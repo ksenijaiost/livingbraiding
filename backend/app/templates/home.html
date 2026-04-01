@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Главная</h2>
+    <p class="muted">MVP каркас. Дальше добавим анкету визита мастера и полноценную админку.</p>
+
+    {% if current_user.role == "MASTER" %}
+      <div class="row">
+        <div class="card">
+          <h3 style="margin-top: 0;">Мастер</h3>
+          <p>Здесь будет “Новая анкета (визит)” и список последних визитов.</p>
+          <a href="/master/visit/new"><button class="secondary" disabled>Новая анкета (скоро)</button></a>
+        </div>
+        <div class="card">
+          <h3 style="margin-top: 0;">Подсказка</h3>
+          <p class="muted">Сейчас включён вход и БД-основа. Следующий шаг — форма визита + справочники.</p>
+        </div>
+      </div>
+    {% else %}
+      <div class="row">
+        <div class="card">
+          <h3 style="margin-top: 0;">Админ</h3>
+          <p>Быстрые ссылки:</p>
+          <p>
+            <a href="/admin/clients"><button>Клиенты</button></a>
+            <a href="/admin/visits"><button class="secondary">Визиты</button></a>
+            <a href="/admin/settings"><button class="secondary">Настройки</button></a>
+          </p>
+        </div>
+        <div class="card">
+          <h3 style="margin-top: 0;">Что дальше</h3>
+          <p class="muted">Добавим CRUD справочников и анкету, включая комплекты и термозамещение.</p>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
+

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 520px; margin: 24px auto;">
+    <h2 style="margin-top: 0;">Вход</h2>
+    {% if error %}
+      <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/login">
+      <div style="margin-bottom: 12px;">
+        <label>Логин</label>
+        <input name="username" autocomplete="username" required />
+      </div>
+      <div style="margin-bottom: 12px;">
+        <label>Пароль</label>
+        <input name="password" type="password" autocomplete="current-password" required />
+      </div>
+      <div class="row" style="align-items:center;">
+        <button type="submit">Войти</button>
+        <div class="muted" style="text-align:right;">
+          Dev: admin/admin, master1/master1
+        </div>
+      </div>
+    </form>
+  </div>
+{% endblock %}
+

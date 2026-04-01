@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title or "livingbraiding" }}</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f6f7fb; color: #111; }
+      header { background: #111827; color: #fff; padding: 12px 16px; display:flex; align-items:center; justify-content: space-between; }
+      a { color: inherit; }
+      .container { max-width: 980px; margin: 0 auto; padding: 16px; }
+      .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; }
+      .row { display:flex; gap: 12px; flex-wrap: wrap; }
+      .row > * { flex: 1; min-width: 260px; }
+      .muted { color: #6b7280; }
+      input, select, textarea { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; box-sizing: border-box; }
+      label { display:block; font-size: 13px; color: #374151; margin-bottom: 6px; }
+      button { background: #111827; color: #fff; padding: 10px 14px; border: 0; border-radius: 8px; cursor: pointer; }
+      button.secondary { background: #e5e7eb; color: #111827; }
+      table { width:100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 14px; }
+      .nav a { margin-right: 12px; text-decoration: none; opacity: 0.95; }
+      .nav a:hover { text-decoration: underline; }
+      .error { background: #fee2e2; border: 1px solid #fecaca; color: #991b1b; padding: 10px 12px; border-radius: 8px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div><strong>livingbraiding</strong></div>
+      <div class="nav">
+        {% if current_user %}
+          <span class="muted">{{ current_user.display_name }} ({{ current_user.role }})</span>
+          <a href="/">Главная</a>
+          {% if current_user.role == "ADMIN" %}
+            <a href="/admin/clients">Клиенты</a>
+            <a href="/admin/visits">Визиты</a>
+            <a href="/admin/settings">Настройки</a>
+          {% endif %}
+          <a href="/logout">Выйти</a>
+        {% else %}
+          <a href="/login">Вход</a>
+        {% endif %}
+      </div>
+    </header>
+    <div class="container">
+      {% block content %}{% endblock %}
+    </div>
+  </body>
+</html>
+
