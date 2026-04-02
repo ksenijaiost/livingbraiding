@@ -1,0 +1,141 @@
+"""
+Pydantic-схемы для `details_json` в `visit_services`.
+
+Правило: сохранённый в БД JSON должен парситься в эти модели (или расширенные версии),
+чтобы анкета и отчёты были предсказуемыми.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class KitFromStock(BaseModel):
+    """Комплект из наличия: списание по артикулу и количеству заготовок."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str = Field(..., description="Артикул комплекта на складе")
+    blanks_used: int = Field(0, ge=0, description="Сколько заготовок списать")
+    use_entire_kit: bool = Field(
+        False,
+        description="Если true — списать все доступные заготовки (blanks_used может быть 0)",
+    )
+
+
+class KitNew(BaseModel):
+    """Новый комплект (внесение в каталог)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    description: str | None = None
+    blanks_total: int = Field(..., ge=0)
+    sku: str | None = Field(None, description="Необязателен, если использованы все заготовки")
+    made_by_self: bool = Field(
+        True,
+        description="True, если изготовил тот же мастер, что заполняет анкету",
+    )
+    notes: str | None = None
+
+
+class KitOwnExtra(BaseModel):
+    """Доп. заготовки для «своего» комплекта: из наличия или новые."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["STOCK", "NEW"]
+    from_stock: KitFromStock | None = None
+    new_kit: KitNew | None = None
+
+    @model_validator(mode="after")
+    def _validate_source(self):
+        if self.source == "STOCK" and self.from_stock is None:
+            raise ValueError("Для source=STOCK нужен from_stock")
+        if self.source == "NEW" and self.new_kit is None:
+            raise ValueError("Для source=NEW нужен new_kit")
+        return self
+
+
+class KitOwn(BaseModel):
+    """Свой комплект (клиента/студии)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    origin: Literal["STUDIO", "FOREIGN"] = Field(
+        ...,
+        description="STUDIO — нашей студии, FOREIGN — чужой",
+    )
+    correction: bool
+    extra_blanks: bool
+    extra: KitOwnExtra | None = None
+
+    @model_validator(mode="after")
+    def _validate_extra(self):
+        if self.extra_blanks and self.extra is None:
+            raise ValueError("При extra_blanks=true нужен блок extra")
+        if not self.extra_blanks and self.extra is not None:
+            raise ValueError("При extra_blanks=false блок extra должен отсутствовать")
+        return self
+
+
+class KitBlock(BaseModel):
+    """
+    Общий блок «комплект» для любой услуги, где он встречается.
+
+    kind:
+      STOCK — из наличия
+      NEW — новый (данные как при внесении в таблицу комплектов)
+      OWN — свой (не из ассортимента студии как обычная продажа)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["STOCK", "NEW", "OWN"]
+    from_stock: KitFromStock | None = None
+    new_kit: KitNew | None = None
+    own: KitOwn | None = None
+
+    @model_validator(mode="after")
+    def _validate_kind(self):
+        if self.kind == "STOCK":
+            if self.from_stock is None:
+                raise ValueError("Для kind=STOCK нужен from_stock")
+        elif self.kind == "NEW":
+            if self.new_kit is None:
+                raise ValueError("Для kind=NEW нужен new_kit")
+        elif self.kind == "OWN":
+            if self.own is None:
+                raise ValueError("Для kind=OWN нужен own")
+        return self
+
+
+class FullHeadKitInlayServiceFields(BaseModel):
+    """Поля услуг «Вплетение комплекта»: В 2 руки / в 4 руки (одинаковые поля)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bases_count: int = Field(..., ge=0)
+    blanks_count: int = Field(..., ge=0)
+    service_comment: str | None = None
+
+
+class VisitServiceDetailsPayload(BaseModel):
+    """
+    Полный `details_json` для строки услуги в визите.
+
+    service_fields — типизировано для группы «вплетение комплекта»; для других услуг
+    позже можно добавить Union или отдельные модели с дискриминатором.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    service_fields: FullHeadKitInlayServiceFields
+    kit: KitBlock
+
+
+def parse_visit_service_details(data: object) -> VisitServiceDetailsPayload:
+    """Разбор `details_json` (dict или JSON-совместимая структура) для строки услуги."""
+    return VisitServiceDetailsPayload.model_validate(data)

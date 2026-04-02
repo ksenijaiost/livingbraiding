@@ -14,7 +14,6 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
-    Date,
     DateTime,
     Enum,
     Float,
@@ -172,6 +171,12 @@ class MaterialPriceCurrent(Base):
 
 
 class Kit(Base):
+    """
+    Один комплект = одна строка: карточка, остаток заготовок, цены.
+    Заготовки списываются поштучно или целиком; когда кончились — `is_in_stock=False`.
+    `is_archived=True` — не показывать в выборе «из наличия» (история и прошлые визиты не трогаются).
+    """
+
     __tablename__ = "kits"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -180,25 +185,17 @@ class Kit(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    pieces_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    pieces_available: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-class KitBatch(Base):
-    __tablename__ = "kit_batches"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    kit_id: Mapped[int] = mapped_column(ForeignKey("kits.id"), nullable=False)
-    pieces_total: Mapped[int] = mapped_column(Integer, nullable=False)
-    pieces_available: Mapped[int] = mapped_column(Integer, nullable=False)
-
-    # If taken from stock: subtract this value (pro-rated by pieces used) from visit profit.
+    # Из наличия: вычитаемая из прибыли визита цена (пропорционально списанным заготовкам).
     stock_price_total: Mapped[float | None] = mapped_column(Float, nullable=True)
-
-    # If newly made: subtract this value (pro-rated by pieces used) from visit profit.
+    # Новый комплект: себестоимость (пропорционально списанным заготовкам).
     cost_total: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     is_in_stock: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-
-    kit: Mapped[Kit] = relationship()
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class Visit(Base):
@@ -287,7 +284,7 @@ class VisitKitUsage(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     visit_id: Mapped[int] = mapped_column(ForeignKey("visits.id"), nullable=False)
-    kit_batch_id: Mapped[int] = mapped_column(ForeignKey("kit_batches.id"), nullable=False)
+    kit_id: Mapped[int] = mapped_column(ForeignKey("kits.id"), nullable=False)
     pieces_used: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # snapshot: what we subtract from profit for this usage
@@ -295,4 +292,4 @@ class VisitKitUsage(Base):
     note: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     visit: Mapped[Visit] = relationship(back_populates="kit_usages")
-    kit_batch: Mapped[KitBatch] = relationship()
+    kit: Mapped[Kit] = relationship()

@@ -1,0 +1,17 @@
+{
+  "service_fields": {
+    "bases_count": 42,
+    "blanks_count": 12,
+    "service_comment": "В двух базах по две заготовки"
+  },
+  "kit": {
+    "kind": "STOCK",
+    "from_stock": {
+      "sku": "K-2024-0142",
+      "blanks_used": 0,
+      "use_entire_kit": true
+    },
+    "new_kit": null,
+    "own": null
+  }
+}

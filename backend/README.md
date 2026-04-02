@@ -2,15 +2,24 @@
 
 This folder contains the FastAPI app and its SQLite/Postgres database schema.
 
+Файл **`data/livingbraiding.db`** (SQLite) — это **одна база**: все таблицы живут внутри этого файла, отдельных файлов на каждую таблицу не будет.
+
 ### Key folders
 
 - `app/`: application code
   - `main.py`: routes + template rendering (server-side HTML)
   - `auth.py`: cookie session auth + role checks
   - `db/`: SQLAlchemy models + session
+  - `questionnaire/`: JSON-каталоги/формы анкеты + Pydantic-схемы для `visit_services.details_json`
   - `seed.py`: creates dev users and default settings on startup
   - `templates/`: Jinja templates (minimal UI)
 - `alembic/`: database migrations
+
+### Migrations
+
+Пока проект только у тебя локально и данных нет, **можно не копить цепочку миграций**: правим `alembic/versions/0001_init.py` под актуальную схему, удаляем файл БД `data/livingbraiding.db` (если был) и снова `alembic upgrade head`.
+
+Когда появится продакшен с реальными данными, миграции нужны, чтобы менять схему **без потери** существующих строк — тогда каждое изменение оформляется новым файлом в `versions/`.
 
 ### Design rules (important)
 
@@ -41,5 +50,11 @@ Run server:
 
 ```bash
 ..\.\.venv\Scripts\python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8010
+```
+
+Validate questionnaire JSON examples:
+
+```bash
+..\.\.venv\Scripts\python -m app.questionnaire.self_check
 ```
 

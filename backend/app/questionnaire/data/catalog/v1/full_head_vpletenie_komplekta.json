@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "category": "Вся голова",
+  "subcategory": "Вплетение комплекта",
+  "services": [
+    {
+      "code": "full_head_kit_2h",
+      "name": "В 2 руки",
+      "price_hint_from": 4500,
+      "price_hint_to": 5000,
+      "notes": "Пока одна шкала цен для всех уровней мастеров; позже — отдельные диапазоны."
+    },
+    {
+      "code": "full_head_kit_4h",
+      "name": "в 4 руки",
+      "price_hint_from": 6000,
+      "price_hint_to": 7000,
+      "notes": "Те же поля анкеты, что у В 2 руки; отличается только подсказка цены."
+    }
+  ]
+}

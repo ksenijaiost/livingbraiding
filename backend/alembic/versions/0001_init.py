@@ -106,19 +106,19 @@ def upgrade() -> None:
         sa.Column("title", sa.String(length=200), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
-        sa.UniqueConstraint("sku", name="uq_kits_sku"),
-    )
-
-    op.create_table(
-        "kit_batches",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("kit_id", sa.Integer(), sa.ForeignKey("kits.id"), nullable=False),
-        sa.Column("pieces_total", sa.Integer(), nullable=False),
-        sa.Column("pieces_available", sa.Integer(), nullable=False),
+        sa.Column("pieces_total", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("pieces_available", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("stock_price_total", sa.Float(), nullable=True),
         sa.Column("cost_total", sa.Float(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(),
+            nullable=False,
+            server_default=sa.text("(datetime('now'))"),
+        ),
         sa.Column("is_in_stock", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("is_archived", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.UniqueConstraint("sku", name="uq_kits_sku"),
     )
 
     op.create_table(
@@ -178,7 +178,7 @@ def upgrade() -> None:
         "visit_kit_usages",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("visit_id", sa.Integer(), sa.ForeignKey("visits.id"), nullable=False),
-        sa.Column("kit_batch_id", sa.Integer(), sa.ForeignKey("kit_batches.id"), nullable=False),
+        sa.Column("kit_id", sa.Integer(), sa.ForeignKey("kits.id"), nullable=False),
         sa.Column("pieces_used", sa.Integer(), nullable=False),
         sa.Column("cost_amount", sa.Float(), nullable=False),
         sa.Column("note", sa.String(length=200), nullable=True),
@@ -190,7 +190,6 @@ def downgrade() -> None:
     op.drop_table("visit_services")
     op.drop_table("visit_masters")
     op.drop_table("visits")
-    op.drop_table("kit_batches")
     op.drop_table("kits")
     op.drop_table("material_prices_current")
     op.drop_table("services")

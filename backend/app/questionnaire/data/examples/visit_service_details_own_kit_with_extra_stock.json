@@ -1,0 +1,26 @@
+{
+  "service_fields": {
+    "bases_count": 30,
+    "blanks_count": 8,
+    "service_comment": null
+  },
+  "kit": {
+    "kind": "OWN",
+    "from_stock": null,
+    "new_kit": null,
+    "own": {
+      "origin": "STUDIO",
+      "correction": false,
+      "extra_blanks": true,
+      "extra": {
+        "source": "STOCK",
+        "from_stock": {
+          "sku": "K-2023-0099",
+          "blanks_used": 2,
+          "use_entire_kit": false
+        },
+        "new_kit": null
+      }
+    }
+  }
+}
