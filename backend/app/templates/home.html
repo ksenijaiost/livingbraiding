@@ -4,19 +4,19 @@
     <h2 style="margin-top: 0;">Главная</h2>
     <p class="muted">MVP каркас. Дальше добавим анкету визита мастера и полноценную админку.</p>
 
-    {% if current_user.role == "MASTER" %}
+    {% if current_user.role.value == "MASTER" %}
       <div class="row">
         <div class="card">
           <h3 style="margin-top: 0;">Мастер</h3>
-          <p>Здесь будет “Новая анкета (визит)” и список последних визитов.</p>
-          <a href="/master/visit/new"><button class="secondary" disabled>Новая анкета (скоро)</button></a>
+          <p>Демо-анкета: вплетение комплекта.</p>
+          <a href="/master/visit/new"><button>Новый визит (демо)</button></a>
         </div>
         <div class="card">
           <h3 style="margin-top: 0;">Подсказка</h3>
-          <p class="muted">Сейчас включён вход и БД-основа. Следующий шаг — форма визита + справочники.</p>
+          <p class="muted">После сохранения зайди как админ → Визиты → открой ID записи.</p>
         </div>
       </div>
-    {% else %}
+    {% elif current_user.role.value == "ADMIN" %}
       <div class="row">
         <div class="card">
           <h3 style="margin-top: 0;">Админ</h3>

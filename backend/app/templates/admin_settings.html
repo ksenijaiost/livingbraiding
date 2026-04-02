@@ -2,7 +2,7 @@
 {% block content %}
   <div class="card" style="max-width: 680px;">
     <h2 style="margin-top: 0;">Настройки</h2>
-    <p class="muted">Процент салона применяется только к новым визитам (в визите хранится снимок).</p>
+    <p class="muted">Процент салона и цены материалов влияют только на <strong>новые</strong> визиты (в визите хранится снимок).</p>
 
     {% if saved %}
       <div class="card" style="border-color:#bbf7d0; background:#f0fdf4;">
@@ -15,8 +15,15 @@
         <label>Процент салона (0..1)</label>
         <input name="salon_cut_pct" value="{{ salon_cut_pct }}" />
       </div>
+      <div style="margin-bottom: 12px;">
+        <label>Канекалон, ₽ за 100 г</label>
+        <input name="kanek_per_100g" type="number" step="0.01" min="0" value="{{ kanek_per_100g }}" />
+      </div>
+      <div style="margin-bottom: 12px;">
+        <label>Кудри, ₽ за 100 г</label>
+        <input name="kudri_per_100g" type="number" step="0.01" min="0" value="{{ kudri_per_100g }}" />
+      </div>
       <button type="submit">Сохранить</button>
     </form>
   </div>
 {% endblock %}
-

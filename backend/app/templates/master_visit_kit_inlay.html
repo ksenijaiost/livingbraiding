@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Демо: визит — вплетение комплекта</h2>
+    <p class="muted">Заполни форму и сохрани. В админке: Визиты → открой запись по ID.</p>
+    {% if saved %}
+      <div class="card" style="border-color:#86efac; background:#f0fdf4; margin-bottom: 12px;">
+        Визит <strong>#{{ saved }}</strong> сохранён. Зайди как админ и открой запись по ID вручную.
+      </div>
+    {% endif %}
+    {% if error %}
+      <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
+    {% endif %}
+    {% if not services %}
+      <div class="error" style="margin-bottom: 12px;">
+        В базе нет услуг «Вплетение комплекта». Останови сервер, удали <code>data/livingbraiding.db</code>, снова <code>alembic upgrade head</code> и запусти приложение (сиды создадут каталог).
+      </div>
+    {% endif %}
+    <form method="post" action="/master/visit/new" id="visit-form">
+      <h3>Клиент</h3>
+      <div class="row">
+        <div>
+          <label>Имя / как записали *</label>
+          <input name="client_name" required value="{{ form_prefill.client_name or '' }}" />
+        </div>
+        <div>
+          <label>Контакт</label>
+          <input name="client_contact" value="{{ form_prefill.client_contact or '' }}" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Тип клиента</label>
+          <select name="client_type">
+            <option value="NEW">Новый</option>
+            <option value="RETURNING">Повторный</option>
+            <option value="SELF">Свой</option>
+          </select>
+        </div>
+        <div>
+          <label>Прайс</label>
+          <select name="price_type">
+            <option value="CLIENT">Клиент</option>
+            <option value="MODEL">Модель</option>
+          </select>
+        </div>
+      </div>
+
+      <h3>Работа</h3>
+      <div class="row">
+        <div>
+          <label>Дата выполнения *</label>
+          <input type="date" name="performed_date" required value="{{ default_date }}" />
+        </div>
+        <div>
+          <label>Длительность (часы)</label>
+          <input type="number" name="duration_h" min="0" value="0" />
+        </div>
+        <div>
+          <label>Длительность (мин)</label>
+          <input type="number" name="duration_m" min="0" value="0" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Услуга *</label>
+          <select name="service_id" required>
+            <option value="">— выбери —</option>
+            {% for s in services %}
+              <option value="{{ s.id }}">{{ s.name }} (подсказка {{ (s.price_junior_from or 0)|int }}–{{ (s.price_junior_to or 0)|int }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Сумма с клиента *</label>
+          <input type="number" name="amount_from_client" min="0" step="1" required value="5000" />
+        </div>
+      </div>
+
+      <h3>Материал (опционально)</h3>
+      <label><input type="checkbox" name="materials_used" /> Материал использовался</label>
+      <div class="row">
+        <div>
+          <label>Канекалон, г</label>
+          <input type="number" name="kanekalon_grams" min="0" step="1" value="0" />
+        </div>
+        <div>
+          <label>Кудри, г</label>
+          <input type="number" name="kudri_grams" min="0" step="1" value="0" />
+        </div>
+        <div>
+          <label>Смешка</label>
+          <select name="mix_source">
+            <option value="">—</option>
+            <option value="FROM_STOCK">Из наличия</option>
+            <option value="NO_MIX">Без смешки</option>
+            <option value="SELF_MIXED">Сама мешала</option>
+          </select>
+        </div>
+      </div>
+
+      <h3>По услуге</h3>
+      <div class="row">
+        <div>
+          <label>Количество баз *</label>
+          <input type="number" name="bases_count" min="0" required value="40" />
+        </div>
+        <div>
+          <label>Количество заготовок *</label>
+          <input type="number" name="blanks_count" min="0" required value="12" />
+        </div>
+      </div>
+      <div style="margin-bottom: 12px;">
+        <label>Комментарий</label>
+        <textarea name="service_comment" rows="2" placeholder="Разметка, несколько заготовок в базу…"></textarea>
+      </div>
+
+      <h3>Комплект</h3>
+      <label><input type="radio" name="kit_kind" value="STOCK" checked onchange="kitKind()" /> Из наличия</label>
+      <label><input type="radio" name="kit_kind" value="NEW" onchange="kitKind()" /> Новый</label>
+      <label><input type="radio" name="kit_kind" value="OWN" onchange="kitKind()" /> Свой</label>
+
+      <div id="blk-stock" class="card" style="margin-top: 10px;">
+        <strong>Из наличия</strong>
+        <div style="margin-top: 8px;">
+          <label>Комплект *</label>
+          <select name="stock_kit_id">
+            <option value="">—</option>
+            {% for k in kits %}
+              <option value="{{ k.id }}">{{ k.sku }} — {{ k.title }} (остаток {{ k.pieces_available }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <label><input type="checkbox" name="stock_use_entire" /> Весь комплект (все доступные заготовки)</label>
+        <div>
+          <label>Или заготовок списать</label>
+          <input type="number" name="stock_blanks_used" min="0" value="12" />
+        </div>
+      </div>
+
+      <div id="blk-new" class="card" style="margin-top: 10px; display: none;">
+        <strong>Новый комплект</strong>
+        <div><label>Название *</label><input name="new_title" placeholder="Например, чёрный 1B" /></div>
+        <div><label>Описание</label><textarea name="new_description" rows="2"></textarea></div>
+        <div class="row">
+          <div><label>Всего заготовок *</label><input type="number" name="new_blanks_total" min="0" value="12" /></div>
+          <div><label>Артикул (если есть)</label><input name="new_sku" /></div>
+        </div>
+        <label><input type="checkbox" name="new_made_by_self" checked /> Изготовил я (тот же мастер)</label>
+        <div><label>Заметки</label><input name="new_notes" /></div>
+      </div>
+
+      <div id="blk-own" class="card" style="margin-top: 10px; display: none;">
+        <strong>Свой комплект</strong>
+        <div>
+          <label>Происхождение</label>
+          <select name="own_origin">
+            <option value="">—</option>
+            <option value="STUDIO">Нашей студии</option>
+            <option value="FOREIGN">Чужой</option>
+          </select>
+        </div>
+        <label><input type="checkbox" name="own_correction" /> Коррекция</label>
+        <label><input type="checkbox" name="own_extra_blanks" id="own_extra_blanks" onchange="ownExtra()" /> Доп. заготовки</label>
+
+        <div id="blk-own-extra" style="display: none; margin-top: 8px;">
+          <label>Источник доп.</label>
+          <select name="own_extra_source" id="own_extra_source" onchange="ownExtraSrc()">
+            <option value="">—</option>
+            <option value="STOCK">Из наличия</option>
+            <option value="NEW">Новые</option>
+          </select>
+          <div id="blk-own-extra-stock" style="display: none; margin-top: 8px;">
+            <label>Комплект</label>
+            <select name="own_extra_stock_kit_id">
+              <option value="">—</option>
+              {% for k in kits %}
+                <option value="{{ k.id }}">{{ k.sku }} — остаток {{ k.pieces_available }}</option>
+              {% endfor %}
+            </select>
+            <label><input type="checkbox" name="own_extra_stock_use_entire" /> Весь комплект</label>
+            <input type="number" name="own_extra_stock_blanks_used" min="0" value="2" placeholder="заготовок" />
+          </div>
+          <div id="blk-own-extra-new" style="display: none; margin-top: 8px;">
+            <input name="own_extra_new_title" placeholder="Название новых заготовок" />
+            <textarea name="own_extra_new_description" rows="1" placeholder="Описание"></textarea>
+            <input type="number" name="own_extra_new_blanks_total" min="0" value="4" placeholder="шт" />
+            <input name="own_extra_new_sku" placeholder="артикул" />
+            <label><input type="checkbox" name="own_extra_new_made_by_self" checked /> Изготовил я</label>
+            <input name="own_extra_new_notes" placeholder="заметки" />
+          </div>
+        </div>
+      </div>
+
+      <p style="margin-top: 16px;">
+        <button type="submit">Сохранить визит</button>
+        <a href="/"><button type="button" class="secondary">Отмена</button></a>
+      </p>
+    </form>
+  </div>
+  <script>
+    function kitKind() {
+      const v = document.querySelector('input[name="kit_kind"]:checked').value;
+      document.getElementById('blk-stock').style.display = v === 'STOCK' ? 'block' : 'none';
+      document.getElementById('blk-new').style.display = v === 'NEW' ? 'block' : 'none';
+      document.getElementById('blk-own').style.display = v === 'OWN' ? 'block' : 'none';
+    }
+    function ownExtra() {
+      const on = document.getElementById('own_extra_blanks').checked;
+      document.getElementById('blk-own-extra').style.display = on ? 'block' : 'none';
+      if (on) ownExtraSrc();
+    }
+    function ownExtraSrc() {
+      const s = document.getElementById('own_extra_source').value;
+      document.getElementById('blk-own-extra-stock').style.display = s === 'STOCK' ? 'block' : 'none';
+      document.getElementById('blk-own-extra-new').style.display = s === 'NEW' ? 'block' : 'none';
+    }
+    kitKind();
+    ownExtra();
+    ownExtraSrc();
+  </script>
+{% endblock %}

@@ -29,9 +29,12 @@
       <div><strong>livingbraiding</strong></div>
       <div class="nav">
         {% if current_user %}
-          <span class="muted">{{ current_user.display_name }} ({{ current_user.role }})</span>
+          <span class="muted">{{ current_user.display_name }} ({{ current_user.role.value }})</span>
           <a href="/">Главная</a>
-          {% if current_user.role == "ADMIN" %}
+          {% if current_user.role.value == "MASTER" %}
+            <a href="/master/visit/new">Новый визит</a>
+          {% endif %}
+          {% if current_user.role.value == "ADMIN" %}
             <a href="/admin/clients">Клиенты</a>
             <a href="/admin/visits">Визиты</a>
             <a href="/admin/settings">Настройки</a>

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <p><a href="/admin/visits">← Все визиты</a></p>
+    <h2 style="margin-top: 0;">Визит #{{ visit.id }}</h2>
+    <p class="muted">Создан: {{ visit.created_at.strftime("%d.%m.%Y %H:%M") }} · Дата работы: {{ visit.performed_date.strftime("%d.%m.%Y") }}</p>
+
+    <h3>Клиент</h3>
+    <p><strong>{{ visit.client.name }}</strong>{% if visit.client.contact %} · {{ visit.client.contact }}{% endif %}</p>
+    <p class="muted">
+      Тип клиента — <strong>{{ client_type_ru }}</strong>,
+      прайс — <strong>{{ price_type_ru }}</strong>,
+      длительность — {{ visit.duration_minutes }} мин
+    </p>
+    <p class="muted">Мастера:
+      {% for vm in visit.masters %}
+        {{ vm.master.display_name }} ({{ vm.percent|int }}%){% if not loop.last %}, {% endif %}
+      {% else %}—{% endfor %}
+    </p>
+
+    <h3>Деньги</h3>
+    <table>
+      <tr><td>Выручка (с клиента)</td><td>{{ "%.0f"|format(visit.amount_from_client) }} ₽</td></tr>
+      <tr><td>Себестоимость (материалы + комплект)</td><td>{{ "%.0f"|format(visit.cost_total) }} ₽</td></tr>
+      <tr><td>Прибыль до распределения</td><td>{{ "%.0f"|format(visit.profit_before_split) }} ₽</td></tr>
+      <tr><td>Доля салона (снимок, 0..1)</td><td>{{ visit.salon_cut_pct_at_time }}</td></tr>
+      <tr><td>Заработок студии</td><td>{{ "%.0f"|format(visit.salon_profit) }} ₽</td></tr>
+      <tr><td>ЗП мастеров (суммарно)</td><td>{{ "%.0f"|format(visit.masters_pool) }} ₽</td></tr>
+    </table>
+
+    <h3>Материал (снимок)</h3>
+    <p class="muted">
+      Учитывался в расчёте: <strong>{{ materials_used_ru }}</strong> ·
+      Канек {{ visit.kanekalon_grams }} г · Кудри {{ visit.kudri_grams }} г ·
+      Смешка: <strong>{{ mix_source_ru }}</strong>
+    </p>
+    <p class="muted">
+      Цены на момент визита (₽/г):
+      канек {% if visit.kanekalon_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kanekalon_price_per_gram_at_time) }}{% else %}—{% endif %},
+      кудри {% if visit.kudri_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kudri_price_per_gram_at_time) }}{% else %}—{% endif %}
+    </p>
+
+    <h3>Услуги и анкета</h3>
+    {% for disp in service_displays %}
+      <div class="card" style="margin-bottom:12px;">
+        <table>
+          {% for label, val in disp.blocks %}
+            <tr><td style="width:40%; color:#6b7280;">{{ label }}</td><td>{{ val }}</td></tr>
+          {% endfor %}
+        </table>
+      </div>
+    {% endfor %}
+
+    <h3>Списания комплектов со склада</h3>
+    {% if visit.kit_usages %}
+      <table>
+        <thead><tr><th>Артикул</th><th>Заготовок</th><th>В расчёт себестоимости (снимок), ₽</th></tr></thead>
+        <tbody>
+          {% for u in visit.kit_usages %}
+            <tr>
+              <td>{{ u.kit.sku }}</td>
+              <td>{{ u.pieces_used }}</td>
+              <td>{{ "%.0f"|format(u.cost_amount) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">{{ kit_usages_note }}</p>
+    {% endif %}
+  </div>
+{% endblock %}

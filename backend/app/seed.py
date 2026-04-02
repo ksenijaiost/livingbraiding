@@ -14,7 +14,18 @@ In production you may want to disable this or make it explicit via a CLI task.
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import MaterialPriceCurrent, MaterialType, Setting, User, UserRole, MasterLevel
+from app.db.models import (
+    Kit,
+    MaterialPriceCurrent,
+    MaterialType,
+    Service,
+    ServiceCategory,
+    ServiceSubcategory,
+    Setting,
+    User,
+    UserRole,
+    MasterLevel,
+)
 from app.security import hash_password
 
 
@@ -24,11 +35,15 @@ def ensure_seed_data(db: Session) -> None:
     if not salon:
         db.add(Setting(key="salon_cut_pct", value="0.3"))
 
-    # Default material prices (can be edited by admin later)
-    for mt in (MaterialType.KANEKALON, MaterialType.KUDRI):
+    # Default material prices: ₽ за 100 г → ₽/г (админ может поменять в настройках)
+    defaults = {
+        MaterialType.KANEKALON: 4.0,  # 400 ₽ / 100 г
+        MaterialType.KUDRI: 8.0,  # 800 ₽ / 100 г
+    }
+    for mt, default_per_gram in defaults.items():
         row = db.get(MaterialPriceCurrent, mt)
         if not row:
-            db.add(MaterialPriceCurrent(material_type=mt, price_per_gram=0.0))
+            db.add(MaterialPriceCurrent(material_type=mt, price_per_gram=default_per_gram))
 
     # Users
     if not db.scalar(select(User).where(User.username == "admin")):
@@ -55,5 +70,74 @@ def ensure_seed_data(db: Session) -> None:
             )
         )
 
+    _ensure_demo_catalog_and_kits(db)
+
     db.commit()
+
+
+def _ensure_demo_catalog_and_kits(db: Session) -> None:
+    sub = db.scalar(
+        select(ServiceSubcategory)
+        .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
+        .where(
+            ServiceCategory.name == "Вся голова",
+            ServiceSubcategory.name == "Вплетение комплекта",
+        )
+    )
+    if not sub:
+        cat = db.scalar(select(ServiceCategory).where(ServiceCategory.name == "Вся голова"))
+        if not cat:
+            cat = ServiceCategory(name="Вся голова")
+            db.add(cat)
+            db.flush()
+        sub = ServiceSubcategory(category_id=cat.id, name="Вплетение комплекта")
+        db.add(sub)
+        db.flush()
+
+    if not db.scalar(select(Service.id).where(Service.subcategory_id == sub.id, Service.name == "В 2 руки")):
+        for name, lo, hi in (
+            ("В 2 руки", 4500, 5000),
+            ("в 4 руки", 6000, 7000),
+        ):
+            db.add(
+                Service(
+                    subcategory_id=sub.id,
+                    name=name,
+                    price_junior_from=lo,
+                    price_junior_to=hi,
+                    price_middle_from=lo,
+                    price_middle_to=hi,
+                    price_senior_from=lo,
+                    price_senior_to=hi,
+                )
+            )
+
+    if not db.scalar(select(Kit).where(Kit.sku == "DEMO-001")):
+        db.add(
+            Kit(
+                sku="DEMO-001",
+                title="Демо-комплект (70 заготовок)",
+                description="Для проверки «из наличия»",
+                pieces_total=70,
+                pieces_available=70,
+                stock_price_total=3500.0,
+                cost_total=None,
+                is_in_stock=True,
+                is_archived=False,
+            )
+        )
+    if not db.scalar(select(Kit).where(Kit.sku == "DEMO-002")):
+        db.add(
+            Kit(
+                sku="DEMO-002",
+                title="Малый демо-комплект",
+                description="Для доп. заготовок (свой + из наличия)",
+                pieces_total=10,
+                pieces_available=10,
+                stock_price_total=800.0,
+                cost_total=None,
+                is_in_stock=True,
+                is_archived=False,
+            )
+        )
 
