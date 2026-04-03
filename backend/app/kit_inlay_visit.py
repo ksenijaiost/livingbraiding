@@ -148,29 +148,38 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
         s = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
         return s.lower() in ("on", "true", "1", "yes")
 
+    kanekalon_grams = g_float("kanekalon_grams", 0)
+    kudri_grams = g_float("kudri_grams", 0)
+    grams_total = max(0.0, kanekalon_grams) + max(0.0, kudri_grams)
+
     mix_raw = g("mix_source", "")
-    mix: MixSource | None = None
-    if mix_raw:
-        try:
-            mix = MixSource(mix_raw)
-        except ValueError:
-            mix = None
+    mix: MixSource | None
+    if grams_total <= 0:
+        mix = MixSource.NO_MIX
+    else:
+        mix = None
+        if mix_raw:
+            try:
+                mix = MixSource(mix_raw)
+            except ValueError:
+                mix = MixSource.NO_MIX
+        if mix is None:
+            mix = MixSource.NO_MIX
 
-    comp_raw = g("mix_complexity", "")
     comp: MixComplexity | None = None
-    if comp_raw:
-        try:
-            comp = MixComplexity(comp_raw)
-        except ValueError:
-            comp = None
+    if grams_total > 0 and mix is not None and mix != MixSource.NO_MIX:
+        comp_raw = g("mix_complexity", "")
+        if comp_raw:
+            try:
+                comp = MixComplexity(comp_raw)
+            except ValueError:
+                comp = None
 
-    amort_raw = g("amortization_level", "")
-    amort: AmortizationLevel | None = None
-    if amort_raw:
-        try:
-            amort = AmortizationLevel(amort_raw)
-        except ValueError:
-            amort = None
+    amort_raw = g("amortization_level", "") or "MIN"
+    try:
+        amort = AmortizationLevel(amort_raw)
+    except ValueError:
+        amort = AmortizationLevel.MIN
 
     stock_id = g_int("stock_kit_id", 0)
     extra_stock_id = g_int("own_extra_stock_kit_id", 0)
@@ -206,8 +215,8 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
         performed_date=performed_date,
         duration_minutes=g_int("duration_h", 0) * 60 + g_int("duration_m", 0),
         amount_from_client=g_float("amount_from_client", 0),
-        kanekalon_grams=g_float("kanekalon_grams", 0),
-        kudri_grams=g_float("kudri_grams", 0),
+        kanekalon_grams=kanekalon_grams,
+        kudri_grams=kudri_grams,
         mix_source=mix,
         mix_complexity=comp,
         amortization_level=amort,
@@ -584,6 +593,51 @@ def list_kit_inlay_services(db: Session) -> list[Service]:
         .order_by(Service.name.asc())
     )
     return list(db.scalars(q).all())
+
+
+def list_kit_inlay_services_catalog(db: Session) -> list[dict[str, Any]]:
+    """
+    Упрощенный каталог для UI: категория -> подкатегория -> услуга.
+
+    Сейчас страница мастера поддерживает только услугу «Вплетение комплекта»,
+    поэтому каталог тоже ограничен этим набором сервисов.
+    """
+    services = list_kit_inlay_services(db)
+    cats: dict[int, dict[str, Any]] = {}
+    for s in services:
+        sub = getattr(s, "subcategory", None)
+        cat = getattr(sub, "category", None) if sub else None
+        if not sub or not cat:
+            continue
+
+        c_id = int(cat.id)
+        sc_id = int(sub.id)
+
+        if c_id not in cats:
+            cats[c_id] = {"id": c_id, "name": cat.name, "subcategories": {}}
+
+        subs = cats[c_id]["subcategories"]
+        if sc_id not in subs:
+            subs[sc_id] = {"id": sc_id, "name": sub.name, "services": []}
+
+        subs[sc_id]["services"].append(
+            {
+                "id": int(s.id),
+                "name": s.name,
+                "price_junior_from": float(s.price_junior_from or 0.0),
+                "price_junior_to": float(s.price_junior_to or 0.0),
+            }
+        )
+
+    # Convert dict -> list, keep stable ordering.
+    out: list[dict[str, Any]] = []
+    for _, c in sorted(cats.items(), key=lambda x: x[1]["name"]):
+        subs_out: list[dict[str, Any]] = []
+        for _, sc in sorted(c["subcategories"].items(), key=lambda x: x[1]["name"]):
+            sc["services"] = sorted(sc["services"], key=lambda x: x["name"])
+            subs_out.append(sc)
+        out.append({"id": c["id"], "name": c["name"], "subcategories": subs_out})
+    return out
 
 
 def list_kits_for_stock(db: Session) -> list[Kit]:

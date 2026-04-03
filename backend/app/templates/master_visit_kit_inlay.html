@@ -17,7 +17,7 @@
     {% if error %}
       <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
     {% endif %}
-    {% if not services %}
+    {% if not service_catalog %}
       <div class="error" style="margin-bottom: 12px;">
         В базе нет услуг «Вплетение комплекта». Останови сервер, удали <code>data/livingbraiding.db</code>, снова <code>alembic upgrade head</code> и запусти приложение (сиды создадут каталог).
       </div>
@@ -120,17 +120,47 @@
       </div>
       <div class="row">
         <div>
-          <label>Услуга *</label>
-          <select name="service_id" required>
-            <option value="">— выбери —</option>
-            {% for s in services %}
-              <option value="{{ s.id }}" {% if fp.get('service_id')|string == s.id|string %}selected{% endif %}>{{ s.name }} (подсказка {{ (s.price_junior_from or 0)|int }}–{{ (s.price_junior_to or 0)|int }})</option>
+          <label>Категория</label>
+          <select id="service_category_id" name="service_category_id" onchange="serviceCatalogOnCategory()" {% if not service_catalog %}disabled{% endif %}>
+            {% for c in service_catalog %}
+              <option value="{{ c.id }}" {% if fp.get('service_category_id')|string == c.id|string %}selected{% endif %}>{{ c.name }}</option>
             {% endfor %}
           </select>
         </div>
         <div>
-          <label>Сумма с клиента *</label>
-          <input type="number" name="amount_from_client" min="0" step="1" required value="{{ fp.get('amount_from_client', '5000') }}" />
+          <label>Подкатегория</label>
+          <select id="service_subcategory_id" name="service_subcategory_id" onchange="serviceCatalogOnSubcategory()" {% if not service_catalog %}disabled{% endif %}>
+          </select>
+        </div>
+        <div style="flex: 1;">
+          <label>Услуга *</label>
+          <select id="service_id" name="service_id" required>
+          </select>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 14px; background: #f8fafc;">
+        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <strong id="amount_from_client_label" style="font-size: 1.05rem;">Сколько взяли с клиента</strong>
+          <input id="amount_from_client" type="number" name="amount_from_client" min="0" step="1" value="{{ fp.get('amount_from_client', '5000') }}" style="max-width: 12rem; font-size: 1.05rem;" />
+          <span class="muted">₽</span>
+        </div>
+        <p class="muted" style="font-size: 12px; margin: 8px 0 0;">Для визита «свой клиент» сумму можно оставить 0.</p>
+
+        <div style="margin-top: 14px;">
+          <div style="font-weight: 600; margin-bottom: 8px;">Амортизация *</div>
+          <label style="display: block; margin-bottom: 6px;">
+            <input type="radio" name="amortization_level" value="MIN" {% if not fp.get('amortization_level') or fp.get('amortization_level') == 'MIN' %}checked{% endif %} />
+            Минимальная
+          </label>
+          <label style="display: block; margin-bottom: 6px;">
+            <input type="radio" name="amortization_level" value="MID" {% if fp.get('amortization_level') == 'MID' %}checked{% endif %} />
+            Средняя <span class="muted">(включая украшения, резинки и пр.)</span>
+          </label>
+          <label style="display: block; margin-bottom: 0;">
+            <input type="radio" name="amortization_level" value="MAX" {% if fp.get('amortization_level') == 'MAX' %}checked{% endif %} />
+            Увеличенная <span class="muted">(включая средства для волос и пр.)</span>
+          </label>
         </div>
       </div>
 
@@ -138,40 +168,27 @@
       <div class="row">
         <div>
           <label>Канекалон, г</label>
-          <input type="number" name="kanekalon_grams" min="0" step="1" value="{{ fp.get('kanekalon_grams', '0') }}" />
+          <input type="number" id="kanekalon_grams" name="kanekalon_grams" min="0" step="1" value="{{ fp.get('kanekalon_grams', '0') }}" />
         </div>
         <div>
           <label>Кудри, г</label>
-          <input type="number" name="kudri_grams" min="0" step="1" value="{{ fp.get('kudri_grams', '0') }}" />
-        </div>
-        <div>
-          <label>Смешка</label>
-          <select name="mix_source">
-            <option value="" {% if not fp.get('mix_source') %}selected{% endif %}>—</option>
-            <option value="FROM_STOCK" {% if fp.get('mix_source') == 'FROM_STOCK' %}selected{% endif %}>Из наличия</option>
-            <option value="NO_MIX" {% if fp.get('mix_source') == 'NO_MIX' %}selected{% endif %}>Без смешки</option>
-            <option value="SELF_MIXED" {% if fp.get('mix_source') == 'SELF_MIXED' %}selected{% endif %}>Сама мешала</option>
-          </select>
+          <input type="number" id="kudri_grams" name="kudri_grams" min="0" step="1" value="{{ fp.get('kudri_grams', '0') }}" />
         </div>
       </div>
-      <div class="row">
-        <div>
-          <label>Сложность смешки</label>
-          <select name="mix_complexity">
-            <option value="" {% if not fp.get('mix_complexity') %}selected{% endif %}>—</option>
-            <option value="SIMPLE" {% if fp.get('mix_complexity') == 'SIMPLE' %}selected{% endif %}>Простая (1 ₽/г)</option>
-            <option value="MEDIUM" {% if fp.get('mix_complexity') == 'MEDIUM' %}selected{% endif %}>Средняя (1.5 ₽/г)</option>
-            <option value="HARD" {% if fp.get('mix_complexity') == 'HARD' %}selected{% endif %}>Сложная (2 ₽/г)</option>
-          </select>
+      <div id="mix_block" style="margin-top: 10px; opacity: 0.55; pointer-events: none;">
+        <div class="muted" style="font-size: 12px; margin-bottom: 8px;">Укажите граммы канекалона и/или кудрей — затем выберите вариант смешки.</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px 16px;">
+          <label><input type="radio" name="mix_source" value="NO_MIX" {% if (fp.get('mix_source') or 'NO_MIX') == 'NO_MIX' %}checked{% endif %} /> Без смешки</label>
+          <label><input type="radio" name="mix_source" value="FROM_STOCK" {% if fp.get('mix_source') == 'FROM_STOCK' %}checked{% endif %} /> Из наличия</label>
+          <label><input type="radio" name="mix_source" value="SELF_MIXED" {% if fp.get('mix_source') == 'SELF_MIXED' %}checked{% endif %} /> Сама мешала</label>
         </div>
-        <div>
-          <label>Амортизация</label>
-          <select name="amortization_level">
-            <option value="" {% if not fp.get('amortization_level') %}selected{% endif %}>—</option>
-            <option value="MIN" {% if fp.get('amortization_level') == 'MIN' %}selected{% endif %}>Минимальная (100 ₽)</option>
-            <option value="MID" {% if fp.get('amortization_level') == 'MID' %}selected{% endif %}>Средняя (200 ₽)</option>
-            <option value="MAX" {% if fp.get('amortization_level') == 'MAX' %}selected{% endif %}>Увеличенная (500 ₽)</option>
-          </select>
+      </div>
+      <div id="mix_complexity_block" style="margin-top: 12px; display: none;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Сложность смешки *</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px 16px;">
+          <label><input type="radio" name="mix_complexity" value="SIMPLE" {% if (fp.get('mix_complexity') or 'SIMPLE') == 'SIMPLE' %}checked{% endif %} /> Простая</label>
+          <label><input type="radio" name="mix_complexity" value="MEDIUM" {% if fp.get('mix_complexity') == 'MEDIUM' %}checked{% endif %} /> Средняя</label>
+          <label><input type="radio" name="mix_complexity" value="HARD" {% if fp.get('mix_complexity') == 'HARD' %}checked{% endif %} /> Сложная</label>
         </div>
       </div>
 
@@ -280,6 +297,47 @@
       d.textContent = s;
       return d.innerHTML;
     }
+    function materialGramsTotal() {
+      const k = parseFloat(document.getElementById('kanekalon_grams').value || '0') || 0;
+      const u = parseFloat(document.getElementById('kudri_grams').value || '0') || 0;
+      return Math.max(0, k) + Math.max(0, u);
+    }
+    function updateMixComplexityBlock() {
+      const g = materialGramsTotal();
+      const mix = document.querySelector('input[name="mix_source"]:checked');
+      const wrap = document.getElementById('mix_complexity_block');
+      const need = g > 0 && mix && (mix.value === 'FROM_STOCK' || mix.value === 'SELF_MIXED');
+      wrap.style.display = need ? 'block' : 'none';
+      if (!need) {
+        const simple = wrap.querySelector('input[name="mix_complexity"][value="SIMPLE"]');
+        if (simple) simple.checked = true;
+      }
+    }
+    function updateMixBlockUI() {
+      const g = materialGramsTotal();
+      const blk = document.getElementById('mix_block');
+      const radios = blk.querySelectorAll('input[name="mix_source"]');
+      if (g <= 0) {
+        blk.style.opacity = '0.55';
+        blk.style.pointerEvents = 'none';
+        radios.forEach(function (r) {
+          if (r.value === 'NO_MIX') { r.checked = true; }
+          else { r.checked = false; r.disabled = true; }
+        });
+      } else {
+        blk.style.opacity = '1';
+        blk.style.pointerEvents = 'auto';
+        radios.forEach(function (r) { r.disabled = false; });
+      }
+      updateMixComplexityBlock();
+    }
+    function syncAmountRequired() {
+      const self = document.querySelector('input[name="client_is_self"]');
+      const amt = document.getElementById('amount_from_client');
+      if (!amt || !self) return;
+      if (self.checked) amt.removeAttribute('required');
+      else amt.setAttribute('required', 'required');
+    }
     let suggestTimer = null;
     function clientMode() {
       const draft = document.querySelector('input[name="client_mode"]:checked').value === 'draft';
@@ -293,6 +351,7 @@
       } else {
         nameInp.removeAttribute('required');
       }
+      syncAmountRequired();
     }
     function renderSelectedClient(name, isDraft) {
       const box = document.getElementById('selected_client_box');
@@ -336,6 +395,16 @@
     }
     document.getElementById('client_search_q').addEventListener('input', scheduleSuggest);
 
+    document.querySelectorAll('input[name="mix_source"]').forEach(function (el) {
+      el.addEventListener('change', updateMixComplexityBlock);
+    });
+    const _kg = document.getElementById('kanekalon_grams');
+    const _ug = document.getElementById('kudri_grams');
+    if (_kg) _kg.addEventListener('input', updateMixBlockUI);
+    if (_ug) _ug.addEventListener('input', updateMixBlockUI);
+    const _cis = document.querySelector('input[name="client_is_self"]');
+    if (_cis) _cis.addEventListener('change', syncAmountRequired);
+
     document.getElementById('visit-form').addEventListener('submit', function (e) {
       const mode = document.querySelector('input[name="client_mode"]:checked').value;
       if (mode === 'existing') {
@@ -343,9 +412,122 @@
         if (!id) {
           e.preventDefault();
           alert('Выберите клиента из списка поиска или переключитесь на «Новый черновик».');
+          return;
+        }
+      }
+      const g = materialGramsTotal();
+      const mix = document.querySelector('input[name="mix_source"]:checked');
+      if (g > 0 && mix && (mix.value === 'FROM_STOCK' || mix.value === 'SELF_MIXED')) {
+        const c = document.querySelector('input[name="mix_complexity"]:checked');
+        if (!c) {
+          e.preventDefault();
+          alert('Выберите сложность смешки.');
+          return;
+        }
+      }
+      const selfCb = document.querySelector('input[name="client_is_self"]');
+      if (selfCb && !selfCb.checked) {
+        const raw = (document.getElementById('amount_from_client').value || '').trim();
+        const n = parseFloat(raw.replace(',', '.'));
+        if (!raw || !(n >= 0) || n <= 0) {
+          e.preventDefault();
+          alert('Укажите сумму, взятую с клиента.');
         }
       }
     });
+
+    const serviceCatalog = {{ service_catalog|tojson }};
+    const serviceMetaById = {};
+    for (const c of serviceCatalog || []) {
+      for (const sc of (c.subcategories || [])) {
+        for (const s of (sc.services || [])) {
+          serviceMetaById[s.id] = { categoryId: c.id, subcategoryId: sc.id };
+        }
+      }
+    }
+
+    function fillSubcategories() {
+      const catSel = document.getElementById('service_category_id');
+      const subSel = document.getElementById('service_subcategory_id');
+      const serviceSel = document.getElementById('service_id');
+
+      const catId = parseInt(catSel.value || '0');
+      const cat = (serviceCatalog || []).find(x => x.id === catId);
+      const subs = (cat && cat.subcategories) ? cat.subcategories : [];
+
+      subSel.innerHTML = '';
+      for (const sc of subs) {
+        const opt = document.createElement('option');
+        opt.value = sc.id;
+        opt.textContent = sc.name;
+        subSel.appendChild(opt);
+      }
+
+      if (subs.length > 0) {
+        subSel.value = subs[0].id;
+      }
+      fillServices();
+    }
+
+    function fillServices() {
+      const catSel = document.getElementById('service_category_id');
+      const subSel = document.getElementById('service_subcategory_id');
+      const serviceSel = document.getElementById('service_id');
+
+      const subId = parseInt(subSel.value || '0');
+      let sc = null;
+      for (const c of serviceCatalog || []) {
+        for (const ssc of (c.subcategories || [])) {
+          if (ssc.id === subId) {
+            sc = ssc;
+            break;
+          }
+        }
+      }
+      const services = (sc && sc.services) ? sc.services : [];
+
+      serviceSel.innerHTML = '';
+      for (const s of services) {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        const lo = s.price_junior_from ? String(s.price_junior_from) : '0';
+        const hi = s.price_junior_to ? String(s.price_junior_to) : '0';
+        opt.textContent = s.name + ` (подсказка ${parseInt(lo)}–${parseInt(hi)})`;
+        serviceSel.appendChild(opt);
+      }
+    }
+
+    function serviceCatalogOnCategory() {
+      fillSubcategories();
+    }
+
+    function serviceCatalogOnSubcategory() {
+      fillServices();
+    }
+
+    (function initServiceCatalog() {
+      if (!serviceCatalog || serviceCatalog.length === 0) return;
+
+      // If user came back with a service_id, try to restore category/subcategory.
+      const initialServiceId = parseInt({{ (fp.get('service_id') or 0)|int }} || 0);
+      const meta = initialServiceId ? serviceMetaById[initialServiceId] : null;
+
+      const catSel = document.getElementById('service_category_id');
+      const subSel = document.getElementById('service_subcategory_id');
+      const serviceSel = document.getElementById('service_id');
+
+      if (meta && meta.categoryId) catSel.value = String(meta.categoryId);
+      fillSubcategories();
+
+      if (meta && meta.subcategoryId) {
+        subSel.value = String(meta.subcategoryId);
+        fillServices();
+      }
+
+      if (initialServiceId) {
+        serviceSel.value = String(initialServiceId);
+      }
+    })();
 
     function kitKind() {
       const v = document.querySelector('input[name="kit_kind"]:checked').value;
@@ -367,6 +549,8 @@
     kitKind();
     ownExtra();
     ownExtraSrc();
+    updateMixBlockUI();
+    syncAmountRequired();
     {% if selected_client %}
     renderSelectedClient({{ selected_client.name|tojson }}, {{ (not selected_client.is_confirmed)|tojson }});
     {% endif %}

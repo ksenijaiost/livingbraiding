@@ -51,6 +51,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.kit_inlay_visit import (
     list_kit_inlay_services,
+    list_kit_inlay_services_catalog,
     list_kits_for_stock,
     parse_kit_inlay_form,
     save_kit_inlay_visit,
@@ -568,7 +569,7 @@ def master_visit_new_get(
     current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
-    services = list_kit_inlay_services(db)
+    service_catalog = list_kit_inlay_services_catalog(db)
     kits = list_kits_for_stock(db)
     saved_draft_client = False
     if saved and saved.isdigit():
@@ -581,7 +582,7 @@ def master_visit_new_get(
         _ctx(
             request,
             current_user=current_user,
-            services=services,
+            service_catalog=service_catalog,
             kits=kits,
             default_date=date.today().isoformat(),
             form_prefill={},
@@ -609,7 +610,7 @@ async def master_visit_new_post(
             created_by_label=format_created_by_label(current_user),
         )
     except ValueError as exc:
-        services = list_kit_inlay_services(db)
+        service_catalog = list_kit_inlay_services_catalog(db)
         kits = list_kits_for_stock(db)
         form_map = _form_to_str_map(form)
         selected_client = None
@@ -622,7 +623,7 @@ async def master_visit_new_post(
             _ctx(
                 request,
                 current_user=current_user,
-                services=services,
+                service_catalog=service_catalog,
                 kits=kits,
                 default_date=performed,
                 form_prefill=form_map,
