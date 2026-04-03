@@ -118,6 +118,56 @@ def upgrade() -> None:
         sa.UniqueConstraint("subcategory_id", "name", name="uq_service_per_subcategory"),
     )
 
+    questionnaire_field_type = sa.Enum(
+        "TEXT", "NUMBER", "TEXTAREA", "CHECKBOX", "SELECT", name="questionnairefieldtype"
+    )
+
+    op.create_table(
+        "subcategory_questionnaire_fields",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "subcategory_id",
+            sa.Integer(),
+            sa.ForeignKey("service_subcategories.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("field_key", sa.String(length=100), nullable=False),
+        sa.Column("field_type", questionnaire_field_type, nullable=False),
+        sa.Column("label", sa.String(length=500), nullable=False),
+        sa.Column("required", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("sort_order", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("placeholder", sa.String(length=500), nullable=True),
+        sa.Column("help_text", sa.Text(), nullable=True),
+        sa.Column("options_json", sa.Text(), nullable=True),
+        sa.Column("min_value", sa.Float(), nullable=True),
+        sa.Column("max_value", sa.Float(), nullable=True),
+        sa.Column("visibility_json", sa.Text(), nullable=True),
+        sa.UniqueConstraint("subcategory_id", "field_key", name="uq_subcategory_questionnaire_field_key"),
+    )
+
+    op.create_table(
+        "service_questionnaire_fields",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "service_id",
+            sa.Integer(),
+            sa.ForeignKey("services.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("field_key", sa.String(length=100), nullable=False),
+        sa.Column("field_type", questionnaire_field_type, nullable=False),
+        sa.Column("label", sa.String(length=500), nullable=False),
+        sa.Column("required", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("sort_order", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("placeholder", sa.String(length=500), nullable=True),
+        sa.Column("help_text", sa.Text(), nullable=True),
+        sa.Column("options_json", sa.Text(), nullable=True),
+        sa.Column("min_value", sa.Float(), nullable=True),
+        sa.Column("max_value", sa.Float(), nullable=True),
+        sa.Column("visibility_json", sa.Text(), nullable=True),
+        sa.UniqueConstraint("service_id", "field_key", name="uq_service_questionnaire_field_key"),
+    )
+
     op.create_table(
         "material_prices_current",
         sa.Column("material_type", sa.Enum("KANEKALON", "KUDRI", name="materialtype"), primary_key=True),
@@ -274,7 +324,9 @@ def downgrade() -> None:
     op.drop_table("visits")
     op.drop_table("kits")
     op.drop_table("material_prices_current")
+    op.drop_table("service_questionnaire_fields")
     op.drop_table("services")
+    op.drop_table("subcategory_questionnaire_fields")
     op.drop_table("service_subcategories")
     op.drop_table("service_categories")
     op.drop_table("studio_expenses")
@@ -292,3 +344,4 @@ def downgrade() -> None:
     op.execute("DROP TYPE IF EXISTS mixcomplexity")
     op.execute("DROP TYPE IF EXISTS amortizationlevel")
     op.execute("DROP TYPE IF EXISTS materialtype")
+    op.execute("DROP TYPE IF EXISTS questionnairefieldtype")

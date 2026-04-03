@@ -77,6 +77,16 @@ class AmortizationLevel(str, enum.Enum):
     MAX = "MAX"  # 500 ₽
 
 
+class QuestionnaireFieldType(str, enum.Enum):
+    """Тип поля опросника (анкета мастера, шаг 4)."""
+
+    TEXT = "TEXT"
+    NUMBER = "NUMBER"
+    TEXTAREA = "TEXTAREA"
+    CHECKBOX = "CHECKBOX"
+    SELECT = "SELECT"
+
+
 class MaterialType(str, enum.Enum):
     KANEKALON = "KANEKALON"
     KUDRI = "KUDRI"
@@ -163,6 +173,10 @@ class ServiceSubcategory(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     category: Mapped[ServiceCategory] = relationship()
+    questionnaire_fields: Mapped[list[SubcategoryQuestionnaireField]] = relationship(
+        back_populates="subcategory",
+        order_by="SubcategoryQuestionnaireField.sort_order",
+    )
 
     __table_args__ = (UniqueConstraint("category_id", "name", name="uq_subcategory_per_category"),)
 
@@ -175,6 +189,7 @@ class Service(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    # Прайс этапа: заполняем middle; junior/senior оставляем пустыми до отдельного распределения уровней.
     price_junior_from: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_junior_to: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_middle_from: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -183,8 +198,74 @@ class Service(Base):
     price_senior_to: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     subcategory: Mapped[ServiceSubcategory] = relationship()
+    questionnaire_fields: Mapped[list[ServiceQuestionnaireField]] = relationship(
+        back_populates="service",
+        order_by="ServiceQuestionnaireField.sort_order",
+    )
 
     __table_args__ = (UniqueConstraint("subcategory_id", "name", name="uq_service_per_subcategory"),)
+
+
+class SubcategoryQuestionnaireField(Base):
+    """
+    Поля анкеты, общие для всех услуг подкатегории.
+    `field_key` уникален в рамках подкатегории; при склейке с полями услуги ключи не должны пересекаться
+    (проверка на сохранении / при сборке формы).
+    """
+
+    __tablename__ = "subcategory_questionnaire_fields"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subcategory_id: Mapped[int] = mapped_column(
+        ForeignKey("service_subcategories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    field_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    field_type: Mapped[QuestionnaireFieldType] = mapped_column(Enum(QuestionnaireFieldType), nullable=False)
+    label: Mapped[str] = mapped_column(String(500), nullable=False)
+    required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    placeholder: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    help_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    options_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    min_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    visibility_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    subcategory: Mapped[ServiceSubcategory] = relationship(back_populates="questionnaire_fields")
+
+    __table_args__ = (
+        UniqueConstraint("subcategory_id", "field_key", name="uq_subcategory_questionnaire_field_key"),
+    )
+
+
+class ServiceQuestionnaireField(Base):
+    """Дополнительные поля анкеты только для этой услуги (к общим полям подкатегории)."""
+
+    __tablename__ = "service_questionnaire_fields"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    service_id: Mapped[int] = mapped_column(
+        ForeignKey("services.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    field_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    field_type: Mapped[QuestionnaireFieldType] = mapped_column(Enum(QuestionnaireFieldType), nullable=False)
+    label: Mapped[str] = mapped_column(String(500), nullable=False)
+    required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    placeholder: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    help_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    options_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    min_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    visibility_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    service: Mapped[Service] = relationship(back_populates="questionnaire_fields")
+
+    __table_args__ = (
+        UniqueConstraint("service_id", "field_key", name="uq_service_questionnaire_field_key"),
+    )
 
 
 class MaterialPriceCurrent(Base):
