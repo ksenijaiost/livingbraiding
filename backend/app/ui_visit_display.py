@@ -149,3 +149,13 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
                     blocks.append(("Количество доп. заготовок", str(nk["blanks_total"])))
 
     return {"blocks": blocks}
+
+
+def visit_services_catalog_line(visit: Visit) -> str:
+    """Строка для списка визитов: категория / подкатегория / услуга (все строки визита)."""
+    svcs = sorted(visit.services or [], key=lambda s: s.id)
+    if not svcs:
+        return "—"
+    return "; ".join(
+        f"{vs.category_name} / {vs.subcategory_name} / {vs.service_name}" for vs in svcs
+    )

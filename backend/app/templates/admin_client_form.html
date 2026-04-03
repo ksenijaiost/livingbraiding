@@ -103,15 +103,33 @@
       </section>
 
       <section class="form-section">
-        <h3>Возрастная группа</h3>
+        <h3>Возрастная группа и день рождения</h3>
+        <p class="section-hint">Группа и дата по желанию. День рождения: можно только день и месяц, полную дату или только год.</p>
         <div class="row">
           <div>
-            <label class="label-sub">Группа</label>
+            <label class="label-sub">Возрастная группа</label>
             <select name="age_group">
               {% for val, label in age_options %}
                 <option value="{{ val }}" {% if form.get('age_group', '') == val %}selected{% endif %}>{{ label }}</option>
               {% endfor %}
             </select>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label class="label-sub">День</label>
+            <input name="birth_day" type="number" min="1" max="31" placeholder="1–31"
+              value="{{ form.get('birth_day', '') }}" />
+          </div>
+          <div>
+            <label class="label-sub">Месяц</label>
+            <input name="birth_month" type="number" min="1" max="12" placeholder="1–12"
+              value="{{ form.get('birth_month', '') }}" />
+          </div>
+          <div>
+            <label class="label-sub">Год</label>
+            <input name="birth_year" type="number" min="1900" max="2100" placeholder="необязательно"
+              value="{{ form.get('birth_year', '') }}" />
           </div>
         </div>
       </section>
@@ -135,28 +153,6 @@
             <label class="label-sub">Уточнение</label>
             <input name="source_other" maxlength="200" placeholder="Доп. информация к любому пункту"
               value="{{ form.get('source_other', '') }}" />
-          </div>
-        </div>
-      </section>
-
-      <section class="form-section">
-        <h3>День рождения</h3>
-        <p class="section-hint">Всё необязательно: можно только день и месяц или полную дату с годом.</p>
-        <div class="row">
-          <div>
-            <label class="label-sub">День</label>
-            <input name="birth_day" type="number" min="1" max="31" placeholder="1–31"
-              value="{{ form.get('birth_day', '') }}" />
-          </div>
-          <div>
-            <label class="label-sub">Месяц</label>
-            <input name="birth_month" type="number" min="1" max="12" placeholder="1–12"
-              value="{{ form.get('birth_month', '') }}" />
-          </div>
-          <div>
-            <label class="label-sub">Год</label>
-            <input name="birth_year" type="number" min="1900" max="2100" placeholder="необязательно"
-              value="{{ form.get('birth_year', '') }}" />
           </div>
         </div>
       </section>

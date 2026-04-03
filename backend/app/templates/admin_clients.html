@@ -3,7 +3,9 @@
   <div class="card">
     <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
       <h2 style="margin-top: 0;">Клиенты</h2>
-      <a href="/admin/clients/new"><button type="button">Новый клиент</button></a>
+      {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
+        <a href="/admin/clients/new"><button type="button">Новый клиент</button></a>
+      {% endif %}
     </div>
 
     {% if created_ok %}
@@ -34,22 +36,20 @@
           <th>Имя</th>
           <th>Контакт</th>
           <th>Посещений</th>
-          <th></th>
         </tr>
       </thead>
       <tbody>
         {% for row in rows %}
           <tr>
-            <td>{{ row.id }}</td>
+            <td><a href="/admin/clients/{{ row.id }}">{{ row.id }}</a></td>
             <td>
-              {{ row.name }}
+              <a href="/admin/clients/{{ row.id }}">{{ row.name }}</a>
               {% if not row.is_confirmed %}
                 <span class="muted" title="Ждёт подтверждения администратора">· черновик</span>
               {% endif %}
             </td>
             <td>{{ row.contact_preview or "—" }}</td>
             <td>{{ row.visits_count }}</td>
-            <td><a href="/admin/clients/{{ row.id }}/edit">Изменить</a></td>
           </tr>
         {% endfor %}
       </tbody>

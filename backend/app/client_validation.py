@@ -162,3 +162,57 @@ CLIENT_AGE_GROUP_OPTIONS: list[tuple[str, str]] = [
     (ClientAgeGroup.A30_50.value, "30–50 лет"),
     (ClientAgeGroup.A50P.value, "50+"),
 ]
+
+
+def client_age_group_label(ag: ClientAgeGroup | None) -> str:
+    if ag is None:
+        return "—"
+    for val, label in CLIENT_AGE_GROUP_OPTIONS:
+        if val and val == ag.value:
+            return label
+    return ag.value
+
+
+def _years_word_ru(n: int) -> str:
+    """1 год, 2 года, 5 лет."""
+    n = abs(int(n)) % 100
+    n1 = n % 10
+    if 11 <= n <= 14:
+        return "лет"
+    if n1 == 1:
+        return "год"
+    if 2 <= n1 <= 4:
+        return "года"
+    return "лет"
+
+
+def format_client_birth_display(
+    day: int | None,
+    month: int | None,
+    year: int | None,
+) -> str:
+    """
+    Дата + в скобках: «без года» для день+месяц без года;
+    при наличии года — возраст на сегодня (для полной даты — по календарю, для только года — разница лет).
+    """
+    today = date.today()
+
+    if day is not None and month is not None:
+        if year is not None:
+            try:
+                birth = date(int(year), int(month), int(day))
+            except ValueError:
+                return f"{day:02d}.{month:02d}.{year} (некорректная дата)"
+            age = today.year - birth.year - int(
+                (today.month, today.day) < (birth.month, birth.day)
+            )
+            age = max(0, age)
+            return f"{day:02d}.{month:02d}.{year} ({age} {_years_word_ru(age)})"
+        return f"{day:02d}.{month:02d} (без года)"
+
+    if year is not None:
+        y = int(year)
+        age = max(0, today.year - y)
+        return f"{y} ({age} {_years_word_ru(age)})"
+
+    return "—"

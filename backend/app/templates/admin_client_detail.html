@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block content %}
+  <style>
+    .client-detail-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+    .client-detail-actions { display: flex; flex-direction: column; gap: 8px; min-width: 220px; }
+    .client-detail-actions a { text-decoration: none; }
+    .client-detail-actions button { width: 100%; }
+    .kv { width: 100%; border-collapse: collapse; font-size: 14px; margin: 12px 0; }
+    .kv th { text-align: left; color: #6b7280; font-weight: 500; width: 200px; padding: 6px 8px 6px 0; vertical-align: top; }
+    .kv td { padding: 6px 0; vertical-align: top; }
+    .section-title { font-size: 1.05rem; font-weight: 600; margin: 20px 0 10px; color: #111827; }
+  </style>
+
+  <div class="card">
+    <p class="muted" style="margin-top:0;"><a href="/admin/clients">← К списку клиентов</a></p>
+
+    {% if confirmed_banner %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">
+        Клиент подтверждён.
+      </p>
+    {% endif %}
+
+    <div class="client-detail-header">
+      <div>
+        <h2 style="margin: 0 0 8px;">{{ client.name }}</h2>
+        <p class="muted" style="margin:0;">id {{ client.id }}{% if not client.is_confirmed %} · <strong>черновик</strong>{% endif %}</p>
+        {% if client.created_by_label %}
+          <p class="muted" style="margin:8px 0 0;">Занесён в базу: {{ client.created_by_label }}</p>
+        {% endif %}
+      </div>
+      {% if show_admin_actions %}
+        <div class="client-detail-actions">
+          <a href="/admin/clients/{{ client.id }}/edit"><button type="button">Изменить</button></a>
+          {% if not client.is_confirmed %}
+            <form method="post" action="/admin/clients/{{ client.id }}/confirm" style="margin:0;">
+              <button type="submit" class="secondary">Подтвердить без редактирования</button>
+            </form>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+
+    <h3 class="section-title" style="margin-top: 20px;">Данные клиента</h3>
+    <table class="kv">
+      <tr><th>Телефон</th><td>{{ client.phone or "—" }}</td></tr>
+      <tr><th>Telegram</th><td>{{ client.telegram or "—" }}</td></tr>
+      <tr><th>ВКонтакте</th><td>{{ client.vk or "—" }}</td></tr>
+      <tr><th>Instagram</th><td>{{ client.instagram or "—" }}</td></tr>
+      <tr><th>Другой контакт</th><td>{{ client.other_contact or "—" }}</td></tr>
+      <tr><th>Возрастная группа</th><td>{{ age_group_label }}</td></tr>
+      <tr><th>День рождения</th><td>{{ birth_display }}</td></tr>
+      <tr><th>Источник</th><td>{{ client.source or "—" }}</td></tr>
+      <tr><th>Уточнение</th><td>{{ client.source_other or "—" }}</td></tr>
+      <tr><th>Комментарий</th><td>{{ client.comment or "—" }}</td></tr>
+      <tr><th>Подтверждён</th><td>{% if client.is_confirmed %}Да{% else %}Нет (черновик){% endif %}</td></tr>
+    </table>
+
+    <h3 class="section-title">Визиты</h3>
+    {% if not visit_rows %}
+      <p class="muted">Пока нет визитов.</p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Визит</th>
+            <th>Услуга (категория / подкатегория / услуга)</th>
+            <th>Выручка (от клиента), ₽</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in visit_rows %}
+            {% set v = row.visit %}
+            <tr>
+              <td>
+                <a href="/admin/visits/{{ v.id }}">№{{ v.id }}, {{ v.performed_date.strftime("%d.%m.%Y") }}</a>
+              </td>
+              <td>{{ row.services_line }}</td>
+              <td>{{ "%.0f"|format(v.amount_from_client) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    <h3 class="section-title">Комплекты по визитам</h3>
+    {% if not kit_rows %}
+      <p class="muted">Нет списаний комплектов.</p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Визит</th>
+            <th>SKU</th>
+            <th>Название</th>
+            <th>Описание</th>
+            <th>Заготовок</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ku in kit_rows %}
+            {% set k = ku.kit %}
+            {% set vis = ku.visit %}
+            <tr>
+              <td>
+                <a href="/admin/visits/{{ vis.id }}">№{{ vis.id }}, {{ vis.performed_date.strftime("%d.%m.%Y") }}</a>
+              </td>
+              <td>{{ k.sku }}</td>
+              <td>{{ k.title }}</td>
+              <td>{{ k.description or "—" }}</td>
+              <td>{{ ku.pieces_used }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    <h3 class="section-title">Термозамещение</h3>
+    <p class="muted">Нет данных (блок будет заполнен позже).</p>
+  </div>
+{% endblock %}

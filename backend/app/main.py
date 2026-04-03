@@ -23,8 +23,10 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth import AuthUser, authenticate, get_current_user, login_response, logout_response, require_role
 from app.client_validation import (
     CLIENT_AGE_GROUP_OPTIONS,
+    client_age_group_label,
     client_db_to_form_dict,
     client_has_any_contact,
+    format_client_birth_display,
     format_created_by_label,
     load_client_source_options,
     parse_age_group,
@@ -58,6 +60,7 @@ from app.ui_visit_display import (
     ru_mix_complexity,
     ru_mix_source,
     ru_price_type,
+    visit_services_catalog_line,
 )
 
 app = FastAPI(title="livingbraiding")
@@ -151,10 +154,10 @@ def admin_clients(
     q: str | None = None,
     created: int | None = None,
     updated: int | None = None,
-    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
-    """Admin: client list — id, name, contact preview, visit count (non-cancelled only)."""
+    """Список клиентов (админ + мастер; создание/редактирование — только админ)."""
     q_norm = (q or "").strip()
     where = []
     if q_norm:
@@ -417,6 +420,77 @@ async def admin_client_edit_post(
     return RedirectResponse(url=f"/admin/clients?updated={client.id}", status_code=303)
 
 
+@app.get("/admin/clients/{client_id}", response_class=HTMLResponse)
+def admin_client_detail(
+    request: Request,
+    client_id: int,
+    confirmed: str | None = None,
+    current_user: AuthUser = Depends(
+        require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)
+    ),
+    db: Session = Depends(get_db),
+):
+    client = db.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+
+    visits_stmt = (
+        select(Visit)
+        .where(Visit.client_id == client_id)
+        .options(selectinload(Visit.services))
+        .order_by(Visit.performed_date.desc())
+    )
+    visits = list(db.scalars(visits_stmt).all())
+    visit_rows = [
+        {
+            "visit": v,
+            "services_line": visit_services_catalog_line(v),
+        }
+        for v in visits
+    ]
+
+    kit_stmt = (
+        select(VisitKitUsage)
+        .join(Visit, VisitKitUsage.visit_id == Visit.id)
+        .where(Visit.client_id == client_id)
+        .options(selectinload(VisitKitUsage.kit), selectinload(VisitKitUsage.visit))
+        .order_by(Visit.performed_date.desc(), VisitKitUsage.id.asc())
+    )
+    kit_rows = list(db.scalars(kit_stmt).all())
+
+    show_admin_actions = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    return templates.TemplateResponse(
+        "admin_client_detail.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            client=client,
+            visit_rows=visit_rows,
+            kit_rows=kit_rows,
+            birth_display=format_client_birth_display(
+                client.birth_day, client.birth_month, client.birth_year
+            ),
+            age_group_label=client_age_group_label(client.age_group),
+            show_admin_actions=show_admin_actions,
+            confirmed_banner=confirmed == "1",
+        ),
+    )
+
+
+@app.post("/admin/clients/{client_id}/confirm")
+def admin_client_confirm(
+    client_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    client = db.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    client.is_confirmed = True
+    db.commit()
+    return RedirectResponse(url=f"/admin/clients/{client_id}?confirmed=1", status_code=303)
+
+
 @app.get("/master/visit/new", response_class=HTMLResponse)
 def master_visit_new_get(
     request: Request,
@@ -474,7 +548,7 @@ async def master_visit_new_post(
 @app.get("/admin/visits", response_class=HTMLResponse)
 def admin_visits(
     request: Request,
-    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
     stmt = (
@@ -494,7 +568,7 @@ def admin_visits(
 def admin_visit_detail(
     visit_id: int,
     request: Request,
-    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
     visit = db.scalar(
