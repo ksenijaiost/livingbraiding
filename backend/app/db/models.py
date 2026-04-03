@@ -224,6 +224,20 @@ class Kit(Base):
     is_in_stock: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Резерв (MVP: одна метка, без истории). Заполняется при «зарезервировать», очищается при «снять».
+    reserved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reserved_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    reserved_for_client_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("clients.id"), nullable=True)
+    reserved_for_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+
+    reserved_by_user: Mapped[User | None] = relationship(foreign_keys=[reserved_by_user_id])
+    reserved_for_client: Mapped[Client | None] = relationship(foreign_keys=[reserved_for_client_id])
+    reserved_for_user: Mapped[User | None] = relationship(foreign_keys=[reserved_for_user_id])
+
+    @property
+    def is_reserved(self) -> bool:
+        return self.reserved_at is not None
+
 
 class Visit(Base):
     __tablename__ = "visits"

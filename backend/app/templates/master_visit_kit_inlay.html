@@ -230,6 +230,9 @@
             <p id="selected_stock_kit_line" style="margin:0;">
               {% if stock_kit_selected_label %}Выбрано: <strong>{{ stock_kit_selected_label }}</strong>{% endif %}
             </p>
+            <p id="selected_stock_kit_reserve" style="margin:8px 0 0; padding:8px 10px; background:#fffbeb; border:1px solid #fbbf24; border-radius:8px; font-size:13px; color:#92400e; {% if not stock_kit_reserve_hint %}display:none;{% endif %}">
+              {% if stock_kit_reserve_hint %}<strong>Резерв.</strong> Зарезервирован для: {{ stock_kit_reserve_hint }}{% endif %}
+            </p>
           </div>
         </div>
         <label><input type="checkbox" name="stock_use_entire" {% if fp.get('stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект (все доступные заготовки)</label>
@@ -268,6 +271,9 @@
           <div id="selected_extra_stock_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not extra_stock_kit_selected_label %}display:none;{% endif %}">
             <p id="selected_extra_stock_kit_line" style="margin:0;">
               {% if extra_stock_kit_selected_label %}Выбрано: <strong>{{ extra_stock_kit_selected_label }}</strong>{% endif %}
+            </p>
+            <p id="selected_extra_stock_kit_reserve" style="margin:8px 0 0; padding:8px 10px; background:#fffbeb; border:1px solid #fbbf24; border-radius:8px; font-size:13px; color:#92400e; {% if not extra_stock_kit_reserve_hint %}display:none;{% endif %}">
+              {% if extra_stock_kit_reserve_hint %}<strong>Резерв.</strong> Зарезервирован для: {{ extra_stock_kit_reserve_hint }}{% endif %}
             </p>
           </div>
           <div style="margin-top: 8px;">
@@ -404,11 +410,25 @@
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'secondary';
-        const line = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+        let line = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+        if (k.is_reserved) line += ' · резерв';
         b.textContent = line;
         b.onclick = function () { onPick(k); };
         li.appendChild(b);
         ul.appendChild(li);
+      }
+    }
+    function updateKitReserveLine(reserveElId, k) {
+      const el = document.getElementById(reserveElId);
+      if (!el) return;
+      if (k.is_reserved) {
+        el.style.display = 'block';
+        const who = (k.reserved_for_label || 'цель резерва в карточке не заполнена').trim();
+        el.innerHTML =
+          '<strong>Резерв.</strong> Зарезервирован для: ' + escapeHtml(who);
+      } else {
+        el.style.display = 'none';
+        el.innerHTML = '';
       }
     }
     function selectMainStockKit(k) {
@@ -417,6 +437,7 @@
       document.getElementById('selected_stock_kit_box').style.display = 'block';
       document.getElementById('selected_stock_kit_line').innerHTML =
         'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
+      updateKitReserveLine('selected_stock_kit_reserve', k);
       document.getElementById('stock_kit_suggest_list').innerHTML = '';
     }
     function selectExtraStockKit(k) {
@@ -425,6 +446,7 @@
       document.getElementById('selected_extra_stock_kit_box').style.display = 'block';
       document.getElementById('selected_extra_stock_kit_line').innerHTML =
         'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
+      updateKitReserveLine('selected_extra_stock_kit_reserve', k);
       document.getElementById('extra_stock_kit_suggest_list').innerHTML = '';
     }
     async function stockKitSuggest() {

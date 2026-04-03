@@ -609,13 +609,54 @@ def list_kits_for_stock(db: Session) -> list[Kit]:
     )
 
 
+def kit_reserved_for_visit_label(kit: Kit) -> str | None:
+    """Краткое «для кого» резерв в анкете визита (без даты и автора)."""
+    if not kit.reserved_at:
+        return None
+    parts: list[str] = []
+    if kit.reserved_for_client:
+        n = (kit.reserved_for_client.name or "").strip() or "—"
+        parts.append(f"клиент «{n}»")
+    if kit.reserved_for_user:
+        dn = (kit.reserved_for_user.display_name or "").strip() or "—"
+        parts.append(f"сотрудник «{dn}»")
+    if not parts:
+        return "цель резерва в карточке не заполнена"
+    if len(parts) == 1:
+        return parts[0]
+    return f"{parts[0]} и {parts[1]}"
+
+
+def kit_reserve_hint_by_id(db: Session, kit_id: int | None) -> str | None:
+    if not kit_id:
+        return None
+    k = db.scalar(
+        select(Kit)
+        .options(
+            selectinload(Kit.reserved_for_client),
+            selectinload(Kit.reserved_for_user),
+        )
+        .where(Kit.id == kit_id)
+    )
+    if not k:
+        return None
+    return kit_reserved_for_visit_label(k)
+
+
 def suggest_kits_for_stock(db: Session, q: str, *, limit: int = 30) -> list[dict[str, Any]]:
     """Подсказки для мастера: комплекты в наличии, фильтр по артикулу или названию."""
     needle = (q or "").strip()
-    stmt = select(Kit).where(
-        Kit.is_archived.is_(False),
-        Kit.is_active.is_(True),
-        Kit.pieces_available > 0,
+    stmt = (
+        select(Kit)
+        .where(
+            Kit.is_archived.is_(False),
+            Kit.is_active.is_(True),
+            Kit.pieces_available > 0,
+        )
+        .options(
+            selectinload(Kit.reserved_for_client),
+            selectinload(Kit.reserved_for_user),
+        )
     )
     if needle:
         stmt = stmt.where(
@@ -623,12 +664,17 @@ def suggest_kits_for_stock(db: Session, q: str, *, limit: int = 30) -> list[dict
         )
     stmt = stmt.order_by(Kit.sku.asc()).limit(limit)
     rows = list(db.scalars(stmt).all())
-    return [
-        {
-            "id": k.id,
-            "sku": k.sku,
-            "title": k.title,
-            "pieces_available": k.pieces_available,
-        }
-        for k in rows
-    ]
+    out: list[dict[str, Any]] = []
+    for k in rows:
+        res_label = kit_reserved_for_visit_label(k)
+        out.append(
+            {
+                "id": k.id,
+                "sku": k.sku,
+                "title": k.title,
+                "pieces_available": k.pieces_available,
+                "is_reserved": bool(k.reserved_at),
+                "reserved_for_label": res_label,
+            }
+        )
+    return out

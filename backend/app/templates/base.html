@@ -36,10 +36,12 @@
             <a href="/master/visit/new">Новый визит</a>
             <a href="/admin/clients">Клиенты</a>
             <a href="/admin/visits">Визиты</a>
+            <a href="/admin/kits">Комплекты</a>
           {% endif %}
           {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
             <a href="/admin/clients">Клиенты</a>
             <a href="/admin/visits">Визиты</a>
+            <a href="/admin/kits">Комплекты</a>
             {% if current_user.role.value == "ADMIN_SUPER" %}
               <a href="/admin/settings">Настройки</a>
             {% endif %}

@@ -144,6 +144,10 @@ def upgrade() -> None:
         ),
         sa.Column("is_in_stock", sa.Boolean(), nullable=False, server_default=sa.text("1")),
         sa.Column("is_archived", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("reserved_at", sa.DateTime(), nullable=True),
+        sa.Column("reserved_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("reserved_for_client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=True),
+        sa.Column("reserved_for_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.UniqueConstraint("sku", name="uq_kits_sku"),
     )
 

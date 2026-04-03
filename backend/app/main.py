@@ -13,6 +13,7 @@ As the project grows, we can split routes into modules (e.g. `routes/admin.py`,
 """
 
 from datetime import date, datetime
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -51,6 +52,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.kit_inlay_visit import (
+    kit_reserve_hint_by_id,
     list_kit_inlay_services_catalog,
     parse_kit_inlay_form,
     save_kit_inlay_visit,
@@ -554,6 +556,40 @@ def _kit_stock_label_from_form(db: Session, form_map: dict[str, str], field: str
     return f"{k.sku} — {k.title} (остаток {k.pieces_available})"
 
 
+def _kit_reserve_hint_from_form(db: Session, form_map: dict[str, str], field: str) -> str | None:
+    raw = (form_map.get(field) or "").strip()
+    if not raw.isdigit():
+        return None
+    return kit_reserve_hint_by_id(db, int(raw))
+
+
+def _staff_users_for_reserve(db: Session) -> list[User]:
+    return list(
+        db.scalars(
+            select(User)
+            .where(
+                User.is_active.is_(True),
+                User.role.in_((UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+            )
+            .order_by(User.display_name.asc())
+        ).all()
+    )
+
+
+def _kit_reservation_tooltip(kit: Kit) -> str:
+    if not kit.reserved_at:
+        return ""
+    parts: list[str] = []
+    if kit.reserved_for_client:
+        parts.append(f"Клиент: {kit.reserved_for_client.name}")
+    if kit.reserved_for_user:
+        parts.append(f"Сотрудник: {kit.reserved_for_user.display_name}")
+    if kit.reserved_by_user:
+        parts.append(f"Забронировал: {kit.reserved_by_user.display_name}")
+    parts.append(f"Когда: {kit.reserved_at.strftime('%d.%m.%Y %H:%M')} UTC")
+    return " · ".join(parts)
+
+
 @app.get("/master/clients/suggest")
 def master_clients_suggest(
     q: str = "",
@@ -602,7 +638,9 @@ def master_visit_new_get(
             current_user=current_user,
             service_catalog=service_catalog,
             stock_kit_selected_label=None,
+            stock_kit_reserve_hint=None,
             extra_stock_kit_selected_label=None,
+            extra_stock_kit_reserve_hint=None,
             default_date=date.today().isoformat(),
             form_prefill={},
             selected_client=None,
@@ -643,7 +681,11 @@ async def master_visit_new_post(
                 current_user=current_user,
                 service_catalog=service_catalog,
                 stock_kit_selected_label=_kit_stock_label_from_form(db, form_map, "stock_kit_id"),
+                stock_kit_reserve_hint=_kit_reserve_hint_from_form(db, form_map, "stock_kit_id"),
                 extra_stock_kit_selected_label=_kit_stock_label_from_form(
+                    db, form_map, "own_extra_stock_kit_id"
+                ),
+                extra_stock_kit_reserve_hint=_kit_reserve_hint_from_form(
                     db, form_map, "own_extra_stock_kit_id"
                 ),
                 default_date=performed,
@@ -656,6 +698,101 @@ async def master_visit_new_post(
             status_code=400,
         )
     return RedirectResponse(url=f"/master/visit/new?saved={visit.id}", status_code=303)
+
+
+@app.get("/admin/kits", response_class=HTMLResponse)
+def admin_kits_list(
+    request: Request,
+    msg: str | None = None,
+    err: str | None = None,
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
+    db: Session = Depends(get_db),
+):
+    kits = list(
+        db.scalars(
+            select(Kit)
+            .options(
+                selectinload(Kit.reserved_by_user),
+                selectinload(Kit.reserved_for_client),
+                selectinload(Kit.reserved_for_user),
+            )
+            .order_by(Kit.sku.asc())
+        ).all()
+    )
+    staff_users = _staff_users_for_reserve(db)
+    kit_rows = [{"kit": k, "reserve_tooltip": _kit_reservation_tooltip(k)} for k in kits]
+    return templates.TemplateResponse(
+        "admin_kits.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            kit_rows=kit_rows,
+            staff_users=staff_users,
+            msg=msg,
+            err=err,
+        ),
+    )
+
+
+@app.post("/admin/kits/{kit_id}/reserve")
+async def admin_kit_reserve_post(
+    kit_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
+    db: Session = Depends(get_db),
+):
+    kit = db.get(Kit, kit_id)
+    if not kit:
+        return RedirectResponse(
+            url="/admin/kits?err=" + quote("Комплект не найден", safe=""),
+            status_code=303,
+        )
+
+    form = await request.form()
+    action = str(form.get("action") or "").strip().lower()
+
+    if action == "clear":
+        kit.reserved_at = None
+        kit.reserved_by_user_id = None
+        kit.reserved_for_client_id = None
+        kit.reserved_for_user_id = None
+        db.commit()
+        return RedirectResponse(url="/admin/kits?msg=cleared", status_code=303)
+
+    cid_raw = str(form.get("reserved_for_client_id") or "").strip()
+    uid_raw = str(form.get("reserved_for_user_id") or "").strip()
+    cid = int(cid_raw) if cid_raw.isdigit() else None
+    uid = int(uid_raw) if uid_raw.isdigit() else None
+    if cid is None and uid is None:
+        return RedirectResponse(
+            url="/admin/kits?err=" + quote("Укажите клиента и/или сотрудника для резерва.", safe=""),
+            status_code=303,
+        )
+    if cid is not None:
+        if not db.get(Client, cid):
+            return RedirectResponse(
+                url="/admin/kits?err=" + quote("Клиент не найден.", safe=""),
+                status_code=303,
+            )
+    if uid is not None:
+        u = db.get(User, uid)
+        if not u or u.role not in (UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
+            return RedirectResponse(
+                url="/admin/kits?err=" + quote("Сотрудник не найден.", safe=""),
+                status_code=303,
+            )
+
+    kit.reserved_at = datetime.utcnow()
+    kit.reserved_by_user_id = current_user.id
+    kit.reserved_for_client_id = cid
+    kit.reserved_for_user_id = uid
+    db.commit()
+    return RedirectResponse(url="/admin/kits?msg=reserved", status_code=303)
+
 
 @app.get("/admin/visits", response_class=HTMLResponse)
 def admin_visits(

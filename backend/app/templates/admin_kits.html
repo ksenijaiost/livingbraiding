@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Комплекты</h2>
+    <p class="muted">Склад: артикулы и остатки. Резерв — кто и для кого (клиент и/или сотрудник); время и автор фиксируются автоматически.</p>
+
+    {% if msg == "reserved" %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Резерв сохранён.</p>
+    {% elif msg == "cleared" %}
+      <p style="background:#dbeafe;border:1px solid #93c5fd;color:#1e40af;padding:10px 12px;border-radius:8px;">Резерв снят.</p>
+    {% endif %}
+    {% if err %}
+      <div class="error" style="margin-bottom: 12px;">{{ err }}</div>
+    {% endif %}
+
+    <table>
+      <thead>
+        <tr>
+          <th>Артикул</th>
+          <th>Название</th>
+          <th>Остаток</th>
+          <th>Резерв</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in kit_rows %}
+          {% set k = row.kit %}
+          <tr>
+            <td><strong>{{ k.sku }}</strong></td>
+            <td>{{ k.title }}</td>
+            <td>{{ k.pieces_available }} / {{ k.pieces_total }}</td>
+            <td>
+              {% if k.is_reserved %}
+                <span
+                  style="display:inline-block;padding:2px 8px;border-radius:6px;background:#fef3c7;border:1px solid #fbbf24;font-size:12px;cursor:default;"
+                  title="{{ row.reserve_tooltip }}"
+                >Зарезервирован</span>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td style="white-space:nowrap;">
+              <button
+                type="button"
+                class="js-reserve-open{% if k.is_reserved %} secondary{% endif %}"
+                data-kit-id="{{ k.id }}"
+                data-sku="{{ k.sku|e }}"
+                data-client-id="{{ k.reserved_for_client_id or '' }}"
+                data-user-id="{{ k.reserved_for_user_id or '' }}"
+                data-client-name="{{ (k.reserved_for_client.name if k.reserved_for_client else '')|e }}"
+              >
+                {% if k.is_reserved %}Изменить резерв{% else %}Зарезервировать{% endif %}
+              </button>
+              {% if k.is_reserved %}
+                <form method="post" action="/admin/kits/{{ k.id }}/reserve" style="display:inline;" onsubmit="return confirm('Снять резерв с этого комплекта?');">
+                  <input type="hidden" name="action" value="clear" />
+                  <button type="submit" class="secondary">Снять</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div id="reserve_overlay" style="display:none;pointer-events:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:50;align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this) closeReserveModal();">
+    <div class="card" style="max-width:480px;width:100%;margin:0;position:relative;" onclick="event.stopPropagation();">
+      <h3 style="margin-top:0;">Резерв комплекта <span id="reserve_sku_label"></span></h3>
+      <form id="reserve_form" method="post" action="">
+        <input type="hidden" name="action" value="set" />
+        <input type="hidden" name="reserved_for_client_id" id="reserve_client_id" value="" />
+
+        <div style="margin-bottom:12px;">
+          <label>Клиент (необязательно)</label>
+          <div class="row" style="align-items: flex-end;">
+            <div style="flex:1;">
+              <input type="search" id="reserve_client_q" autocomplete="off" placeholder="Поиск по имени" value="" />
+            </div>
+            <div>
+              <button type="button" class="secondary" onclick="reserveClientSuggest()">Найти</button>
+            </div>
+          </div>
+          <ul id="reserve_client_list" style="list-style:none;padding:0;margin:8px 0 0;max-height:160px;overflow:auto;"></ul>
+          <div id="reserve_client_selected" class="muted" style="margin-top:6px;font-size:13px;"></div>
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <label>Сотрудник (необязательно)</label>
+          <select name="reserved_for_user_id" id="reserve_user_select">
+            <option value="">— не выбран —</option>
+            {% for u in staff_users %}
+              <option value="{{ u.id }}">{{ u.display_name }} ({{ u.role.value }})</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <p class="muted" style="font-size:12px;">Нужно выбрать хотя бы клиента или сотрудника.</p>
+
+        <div class="row" style="margin-top:16px;">
+          <button type="submit">Сохранить резерв</button>
+          <button type="button" class="secondary" onclick="closeReserveModal()">Отмена</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    function escapeHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+    let reserveTimer = null;
+    function openReserveModal(kitId, sku, preClientId, preUserId, preClientName) {
+      const overlay = document.getElementById('reserve_overlay');
+      overlay.style.display = 'flex';
+      overlay.style.pointerEvents = 'auto';
+      document.getElementById('reserve_sku_label').textContent = sku;
+      document.getElementById('reserve_form').action = '/admin/kits/' + kitId + '/reserve';
+      document.getElementById('reserve_client_q').value = '';
+      document.getElementById('reserve_client_list').innerHTML = '';
+      const cid = preClientId != null && preClientId !== '' ? String(preClientId) : '';
+      document.getElementById('reserve_client_id').value = cid;
+      const sel = document.getElementById('reserve_user_select');
+      sel.value = preUserId != null && preUserId !== '' ? String(preUserId) : '';
+      const selLine = document.getElementById('reserve_client_selected');
+      if (preClientName) {
+        selLine.textContent = 'Клиент: ' + preClientName;
+      } else if (cid) {
+        selLine.textContent = 'Клиент id ' + cid;
+      } else {
+        selLine.textContent = '';
+      }
+    }
+    function closeReserveModal() {
+      const overlay = document.getElementById('reserve_overlay');
+      overlay.style.display = 'none';
+      overlay.style.pointerEvents = 'none';
+    }
+    function selectReserveClient(id, name) {
+      document.getElementById('reserve_client_id').value = String(id);
+      document.getElementById('reserve_client_selected').textContent = 'Клиент: ' + name;
+      document.getElementById('reserve_client_list').innerHTML = '';
+    }
+    async function reserveClientSuggest() {
+      const q = document.getElementById('reserve_client_q').value.trim();
+      const res = await fetch('/admin/clients/suggest?q=' + encodeURIComponent(q));
+      if (!res.ok) return;
+      const data = await res.json();
+      const ul = document.getElementById('reserve_client_list');
+      ul.innerHTML = '';
+      for (const c of data.clients || []) {
+        const li = document.createElement('li');
+        li.style.marginBottom = '6px';
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'secondary';
+        b.textContent = c.name + (c.is_draft ? ' (черновик)' : '');
+        b.onclick = function () { selectReserveClient(c.id, c.name); };
+        li.appendChild(b);
+        ul.appendChild(li);
+      }
+    }
+    function scheduleReserveClientSuggest() {
+      clearTimeout(reserveTimer);
+      reserveTimer = setTimeout(reserveClientSuggest, 350);
+    }
+    function bindReserveUi() {
+      document.querySelectorAll('.js-reserve-open').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const kitId = parseInt(btn.getAttribute('data-kit-id') || '0', 10);
+          const sku = btn.getAttribute('data-sku') || '';
+          const rawC = btn.getAttribute('data-client-id') || '';
+          const rawU = btn.getAttribute('data-user-id') || '';
+          const cname = btn.getAttribute('data-client-name') || '';
+          const preC = rawC ? parseInt(rawC, 10) : null;
+          const preU = rawU ? parseInt(rawU, 10) : null;
+          openReserveModal(kitId, sku, preC, preU, cname || null);
+        });
+      });
+      var rcq = document.getElementById('reserve_client_q');
+      if (rcq) rcq.addEventListener('input', scheduleReserveClientSuggest);
+      var rf = document.getElementById('reserve_form');
+      if (rf) {
+        rf.addEventListener('submit', function (e) {
+          const cid = document.getElementById('reserve_client_id').value.trim();
+          const uid = document.getElementById('reserve_user_select').value.trim();
+          if (!cid && !uid) {
+            e.preventDefault();
+            alert('Выбери клиента и/или сотрудника.');
+          }
+        });
+      }
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', bindReserveUi);
+    } else {
+      bindReserveUi();
+    }
+  </script>
+{% endblock %}
