@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block content %}
+  {% set is_admin_kit = current_user.role.value in ['ADMIN', 'ADMIN_SUPER'] %}
+  {% set own_reserve = kit.is_reserved and kit.reserved_by_user_id == current_user.id %}
+  {% set can_reserve_ui = is_admin_kit or not kit.is_reserved or own_reserve %}
+  <div class="card">
+    <p><a href="/admin/kits">← К списку комплектов</a></p>
+
+    {% if msg == "reserved" %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Резерв сохранён.</p>
+    {% elif msg == "cleared" %}
+      <p style="background:#dbeafe;border:1px solid #93c5fd;color:#1e40af;padding:10px 12px;border-radius:8px;">Резерв снят.</p>
+    {% elif msg == "created" %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Комплект создан.</p>
+    {% elif msg == "saved" %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Изменения сохранены.</p>
+    {% endif %}
+    {% if err %}
+      <div class="error" style="margin-bottom: 12px;">{{ err }}</div>
+    {% endif %}
+
+    <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-start; justify-content:space-between;">
+      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+        {% if can_reserve_ui %}
+          <button
+            type="button"
+            class="js-reserve-open{% if kit.is_reserved %} secondary{% endif %}"
+            data-kit-id="{{ kit.id }}"
+            data-sku="{{ kit.sku|e }}"
+            data-client-id="{{ kit.reserved_for_client_id or '' }}"
+            data-user-id="{{ kit.reserved_for_user_id or '' }}"
+            data-client-name="{{ (kit.reserved_for_client.name if kit.reserved_for_client else '')|e }}"
+          >
+            {% if kit.is_reserved %}Изменить резерв{% else %}Зарезервировать{% endif %}
+          </button>
+        {% endif %}
+        {% if kit.is_reserved and (is_admin_kit or own_reserve) %}
+          <form method="post" action="/admin/kits/{{ kit.id }}/reserve" style="display:inline;" onsubmit="return confirm('Снять резерв с этого комплекта?');">
+            <input type="hidden" name="action" value="clear" />
+            <input type="hidden" name="after_reserve" value="detail" />
+            <button type="submit" class="secondary">Снять резерв</button>
+          </form>
+        {% endif %}
+      </div>
+      {% if is_admin_kit %}
+        <a href="/admin/kits/{{ kit.id }}/edit"><button type="button">Редактировать</button></a>
+      {% endif %}
+    </div>
+
+    <h2 style="margin:16px 0 12px; display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
+      <span>{{ kit.sku }}</span>
+      {% if kit.is_reserved %}
+        <span
+          style="display:inline-block;padding:2px 10px;border-radius:6px;background:#fef3c7;border:1px solid #fbbf24;font-size:14px;font-weight:600;"
+          title="{{ reserve_tooltip }}"
+        >Зарезервирован</span>
+      {% endif %}
+    </h2>
+
+    <dl style="margin:0; display:grid; gap:10px 24px; grid-template-columns: auto 1fr; max-width:720px;">
+      <dt class="muted">Название</dt>
+      <dd style="margin:0;">{{ kit.title }}</dd>
+
+      <dt class="muted">Заготовок</dt>
+      <dd style="margin:0;">изначально {{ kit.pieces_total }}, остаток {{ kit.pieces_available }}</dd>
+
+      <dt class="muted">Тип заготовок</dt>
+      <dd style="margin:0;">
+        {% if kit.blank_type_de %}<span>D.E.</span>{% endif %}
+        {% if kit.blank_type_de and kit.blank_type_se %} и {% endif %}
+        {% if kit.blank_type_se %}<span>S.E.</span>{% endif %}
+        {% if not kit.blank_type_de and not kit.blank_type_se %}—{% endif %}
+      </dd>
+
+      <dt class="muted">Вес</dt>
+      <dd style="margin:0;">{% if kit.weight_grams is not none %}{{ kit.weight_grams }} г{% else %}—{% endif %}</dd>
+
+      <dt class="muted">Длина</dt>
+      <dd style="margin:0;">{% if kit.length_cm is not none %}{{ kit.length_cm }} см{% else %}—{% endif %}</dd>
+
+      <dt class="muted">Украшения</dt>
+      <dd style="margin:0;">{% if kit.has_decorations %}да{% else %}нет{% endif %}</dd>
+
+      <dt class="muted">Материалы</dt>
+      <dd style="margin:0; white-space:pre-wrap;">{{ kit.materials_text or '—' }}</dd>
+
+      <dt class="muted">Цвет</dt>
+      <dd style="margin:0;">{{ kit.color_text or '—' }}</dd>
+
+      <dt class="muted">Виды заготовок</dt>
+      <dd style="margin:0; white-space:pre-wrap;">{{ kit.blanks_kinds_text or '—' }}</dd>
+
+      <dt class="muted">Описание</dt>
+      <dd style="margin:0; white-space:pre-wrap;">{{ kit.description or '—' }}</dd>
+
+      <dt class="muted">Примечание</dt>
+      <dd style="margin:0; white-space:pre-wrap;">{{ kit.notes or '—' }}</dd>
+
+      <dt class="muted">Цена на складе (всего)</dt>
+      <dd style="margin:0;">{% if kit.stock_price_total is not none %}{{ kit.stock_price_total }} ₽{% else %}—{% endif %}</dd>
+
+      <dt class="muted">Себестоимость (всего)</dt>
+      <dd style="margin:0;">{% if kit.cost_total is not none %}{{ kit.cost_total }} ₽{% else %}—{% endif %}</dd>
+
+      {% if kit.is_reserved %}
+        <dt class="muted">Резерв</dt>
+        <dd style="margin:0;">{{ reserve_tooltip or '—' }}</dd>
+      {% endif %}
+    </dl>
+  </div>
+
+{% with after_reserve='detail' %}
+{% include "kit_reserve_ui.html" %}
+{% endwith %}
+
+{% endblock %}

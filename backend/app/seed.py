@@ -39,6 +39,10 @@ def ensure_seed_data(db: Session) -> None:
     if not edit_days:
         db.add(Setting(key="edit_window_days", value="2"))
 
+    tz = db.get(Setting, "display_timezone")
+    if not tz:
+        db.add(Setting(key="display_timezone", value="Asia/Novosibirsk"))
+
     # Default material prices: ₽ за 100 г → ₽/г (админ может поменять в настройках)
     defaults = {
         MaterialType.KANEKALON: 4.0,  # 400 ₽ / 100 г
@@ -124,6 +128,8 @@ def _ensure_demo_catalog_and_kits(db: Session) -> None:
                 description="Для проверки «из наличия»",
                 pieces_total=70,
                 pieces_available=70,
+                blank_type_de=True,
+                blank_type_se=False,
                 stock_price_total=3500.0,
                 cost_total=None,
                 is_in_stock=True,
@@ -138,6 +144,8 @@ def _ensure_demo_catalog_and_kits(db: Session) -> None:
                 description="Для доп. заготовок (свой + из наличия)",
                 pieces_total=10,
                 pieces_available=10,
+                blank_type_de=True,
+                blank_type_se=True,
                 stock_price_total=800.0,
                 cost_total=None,
                 is_in_stock=True,

@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">{% if is_new %}Новый комплект{% else %}Редактирование: {{ kit.sku }}{% endif %}</h2>
+    <p><a href="/admin/kits">← К списку комплектов</a>{% if not is_new %} · <a href="/admin/kits/{{ kit.id }}">Карточка</a>{% endif %}</p>
+
+    {% if error %}
+      <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="{{ form_action }}">
+      <div class="row">
+        <div>
+          <label>Артикул <span class="muted">*</span></label>
+          <input name="sku" required maxlength="80" value="{{ fp.get('sku', '') }}" />
+        </div>
+        <div>
+          <label>Название <span class="muted">*</span></label>
+          <input name="title" required maxlength="200" value="{{ fp.get('title', '') }}" />
+        </div>
+      </div>
+
+      <p style="margin:12px 0 6px;"><strong>Тип заготовок</strong> <span class="muted">*</span> (можно оба)</p>
+      <div style="display:flex; flex-wrap:wrap; gap:20px; align-items:center;">
+        <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
+          <input type="checkbox" name="blank_type_de" {% if fp.get('blank_type_de') %}checked{% endif %} />
+          <span>D.E.</span>
+        </label>
+        <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
+          <input type="checkbox" name="blank_type_se" {% if fp.get('blank_type_se') %}checked{% endif %} />
+          <span>S.E.</span>
+        </label>
+      </div>
+
+      {% if is_new %}
+        <div style="margin-top:12px;">
+          <label>Количество заготовок <span class="muted">*</span></label>
+          <input name="pieces_initial" type="number" min="1" required value="{{ fp.get('pieces_initial', '') }}" />
+        </div>
+      {% else %}
+        <div class="row" style="margin-top:12px;">
+          <div>
+            <label>Всего заготовок (изначально) <span class="muted">*</span></label>
+            <input name="pieces_total" type="number" min="1" required value="{{ fp.get('pieces_total', kit.pieces_total) }}" />
+          </div>
+          <div>
+            <label>Остаток на складе <span class="muted">*</span></label>
+            <input name="pieces_available" type="number" min="0" required value="{{ fp.get('pieces_available', kit.pieces_available) }}" />
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="row" style="margin-top:12px;">
+        <div>
+          <label>Вес, г</label>
+          <input name="weight_grams" type="text" inputmode="decimal" placeholder="необязательно" value="{{ fp.get('weight_grams', '') }}" />
+        </div>
+        <div>
+          <label>Длина, см</label>
+          <input name="length_cm" type="text" inputmode="decimal" placeholder="необязательно" value="{{ fp.get('length_cm', '') }}" />
+        </div>
+      </div>
+
+      <label style="margin-top:12px;"><input type="checkbox" name="has_decorations" {% if fp.get('has_decorations') %}checked{% endif %} /> Украшения</label>
+
+      <div style="margin-top:12px;">
+        <label>Материалы</label>
+        <textarea name="materials_text" rows="2" placeholder="Список использованных материалов (например, названия канекалона)">{{ fp.get('materials_text', '') }}</textarea>
+      </div>
+      <div style="margin-top:8px;">
+        <label>Цвет</label>
+        <input name="color_text" maxlength="200" placeholder="Цвет материала с пачки и/или словесное описание" value="{{ fp.get('color_text', '') }}" />
+      </div>
+      <div style="margin-top:8px;">
+        <label>Виды заготовок</label>
+        <textarea name="blanks_kinds_text" rows="2" placeholder="Виды кос, дредов и т.д.">{{ fp.get('blanks_kinds_text', '') }}</textarea>
+      </div>
+      <div style="margin-top:8px;">
+        <label>Описание комплекта</label>
+        <textarea name="description" rows="2" placeholder="Если нужно как-то ещё описать комплект, это можно сделать тут">{{ fp.get('description', '') }}</textarea>
+      </div>
+      <div style="margin-top:8px;">
+        <label>Примечание</label>
+        <textarea name="notes" rows="3" placeholder="Тут можно рассказать про украшения в комплекте, какие-то важные нюансы">{{ fp.get('notes', '') }}</textarea>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <div>
+          <label>Цена комплекта на складе (всего), ₽ <span class="muted">*</span></label>
+          <input name="stock_price_total" type="text" inputmode="decimal" required placeholder="например, 3500" value="{{ fp.get('stock_price_total', '') }}" />
+        </div>
+        <div>
+          <label>Себестоимость (всего), ₽</label>
+          <input name="cost_total" type="text" inputmode="decimal" placeholder="необязательно" value="{{ fp.get('cost_total', '') }}" />
+        </div>
+      </div>
+
+      <p style="margin-top: 16px;">
+        <button type="submit">{% if is_new %}Создать{% else %}Сохранить{% endif %}</button>
+        <a href="{% if is_new %}/admin/kits{% else %}/admin/kits/{{ kit.id }}{% endif %}"><button type="button" class="secondary">Отмена</button></a>
+      </p>
+    </form>
+  </div>
+{% endblock %}

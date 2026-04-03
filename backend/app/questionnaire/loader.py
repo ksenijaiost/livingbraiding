@@ -20,7 +20,7 @@ def _read_json(path: Path) -> Any:
 
 def load_catalog_slice(relative_path: str) -> dict[str, Any]:
     """
-    relative_path: например \"catalog/v1/full_head_vpletenie_komplekta.json\"
+    relative_path: например, \"catalog/v1/full_head_vpletenie_komplekta.json\"
     """
     path = questionnaire_data_dir() / relative_path
     data = _read_json(path)

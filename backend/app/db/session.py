@@ -12,7 +12,7 @@ from app.settings import get_settings
 
 
 def _ensure_sqlite_parent_dir(database_url: str) -> None:
-    """Создать родительскую папку для файла SQLite (например `data/`), если её ещё нет."""
+    """Создать родительскую папку для файла SQLite (например, `data/`), если её ещё нет."""
     url = make_url(database_url)
     if url.drivername != "sqlite":
         return

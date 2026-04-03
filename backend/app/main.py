@@ -13,6 +13,7 @@ As the project grows, we can split routes into modules (e.g. `routes/admin.py`,
 """
 
 from datetime import date, datetime
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -23,6 +24,13 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, authenticate, get_current_user, login_response, logout_response, require_role
+from app.display_time import (
+    ALLOWED_TIMEZONES,
+    ALLOWED_TIMEZONE_IDS,
+    format_naive_utc_datetime,
+    get_display_timezone,
+    timezone_label,
+)
 from app.client_validation import (
     CLIENT_AGE_GROUP_OPTIONS,
     client_age_group_label,
@@ -51,6 +59,14 @@ from app.db.models import (
     VisitMaster,
 )
 from app.db.session import get_db
+from app.kit_crud import (
+    apply_kit_admin_form,
+    kit_edit_error_prefill,
+    kit_new_error_prefill,
+    kit_to_form_prefill,
+    parse_kit_admin_form,
+    validate_kit_admin_form,
+)
 from app.kit_inlay_visit import (
     kit_reserve_hint_by_id,
     list_kit_inlay_services_catalog,
@@ -563,6 +579,13 @@ def _kit_reserve_hint_from_form(db: Session, form_map: dict[str, str], field: st
     return kit_reserve_hint_by_id(db, int(raw))
 
 
+def _kit_reserve_redirect_base(kit_id: int, form: Any) -> str:
+    ar = str(form.get("after_reserve") or "list").strip()
+    if ar == "detail":
+        return f"/admin/kits/{kit_id}"
+    return "/admin/kits"
+
+
 def _staff_users_for_reserve(db: Session) -> list[User]:
     return list(
         db.scalars(
@@ -576,7 +599,7 @@ def _staff_users_for_reserve(db: Session) -> list[User]:
     )
 
 
-def _kit_reservation_tooltip(kit: Kit) -> str:
+def _kit_reservation_tooltip(kit: Kit, db: Session) -> str:
     if not kit.reserved_at:
         return ""
     parts: list[str] = []
@@ -586,7 +609,9 @@ def _kit_reservation_tooltip(kit: Kit) -> str:
         parts.append(f"Сотрудник: {kit.reserved_for_user.display_name}")
     if kit.reserved_by_user:
         parts.append(f"Забронировал: {kit.reserved_by_user.display_name}")
-    parts.append(f"Когда: {kit.reserved_at.strftime('%d.%m.%Y %H:%M')} UTC")
+    tz = get_display_timezone(db)
+    when = format_naive_utc_datetime(kit.reserved_at, tz)
+    parts.append(f"Когда: {when} ({timezone_label(tz)})")
     return " · ".join(parts)
 
 
@@ -722,7 +747,7 @@ def admin_kits_list(
         ).all()
     )
     staff_users = _staff_users_for_reserve(db)
-    kit_rows = [{"kit": k, "reserve_tooltip": _kit_reservation_tooltip(k)} for k in kits]
+    kit_rows = [{"kit": k, "reserve_tooltip": _kit_reservation_tooltip(k, db)} for k in kits]
     return templates.TemplateResponse(
         "admin_kits.html",
         _ctx(
@@ -734,6 +759,157 @@ def admin_kits_list(
             err=err,
         ),
     )
+
+
+@app.get("/admin/kits/new", response_class=HTMLResponse)
+def admin_kit_new_get(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    return templates.TemplateResponse(
+        "admin_kit_form.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            is_new=True,
+            kit=None,
+            fp={},
+            form_action="/admin/kits/new",
+            error=None,
+        ),
+    )
+
+
+@app.post("/admin/kits/new")
+async def admin_kit_new_post(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        d = parse_kit_admin_form(form, for_create=True)
+        validate_kit_admin_form(d, for_create=True)
+        if db.scalar(select(Kit.id).where(Kit.sku == d.sku)):
+            raise ValueError("Комплект с таким артикулом уже есть")
+        kit = Kit()
+        apply_kit_admin_form(kit, d)
+        db.add(kit)
+        db.commit()
+        return RedirectResponse(url=f"/admin/kits/{kit.id}?msg=created", status_code=303)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            "admin_kit_form.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                is_new=True,
+                kit=None,
+                fp=kit_new_error_prefill(form),
+                form_action="/admin/kits/new",
+                error=str(exc),
+            ),
+            status_code=400,
+        )
+
+
+@app.get("/admin/kits/{kit_id}", response_class=HTMLResponse)
+def admin_kit_detail(
+    request: Request,
+    kit_id: int,
+    msg: str | None = None,
+    err: str | None = None,
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
+    db: Session = Depends(get_db),
+):
+    kit = db.scalar(
+        select(Kit)
+        .options(
+            selectinload(Kit.reserved_by_user),
+            selectinload(Kit.reserved_for_client),
+            selectinload(Kit.reserved_for_user),
+        )
+        .where(Kit.id == kit_id)
+    )
+    if not kit:
+        raise HTTPException(status_code=404, detail="Комплект не найден")
+    return templates.TemplateResponse(
+        "admin_kit_detail.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            kit=kit,
+            reserve_tooltip=_kit_reservation_tooltip(kit, db),
+            staff_users=_staff_users_for_reserve(db),
+            msg=msg,
+            err=err,
+        ),
+    )
+
+
+@app.get("/admin/kits/{kit_id}/edit", response_class=HTMLResponse)
+def admin_kit_edit_get(
+    request: Request,
+    kit_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    kit = db.get(Kit, kit_id)
+    if not kit:
+        raise HTTPException(status_code=404, detail="Комплект не найден")
+    return templates.TemplateResponse(
+        "admin_kit_form.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            is_new=False,
+            kit=kit,
+            fp=kit_to_form_prefill(kit),
+            form_action=f"/admin/kits/{kit_id}/edit",
+            error=None,
+        ),
+    )
+
+
+@app.post("/admin/kits/{kit_id}/edit")
+async def admin_kit_edit_post(
+    kit_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    kit = db.get(Kit, kit_id)
+    if not kit:
+        raise HTTPException(status_code=404, detail="Комплект не найден")
+    form = await request.form()
+    try:
+        d = parse_kit_admin_form(form, for_create=False)
+        validate_kit_admin_form(d, for_create=False)
+        if d.sku != kit.sku:
+            oid = db.scalar(select(Kit.id).where(Kit.sku == d.sku, Kit.id != kit.id))
+            if oid:
+                raise ValueError("Комплект с таким артикулом уже есть")
+        apply_kit_admin_form(kit, d)
+        db.commit()
+        return RedirectResponse(url=f"/admin/kits/{kit_id}?msg=saved", status_code=303)
+    except ValueError as exc:
+        fp = kit_edit_error_prefill(form)
+        return templates.TemplateResponse(
+            "admin_kit_form.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                is_new=False,
+                kit=kit,
+                fp=fp,
+                form_action=f"/admin/kits/{kit_id}/edit",
+                error=str(exc),
+            ),
+            status_code=400,
+        )
 
 
 @app.post("/admin/kits/{kit_id}/reserve")
@@ -753,15 +929,39 @@ async def admin_kit_reserve_post(
         )
 
     form = await request.form()
+    redirect_base = _kit_reserve_redirect_base(kit_id, form)
     action = str(form.get("action") or "").strip().lower()
 
     if action == "clear":
+        if current_user.role == UserRole.MASTER:
+            if not kit.is_reserved or kit.reserved_by_user_id != current_user.id:
+                return RedirectResponse(
+                    url=redirect_base
+                    + "?err="
+                    + quote(
+                        "Снять резерв может автор резерва или администратор.",
+                        safe="",
+                    ),
+                    status_code=303,
+                )
         kit.reserved_at = None
         kit.reserved_by_user_id = None
         kit.reserved_for_client_id = None
         kit.reserved_for_user_id = None
         db.commit()
-        return RedirectResponse(url="/admin/kits?msg=cleared", status_code=303)
+        return RedirectResponse(url=redirect_base + "?msg=cleared", status_code=303)
+
+    if current_user.role == UserRole.MASTER:
+        if kit.is_reserved and kit.reserved_by_user_id != current_user.id:
+            return RedirectResponse(
+                url=redirect_base
+                + "?err="
+                + quote(
+                    "Этот комплект зарезервирован другим пользователем. Изменить резерв может только администратор.",
+                    safe="",
+                ),
+                status_code=303,
+            )
 
     cid_raw = str(form.get("reserved_for_client_id") or "").strip()
     uid_raw = str(form.get("reserved_for_user_id") or "").strip()
@@ -769,20 +969,22 @@ async def admin_kit_reserve_post(
     uid = int(uid_raw) if uid_raw.isdigit() else None
     if cid is None and uid is None:
         return RedirectResponse(
-            url="/admin/kits?err=" + quote("Укажите клиента и/или сотрудника для резерва.", safe=""),
+            url=redirect_base
+            + "?err="
+            + quote("Укажите клиента и/или сотрудника для резерва.", safe=""),
             status_code=303,
         )
     if cid is not None:
         if not db.get(Client, cid):
             return RedirectResponse(
-                url="/admin/kits?err=" + quote("Клиент не найден.", safe=""),
+                url=redirect_base + "?err=" + quote("Клиент не найден.", safe=""),
                 status_code=303,
             )
     if uid is not None:
         u = db.get(User, uid)
         if not u or u.role not in (UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
             return RedirectResponse(
-                url="/admin/kits?err=" + quote("Сотрудник не найден.", safe=""),
+                url=redirect_base + "?err=" + quote("Сотрудник не найден.", safe=""),
                 status_code=303,
             )
 
@@ -791,7 +993,7 @@ async def admin_kit_reserve_post(
     kit.reserved_for_client_id = cid
     kit.reserved_for_user_id = uid
     db.commit()
-    return RedirectResponse(url="/admin/kits?msg=reserved", status_code=303)
+    return RedirectResponse(url=redirect_base + "?msg=reserved", status_code=303)
 
 
 @app.get("/admin/visits", response_class=HTMLResponse)
@@ -940,6 +1142,7 @@ def admin_settings_page(
     pku = db.get(MaterialPriceCurrent, MaterialType.KUDRI)
     kanek_per_100 = str((pk.price_per_gram * 100) if pk else 400.0)
     kudri_per_100 = str((pku.price_per_gram * 100) if pku else 800.0)
+    display_tz = get_display_timezone(db)
     return templates.TemplateResponse(
         "admin_settings.html",
         _ctx(
@@ -949,6 +1152,8 @@ def admin_settings_page(
             edit_window_days=edit_window_days,
             kanek_per_100g=kanek_per_100,
             kudri_per_100g=kudri_per_100,
+            display_timezone=display_tz,
+            timezone_choices=ALLOWED_TIMEZONES,
             saved=bool(saved),
         ),
     )
@@ -960,9 +1165,14 @@ def admin_settings_save(
     edit_window_days: str = Form(...),
     kanek_per_100g: str = Form(...),
     kudri_per_100g: str = Form(...),
+    display_timezone: str = Form(...),
     current_user=Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
+    tz_raw = display_timezone.strip()
+    if tz_raw not in ALLOWED_TIMEZONE_IDS:
+        return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
+
     value = salon_cut_pct.strip().replace(",", ".")
     try:
         pct = float(value)
@@ -1004,9 +1214,15 @@ def admin_settings_save(
         mrow = db.get(MaterialPriceCurrent, mt)
         if not mrow:
             db.add(MaterialPriceCurrent(material_type=mt, price_per_gram=per_g, updated_at=now))
-        else:
-            mrow.price_per_gram = per_g
-            mrow.updated_at = now
+    else:
+        mrow.price_per_gram = per_g
+        mrow.updated_at = now
+
+    tz_row = db.get(Setting, "display_timezone")
+    if not tz_row:
+        db.add(Setting(key="display_timezone", value=tz_raw))
+    else:
+        tz_row.value = tz_raw
 
     db.commit()
     return RedirectResponse(url="/admin/settings?saved=1", status_code=303)

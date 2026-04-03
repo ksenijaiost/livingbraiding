@@ -215,6 +215,17 @@ class Kit(Base):
     pieces_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     pieces_available: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    # Карточка склада (шаг 3.3): типы заготовок — можно один или оба.
+    blank_type_de: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    blank_type_se: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    weight_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
+    length_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    has_decorations: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    materials_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    color_text: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    blanks_kinds_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Из наличия: вычитаемая из прибыли визита цена (пропорционально списанным заготовкам).
     stock_price_total: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Новый комплект: себестоимость (пропорционально списанным заготовкам).

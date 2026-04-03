@@ -7,3 +7,4 @@ alembic==1.15.2
 passlib==1.7.4
 itsdangerous==2.2.0
 python-dotenv==1.1.0
+tzdata>=2025.1
