@@ -11,6 +11,11 @@
         Клиент «{{ created_ok.name }}» создан (id {{ created_ok.id }}).
       </p>
     {% endif %}
+    {% if updated_ok %}
+      <p style="background:#dbeafe;border:1px solid #93c5fd;color:#1e40af;padding:10px 12px;border-radius:8px;">
+        Клиент «{{ updated_ok.name }}» сохранён (id {{ updated_ok.id }}).
+      </p>
+    {% endif %}
 
     <form method="get" action="/admin/clients" class="row" style="margin-bottom: 12px;">
       <div>
@@ -29,6 +34,7 @@
           <th>Имя</th>
           <th>Контакт</th>
           <th>Посещений</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -43,6 +49,7 @@
             </td>
             <td>{{ row.contact_preview or "—" }}</td>
             <td>{{ row.visits_count }}</td>
+            <td><a href="/admin/clients/{{ row.id }}/edit">Изменить</a></td>
           </tr>
         {% endfor %}
       </tbody>

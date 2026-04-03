@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from app.auth import AuthUser
-from app.db.models import ClientAgeGroup
+from app.db.models import Client, ClientAgeGroup
 
 _CLIENT_SOURCES_PATH = Path(__file__).resolve().parent / "data" / "client_sources.json"
 
@@ -29,15 +29,48 @@ def load_client_source_options() -> list[dict[str, str]]:
     return [dict(x) for x in _client_source_items_cached()]
 
 
-def parse_client_source(raw: str | None) -> str | None:
-    """Пусто или строго одна из подписей из справочника."""
+def parse_client_source(raw: str | None, *, legacy_label: str | None = None) -> str | None:
+    """Пусто или подпись из справочника; при редактировании можно оставить прежнее значение, даже если его нет в JSON."""
     s = (raw or "").strip()
     if not s:
         return None
     allowed = {it["label"] for it in _client_source_items_cached()}
-    if s not in allowed:
-        raise ValueError("Выберите источник из списка.")
-    return s[:120]
+    if s in allowed:
+        return s[:120]
+    if legacy_label is not None and s == legacy_label.strip():
+        return s[:120]
+    raise ValueError("Выберите источник из списка.")
+
+
+def client_db_to_form_dict(client: Client) -> dict[str, str]:
+    """Значения для HTML-формы редактирования."""
+    ag = client.age_group.value if client.age_group else ""
+    return {
+        "name": client.name,
+        "phone": client.phone or "",
+        "telegram": client.telegram or "",
+        "vk": client.vk or "",
+        "instagram": client.instagram or "",
+        "other_contact": client.other_contact or "",
+        "age_group": ag,
+        "source": client.source or "",
+        "source_other": client.source_other or "",
+        "comment": client.comment or "",
+        "birth_day": str(client.birth_day) if client.birth_day is not None else "",
+        "birth_month": str(client.birth_month) if client.birth_month is not None else "",
+        "birth_year": str(client.birth_year) if client.birth_year is not None else "",
+        "is_confirmed": "1" if client.is_confirmed else "0",
+    }
+
+
+def source_extra_option_for_form(form: dict[str, str], options: list[dict[str, str]]) -> str | None:
+    """Если выбранный источник не из справочника — отдельный пункт в выпадающем списке (старые данные в БД)."""
+    s = (form.get("source") or "").strip()
+    if not s:
+        return None
+    if s in {x["label"] for x in options}:
+        return None
+    return s
 
 
 def format_created_by_label(user: AuthUser) -> str:

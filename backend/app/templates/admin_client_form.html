@@ -50,13 +50,17 @@
 
   <div class="card client-form">
     <p class="muted" style="margin-top:0;"><a href="/admin/clients">← К списку клиентов</a></p>
-    <h2 style="margin-top: 0;">Новый клиент</h2>
+    <h2 style="margin-top: 0;">{{ page_heading }}</h2>
+
+    {% if not is_new and created_by_label %}
+      <p class="muted" style="margin-bottom: 16px;">Занесён в базу: {{ created_by_label }}</p>
+    {% endif %}
 
     {% if error %}
       <p class="error">{{ error }}</p>
     {% endif %}
 
-    <form method="post" action="/admin/clients/new">
+    <form method="post" action="{{ form_action }}">
       <section class="form-section">
         <h3>Имя</h3>
         <div class="row">
@@ -119,6 +123,9 @@
             <label class="label-sub">Откуда узнал о студии</label>
             <select name="source">
               <option value="">— не выбрано —</option>
+              {% if source_extra_option %}
+                <option value="{{ source_extra_option }}" {% if form.get('source', '') == source_extra_option %}selected{% endif %}>{{ source_extra_option }} (в базе, не из списка)</option>
+              {% endif %}
               {% for item in source_options %}
                 <option value="{{ item.label }}" {% if form.get('source', '') == item.label %}selected{% endif %}>{{ item.label }}</option>
               {% endfor %}
@@ -164,13 +171,21 @@
         </div>
       </section>
 
-      <label class="checkbox-row">
-        <input type="checkbox" name="mark_draft" value="1" {% if form.get('mark_draft') == '1' %}checked{% endif %} />
-        <span>Сохранить как черновик (не подтверждён, ждёт админа)</span>
-      </label>
+      {% if is_new %}
+        <label class="checkbox-row">
+          <input type="checkbox" name="mark_draft" value="1" {% if form.get('mark_draft') == '1' %}checked{% endif %} />
+          <span>Сохранить как черновик (не подтверждён, ждёт админа)</span>
+        </label>
+      {% else %}
+        <label class="checkbox-row">
+          <input type="checkbox" name="is_confirmed" value="1" {% if form.get('is_confirmed', '0') == '1' %}checked{% endif %} />
+          <span>Клиент подтверждён (не черновик)</span>
+        </label>
+        <input type="hidden" name="is_confirmed" value="0" />
+      {% endif %}
 
       <div class="form-actions">
-        <button type="submit">Создать</button>
+        <button type="submit">{{ submit_label }}</button>
         <a href="/admin/clients" class="muted" style="margin-left: 16px;">Отмена</a>
       </div>
     </form>

@@ -23,12 +23,14 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth import AuthUser, authenticate, get_current_user, login_response, logout_response, require_role
 from app.client_validation import (
     CLIENT_AGE_GROUP_OPTIONS,
+    client_db_to_form_dict,
     client_has_any_contact,
     format_created_by_label,
     load_client_source_options,
     parse_age_group,
     parse_birth_fields,
     parse_client_source,
+    source_extra_option_for_form,
     strip_or_none,
 )
 from app.db.models import (
@@ -77,6 +79,39 @@ def _ctx(request: Request, current_user=None, **kwargs):
     return {"request": request, "current_user": current_user, **kwargs}
 
 
+def _admin_client_form_page(
+    request: Request,
+    current_user: AuthUser,
+    *,
+    form: dict,
+    error: str | None,
+    is_new: bool,
+    client_id: int | None = None,
+    created_by_display: str | None = None,
+    status_code: int = 200,
+):
+    so = load_client_source_options()
+    seo = source_extra_option_for_form(form, so)
+    return templates.TemplateResponse(
+        "admin_client_form.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            is_new=is_new,
+            form_action="/admin/clients/new" if is_new else f"/admin/clients/{client_id}/edit",
+            page_heading="Новый клиент" if is_new else "Редактирование клиента",
+            submit_label="Создать" if is_new else "Сохранить",
+            age_options=CLIENT_AGE_GROUP_OPTIONS,
+            source_options=so,
+            source_extra_option=seo,
+            created_by_label=created_by_display,
+            form=form,
+            error=error,
+        ),
+        status_code=status_code,
+    )
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     return templates.TemplateResponse("login.html", _ctx(request, current_user=None, error=None))
@@ -115,6 +150,7 @@ def admin_clients(
     request: Request,
     q: str | None = None,
     created: int | None = None,
+    updated: int | None = None,
     current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -170,6 +206,9 @@ def admin_clients(
     created_ok = None
     if created is not None:
         created_ok = db.get(Client, created)
+    updated_ok = None
+    if updated is not None:
+        updated_ok = db.get(Client, updated)
     return templates.TemplateResponse(
         "admin_clients.html",
         _ctx(
@@ -178,6 +217,7 @@ def admin_clients(
             rows=rows,
             q=q_norm,
             created_ok=created_ok,
+            updated_ok=updated_ok,
         ),
     )
 
@@ -187,16 +227,12 @@ def admin_client_new_get(
     request: Request,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
 ):
-    return templates.TemplateResponse(
-        "admin_client_new.html",
-        _ctx(
-            request,
-            current_user=current_user,
-            age_options=CLIENT_AGE_GROUP_OPTIONS,
-            source_options=load_client_source_options(),
-            error=None,
-            form={},
-        ),
+    return _admin_client_form_page(
+        request,
+        current_user,
+        form={},
+        error=None,
+        is_new=True,
     )
 
 
@@ -244,16 +280,12 @@ async def admin_client_new_post(
             err = str(exc)
 
     if err:
-        return templates.TemplateResponse(
-            "admin_client_new.html",
-            _ctx(
-                request,
-                current_user=current_user,
-                age_options=CLIENT_AGE_GROUP_OPTIONS,
-                source_options=load_client_source_options(),
-                error=err,
-                form=form,
-            ),
+        return _admin_client_form_page(
+            request,
+            current_user,
+            form=form,
+            error=err,
+            is_new=True,
             status_code=400,
         )
 
@@ -278,6 +310,111 @@ async def admin_client_new_post(
     db.commit()
     db.refresh(client)
     return RedirectResponse(url=f"/admin/clients?created={client.id}", status_code=303)
+
+
+@app.get("/admin/clients/{client_id}/edit", response_class=HTMLResponse)
+def admin_client_edit_get(
+    request: Request,
+    client_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    client = db.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    form = client_db_to_form_dict(client)
+    return _admin_client_form_page(
+        request,
+        current_user,
+        form=form,
+        error=None,
+        is_new=False,
+        client_id=client.id,
+        created_by_display=client.created_by_label,
+    )
+
+
+@app.post("/admin/clients/{client_id}/edit")
+async def admin_client_edit_post(
+    request: Request,
+    client_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    client = db.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    form_raw = await request.form()
+    form: dict[str, str] = {}
+    for k in form_raw.keys():
+        if k == "is_confirmed":
+            continue
+        form[k] = str(form_raw.get(k) or "")
+    form["is_confirmed"] = "1" if "1" in map(str, form_raw.getlist("is_confirmed")) else "0"
+
+    name = (str(form.get("name") or "")).strip()
+    phone = str(form.get("phone") or "")
+    telegram = str(form.get("telegram") or "")
+    vk = str(form.get("vk") or "")
+    instagram = str(form.get("instagram") or "")
+    other_contact = str(form.get("other_contact") or "")
+    source = str(form.get("source") or "")
+    source_other = str(form.get("source_other") or "")
+    comment = str(form.get("comment") or "")
+
+    err: str | None = None
+    if not name:
+        err = "Укажите имя клиента."
+    elif not client_has_any_contact(phone, telegram, vk, instagram, other_contact):
+        err = "Нужен хотя бы один контакт: телефон или любая из соцсетей."
+
+    bd_raw = str(form.get("birth_day") or "")
+    bm_raw = str(form.get("birth_month") or "")
+    by_raw = str(form.get("birth_year") or "")
+    age_raw = str(form.get("age_group") or "")
+
+    birth_day = birth_month = birth_year = None
+    age_group = None
+    source_parsed: str | None = None
+    is_confirmed = form["is_confirmed"] == "1"
+
+    if not err:
+        try:
+            birth_day, birth_month, birth_year = parse_birth_fields(bd_raw, bm_raw, by_raw)
+            age_group = parse_age_group(age_raw)
+            source_parsed = parse_client_source(source, legacy_label=client.source)
+        except ValueError as exc:
+            err = str(exc)
+
+    if err:
+        return _admin_client_form_page(
+            request,
+            current_user,
+            form=form,
+            error=err,
+            is_new=False,
+            client_id=client.id,
+            created_by_display=client.created_by_label,
+            status_code=400,
+        )
+
+    client.name = name[:200]
+    client.phone = strip_or_none(phone, 30)
+    client.telegram = strip_or_none(telegram, 100)
+    client.vk = strip_or_none(vk, 120)
+    client.instagram = strip_or_none(instagram, 120)
+    client.other_contact = strip_or_none(other_contact, 200)
+    client.age_group = age_group
+    client.source = source_parsed
+    client.source_other = strip_or_none(source_other, 200)
+    client.comment = strip_or_none(comment) or None
+    client.is_confirmed = is_confirmed
+    client.birth_day = birth_day
+    client.birth_month = birth_month
+    client.birth_year = birth_year
+
+    db.commit()
+    return RedirectResponse(url=f"/admin/clients?updated={client.id}", status_code=303)
 
 
 @app.get("/master/visit/new", response_class=HTMLResponse)
