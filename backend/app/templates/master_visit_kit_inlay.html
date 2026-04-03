@@ -210,37 +210,33 @@
 
       <h3>Комплект</h3>
       <label><input type="radio" name="kit_kind" value="STOCK" onchange="kitKind()" {% if fp.get('kit_kind', 'STOCK') == 'STOCK' %}checked{% endif %} /> Из наличия</label>
-      <label><input type="radio" name="kit_kind" value="NEW" onchange="kitKind()" {% if fp.get('kit_kind', 'STOCK') == 'NEW' %}checked{% endif %} /> Новый</label>
       <label><input type="radio" name="kit_kind" value="OWN" onchange="kitKind()" {% if fp.get('kit_kind', 'STOCK') == 'OWN' %}checked{% endif %} /> Свой</label>
 
       <div id="blk-stock" class="card" style="margin-top: 10px;">
         <strong>Из наличия</strong>
         <div style="margin-top: 8px;">
+          <input type="hidden" name="stock_kit_id" id="stock_kit_id" value="{{ fp.get('stock_kit_id', '') }}" />
           <label>Комплект *</label>
-          <select name="stock_kit_id">
-            <option value="">—</option>
-            {% for k in kits %}
-              <option value="{{ k.id }}" {% if fp.get('stock_kit_id')|string == k.id|string %}selected{% endif %}>{{ k.sku }} — {{ k.title }} (остаток {{ k.pieces_available }})</option>
-            {% endfor %}
-          </select>
+          <div class="row" style="align-items: flex-end;">
+            <div style="flex:1;">
+              <input type="search" id="stock_kit_search_q" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" value="" />
+            </div>
+            <div>
+              <button type="button" class="secondary" onclick="stockKitSuggest()">Найти</button>
+            </div>
+          </div>
+          <ul id="stock_kit_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+          <div id="selected_stock_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not stock_kit_selected_label %}display:none;{% endif %}">
+            <p id="selected_stock_kit_line" style="margin:0;">
+              {% if stock_kit_selected_label %}Выбрано: <strong>{{ stock_kit_selected_label }}</strong>{% endif %}
+            </p>
+          </div>
         </div>
         <label><input type="checkbox" name="stock_use_entire" {% if fp.get('stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект (все доступные заготовки)</label>
         <div>
           <label>Или заготовок списать</label>
           <input type="number" name="stock_blanks_used" min="0" value="{{ fp.get('stock_blanks_used', '12') }}" />
         </div>
-      </div>
-
-      <div id="blk-new" class="card" style="margin-top: 10px; display: none;">
-        <strong>Новый комплект</strong>
-        <div><label>Название *</label><input name="new_title" placeholder="Например, чёрный 1B" value="{{ fp.get('new_title', '') }}" /></div>
-        <div><label>Описание</label><textarea name="new_description" rows="2">{{ fp.get('new_description', '') }}</textarea></div>
-        <div class="row">
-          <div><label>Всего заготовок *</label><input type="number" name="new_blanks_total" min="0" value="{{ fp.get('new_blanks_total', '12') }}" /></div>
-          <div><label>Артикул (если есть)</label><input name="new_sku" value="{{ fp.get('new_sku', '') }}" /></div>
-        </div>
-        <label><input type="checkbox" name="new_made_by_self" {% if not fp or fp.get('new_made_by_self') == 'on' %}checked{% endif %} /> Изготовил я (тот же мастер)</label>
-        <div><label>Заметки</label><input name="new_notes" value="{{ fp.get('new_notes', '') }}" /></div>
       </div>
 
       <div id="blk-own" class="card" style="margin-top: 10px; display: none;">
@@ -257,30 +253,26 @@
         <label><input type="checkbox" name="own_extra_blanks" id="own_extra_blanks" onchange="ownExtra()" {% if fp.get('own_extra_blanks') == 'on' %}checked{% endif %} /> Доп. заготовки</label>
 
         <div id="blk-own-extra" style="display: none; margin-top: 8px;">
-          <label>Источник доп.</label>
-          <select name="own_extra_source" id="own_extra_source" onchange="ownExtraSrc()">
-            <option value="" {% if not fp.get('own_extra_source') %}selected{% endif %}>—</option>
-            <option value="STOCK" {% if fp.get('own_extra_source') == 'STOCK' %}selected{% endif %}>Из наличия</option>
-            <option value="NEW" {% if fp.get('own_extra_source') == 'NEW' %}selected{% endif %}>Новые</option>
-          </select>
-          <div id="blk-own-extra-stock" style="display: none; margin-top: 8px;">
-            <label>Комплект</label>
-            <select name="own_extra_stock_kit_id">
-              <option value="">—</option>
-              {% for k in kits %}
-                <option value="{{ k.id }}" {% if fp.get('own_extra_stock_kit_id')|string == k.id|string %}selected{% endif %}>{{ k.sku }} — остаток {{ k.pieces_available }}</option>
-              {% endfor %}
-            </select>
+          <p class="muted" style="margin:0 0 8px;font-size:12px;">Доп. заготовки списываются из наличия — выбери комплект.</p>
+          <input type="hidden" name="own_extra_stock_kit_id" id="own_extra_stock_kit_id" value="{{ fp.get('own_extra_stock_kit_id', '') }}" />
+          <label>Комплект *</label>
+          <div class="row" style="align-items: flex-end;">
+            <div style="flex:1;">
+              <input type="search" id="extra_stock_kit_search_q" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" value="" />
+            </div>
+            <div>
+              <button type="button" class="secondary" onclick="extraStockKitSuggest()">Найти</button>
+            </div>
+          </div>
+          <ul id="extra_stock_kit_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+          <div id="selected_extra_stock_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not extra_stock_kit_selected_label %}display:none;{% endif %}">
+            <p id="selected_extra_stock_kit_line" style="margin:0;">
+              {% if extra_stock_kit_selected_label %}Выбрано: <strong>{{ extra_stock_kit_selected_label }}</strong>{% endif %}
+            </p>
+          </div>
+          <div style="margin-top: 8px;">
             <label><input type="checkbox" name="own_extra_stock_use_entire" {% if fp.get('own_extra_stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект</label>
             <input type="number" name="own_extra_stock_blanks_used" min="0" value="{{ fp.get('own_extra_stock_blanks_used', '2') }}" placeholder="заготовок" />
-          </div>
-          <div id="blk-own-extra-new" style="display: none; margin-top: 8px;">
-            <input name="own_extra_new_title" placeholder="Название новых заготовок" value="{{ fp.get('own_extra_new_title', '') }}" />
-            <textarea name="own_extra_new_description" rows="1" placeholder="Описание">{{ fp.get('own_extra_new_description', '') }}</textarea>
-            <input type="number" name="own_extra_new_blanks_total" min="0" value="{{ fp.get('own_extra_new_blanks_total', '4') }}" placeholder="шт" />
-            <input name="own_extra_new_sku" placeholder="артикул" value="{{ fp.get('own_extra_new_sku', '') }}" />
-            <label><input type="checkbox" name="own_extra_new_made_by_self" {% if not fp or fp.get('own_extra_new_made_by_self') == 'on' %}checked{% endif %} /> Изготовил я</label>
-            <input name="own_extra_new_notes" placeholder="заметки" value="{{ fp.get('own_extra_new_notes', '') }}" />
           </div>
         </div>
       </div>
@@ -395,6 +387,67 @@
     }
     document.getElementById('client_search_q').addEventListener('input', scheduleSuggest);
 
+    let stockKitTimer = null;
+    let extraStockKitTimer = null;
+    async function fetchKitSuggest(q) {
+      const res = await fetch('/master/kits/suggest?q=' + encodeURIComponent(q));
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.kits || [];
+    }
+    function renderKitSuggestList(ulId, kits, onPick) {
+      const ul = document.getElementById(ulId);
+      ul.innerHTML = '';
+      for (const k of kits) {
+        const li = document.createElement('li');
+        li.style.marginBottom = '8px';
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'secondary';
+        const line = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+        b.textContent = line;
+        b.onclick = function () { onPick(k); };
+        li.appendChild(b);
+        ul.appendChild(li);
+      }
+    }
+    function selectMainStockKit(k) {
+      document.getElementById('stock_kit_id').value = String(k.id);
+      const label = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+      document.getElementById('selected_stock_kit_box').style.display = 'block';
+      document.getElementById('selected_stock_kit_line').innerHTML =
+        'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
+      document.getElementById('stock_kit_suggest_list').innerHTML = '';
+    }
+    function selectExtraStockKit(k) {
+      document.getElementById('own_extra_stock_kit_id').value = String(k.id);
+      const label = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+      document.getElementById('selected_extra_stock_kit_box').style.display = 'block';
+      document.getElementById('selected_extra_stock_kit_line').innerHTML =
+        'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
+      document.getElementById('extra_stock_kit_suggest_list').innerHTML = '';
+    }
+    async function stockKitSuggest() {
+      const q = document.getElementById('stock_kit_search_q').value.trim();
+      const kits = await fetchKitSuggest(q);
+      renderKitSuggestList('stock_kit_suggest_list', kits, selectMainStockKit);
+    }
+    async function extraStockKitSuggest() {
+      const q = document.getElementById('extra_stock_kit_search_q').value.trim();
+      const kits = await fetchKitSuggest(q);
+      renderKitSuggestList('extra_stock_kit_suggest_list', kits, selectExtraStockKit);
+    }
+    function scheduleStockKitSuggest() {
+      clearTimeout(stockKitTimer);
+      stockKitTimer = setTimeout(stockKitSuggest, 350);
+    }
+    function scheduleExtraStockKitSuggest() {
+      clearTimeout(extraStockKitTimer);
+      extraStockKitTimer = setTimeout(extraStockKitSuggest, 350);
+    }
+    document.getElementById('stock_kit_search_q').addEventListener('input', scheduleStockKitSuggest);
+    document.getElementById('extra_stock_kit_search_q').addEventListener('input', scheduleExtraStockKitSuggest);
+
     document.querySelectorAll('input[name="mix_source"]').forEach(function (el) {
       el.addEventListener('change', updateMixComplexityBlock);
     });
@@ -432,6 +485,27 @@
         if (!raw || !(n >= 0) || n <= 0) {
           e.preventDefault();
           alert('Укажите сумму, взятую с клиента.');
+          return;
+        }
+      }
+      const kk = document.querySelector('input[name="kit_kind"]:checked');
+      if (kk && kk.value === 'STOCK') {
+        const sid = document.getElementById('stock_kit_id').value.trim();
+        if (!sid) {
+          e.preventDefault();
+          alert('Выберите комплект из наличия (поиск по артикулу).');
+          return;
+        }
+      }
+      if (kk && kk.value === 'OWN') {
+        const ownEx = document.getElementById('own_extra_blanks');
+        if (ownEx && ownEx.checked) {
+          const eid = document.getElementById('own_extra_stock_kit_id').value.trim();
+          if (!eid) {
+            e.preventDefault();
+            alert('Выберите комплект для доп. заготовок (поиск по артикулу).');
+            return;
+          }
         }
       }
     });
@@ -532,23 +606,15 @@
     function kitKind() {
       const v = document.querySelector('input[name="kit_kind"]:checked').value;
       document.getElementById('blk-stock').style.display = v === 'STOCK' ? 'block' : 'none';
-      document.getElementById('blk-new').style.display = v === 'NEW' ? 'block' : 'none';
       document.getElementById('blk-own').style.display = v === 'OWN' ? 'block' : 'none';
     }
     function ownExtra() {
       const on = document.getElementById('own_extra_blanks').checked;
       document.getElementById('blk-own-extra').style.display = on ? 'block' : 'none';
-      if (on) ownExtraSrc();
-    }
-    function ownExtraSrc() {
-      const s = document.getElementById('own_extra_source').value;
-      document.getElementById('blk-own-extra-stock').style.display = s === 'STOCK' ? 'block' : 'none';
-      document.getElementById('blk-own-extra-new').style.display = s === 'NEW' ? 'block' : 'none';
     }
     clientMode();
     kitKind();
     ownExtra();
-    ownExtraSrc();
     updateMixBlockUI();
     syncAmountRequired();
     {% if selected_client %}

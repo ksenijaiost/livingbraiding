@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from starlette.datastructures import UploadFile
 from sqlalchemy.orm import Session, selectinload
 
@@ -36,7 +36,6 @@ from app.client_validation import client_has_any_contact, strip_or_none
 from app.questionnaire.schemas import (
     KitBlock,
     KitFromStock,
-    KitNew,
     KitOwn,
     KitOwnExtra,
     VisitServiceDetailsPayload,
@@ -225,25 +224,19 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
         stock_kit_id=stock_id if stock_id else None,
         stock_use_entire=g_bool("stock_use_entire"),
         stock_blanks_used=g_int("stock_blanks_used", 0),
-        new_title=g("new_title"),
-        new_description=g("new_description") or None,
-        new_blanks_total=g_int("new_blanks_total", 0),
-        new_sku=g("new_sku") or None,
-        new_made_by_self=g_bool("new_made_by_self"),
-        new_notes=g("new_notes") or None,
+        # В текущем шаге анкеты «Новый комплект» недоступен, поэтому поля не парсим.
+        new_title="",
+        new_description=None,
+        new_blanks_total=0,
+        new_sku=None,
+        new_made_by_self=False,
+        new_notes=None,
         own_origin=g("own_origin") or None,
         own_correction=g_bool("own_correction"),
         own_extra_blanks=g_bool("own_extra_blanks"),
-        own_extra_source=g("own_extra_source") or None,
         own_extra_stock_kit_id=extra_stock_id if extra_stock_id else None,
         own_extra_stock_use_entire=g_bool("own_extra_stock_use_entire"),
         own_extra_stock_blanks_used=g_int("own_extra_stock_blanks_used", 0),
-        own_extra_new_title=g("own_extra_new_title"),
-        own_extra_new_description=g("own_extra_new_description") or None,
-        own_extra_new_blanks_total=g_int("own_extra_new_blanks_total", 0),
-        own_extra_new_sku=g("own_extra_new_sku") or None,
-        own_extra_new_made_by_self=g_bool("own_extra_new_made_by_self"),
-        own_extra_new_notes=g("own_extra_new_notes") or None,
         bases_count=g_int("bases_count", 0),
         blanks_count=g_int("blanks_count", 0),
         service_comment=g("service_comment") or None,
@@ -287,16 +280,9 @@ class KitInlayFormInput:
     own_origin: str | None
     own_correction: bool
     own_extra_blanks: bool
-    own_extra_source: str | None
     own_extra_stock_kit_id: int | None
     own_extra_stock_use_entire: bool
     own_extra_stock_blanks_used: int
-    own_extra_new_title: str
-    own_extra_new_description: str | None
-    own_extra_new_blanks_total: int
-    own_extra_new_sku: str | None
-    own_extra_new_made_by_self: bool
-    own_extra_new_notes: str | None
     # service fields
     bases_count: int
     blanks_count: int
@@ -330,61 +316,30 @@ def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServic
             own=None,
         )
     elif kind == "NEW":
-        if not inp.new_title.strip():
-            raise ValueError("Укажите название нового комплекта")
-        kit_block = KitBlock(
-            kind="NEW",
-            from_stock=None,
-            new_kit=KitNew(
-                title=inp.new_title.strip(),
-                description=(inp.new_description or "").strip() or None,
-                blanks_total=inp.new_blanks_total,
-                sku=(inp.new_sku or "").strip() or None,
-                made_by_self=inp.new_made_by_self,
-                notes=(inp.new_notes or "").strip() or None,
-            ),
-            own=None,
-        )
+        # В текущем шаге анкеты «Новый комплект» недоступен (используй только из наличия или свой).
+        raise ValueError("Режим «Новый комплект» временно отключён. Выберите «Из наличия» или «Свой».")
     elif kind == "OWN":
         if inp.own_origin not in ("STUDIO", "FOREIGN"):
             raise ValueError("Укажите происхождение своего комплекта")
         extra: KitOwnExtra | None = None
         if inp.own_extra_blanks:
-            if inp.own_extra_source == "STOCK":
-                if not inp.own_extra_stock_kit_id:
-                    raise ValueError("Выберите комплект для доп. заготовок")
-                ek = _validate_stock_selection(
-                    db,
-                    kit_id=inp.own_extra_stock_kit_id,
-                    use_entire=inp.own_extra_stock_use_entire,
-                    blanks_used=inp.own_extra_stock_blanks_used,
-                )
-                extra = KitOwnExtra(
-                    source="STOCK",
-                    from_stock=KitFromStock(
-                        sku=ek.sku,
-                        blanks_used=0 if inp.own_extra_stock_use_entire else inp.own_extra_stock_blanks_used,
-                        use_entire_kit=inp.own_extra_stock_use_entire,
-                    ),
-                    new_kit=None,
-                )
-            elif inp.own_extra_source == "NEW":
-                if not inp.own_extra_new_title.strip():
-                    raise ValueError("Название для новых доп. заготовок")
-                extra = KitOwnExtra(
-                    source="NEW",
-                    from_stock=None,
-                    new_kit=KitNew(
-                        title=inp.own_extra_new_title.strip(),
-                        description=(inp.own_extra_new_description or "").strip() or None,
-                        blanks_total=inp.own_extra_new_blanks_total,
-                        sku=(inp.own_extra_new_sku or "").strip() or None,
-                        made_by_self=inp.own_extra_new_made_by_self,
-                        notes=(inp.own_extra_new_notes or "").strip() or None,
-                    ),
-                )
-            else:
-                raise ValueError("Укажите источник доп. заготовок")
+            if not inp.own_extra_stock_kit_id:
+                raise ValueError("Выберите комплект для доп. заготовок")
+            ek = _validate_stock_selection(
+                db,
+                kit_id=inp.own_extra_stock_kit_id,
+                use_entire=inp.own_extra_stock_use_entire,
+                blanks_used=inp.own_extra_stock_blanks_used,
+            )
+            extra = KitOwnExtra(
+                source="STOCK",
+                from_stock=KitFromStock(
+                    sku=ek.sku,
+                    blanks_used=0 if inp.own_extra_stock_use_entire else inp.own_extra_stock_blanks_used,
+                    use_entire_kit=inp.own_extra_stock_use_entire,
+                ),
+                new_kit=None,
+            )
         kit_block = KitBlock(
             kind="OWN",
             from_stock=None,
@@ -448,7 +403,7 @@ def save_kit_inlay_visit(
         )
         usages.append((inp.stock_kit_id, n, cost))
         kit_cost_total += cost
-    if kind == "OWN" and inp.own_extra_blanks and inp.own_extra_source == "STOCK" and inp.own_extra_stock_kit_id:
+    if kind == "OWN" and inp.own_extra_blanks and inp.own_extra_stock_kit_id:
         n, cost = _apply_stock_kit_usage(
             db,
             kit_id=inp.own_extra_stock_kit_id,
@@ -652,3 +607,28 @@ def list_kits_for_stock(db: Session) -> list[Kit]:
             .order_by(Kit.sku.asc())
         ).all()
     )
+
+
+def suggest_kits_for_stock(db: Session, q: str, *, limit: int = 30) -> list[dict[str, Any]]:
+    """Подсказки для мастера: комплекты в наличии, фильтр по артикулу или названию."""
+    needle = (q or "").strip()
+    stmt = select(Kit).where(
+        Kit.is_archived.is_(False),
+        Kit.is_active.is_(True),
+        Kit.pieces_available > 0,
+    )
+    if needle:
+        stmt = stmt.where(
+            or_(Kit.sku.ilike(f"%{needle}%"), Kit.title.ilike(f"%{needle}%"))
+        )
+    stmt = stmt.order_by(Kit.sku.asc()).limit(limit)
+    rows = list(db.scalars(stmt).all())
+    return [
+        {
+            "id": k.id,
+            "sku": k.sku,
+            "title": k.title,
+            "pieces_available": k.pieces_available,
+        }
+        for k in rows
+    ]

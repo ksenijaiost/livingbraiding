@@ -38,6 +38,7 @@ from app.client_validation import (
 )
 from app.db.models import (
     Client,
+    Kit,
     MaterialPriceCurrent,
     MaterialType,
     Setting,
@@ -50,11 +51,10 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.kit_inlay_visit import (
-    list_kit_inlay_services,
     list_kit_inlay_services_catalog,
-    list_kits_for_stock,
     parse_kit_inlay_form,
     save_kit_inlay_visit,
+    suggest_kits_for_stock,
 )
 from app.seed import ensure_seed_data
 from app.visit_edit_policy import visit_client_change_policy
@@ -544,6 +544,16 @@ def _client_suggest_items(db: Session, q: str) -> list[dict[str, str | int | boo
     return clients
 
 
+def _kit_stock_label_from_form(db: Session, form_map: dict[str, str], field: str) -> str | None:
+    raw = (form_map.get(field) or "").strip()
+    if not raw.isdigit():
+        return None
+    k = db.get(Kit, int(raw))
+    if not k:
+        return None
+    return f"{k.sku} — {k.title} (остаток {k.pieces_available})"
+
+
 @app.get("/master/clients/suggest")
 def master_clients_suggest(
     q: str = "",
@@ -551,6 +561,15 @@ def master_clients_suggest(
     db: Session = Depends(get_db),
 ):
     return JSONResponse({"clients": _client_suggest_items(db, q)})
+
+
+@app.get("/master/kits/suggest")
+def master_kits_suggest(
+    q: str = "",
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    return JSONResponse({"kits": suggest_kits_for_stock(db, q)})
 
 
 @app.get("/admin/clients/suggest")
@@ -570,7 +589,6 @@ def master_visit_new_get(
     db: Session = Depends(get_db),
 ):
     service_catalog = list_kit_inlay_services_catalog(db)
-    kits = list_kits_for_stock(db)
     saved_draft_client = False
     if saved and saved.isdigit():
         vid = int(saved)
@@ -583,7 +601,8 @@ def master_visit_new_get(
             request,
             current_user=current_user,
             service_catalog=service_catalog,
-            kits=kits,
+            stock_kit_selected_label=None,
+            extra_stock_kit_selected_label=None,
             default_date=date.today().isoformat(),
             form_prefill={},
             selected_client=None,
@@ -611,7 +630,6 @@ async def master_visit_new_post(
         )
     except ValueError as exc:
         service_catalog = list_kit_inlay_services_catalog(db)
-        kits = list_kits_for_stock(db)
         form_map = _form_to_str_map(form)
         selected_client = None
         eid = (form_map.get("existing_client_id") or "").strip()
@@ -624,7 +642,10 @@ async def master_visit_new_post(
                 request,
                 current_user=current_user,
                 service_catalog=service_catalog,
-                kits=kits,
+                stock_kit_selected_label=_kit_stock_label_from_form(db, form_map, "stock_kit_id"),
+                extra_stock_kit_selected_label=_kit_stock_label_from_form(
+                    db, form_map, "own_extra_stock_kit_id"
+                ),
                 default_date=performed,
                 form_prefill=form_map,
                 selected_client=selected_client,
