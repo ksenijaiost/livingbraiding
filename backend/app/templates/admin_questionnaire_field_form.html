@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">{% if is_new %}Новое поле{% else %}Поле{% endif %}</h2>
+    <p class="muted">
+      <a href="/admin/catalog">Каталог</a>
+      → <a href="/admin/catalog/categories/{{ category.id }}/subcategories">{{ category.name }}</a>
+      {% if scope == "subcategory" %}
+        → <a href="/admin/catalog/subcategories/{{ subcategory.id }}/fields">вопросы «{{ subcategory.name }}»</a>
+      {% else %}
+        → <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services">{{ subcategory.name }}</a>
+        → <a href="/admin/catalog/services/{{ service.id }}/fields">«{{ service.name }}»</a>
+      {% endif %}
+    </p>
+    {% if errors %}
+      <div class="error">
+        <ul style="margin:0;padding-left:20px;">
+          {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    {% if scope == "subcategory" %}
+      {% set action = "/admin/catalog/subcategories/" ~ subcategory.id ~ "/fields/new" if is_new else "/admin/catalog/subcategories/" ~ subcategory.id ~ "/fields/" ~ field.id ~ "/edit" %}
+      {% set back_url = "/admin/catalog/subcategories/" ~ subcategory.id ~ "/fields" %}
+    {% else %}
+      {% set action = "/admin/catalog/services/" ~ service.id ~ "/fields/new" if is_new else "/admin/catalog/services/" ~ service.id ~ "/fields/" ~ field.id ~ "/edit" %}
+      {% set back_url = "/admin/catalog/services/" ~ service.id ~ "/fields" %}
+    {% endif %}
+
+    <form method="post" action="{{ action }}">
+      <label>Ключ поля (латиница, для ответов в JSON, без пробелов)
+        {% if is_new %}
+          <input name="field_key" value="{{ form.field_key|default('') }}" required maxlength="100" placeholder="например braid_length_cm" />
+        {% else %}
+          <input name="field_key" value="{{ form.field_key|default('') }}" readonly style="background:#f3f4f6;" title="Ключ нельзя менять после создания" />
+        {% endif %}
+      </label>
+      <label>Тип поля
+        <select name="field_type" required>
+          {% for val, title in field_types %}
+            <option value="{{ val }}" {% if form.field_type|default('TEXT') == val %}selected{% endif %}>{{ title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Подпись для мастера (русский текст)
+        <input name="label" value="{{ form.label|default('') }}" required maxlength="500" />
+      </label>
+      <label style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" name="required" {% if form.required|default(false) %}checked{% endif %} />
+        Обязательное поле
+      </label>
+      <label>Подсказка в поле (placeholder)
+        <input name="placeholder" value="{{ form.placeholder|default('') }}" maxlength="500" />
+      </label>
+      <label>Пояснение под полем
+        <textarea name="help_text" rows="2" maxlength="8000">{{ form.help_text|default('') }}</textarea>
+      </label>
+      <label>Варианты для «выбор из списка» (JSON-массив)
+        <textarea name="options_json" rows="5" placeholder='["Короткая", "Длинная"] или [{"value":"a","label":"Вариант А"}]'>{{ form.options_json|default('') }}</textarea>
+      </label>
+      <p class="muted" style="margin: -8px 0 12px;">Только для типа «выбор из списка». После сохранения хранится нормализованный JSON.</p>
+      <div class="row">
+        <div>
+          <label>Мин. значение (число)
+            <input name="min_value" value="{{ form.min_value|default('') }}" placeholder="только для типа «число»" />
+          </label>
+        </div>
+        <div>
+          <label>Макс. значение (число)
+            <input name="max_value" value="{{ form.max_value|default('') }}" />
+          </label>
+        </div>
+      </div>
+      <p style="margin-top: 16px;">
+        <button type="submit">Сохранить</button>
+        <a href="{{ back_url }}"><button type="button" class="secondary">Отмена</button></a>
+      </p>
+    </form>
+  </div>
+{% endblock %}

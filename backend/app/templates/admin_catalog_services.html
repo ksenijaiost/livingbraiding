@@ -26,6 +26,7 @@
           <th colspan="2">{{ ru_master_level('JUNIOR')|capitalize }}</th>
           <th colspan="2">{{ ru_master_level('MIDDLE')|capitalize }}</th>
           <th colspan="2">{{ ru_master_level('SENIOR')|capitalize }}</th>
+          <th rowspan="2">Анкета</th>
           <th rowspan="2"></th>
         </tr>
         <tr>
@@ -45,6 +46,7 @@
             <td>{% if s.price_middle_to is not none %}{{ s.price_middle_to }}{% else %}<span class="muted">—</span>{% endif %}</td>
             <td>{% if s.price_senior_from is not none %}{{ s.price_senior_from }}{% else %}<span class="muted">—</span>{% endif %}</td>
             <td>{% if s.price_senior_to is not none %}{{ s.price_senior_to }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td><a href="/admin/catalog/services/{{ s.id }}/fields"><button type="button" class="secondary">Анкета</button></a></td>
             <td><a href="/admin/catalog/services/{{ s.id }}/edit"><button type="button" class="secondary">Изменить</button></a></td>
           </tr>
         {% endfor %}

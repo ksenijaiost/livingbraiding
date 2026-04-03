@@ -23,9 +23,10 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.admin_questionnaire_fields import router as admin_questionnaire_fields_router
 from app.admin_service_catalog import router as admin_service_catalog_router
 from app.auth import AuthUser, authenticate, get_current_user, login_response, logout_response, require_role
-from app.ru_labels import ru_master_level
+from app.ru_labels import ru_master_level, ru_questionnaire_field_type
 from app.display_time import (
     ALLOWED_TIMEZONES,
     ALLOWED_TIMEZONE_IDS,
@@ -89,8 +90,10 @@ from app.ui_visit_display import (
 
 app = FastAPI(title="livingbraiding")
 app.include_router(admin_service_catalog_router)
+app.include_router(admin_questionnaire_fields_router)
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_master_level"] = ru_master_level
+templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_type
 
 
 @app.on_event("startup")

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from app.db.models import MasterLevel
+from app.db.models import MasterLevel, QuestionnaireFieldType
 
 # Прайс и уровень мастера в списках — одни и те же формулировки.
 RU_MASTER_LEVEL: dict[MasterLevel, str] = {
@@ -24,3 +24,21 @@ def ru_master_level(ml: MasterLevel | str | None) -> str:
         except ValueError:
             return ml
     return RU_MASTER_LEVEL.get(ml, str(ml))
+
+
+RU_QUESTIONNAIRE_FIELD_TYPE: dict[QuestionnaireFieldType, str] = {
+    QuestionnaireFieldType.TEXT: "однострочный текст",
+    QuestionnaireFieldType.NUMBER: "число",
+    QuestionnaireFieldType.TEXTAREA: "многострочный текст",
+    QuestionnaireFieldType.CHECKBOX: "галочка",
+    QuestionnaireFieldType.SELECT: "выбор из списка",
+}
+
+
+def ru_questionnaire_field_type(ft: QuestionnaireFieldType | str) -> str:
+    if isinstance(ft, str):
+        try:
+            ft = QuestionnaireFieldType(ft)
+        except ValueError:
+            return ft
+    return RU_QUESTIONNAIRE_FIELD_TYPE.get(ft, str(ft))

@@ -26,6 +26,7 @@
             <td>{% if s.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
             <td style="white-space: nowrap;">
               <a href="/admin/catalog/subcategories/{{ s.id }}/services"><button type="button" class="secondary">Услуги</button></a>
+              <a href="/admin/catalog/subcategories/{{ s.id }}/fields"><button type="button" class="secondary">Анкета</button></a>
               <a href="/admin/catalog/subcategories/{{ s.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
             </td>
           </tr>
