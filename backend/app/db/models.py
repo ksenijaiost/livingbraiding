@@ -189,7 +189,7 @@ class Service(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    # Прайс этапа: заполняем middle; junior/senior оставляем пустыми до отдельного распределения уровней.
+    # Прайс по уровням мастера (в UI: младший / мастер / старший); любой диапазон может быть NULL.
     price_junior_from: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_junior_to: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_middle_from: Mapped[float | None] = mapped_column(Float, nullable=True)

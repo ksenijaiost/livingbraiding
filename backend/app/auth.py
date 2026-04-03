@@ -20,7 +20,7 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import User, UserRole
+from app.db.models import MasterLevel, User, UserRole
 from app.db.session import get_db
 from app.security import verify_password
 from app.settings import get_settings
@@ -32,6 +32,7 @@ class AuthUser:
     username: str
     display_name: str
     role: UserRole
+    master_level: MasterLevel | None = None
 
 
 COOKIE_NAME = "lb_session"
@@ -105,7 +106,13 @@ def get_current_user(
     user = db.get(User, user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
-    return AuthUser(id=user.id, username=user.username, display_name=user.display_name, role=user.role)
+    return AuthUser(
+        id=user.id,
+        username=user.username,
+        display_name=user.display_name,
+        role=user.role,
+        master_level=user.master_level,
+    )
 
 
 def require_role(*roles: UserRole):

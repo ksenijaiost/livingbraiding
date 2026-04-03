@@ -25,7 +25,7 @@
           <select name="reserved_for_user_id" id="reserve_user_select">
             <option value="">— не выбран —</option>
             {% for u in staff_users %}
-              <option value="{{ u.id }}">{{ u.display_name }} ({{ u.role.value }})</option>
+              <option value="{{ u.id }}">{{ u.display_name }} ({% if u.role.value == 'MASTER' %}{{ ru_master_level(u.master_level) }}{% else %}{{ u.role.value }}{% endif %})</option>
             {% endfor %}
           </select>
         </div>

@@ -557,6 +557,10 @@ def list_kit_inlay_services_catalog(db: Session) -> list[dict[str, Any]]:
     Сейчас страница мастера поддерживает только услугу «Вплетение комплекта»,
     поэтому каталог тоже ограничен этим набором сервисов.
     """
+
+    def _opt_f(v: float | None) -> float | None:
+        return None if v is None else float(v)
+
     services = list_kit_inlay_services(db)
     cats: dict[int, dict[str, Any]] = {}
     for s in services:
@@ -579,8 +583,12 @@ def list_kit_inlay_services_catalog(db: Session) -> list[dict[str, Any]]:
             {
                 "id": int(s.id),
                 "name": s.name,
-                "price_junior_from": float(s.price_junior_from or 0.0),
-                "price_junior_to": float(s.price_junior_to or 0.0),
+                "price_junior_from": _opt_f(s.price_junior_from),
+                "price_junior_to": _opt_f(s.price_junior_to),
+                "price_middle_from": _opt_f(s.price_middle_from),
+                "price_middle_to": _opt_f(s.price_middle_to),
+                "price_senior_from": _opt_f(s.price_senior_from),
+                "price_senior_to": _opt_f(s.price_senior_to),
             }
         )
 

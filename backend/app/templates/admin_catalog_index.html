@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <h2 style="margin-top: 0;">Каталог услуг</h2>
+      <a href="/admin/catalog/categories/new"><button type="button">Новая категория</button></a>
+    </div>
+    <p class="muted">Категории → подкатегории → услуги (только суперадмин). У услуги три шкалы цен: младший мастер, мастер, старший мастер — как уровни в карточке сотрудника; любая ступень может быть пустой (NULL).</p>
+    {% if err == "empty" %}
+      <div class="error">Укажите название.</div>
+    {% elif err == "duplicate" %}
+      <div class="error">Такое название уже занято в этом разделе.</div>
+    {% endif %}
+    <table>
+      <thead>
+        <tr>
+          <th>Категория</th>
+          <th>Активна</th>
+          <th>Подкатегорий</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in cat_rows %}
+          {% set c = row.category %}
+          <tr>
+            <td><strong>{{ c.name }}</strong></td>
+            <td>{% if c.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
+            <td>{{ row.sub_count }}</td>
+            <td style="white-space: nowrap;">
+              <a href="/admin/catalog/categories/{{ c.id }}/subcategories"><button type="button" class="secondary">Подкатегории</button></a>
+              <a href="/admin/catalog/categories/{{ c.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if not cat_rows %}
+      <p class="muted" style="margin-top: 12px;">Категорий пока нет — создайте первую.</p>
+    {% endif %}
+  </div>
+{% endblock %}

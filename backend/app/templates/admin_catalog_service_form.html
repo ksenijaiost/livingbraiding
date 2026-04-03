@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">{% if is_new %}Новая услуга{% else %}Услуга{% endif %}</h2>
+    <p>
+      <a href="/admin/catalog">Каталог</a>
+      → <a href="/admin/catalog/categories/{{ category.id }}/subcategories">{{ category.name }}</a>
+      → <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services">{{ subcategory.name }}</a>
+    </p>
+    {% if err == "empty" %}
+      <div class="error">Укажите название.</div>
+    {% elif err == "duplicate" %}
+      <div class="error">Такое имя уже есть в этой подкатегории.</div>
+    {% elif err == "bad_price" %}
+      <div class="error">Некорректная цена.</div>
+    {% endif %}
+    <form method="post" action="{% if is_new %}/admin/catalog/services/new{% else %}/admin/catalog/services/{{ svc.id }}/edit{% endif %}">
+      {% if is_new %}
+        <input type="hidden" name="subcategory_id" value="{{ subcategory.id }}" />
+      {% endif %}
+      <label>Название
+        <input name="name" value="{{ form_name }}" required maxlength="200" />
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 12px;">
+        <input type="checkbox" name="is_active" {% if form_active %}checked{% endif %} />
+        Активна
+      </label>
+      <p class="muted" style="margin: 20px 0 8px;">Прайс (₽), для каждого уровня — «от» и «до». Необязательные поля можно оставить пустыми (в базе будет NULL).</p>
+
+      <p style="margin: 12px 0 6px; font-weight: 600;">{{ ru_master_level('JUNIOR')|capitalize }}</p>
+      <div class="row">
+        <div><label>От<input name="price_junior_from" value="{{ form_jf }}" placeholder="например 4000" /></label></div>
+        <div><label>До<input name="price_junior_to" value="{{ form_jt }}" placeholder="например 4500" /></label></div>
+      </div>
+
+      <p style="margin: 12px 0 6px; font-weight: 600;">{{ ru_master_level('MIDDLE')|capitalize }}</p>
+      <div class="row">
+        <div><label>От<input name="price_middle_from" value="{{ form_mf }}" placeholder="например 4500" /></label></div>
+        <div><label>До<input name="price_middle_to" value="{{ form_mt }}" placeholder="например 5000" /></label></div>
+      </div>
+
+      <p style="margin: 12px 0 6px; font-weight: 600;">{{ ru_master_level('SENIOR')|capitalize }}</p>
+      <div class="row">
+        <div><label>От<input name="price_senior_from" value="{{ form_sf }}" placeholder="например 5000" /></label></div>
+        <div><label>До<input name="price_senior_to" value="{{ form_st }}" placeholder="например 5500" /></label></div>
+      </div>
+
+      <p class="muted" style="margin-top:12px;">Дополнительные поля анкеты услуги — отдельный шаг.</p>
+      <p style="margin-top: 16px;">
+        <button type="submit">Сохранить</button>
+        <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services"><button type="button" class="secondary">Отмена</button></a>
+      </p>
+    </form>
+  </div>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <h2 style="margin-top: 0;">Подкатегории: {{ category.name }}</h2>
+      <a href="/admin/catalog/subcategories/new?category_id={{ category.id }}"><button type="button">Новая подкатегория</button></a>
+    </div>
+    <p><a href="/admin/catalog">← Каталог</a></p>
+    {% if err == "empty" %}
+      <div class="error">Укажите название.</div>
+    {% elif err == "duplicate" %}
+      <div class="error">Подкатегория с таким именем уже есть в этой категории.</div>
+    {% endif %}
+    <table>
+      <thead>
+        <tr>
+          <th>Название</th>
+          <th>Активна</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in subs %}
+          <tr>
+            <td><strong>{{ s.name }}</strong></td>
+            <td>{% if s.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
+            <td style="white-space: nowrap;">
+              <a href="/admin/catalog/subcategories/{{ s.id }}/services"><button type="button" class="secondary">Услуги</button></a>
+              <a href="/admin/catalog/subcategories/{{ s.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if not subs %}
+      <p class="muted" style="margin-top: 12px;">Подкатегорий нет.</p>
+    {% endif %}
+  </div>
+{% endblock %}

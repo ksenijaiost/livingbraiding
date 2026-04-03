@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">{% if is_new %}Новая категория{% else %}Категория{% endif %}</h2>
+    <p><a href="/admin/catalog">← Каталог</a></p>
+    {% if err == "empty" %}
+      <div class="error">Укажите название.</div>
+    {% elif err == "duplicate" %}
+      <div class="error">Категория с таким именем уже есть.</div>
+    {% endif %}
+    <form method="post" action="{% if is_new %}/admin/catalog/categories/new{% else %}/admin/catalog/categories/{{ category.id }}/edit{% endif %}">
+      <label>Название
+        <input name="name" value="{{ form_name }}" required maxlength="120" />
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 12px;">
+        <input type="checkbox" name="is_active" {% if form_active %}checked{% endif %} />
+        Активна (показывать в каталоге)
+      </label>
+      <p style="margin-top: 16px;">
+        <button type="submit">Сохранить</button>
+        {% if not is_new %}
+          <a href="/admin/catalog/categories/{{ category.id }}/subcategories"><button type="button" class="secondary">Отмена</button></a>
+        {% else %}
+          <a href="/admin/catalog"><button type="button" class="secondary">Отмена</button></a>
+        {% endif %}
+      </p>
+    </form>
+  </div>
+{% endblock %}

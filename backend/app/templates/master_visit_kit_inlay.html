@@ -532,6 +532,7 @@
       }
     });
 
+    const visitMasterLevel = {{ (current_user.master_level.value if current_user.master_level else None) | tojson }};
     const serviceCatalog = {{ service_catalog|tojson }};
     const serviceMetaById = {};
     for (const c of serviceCatalog || []) {
@@ -583,12 +584,26 @@
       const services = (sc && sc.services) ? sc.services : [];
 
       serviceSel.innerHTML = '';
+      function servicePriceHint(s) {
+        const byLevel = {
+          JUNIOR: ['младший мастер', s.price_junior_from, s.price_junior_to],
+          MIDDLE: ['мастер', s.price_middle_from, s.price_middle_to],
+          SENIOR: ['старший мастер', s.price_senior_from, s.price_senior_to],
+        };
+        const level = visitMasterLevel && byLevel[visitMasterLevel] ? visitMasterLevel : 'MIDDLE';
+        const tier = byLevel[level];
+        const label = tier[0];
+        const lo = tier[1];
+        const hi = tier[2];
+        if (lo == null && hi == null) return '';
+        const a = lo != null ? String(lo) : '—';
+        const b = hi != null ? String(hi) : '—';
+        return ` (${label}: ${a}–${b})`;
+      }
       for (const s of services) {
         const opt = document.createElement('option');
         opt.value = s.id;
-        const lo = s.price_junior_from ? String(s.price_junior_from) : '0';
-        const hi = s.price_junior_to ? String(s.price_junior_to) : '0';
-        opt.textContent = s.name + ` (подсказка ${parseInt(lo)}–${parseInt(hi)})`;
+        opt.textContent = s.name + servicePriceHint(s);
         serviceSel.appendChild(opt);
       }
     }

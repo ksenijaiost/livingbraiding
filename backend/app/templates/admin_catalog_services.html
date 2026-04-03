@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <h2 style="margin-top: 0;">Услуги: {{ subcategory.name }}</h2>
+      <a href="/admin/catalog/services/new?subcategory_id={{ subcategory.id }}"><button type="button">Новая услуга</button></a>
+    </div>
+    <p>
+      <a href="/admin/catalog">Каталог</a>
+      → <a href="/admin/catalog/categories/{{ category.id }}/subcategories">{{ category.name }}</a>
+    </p>
+    {% if err == "empty" %}
+      <div class="error">Укажите название.</div>
+    {% elif err == "duplicate" %}
+      <div class="error">Услуга с таким именем уже есть в этой подкатегории.</div>
+    {% elif err == "bad_price" %}
+      <div class="error">Некорректная цена (ожидается число, можно пусто).</div>
+    {% endif %}
+    <p class="muted">Прайс по уровням мастера (от / до, ₽). Пустая ячейка — в базе NULL. Названия совпадают с уровнем мастера в карточке сотрудника.</p>
+    <div style="overflow-x: auto;">
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2">Услуга</th>
+          <th rowspan="2">Активна</th>
+          <th colspan="2">{{ ru_master_level('JUNIOR')|capitalize }}</th>
+          <th colspan="2">{{ ru_master_level('MIDDLE')|capitalize }}</th>
+          <th colspan="2">{{ ru_master_level('SENIOR')|capitalize }}</th>
+          <th rowspan="2"></th>
+        </tr>
+        <tr>
+          <th>от</th><th>до</th>
+          <th>от</th><th>до</th>
+          <th>от</th><th>до</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in services %}
+          <tr>
+            <td><strong>{{ s.name }}</strong></td>
+            <td>{% if s.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
+            <td>{% if s.price_junior_from is not none %}{{ s.price_junior_from }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{% if s.price_junior_to is not none %}{{ s.price_junior_to }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{% if s.price_middle_from is not none %}{{ s.price_middle_from }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{% if s.price_middle_to is not none %}{{ s.price_middle_to }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{% if s.price_senior_from is not none %}{{ s.price_senior_from }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{% if s.price_senior_to is not none %}{{ s.price_senior_to }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td><a href="/admin/catalog/services/{{ s.id }}/edit"><button type="button" class="secondary">Изменить</button></a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if not services %}
+      <p class="muted" style="margin-top: 12px;">Услуг пока нет.</p>
+    {% endif %}
+  </div>
+{% endblock %}
