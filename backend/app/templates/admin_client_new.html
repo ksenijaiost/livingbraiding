@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block content %}
+  <style>
+    .client-form .form-section {
+      margin-bottom: 1.35rem;
+      padding-bottom: 1.35rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .client-form .form-section:last-of-type {
+      border-bottom: 0;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+    .client-form .form-section > h3 {
+      margin: 0 0 10px;
+      font-size: 1.08rem;
+      font-weight: 600;
+      color: #111827;
+      line-height: 1.3;
+    }
+    .client-form .section-hint {
+      font-size: 12px;
+      color: #6b7280;
+      margin: 0 0 10px;
+      line-height: 1.4;
+    }
+    .client-form .label-sub {
+      font-size: 12px;
+      color: #6b7280;
+    }
+    .client-form .checkbox-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin: 18px 0 8px;
+      cursor: pointer;
+      max-width: 42rem;
+    }
+    .client-form .checkbox-row input[type="checkbox"] {
+      margin-top: 3px;
+    }
+    .client-form .checkbox-row span {
+      line-height: 1.45;
+    }
+    .client-form .form-actions {
+      margin-top: 18px;
+      padding-top: 8px;
+    }
+  </style>
+
+  <div class="card client-form">
+    <p class="muted" style="margin-top:0;"><a href="/admin/clients">← К списку клиентов</a></p>
+    <h2 style="margin-top: 0;">Новый клиент</h2>
+
+    {% if error %}
+      <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <form method="post" action="/admin/clients/new">
+      <section class="form-section">
+        <h3>Имя</h3>
+        <div class="row">
+          <div>
+            <label class="label-sub">Как обращаться <span class="muted">*</span></label>
+            <input name="name" required maxlength="200" value="{{ form.get('name', '') }}" />
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <h3>Контакты</h3>
+        <p class="section-hint">Заполните хотя бы одно поле <span class="muted">*</span></p>
+        <div class="row">
+          <div>
+            <label class="label-sub">Телефон</label>
+            <input name="phone" maxlength="30" value="{{ form.get('phone', '') }}" />
+          </div>
+          <div>
+            <label class="label-sub">Telegram</label>
+            <input name="telegram" maxlength="100" value="{{ form.get('telegram', '') }}" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label class="label-sub">ВКонтакте</label>
+            <input name="vk" maxlength="120" value="{{ form.get('vk', '') }}" />
+          </div>
+          <div>
+            <label class="label-sub">Instagram</label>
+            <input name="instagram" maxlength="120" value="{{ form.get('instagram', '') }}" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label class="label-sub">Другой контакт</label>
+            <input name="other_contact" maxlength="200" value="{{ form.get('other_contact', '') }}" />
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <h3>Возрастная группа</h3>
+        <div class="row">
+          <div>
+            <label class="label-sub">Группа</label>
+            <select name="age_group">
+              {% for val, label in age_options %}
+                <option value="{{ val }}" {% if form.get('age_group', '') == val %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <h3>Источник</h3>
+        <div class="row">
+          <div>
+            <label class="label-sub">Откуда узнал о студии</label>
+            <select name="source">
+              <option value="">— не выбрано —</option>
+              {% for item in source_options %}
+                <option value="{{ item.label }}" {% if form.get('source', '') == item.label %}selected{% endif %}>{{ item.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="label-sub">Уточнение</label>
+            <input name="source_other" maxlength="200" placeholder="Доп. информация к любому пункту"
+              value="{{ form.get('source_other', '') }}" />
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <h3>День рождения</h3>
+        <p class="section-hint">Всё необязательно: можно только день и месяц или полную дату с годом.</p>
+        <div class="row">
+          <div>
+            <label class="label-sub">День</label>
+            <input name="birth_day" type="number" min="1" max="31" placeholder="1–31"
+              value="{{ form.get('birth_day', '') }}" />
+          </div>
+          <div>
+            <label class="label-sub">Месяц</label>
+            <input name="birth_month" type="number" min="1" max="12" placeholder="1–12"
+              value="{{ form.get('birth_month', '') }}" />
+          </div>
+          <div>
+            <label class="label-sub">Год</label>
+            <input name="birth_year" type="number" min="1900" max="2100" placeholder="необязательно"
+              value="{{ form.get('birth_year', '') }}" />
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <h3>Комментарий</h3>
+        <div class="row">
+          <div>
+            <label class="label-sub">Пометки о клиенте</label>
+            <textarea name="comment" rows="3" placeholder="">{{ form.get('comment', '') }}</textarea>
+          </div>
+        </div>
+      </section>
+
+      <label class="checkbox-row">
+        <input type="checkbox" name="mark_draft" value="1" {% if form.get('mark_draft') == '1' %}checked{% endif %} />
+        <span>Сохранить как черновик (не подтверждён, ждёт админа)</span>
+      </label>
+
+      <div class="form-actions">
+        <button type="submit">Создать</button>
+        <a href="/admin/clients" class="muted" style="margin-left: 16px;">Отмена</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

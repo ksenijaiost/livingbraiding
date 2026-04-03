@@ -20,7 +20,17 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import authenticate, get_current_user, login_response, logout_response, require_role
+from app.auth import AuthUser, authenticate, get_current_user, login_response, logout_response, require_role
+from app.client_validation import (
+    CLIENT_AGE_GROUP_OPTIONS,
+    client_has_any_contact,
+    format_created_by_label,
+    load_client_source_options,
+    parse_age_group,
+    parse_birth_fields,
+    parse_client_source,
+    strip_or_none,
+)
 from app.db.models import (
     Client,
     MaterialPriceCurrent,
@@ -104,6 +114,7 @@ def home(request: Request, current_user=Depends(get_current_user)):
 def admin_clients(
     request: Request,
     q: str | None = None,
+    created: int | None = None,
     current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -156,10 +167,117 @@ def admin_clients(
         .limit(500)
     )
     rows = list(db.execute(stmt).mappings().all())
+    created_ok = None
+    if created is not None:
+        created_ok = db.get(Client, created)
     return templates.TemplateResponse(
         "admin_clients.html",
-        _ctx(request, current_user=current_user, rows=rows, q=q_norm),
+        _ctx(
+            request,
+            current_user=current_user,
+            rows=rows,
+            q=q_norm,
+            created_ok=created_ok,
+        ),
     )
+
+
+@app.get("/admin/clients/new", response_class=HTMLResponse)
+def admin_client_new_get(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+):
+    return templates.TemplateResponse(
+        "admin_client_new.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            age_options=CLIENT_AGE_GROUP_OPTIONS,
+            source_options=load_client_source_options(),
+            error=None,
+            form={},
+        ),
+    )
+
+
+@app.post("/admin/clients/new")
+async def admin_client_new_post(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form_raw = await request.form()
+    form = {k: form_raw.get(k) for k in form_raw.keys()}
+    err: str | None = None
+
+    name = (str(form.get("name") or "")).strip()
+    phone = str(form.get("phone") or "")
+    telegram = str(form.get("telegram") or "")
+    vk = str(form.get("vk") or "")
+    instagram = str(form.get("instagram") or "")
+    other_contact = str(form.get("other_contact") or "")
+    source = str(form.get("source") or "")
+    source_other = str(form.get("source_other") or "")
+    comment = str(form.get("comment") or "")
+    mark_draft = str(form.get("mark_draft") or "")
+
+    if not name:
+        err = "Укажите имя клиента."
+    elif not client_has_any_contact(phone, telegram, vk, instagram, other_contact):
+        err = "Нужен хотя бы один контакт: телефон или любая из соцсетей."
+
+    bd_raw = str(form.get("birth_day") or "")
+    bm_raw = str(form.get("birth_month") or "")
+    by_raw = str(form.get("birth_year") or "")
+    age_raw = str(form.get("age_group") or "")
+
+    birth_day = birth_month = birth_year = None
+    age_group = None
+
+    source_parsed: str | None = None
+    if not err:
+        try:
+            birth_day, birth_month, birth_year = parse_birth_fields(bd_raw, bm_raw, by_raw)
+            age_group = parse_age_group(age_raw)
+            source_parsed = parse_client_source(source)
+        except ValueError as exc:
+            err = str(exc)
+
+    if err:
+        return templates.TemplateResponse(
+            "admin_client_new.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                age_options=CLIENT_AGE_GROUP_OPTIONS,
+                source_options=load_client_source_options(),
+                error=err,
+                form=form,
+            ),
+            status_code=400,
+        )
+
+    client = Client(
+        name=name[:200],
+        phone=strip_or_none(phone, 30),
+        telegram=strip_or_none(telegram, 100),
+        vk=strip_or_none(vk, 120),
+        instagram=strip_or_none(instagram, 120),
+        other_contact=strip_or_none(other_contact, 200),
+        age_group=age_group,
+        source=source_parsed,
+        source_other=strip_or_none(source_other, 200),
+        comment=strip_or_none(comment) or None,
+        is_confirmed=False if mark_draft == "1" else True,
+        birth_day=birth_day,
+        birth_month=birth_month,
+        birth_year=birth_year,
+        created_by_label=format_created_by_label(current_user),
+    )
+    db.add(client)
+    db.commit()
+    db.refresh(client)
+    return RedirectResponse(url=f"/admin/clients?created={client.id}", status_code=303)
 
 
 @app.get("/master/visit/new", response_class=HTMLResponse)

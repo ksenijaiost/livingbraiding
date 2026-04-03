@@ -1,7 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
   <div class="card">
-    <h2 style="margin-top: 0;">Клиенты</h2>
+    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <h2 style="margin-top: 0;">Клиенты</h2>
+      <a href="/admin/clients/new"><button type="button">Новый клиент</button></a>
+    </div>
+
+    {% if created_ok %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">
+        Клиент «{{ created_ok.name }}» создан (id {{ created_ok.id }}).
+      </p>
+    {% endif %}
+
     <form method="get" action="/admin/clients" class="row" style="margin-bottom: 12px;">
       <div>
         <label>Поиск</label>
