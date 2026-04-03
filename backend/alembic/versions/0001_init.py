@@ -1,8 +1,10 @@
-"""init
+"""Single full schema (dev): clients (+ birth, created_by_label), visits, mix/amort/audit.
 
 Revision ID: 0001_init
-Revises: 
+Revises:
 Create Date: 2026-03-31
+
+For early development: delete the SQLite file and run `alembic upgrade head` again.
 """
 
 from alembic import op
@@ -27,10 +29,18 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("username", sa.String(length=50), nullable=False),
         sa.Column("display_name", sa.String(length=120), nullable=False),
-        sa.Column("role", sa.Enum("ADMIN", "MASTER", name="userrole"), nullable=False),
+        sa.Column(
+            "role",
+            sa.Enum("ADMIN_SUPER", "ADMIN", "MASTER", name="userrole"),
+            nullable=False,
+        ),
         sa.Column("password_hash", sa.String(length=255), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
-        sa.Column("master_level", sa.Enum("JUNIOR", "MIDDLE", "SENIOR", name="masterlevel"), nullable=True),
+        sa.Column(
+            "master_level",
+            sa.Enum("JUNIOR", "MIDDLE", "SENIOR", name="masterlevel"),
+            nullable=True,
+        ),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.UniqueConstraint("username", name="uq_users_username"),
     )
@@ -39,8 +49,24 @@ def upgrade() -> None:
         "clients",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("name", sa.String(length=200), nullable=False),
-        sa.Column("contact", sa.String(length=200), nullable=True),
+        sa.Column("phone", sa.String(length=30), nullable=True),
+        sa.Column("telegram", sa.String(length=100), nullable=True),
+        sa.Column("vk", sa.String(length=120), nullable=True),
+        sa.Column("instagram", sa.String(length=120), nullable=True),
+        sa.Column("other_contact", sa.String(length=200), nullable=True),
+        sa.Column(
+            "age_group",
+            sa.Enum("U10", "10_18", "18_30", "30_50", "50P", name="clientagegroup"),
+            nullable=True,
+        ),
+        sa.Column("source", sa.String(length=120), nullable=True),
+        sa.Column("source_other", sa.String(length=200), nullable=True),
         sa.Column("comment", sa.Text(), nullable=True),
+        sa.Column("is_confirmed", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("birth_day", sa.Integer(), nullable=True),
+        sa.Column("birth_month", sa.Integer(), nullable=True),
+        sa.Column("birth_year", sa.Integer(), nullable=True),
+        sa.Column("created_by_label", sa.String(length=240), nullable=True),
     )
 
     op.create_table(
@@ -125,33 +151,64 @@ def upgrade() -> None:
         "visits",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("created_by_user_id", sa.Integer(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), nullable=True),
+        sa.Column("is_cancelled", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("cancelled_at", sa.DateTime(), nullable=True),
+        sa.Column("cancelled_by_user_id", sa.Integer(), nullable=True),
         sa.Column("performed_date", sa.DateTime(), nullable=False),
         sa.Column("duration_minutes", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=False),
-        sa.Column("client_type", sa.Enum("NEW", "RETURNING", "SELF", name="visitclienttype"), nullable=False),
-        sa.Column("price_type", sa.Enum("CLIENT", "MODEL", name="visitpricetype"), nullable=False),
-        sa.Column("client_age_group", sa.Enum("U10", "10_18", "18_30", "30_50", "50P", name="clientagegroup"), nullable=True),
-        sa.Column("client_source", sa.String(length=120), nullable=True),
-        sa.Column("client_source_other", sa.String(length=200), nullable=True),
-        sa.Column("client_comment", sa.Text(), nullable=True),
-        sa.Column("materials_used", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column(
+            "client_type",
+            sa.Enum("NEW", "RETURNING", "SELF", name="visitclienttype"),
+            nullable=False,
+        ),
+        sa.Column(
+            "price_type",
+            sa.Enum("CLIENT", "MODEL", name="visitpricetype"),
+            nullable=False,
+        ),
+        sa.Column(
+            "client_age_group",
+            sa.Enum("U10", "10_18", "18_30", "30_50", "50P", name="clientagegroup"),
+            nullable=True,
+        ),
         sa.Column("kanekalon_grams", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("kudri_grams", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("mix_source", sa.Enum("FROM_STOCK", "NO_MIX", "SELF_MIXED", name="mixsource"), nullable=True),
+        sa.Column(
+            "mix_source",
+            sa.Enum("FROM_STOCK", "NO_MIX", "SELF_MIXED", name="mixsource"),
+            nullable=True,
+        ),
+        sa.Column(
+            "mix_complexity",
+            sa.Enum("SIMPLE", "MEDIUM", "HARD", name="mixcomplexity"),
+            nullable=True,
+        ),
+        sa.Column("mix_cost_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
+        sa.Column("mix_bonus_master_id", sa.Integer(), nullable=True),
+        sa.Column("mix_bonus_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("kanekalon_price_per_gram_at_time", sa.Float(), nullable=True),
         sa.Column("kudri_price_per_gram_at_time", sa.Float(), nullable=True),
         sa.Column("materials_cost_total", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("amount_from_client", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("extra_cost_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("extra_cost_comment", sa.String(length=200), nullable=True),
+        sa.Column("comment", sa.Text(), nullable=True),
         sa.Column("addons_total", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("addons_details_json", sa.Text(), nullable=True),
+        sa.Column(
+            "amortization_level",
+            sa.Enum("MIN", "MID", "MAX", name="amortizationlevel"),
+            nullable=True,
+        ),
+        sa.Column("amortization_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
+        sa.Column("studio_fund_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("cost_total", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("profit_before_split", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("salon_cut_pct_at_time", sa.Float(), nullable=False, server_default=sa.text("0.3")),
         sa.Column("salon_profit", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("masters_pool", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("comment", sa.Text(), nullable=True),
     )
 
     op.create_table(
@@ -184,8 +241,20 @@ def upgrade() -> None:
         sa.Column("note", sa.String(length=200), nullable=True),
     )
 
+    op.create_table(
+        "visit_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("visit_id", sa.Integer(), sa.ForeignKey("visits.id"), nullable=False),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("visit_audit_logs")
     op.drop_table("visit_kit_usages")
     op.drop_table("visit_services")
     op.drop_table("visit_masters")
@@ -207,4 +276,6 @@ def downgrade() -> None:
     op.execute("DROP TYPE IF EXISTS visitclienttype")
     op.execute("DROP TYPE IF EXISTS visitpricetype")
     op.execute("DROP TYPE IF EXISTS mixsource")
+    op.execute("DROP TYPE IF EXISTS mixcomplexity")
+    op.execute("DROP TYPE IF EXISTS amortizationlevel")
     op.execute("DROP TYPE IF EXISTS materialtype")

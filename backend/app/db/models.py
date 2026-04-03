@@ -29,6 +29,7 @@ from app.db.base import Base
 
 
 class UserRole(str, enum.Enum):
+    ADMIN_SUPER = "ADMIN_SUPER"
     ADMIN = "ADMIN"
     MASTER = "MASTER"
 
@@ -64,6 +65,18 @@ class MixSource(str, enum.Enum):
     SELF_MIXED = "SELF_MIXED"
 
 
+class MixComplexity(str, enum.Enum):
+    SIMPLE = "SIMPLE"  # 1 ₽/г
+    MEDIUM = "MEDIUM"  # 1.5 ₽/г
+    HARD = "HARD"  # 2 ₽/г
+
+
+class AmortizationLevel(str, enum.Enum):
+    MIN = "MIN"  # 100 ₽
+    MID = "MID"  # 200 ₽
+    MAX = "MAX"  # 500 ₽
+
+
 class MaterialType(str, enum.Enum):
     KANEKALON = "KANEKALON"
     KUDRI = "KUDRI"
@@ -95,8 +108,22 @@ class Client(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    contact: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    telegram: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    vk: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    instagram: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    other_contact: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    age_group: Mapped[ClientAgeGroup | None] = mapped_column(Enum(ClientAgeGroup), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source_other: Mapped[str | None] = mapped_column(String(200), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Optional birthday: all null = unknown; day+month without year = "only DM"
+    birth_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    birth_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    birth_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Snapshot at creation: e.g. "Анна (MASTER)" — set by app from current user display_name + role
+    created_by_label: Mapped[str | None] = mapped_column(String(240), nullable=True)
 
 
 class StudioExpenseCategory(Base):
@@ -205,6 +232,13 @@ class Visit(Base):
     # must not affect historical visits.
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    is_cancelled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancelled_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     duration_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -212,27 +246,31 @@ class Visit(Base):
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
     client_type: Mapped[VisitClientType] = mapped_column(Enum(VisitClientType), nullable=False)
     price_type: Mapped[VisitPriceType] = mapped_column(Enum(VisitPriceType), nullable=False)
+    # snapshot from client card at time of visit
     client_age_group: Mapped[ClientAgeGroup | None] = mapped_column(Enum(ClientAgeGroup), nullable=True)
-    client_source: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    client_source_other: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    client_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    materials_used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     kanekalon_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     kudri_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     mix_source: Mapped[MixSource | None] = mapped_column(Enum(MixSource), nullable=True)
+    mix_complexity: Mapped[MixComplexity | None] = mapped_column(Enum(MixComplexity), nullable=True)
+    mix_cost_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    mix_bonus_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mix_bonus_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     kanekalon_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     kudri_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     materials_cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     amount_from_client: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    extra_cost_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    extra_cost_comment: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Addons reduce salon/master profit by rule (stored as a separate snapshot field).
     addons_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     addons_details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    amortization_level: Mapped[AmortizationLevel | None] = mapped_column(Enum(AmortizationLevel), nullable=True)
+    amortization_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    studio_fund_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     profit_before_split: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
@@ -240,12 +278,24 @@ class Visit(Base):
     salon_profit: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     masters_pool: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
-    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
-
     client: Mapped[Client] = relationship()
     masters: Mapped[list["VisitMaster"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
     services: Mapped[list["VisitService"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
     kit_usages: Mapped[list["VisitKitUsage"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
+
+
+class VisitAuditLog(Base):
+    __tablename__ = "visit_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    visit_id: Mapped[int] = mapped_column(ForeignKey("visits.id"), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    visit: Mapped[Visit] = relationship()
 
 
 class VisitMaster(Base):

@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.db.models import MixSource, Visit, VisitClientType, VisitPriceType, VisitService
+from app.db.models import MixComplexity, MixSource, Visit, VisitClientType, VisitPriceType, VisitService
 
 
 def ru_client_type(ct: VisitClientType | str) -> str:
@@ -35,6 +35,17 @@ def ru_mix_source(ms: MixSource | str | None) -> str:
         "FROM_STOCK": "Из наличия",
         "NO_MIX": "Без смешки",
         "SELF_MIXED": "Сама мешала",
+    }.get(v, v)
+
+
+def ru_mix_complexity(c: MixComplexity | str | None) -> str:
+    if c is None:
+        return "—"
+    v = c.value if isinstance(c, MixComplexity) else str(c)
+    return {
+        "SIMPLE": "Простая",
+        "MEDIUM": "Средняя",
+        "HARD": "Сложная",
     }.get(v, v)
 
 

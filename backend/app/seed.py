@@ -35,6 +35,10 @@ def ensure_seed_data(db: Session) -> None:
     if not salon:
         db.add(Setting(key="salon_cut_pct", value="0.3"))
 
+    edit_days = db.get(Setting, "edit_window_days")
+    if not edit_days:
+        db.add(Setting(key="edit_window_days", value="2"))
+
     # Default material prices: ₽ за 100 г → ₽/г (админ может поменять в настройках)
     defaults = {
         MaterialType.KANEKALON: 4.0,  # 400 ₽ / 100 г
@@ -51,7 +55,7 @@ def ensure_seed_data(db: Session) -> None:
             User(
                 username="admin",
                 display_name="Админ",
-                role=UserRole.ADMIN,
+                role=UserRole.ADMIN_SUPER,
                 password_hash=hash_password("admin"),
                 is_active=True,
                 master_level=None,

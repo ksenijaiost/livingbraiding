@@ -20,6 +20,8 @@ from app.db.models import (
     Kit,
     MaterialPriceCurrent,
     MaterialType,
+    AmortizationLevel,
+    MixComplexity,
     MixSource,
     Service,
     ServiceSubcategory,
@@ -154,6 +156,22 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
         except ValueError:
             mix = None
 
+    comp_raw = g("mix_complexity", "")
+    comp: MixComplexity | None = None
+    if comp_raw:
+        try:
+            comp = MixComplexity(comp_raw)
+        except ValueError:
+            comp = None
+
+    amort_raw = g("amortization_level", "")
+    amort: AmortizationLevel | None = None
+    if amort_raw:
+        try:
+            amort = AmortizationLevel(amort_raw)
+        except ValueError:
+            amort = None
+
     stock_id = g_int("stock_kit_id", 0)
     extra_stock_id = g_int("own_extra_stock_kit_id", 0)
 
@@ -180,10 +198,11 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
         performed_date=performed_date,
         duration_minutes=g_int("duration_h", 0) * 60 + g_int("duration_m", 0),
         amount_from_client=g_float("amount_from_client", 0),
-        materials_used=g_bool("materials_used"),
         kanekalon_grams=g_float("kanekalon_grams", 0),
         kudri_grams=g_float("kudri_grams", 0),
         mix_source=mix,
+        mix_complexity=comp,
+        amortization_level=amort,
         service_id=g_int("service_id", 0),
         kit_kind=g("kit_kind", "STOCK").upper(),
         stock_kit_id=stock_id if stock_id else None,
@@ -223,10 +242,11 @@ class KitInlayFormInput:
     performed_date: date
     duration_minutes: int
     amount_from_client: float
-    materials_used: bool
     kanekalon_grams: float
     kudri_grams: float
     mix_source: MixSource | None
+    mix_complexity: MixComplexity | None
+    amortization_level: AmortizationLevel | None
     service_id: int
     kit_kind: str
     # STOCK
@@ -386,7 +406,6 @@ def save_kit_inlay_visit(db: Session, master_id: int, inp: KitInlayFormInput) ->
         kanekalon_grams=inp.kanekalon_grams,
         kudri_grams=inp.kudri_grams,
     )
-    materials_flag = inp.materials_used or (inp.kanekalon_grams > 0 or inp.kudri_grams > 0)
     salon_pct = get_salon_cut_pct(db)
 
     kit_cost_total = 0.0
@@ -412,16 +431,37 @@ def save_kit_inlay_visit(db: Session, master_id: int, inp: KitInlayFormInput) ->
         usages.append((inp.own_extra_stock_kit_id, n, cost))
         kit_cost_total += cost
 
-    cost_total = mat_cost + kit_cost_total
+    # Addons: demo пока 0 (в реальной анкете будет сумма + строка)
     addons = 0.0
-    profit_before = inp.amount_from_client - addons - cost_total
+
+    grams_total = max(0.0, inp.kanekalon_grams) + max(0.0, inp.kudri_grams)
+    mix_cost = 0.0
+    mix_bonus_amount = 0.0
+    mix_bonus_master_id = None
+    if inp.mix_source and inp.mix_source != MixSource.NO_MIX:
+        if inp.mix_complexity is None:
+            raise ValueError("Укажите сложность смешки")
+        coef = {"SIMPLE": 1.0, "MEDIUM": 1.5, "HARD": 2.0}[inp.mix_complexity.value]
+        mix_cost = grams_total * coef
+        if inp.mix_source == MixSource.SELF_MIXED:
+            mix_bonus_amount = mix_cost
+            mix_bonus_master_id = master_id
+
+    amort_amount = 0.0
+    if inp.amortization_level is not None:
+        amort_amount = {"MIN": 100.0, "MID": 200.0, "MAX": 500.0}[inp.amortization_level.value]
+
+    # Расходы до распределения
+    cost_total = mat_cost + kit_cost_total + addons + mix_cost + amort_amount
+    profit_before = inp.amount_from_client - cost_total
     salon_profit = profit_before * salon_pct
     masters_pool = profit_before - salon_profit
 
     client = Client(
         name=inp.client_name.strip(),
-        contact=(inp.client_contact or "").strip() or None,
+        phone=(inp.client_contact or "").strip() or None,
         comment=None,
+        is_confirmed=True,
     )
     db.add(client)
     db.flush()
@@ -435,21 +475,22 @@ def save_kit_inlay_visit(db: Session, master_id: int, inp: KitInlayFormInput) ->
         client_type=inp.client_type,
         price_type=inp.price_type,
         client_age_group=None,
-        client_source=None,
-        client_source_other=None,
-        client_comment=None,
-        materials_used=materials_flag,
         kanekalon_grams=inp.kanekalon_grams,
         kudri_grams=inp.kudri_grams,
         mix_source=inp.mix_source,
+        mix_complexity=inp.mix_complexity,
+        mix_cost_amount=mix_cost,
+        mix_bonus_master_id=mix_bonus_master_id,
+        mix_bonus_amount=mix_bonus_amount,
         kanekalon_price_per_gram_at_time=k_snap,
         kudri_price_per_gram_at_time=ku_snap,
         materials_cost_total=mat_cost,
         amount_from_client=inp.amount_from_client,
-        extra_cost_amount=0.0,
-        extra_cost_comment=None,
         addons_total=addons,
         addons_details_json=None,
+        amortization_level=inp.amortization_level,
+        amortization_amount=amort_amount,
+        studio_fund_amount=amort_amount,
         cost_total=cost_total,
         profit_before_split=profit_before,
         salon_cut_pct_at_time=salon_pct,

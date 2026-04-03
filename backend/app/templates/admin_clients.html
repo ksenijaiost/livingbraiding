@@ -19,19 +19,20 @@
           <th>Имя</th>
           <th>Контакт</th>
           <th>Посещений</th>
-          <th>Потрачено</th>
-          <th>Заработано</th>
         </tr>
       </thead>
       <tbody>
         {% for row in rows %}
           <tr>
             <td>{{ row.id }}</td>
-            <td>{{ row.name }}</td>
-            <td>{{ row.contact or "" }}</td>
+            <td>
+              {{ row.name }}
+              {% if not row.is_confirmed %}
+                <span class="muted" title="Ждёт подтверждения администратора">· черновик</span>
+              {% endif %}
+            </td>
+            <td>{{ row.contact_preview or "—" }}</td>
             <td>{{ row.visits_count }}</td>
-            <td>{{ "%.0f"|format(row.spent_total) }}</td>
-            <td>{{ "%.0f"|format(row.earned_total) }}</td>
           </tr>
         {% endfor %}
       </tbody>

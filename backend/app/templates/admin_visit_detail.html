@@ -35,9 +35,23 @@
       Смешка: <strong>{{ mix_source_ru }}</strong>
     </p>
     <p class="muted">
+      Сложность смешки: <strong>{{ mix_complexity_ru }}</strong> ·
+      Стоимость смешки (снимок): {{ "%.0f"|format(visit.mix_cost_amount) }} ₽
+      {% if visit.mix_bonus_amount and visit.mix_bonus_amount > 0 %}
+        · Бонус мастеру за смешку: {{ "%.0f"|format(visit.mix_bonus_amount) }} ₽
+      {% endif %}
+    </p>
+    <p class="muted">
       Цены на момент визита (₽/г):
       канек {% if visit.kanekalon_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kanekalon_price_per_gram_at_time) }}{% else %}—{% endif %},
       кудри {% if visit.kudri_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kudri_price_per_gram_at_time) }}{% else %}—{% endif %}
+    </p>
+
+    <h3>Амортизация</h3>
+    <p class="muted">
+      Уровень: <strong>{{ visit.amortization_level or "—" }}</strong> ·
+      Сумма: {{ "%.0f"|format(visit.amortization_amount) }} ₽ ·
+      В фонд студии: {{ "%.0f"|format(visit.studio_fund_amount) }} ₽
     </p>
 
     <h3>Услуги и анкета</h3>

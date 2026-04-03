@@ -17,7 +17,7 @@ from datetime import date, datetime
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import authenticate, get_current_user, login_response, logout_response, require_role
@@ -43,6 +43,7 @@ from app.ui_visit_display import (
     build_service_human_display,
     kit_usages_empty_explanation,
     ru_client_type,
+    ru_mix_complexity,
     ru_mix_source,
     ru_price_type,
 )
@@ -103,38 +104,54 @@ def home(request: Request, current_user=Depends(get_current_user)):
 def admin_clients(
     request: Request,
     q: str | None = None,
-    current_user=Depends(require_role(UserRole.ADMIN)),
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    """
-    Admin: client list with basic aggregates.
-
-    Notes:
-    - spent_total uses `Visit.amount_from_client` (raw money received).
-    - earned_total uses `Visit.profit_before_split` which should already include all deductions.
-    """
+    """Admin: client list — id, name, contact preview, visit count (non-cancelled only)."""
     q_norm = (q or "").strip()
     where = []
     if q_norm:
-        where.append(or_(Client.name.ilike(f"%{q_norm}%"), Client.contact.ilike(f"%{q_norm}%")))
+        like = f"%{q_norm}%"
+        where.append(
+            or_(
+                Client.name.ilike(like),
+                Client.phone.ilike(like),
+                Client.telegram.ilike(like),
+                Client.vk.ilike(like),
+                Client.instagram.ilike(like),
+                Client.other_contact.ilike(like),
+            )
+        )
 
-    visits_count = func.count(Visit.id)
-    spent_total = func.coalesce(func.sum(Visit.amount_from_client), 0.0)
-    earned_total = func.coalesce(func.sum(Visit.profit_before_split), 0.0)
+    # One row per visit in the join; sum 1 only for real, non-cancelled visits
+    visits_count = func.coalesce(
+        func.sum(case((Visit.is_cancelled.is_(False), 1), else_=0)),
+        0,
+    )
+    def _nz(col):
+        return func.nullif(func.trim(col), "")
+
+    # Phone first, then first non-empty social (same order as coalesce)
+    contact_preview = func.coalesce(
+        _nz(Client.phone),
+        _nz(Client.telegram),
+        _nz(Client.vk),
+        _nz(Client.instagram),
+        _nz(Client.other_contact),
+    ).label("contact_preview")
 
     stmt = (
         select(
             Client.id.label("id"),
             Client.name.label("name"),
-            Client.contact.label("contact"),
+            Client.is_confirmed.label("is_confirmed"),
+            contact_preview,
             visits_count.label("visits_count"),
-            spent_total.label("spent_total"),
-            earned_total.label("earned_total"),
         )
         .select_from(Client)
         .join(Visit, Visit.client_id == Client.id, isouter=True)
         .where(*where)
-        .group_by(Client.id)
+        .group_by(Client.id, Client.name, Client.is_confirmed)
         .order_by(Client.name.asc())
         .limit(500)
     )
@@ -202,7 +219,7 @@ async def master_visit_new_post(
 @app.get("/admin/visits", response_class=HTMLResponse)
 def admin_visits(
     request: Request,
-    current_user=Depends(require_role(UserRole.ADMIN)),
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     stmt = (
@@ -222,7 +239,7 @@ def admin_visits(
 def admin_visit_detail(
     visit_id: int,
     request: Request,
-    current_user=Depends(require_role(UserRole.ADMIN)),
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     visit = db.scalar(
@@ -250,7 +267,8 @@ def admin_visit_detail(
             client_type_ru=ru_client_type(visit.client_type),
             price_type_ru=ru_price_type(visit.price_type),
             mix_source_ru=ru_mix_source(visit.mix_source),
-            materials_used_ru="Да" if visit.materials_used else "Нет",
+            mix_complexity_ru=ru_mix_complexity(getattr(visit, "mix_complexity", None)),
+            materials_used_ru="Да" if (visit.kanekalon_grams > 0 or visit.kudri_grams > 0) else "Нет",
             kit_usages_note=kit_usages_empty_explanation(),
         ),
     )
@@ -260,11 +278,13 @@ def admin_visit_detail(
 def admin_settings_page(
     request: Request,
     saved: int | None = None,
-    current_user=Depends(require_role(UserRole.ADMIN)),
+    current_user=Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     salon = db.get(Setting, "salon_cut_pct")
     salon_cut_pct = salon.value if salon else "0.3"
+    edit_days = db.get(Setting, "edit_window_days")
+    edit_window_days = edit_days.value if edit_days else "2"
     pk = db.get(MaterialPriceCurrent, MaterialType.KANEKALON)
     pku = db.get(MaterialPriceCurrent, MaterialType.KUDRI)
     kanek_per_100 = str((pk.price_per_gram * 100) if pk else 400.0)
@@ -275,6 +295,7 @@ def admin_settings_page(
             request,
             current_user=current_user,
             salon_cut_pct=salon_cut_pct,
+            edit_window_days=edit_window_days,
             kanek_per_100g=kanek_per_100,
             kudri_per_100g=kudri_per_100,
             saved=bool(saved),
@@ -285,9 +306,10 @@ def admin_settings_page(
 @app.post("/admin/settings")
 def admin_settings_save(
     salon_cut_pct: str = Form(...),
+    edit_window_days: str = Form(...),
     kanek_per_100g: str = Form(...),
     kudri_per_100g: str = Form(...),
-    current_user=Depends(require_role(UserRole.ADMIN)),
+    current_user=Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     value = salon_cut_pct.strip().replace(",", ".")
@@ -304,6 +326,18 @@ def admin_settings_save(
         db.add(row)
     else:
         row.value = str(pct)
+
+    try:
+        days = int(edit_window_days.strip())
+    except ValueError:
+        days = -1
+    if days < 0 or days > 365:
+        return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
+    drow = db.get(Setting, "edit_window_days")
+    if not drow:
+        db.add(Setting(key="edit_window_days", value=str(days)))
+    else:
+        drow.value = str(days)
 
     now = datetime.utcnow()
     try:
