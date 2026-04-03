@@ -120,7 +120,7 @@ def _ensure_demo_catalog_and_kits(db: Session) -> None:
         db.add(
             Kit(
                 sku="DEMO-001",
-                title="Демо-комплект (70 заготовок)",
+                title="Комплект, 70 заготовок (пример для склада)",
                 description="Для проверки «из наличия»",
                 pieces_total=70,
                 pieces_available=70,
@@ -134,7 +134,7 @@ def _ensure_demo_catalog_and_kits(db: Session) -> None:
         db.add(
             Kit(
                 sku="DEMO-002",
-                title="Малый демо-комплект",
+                title="Комплект, 10 заготовок (пример)",
                 description="Для доп. заготовок (свой + из наличия)",
                 pieces_total=10,
                 pieces_available=10,

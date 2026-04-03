@@ -15,7 +15,8 @@ As the project grows, we can split routes into modules (e.g. `routes/admin.py`,
 from datetime import date, datetime
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.datastructures import UploadFile
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -40,13 +41,14 @@ from app.db.models import (
     MaterialPriceCurrent,
     MaterialType,
     Setting,
+    User,
     UserRole,
     Visit,
     VisitKitUsage,
     VisitMaster,
 )
 from app.db.session import get_db
-from app.demo_kit_inlay_visit import (
+from app.kit_inlay_visit import (
     list_kit_inlay_services,
     list_kits_for_stock,
     parse_kit_inlay_form,
@@ -56,7 +58,6 @@ from app.seed import ensure_seed_data
 from app.ui_visit_display import (
     build_service_human_display,
     kit_usages_empty_explanation,
-    ru_client_type,
     ru_mix_complexity,
     ru_mix_source,
     ru_price_type,
@@ -491,15 +492,75 @@ def admin_client_confirm(
     return RedirectResponse(url=f"/admin/clients/{client_id}?confirmed=1", status_code=303)
 
 
+def _form_to_str_map(form) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for k in form.keys():
+        v = form.get(k)
+        if isinstance(v, UploadFile):
+            continue
+        if isinstance(v, (bytes, bytearray)):
+            out[k] = v.decode()
+        else:
+            out[k] = str(v)
+    return out
+
+
+@app.get("/master/clients/suggest")
+def master_clients_suggest(
+    q: str = "",
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    needle = (q or "").strip()
+    stmt = select(Client).order_by(Client.name.asc()).limit(30)
+    if needle:
+        stmt = (
+            select(Client)
+            .where(Client.name.ilike(f"%{needle}%"))
+            .order_by(Client.name.asc())
+            .limit(30)
+        )
+    rows = list(db.scalars(stmt).all())
+    clients: list[dict[str, str | int | bool]] = []
+    for c in rows:
+        parts: list[str] = []
+        if c.phone:
+            parts.append(c.phone)
+        if c.telegram:
+            parts.append(f"TG {c.telegram}")
+        if c.vk:
+            parts.append(f"VK {c.vk}")
+        if c.instagram:
+            parts.append(f"IG {c.instagram}")
+        if c.other_contact:
+            parts.append((c.other_contact or "")[:48])
+        hint = " · ".join(parts) if parts else "без контакта"
+        clients.append(
+            {
+                "id": c.id,
+                "name": c.name,
+                "hint": hint,
+                "is_draft": not c.is_confirmed,
+            }
+        )
+    return JSONResponse({"clients": clients})
+
+
 @app.get("/master/visit/new", response_class=HTMLResponse)
 def master_visit_new_get(
     request: Request,
     saved: str | None = None,
-    current_user=Depends(require_role(UserRole.MASTER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
     services = list_kit_inlay_services(db)
     kits = list_kits_for_stock(db)
+    saved_draft_client = False
+    if saved and saved.isdigit():
+        vid = int(saved)
+        v = db.scalar(select(Visit).where(Visit.id == vid).options(selectinload(Visit.client)))
+        if v and v.client and not v.client.is_confirmed:
+            saved_draft_client = True
     return templates.TemplateResponse(
         "master_visit_kit_inlay.html",
         _ctx(
@@ -509,8 +570,10 @@ def master_visit_new_get(
             kits=kits,
             default_date=date.today().isoformat(),
             form_prefill={},
+            selected_client=None,
             error=None,
             saved=saved,
+            saved_draft_client=saved_draft_client,
         ),
     )
 
@@ -518,16 +581,27 @@ def master_visit_new_get(
 @app.post("/master/visit/new")
 async def master_visit_new_post(
     request: Request,
-    current_user=Depends(require_role(UserRole.MASTER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
     form = await request.form()
     inp = parse_kit_inlay_form(form)
     try:
-        visit = save_kit_inlay_visit(db, current_user.id, inp)
+        visit = save_kit_inlay_visit(
+            db,
+            current_user.id,
+            inp,
+            created_by_label=format_created_by_label(current_user),
+        )
     except ValueError as exc:
         services = list_kit_inlay_services(db)
         kits = list_kits_for_stock(db)
+        form_map = _form_to_str_map(form)
+        selected_client = None
+        eid = (form_map.get("existing_client_id") or "").strip()
+        if eid.isdigit():
+            selected_client = db.get(Client, int(eid))
+        performed = (form_map.get("performed_date") or "").strip() or date.today().isoformat()
         return templates.TemplateResponse(
             "master_visit_kit_inlay.html",
             _ctx(
@@ -535,15 +609,16 @@ async def master_visit_new_post(
                 current_user=current_user,
                 services=services,
                 kits=kits,
-                default_date=date.today().isoformat(),
-                form_prefill={},
+                default_date=performed,
+                form_prefill=form_map,
+                selected_client=selected_client,
                 error=str(exc),
                 saved=None,
+                saved_draft_client=False,
             ),
             status_code=400,
         )
     return RedirectResponse(url=f"/master/visit/new?saved={visit.id}", status_code=303)
-
 
 @app.get("/admin/visits", response_class=HTMLResponse)
 def admin_visits(
@@ -586,6 +661,14 @@ def admin_visit_detail(
 
     service_displays = [build_service_human_display(vs) for vs in visit.services]
 
+    mix_bonus_master_label: str | None = None
+    if visit.mix_bonus_master_id:
+        u = db.get(User, visit.mix_bonus_master_id)
+        if u and (u.display_name or "").strip():
+            mix_bonus_master_label = u.display_name.strip()
+        else:
+            mix_bonus_master_label = f"ID {visit.mix_bonus_master_id}"
+
     return templates.TemplateResponse(
         "admin_visit_detail.html",
         _ctx(
@@ -593,7 +676,7 @@ def admin_visit_detail(
             current_user=current_user,
             visit=visit,
             service_displays=service_displays,
-            client_type_ru=ru_client_type(visit.client_type),
+            mix_bonus_master_label=mix_bonus_master_label,
             price_type_ru=ru_price_type(visit.price_type),
             mix_source_ru=ru_mix_source(visit.mix_source),
             mix_complexity_ru=ru_mix_complexity(getattr(visit, "mix_complexity", None)),

@@ -1,7 +1,6 @@
 """
-Демо-поток: визит с услугой «Вплетение комплекта» + блок kit в `visit_services.details_json`.
-
-Дальше этот код можно заменить на полноценную анкету и общий сервис расчётов.
+Визит с услугой «Вплетение комплекта»: разбор формы мастера, сохранение визита,
+расчёт материалов/смешки/амортизации и блок комплекта в `visit_services.details_json`.
 """
 
 from __future__ import annotations
@@ -33,6 +32,7 @@ from app.db.models import (
     VisitPriceType,
     VisitService,
 )
+from app.client_validation import client_has_any_contact, strip_or_none
 from app.questionnaire.schemas import (
     KitBlock,
     KitFromStock,
@@ -175,10 +175,7 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
     stock_id = g_int("stock_kit_id", 0)
     extra_stock_id = g_int("own_extra_stock_kit_id", 0)
 
-    try:
-        ct = VisitClientType(g("client_type", "NEW"))
-    except ValueError:
-        ct = VisitClientType.NEW
+    ct = VisitClientType.SELF if g_bool("client_is_self") else VisitClientType.RETURNING
     try:
         pt = VisitPriceType(g("price_type", "CLIENT"))
     except ValueError:
@@ -190,9 +187,20 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
     except ValueError:
         performed_date = date.today()
 
+    mode_raw = (g("client_mode", "existing") or "existing").lower()
+    client_mode = "draft" if mode_raw == "draft" else "existing"
+    eid = g_int("existing_client_id", 0)
+    existing_client_id = eid if eid > 0 else None
+
     return KitInlayFormInput(
-        client_name=g("client_name"),
-        client_contact=g("client_contact") or None,
+        client_mode=client_mode,
+        existing_client_id=existing_client_id,
+        draft_name=g("draft_client_name"),
+        draft_phone=g("draft_phone"),
+        draft_telegram=g("draft_telegram"),
+        draft_vk=g("draft_vk"),
+        draft_instagram=g("draft_instagram"),
+        draft_other_contact=g("draft_other_contact"),
         client_type=ct,
         price_type=pt,
         performed_date=performed_date,
@@ -235,8 +243,14 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
 
 @dataclass
 class KitInlayFormInput:
-    client_name: str
-    client_contact: str | None
+    client_mode: str  # "existing" | "draft"
+    existing_client_id: int | None
+    draft_name: str
+    draft_phone: str
+    draft_telegram: str
+    draft_vk: str
+    draft_instagram: str
+    draft_other_contact: str
     client_type: VisitClientType
     price_type: VisitPriceType
     performed_date: date
@@ -384,10 +398,14 @@ def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServic
     )
 
 
-def save_kit_inlay_visit(db: Session, master_id: int, inp: KitInlayFormInput) -> Visit:
-    """Создаёт клиента, визит, услугу, списания со склада (STOCK), считает демо-профит."""
-    if not inp.client_name.strip():
-        raise ValueError("Укажите имя клиента")
+def save_kit_inlay_visit(
+    db: Session,
+    master_id: int,
+    inp: KitInlayFormInput,
+    *,
+    created_by_label: str | None = None,
+) -> Visit:
+    """Визит с выбранным клиентом или новым черновиком; услуга, склад STOCK, расчёт."""
     if inp.service_id <= 0:
         raise ValueError("Выберите услугу")
 
@@ -431,7 +449,7 @@ def save_kit_inlay_visit(db: Session, master_id: int, inp: KitInlayFormInput) ->
         usages.append((inp.own_extra_stock_kit_id, n, cost))
         kit_cost_total += cost
 
-    # Addons: demo пока 0 (в реальной анкете будет сумма + строка)
+    # Доп. услуги к визиту: пока 0 (позже — сумма и детализация)
     addons = 0.0
 
     grams_total = max(0.0, inp.kanekalon_grams) + max(0.0, inp.kudri_grams)
@@ -457,24 +475,47 @@ def save_kit_inlay_visit(db: Session, master_id: int, inp: KitInlayFormInput) ->
     salon_profit = profit_before * salon_pct
     masters_pool = profit_before - salon_profit
 
-    client = Client(
-        name=inp.client_name.strip(),
-        phone=(inp.client_contact or "").strip() or None,
-        comment=None,
-        is_confirmed=True,
-    )
-    db.add(client)
-    db.flush()
+    if inp.client_mode == "draft":
+        if not inp.draft_name.strip():
+            raise ValueError("Укажите имя клиента для черновика.")
+        if not client_has_any_contact(
+            inp.draft_phone,
+            inp.draft_telegram,
+            inp.draft_vk,
+            inp.draft_instagram,
+            inp.draft_other_contact,
+        ):
+            raise ValueError("Для черновика нужен хотя бы один контакт (телефон или соцсеть).")
+        client = Client(
+            name=inp.draft_name.strip()[:200],
+            phone=strip_or_none(inp.draft_phone, 30),
+            telegram=strip_or_none(inp.draft_telegram, 100),
+            vk=strip_or_none(inp.draft_vk, 120),
+            instagram=strip_or_none(inp.draft_instagram, 120),
+            other_contact=strip_or_none(inp.draft_other_contact, 200),
+            comment=None,
+            is_confirmed=False,
+            created_by_label=created_by_label,
+        )
+        db.add(client)
+        db.flush()
+    else:
+        if not inp.existing_client_id:
+            raise ValueError("Найдите и выберите клиента из списка или переключитесь на «Новый черновик».")
+        client = db.get(Client, inp.existing_client_id)
+        if client is None:
+            raise ValueError("Клиент не найден.")
 
     performed_dt = datetime.combine(inp.performed_date, datetime.min.time())
 
     visit = Visit(
+        created_by_user_id=master_id,
         performed_date=performed_dt,
         duration_minutes=max(0, inp.duration_minutes),
         client_id=client.id,
         client_type=inp.client_type,
         price_type=inp.price_type,
-        client_age_group=None,
+        client_age_group=client.age_group,
         kanekalon_grams=inp.kanekalon_grams,
         kudri_grams=inp.kudri_grams,
         mix_source=inp.mix_source,

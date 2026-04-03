@@ -1,11 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
+  {% set fp = form_prefill %}
   <div class="card">
-    <h2 style="margin-top: 0;">Демо: визит — вплетение комплекта</h2>
+    <h2 style="margin-top: 0;">Новый визит — вплетение комплекта</h2>
     <p class="muted">Заполни форму и сохрани. В админке: Визиты → открой запись по ID.</p>
     {% if saved %}
       <div class="card" style="border-color:#86efac; background:#f0fdf4; margin-bottom: 12px;">
-        Визит <strong>#{{ saved }}</strong> сохранён. Зайди как админ и открой запись по ID вручную.
+        <p style="margin:0;">Визит <strong>#{{ saved }}</strong> сохранён. Зайди как админ и открой запись по ID вручную.</p>
+        {% if saved_draft_client %}
+          <p style="margin:12px 0 0; padding:10px; background:#fffbeb; border-radius:6px; border:1px solid #fbbf24;">
+            <strong>Черновик клиента.</strong> Карточка создана как неподтверждённая: администратор должен проверить данные и подтвердить клиента в разделе «Клиенты».
+          </p>
+        {% endif %}
       </div>
     {% endif %}
     {% if error %}
@@ -18,31 +24,82 @@
     {% endif %}
     <form method="post" action="/master/visit/new" id="visit-form">
       <h3>Клиент</h3>
-      <div class="row">
-        <div>
-          <label>Имя / как записали *</label>
-          <input name="client_name" required value="{{ form_prefill.client_name or '' }}" />
+      <div style="margin-bottom: 10px;">
+        <label style="margin-right: 16px;">
+          <input type="radio" name="client_mode" value="existing" onchange="clientMode()" {% if fp.get('client_mode', 'existing') != 'draft' %}checked{% endif %} />
+          Из базы
+        </label>
+        <label>
+          <input type="radio" name="client_mode" value="draft" onchange="clientMode()" {% if fp.get('client_mode', 'existing') == 'draft' %}checked{% endif %} />
+          Новый черновик
+        </label>
+      </div>
+
+      <div id="blk-client-existing" class="card" style="margin-top: 8px;">
+        <input type="hidden" name="existing_client_id" id="existing_client_id" value="{{ fp.get('existing_client_id', '') }}" />
+        <div class="row" style="align-items: flex-end;">
+          <div style="flex:1;">
+            <label>Поиск клиента по имени</label>
+            <input type="search" id="client_search_q" autocomplete="off" placeholder="Начни вводить имя и подожди или нажми «Найти»" value="" />
+          </div>
+          <div>
+            <button type="button" class="secondary" onclick="clientSuggest()">Найти</button>
+          </div>
         </div>
-        <div>
-          <label>Контакт</label>
-          <input name="client_contact" value="{{ form_prefill.client_contact or '' }}" />
+        <ul id="client_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+        <div id="selected_client_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not selected_client %}display:none;{% endif %}">
+          <p id="selected_client_line" style="margin:0;">
+            {% if selected_client %}Выбрано: <strong>{{ selected_client.name }}</strong>{% if not selected_client.is_confirmed %} <span class="muted">(черновик)</span>{% endif %}{% endif %}
+          </p>
         </div>
       </div>
-      <div class="row">
-        <div>
-          <label>Тип клиента</label>
-          <select name="client_type">
-            <option value="NEW">Новый</option>
-            <option value="RETURNING">Повторный</option>
-            <option value="SELF">Свой</option>
-          </select>
+
+      <div id="blk-client-draft" class="card" style="margin-top: 8px; display: none; border-color: #fbbf24;">
+        <div style="background:#fffbeb;padding:12px;border-radius:6px;margin-bottom:14px;border:1px solid #fde68a;">
+          <strong>Черновик клиента.</strong>
+          После сохранения визита карточка появится в базе как <em>не подтверждённая</em>. Администратор должен проверить контакты и подтвердить клиента в админке.
+        </div>
+        <div class="row">
+          <div>
+            <label>Имя / как записали <span class="muted">*</span></label>
+            <input id="draft_client_name" name="draft_client_name" maxlength="200" value="{{ fp.get('draft_client_name', '') }}" />
+          </div>
+        </div>
+        <p class="muted" style="font-size:12px;margin:10px 0 6px;">Хотя бы одно поле контакта обязательно.</p>
+        <div class="row">
+          <div>
+            <label>Телефон</label>
+            <input name="draft_phone" maxlength="30" value="{{ fp.get('draft_phone', '') }}" />
+          </div>
+          <div>
+            <label>Telegram</label>
+            <input name="draft_telegram" maxlength="100" value="{{ fp.get('draft_telegram', '') }}" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>ВКонтакте</label>
+            <input name="draft_vk" maxlength="120" value="{{ fp.get('draft_vk', '') }}" />
+          </div>
+          <div>
+            <label>Instagram</label>
+            <input name="draft_instagram" maxlength="120" value="{{ fp.get('draft_instagram', '') }}" />
+          </div>
         </div>
         <div>
-          <label>Прайс</label>
-          <select name="price_type">
-            <option value="CLIENT">Клиент</option>
-            <option value="MODEL">Модель</option>
-          </select>
+          <label>Другой контакт</label>
+          <input name="draft_other_contact" maxlength="200" value="{{ fp.get('draft_other_contact', '') }}" />
+        </div>
+      </div>
+
+      <div style="margin-top: 14px;">
+        <label><input type="checkbox" name="client_is_self" {% if fp.get('client_is_self') == 'on' %}checked{% endif %} />
+          Свой клиент</label>
+        <p class="muted" style="font-size: 12px; margin: 6px 0 10px;">Если не отмечено — обычный платный визит (не «свой»).</p>
+        <div>
+          <span class="muted" style="margin-right: 10px;">Прайс:</span>
+          <label style="margin-right: 14px;"><input type="radio" name="price_type" value="CLIENT" {% if fp.get('price_type', 'CLIENT') == 'CLIENT' %}checked{% endif %} /> Клиент</label>
+          <label><input type="radio" name="price_type" value="MODEL" {% if fp.get('price_type', 'CLIENT') == 'MODEL' %}checked{% endif %} /> Модель</label>
         </div>
       </div>
 
@@ -54,11 +111,11 @@
         </div>
         <div>
           <label>Длительность (часы)</label>
-          <input type="number" name="duration_h" min="0" value="0" />
+          <input type="number" name="duration_h" min="0" value="{{ fp.get('duration_h', '0') }}" />
         </div>
         <div>
           <label>Длительность (мин)</label>
-          <input type="number" name="duration_m" min="0" value="0" />
+          <input type="number" name="duration_m" min="0" value="{{ fp.get('duration_m', '0') }}" />
         </div>
       </div>
       <div class="row">
@@ -67,13 +124,13 @@
           <select name="service_id" required>
             <option value="">— выбери —</option>
             {% for s in services %}
-              <option value="{{ s.id }}">{{ s.name }} (подсказка {{ (s.price_junior_from or 0)|int }}–{{ (s.price_junior_to or 0)|int }})</option>
+              <option value="{{ s.id }}" {% if fp.get('service_id')|string == s.id|string %}selected{% endif %}>{{ s.name }} (подсказка {{ (s.price_junior_from or 0)|int }}–{{ (s.price_junior_to or 0)|int }})</option>
             {% endfor %}
           </select>
         </div>
         <div>
           <label>Сумма с клиента *</label>
-          <input type="number" name="amount_from_client" min="0" step="1" required value="5000" />
+          <input type="number" name="amount_from_client" min="0" step="1" required value="{{ fp.get('amount_from_client', '5000') }}" />
         </div>
       </div>
 
@@ -81,19 +138,19 @@
       <div class="row">
         <div>
           <label>Канекалон, г</label>
-          <input type="number" name="kanekalon_grams" min="0" step="1" value="0" />
+          <input type="number" name="kanekalon_grams" min="0" step="1" value="{{ fp.get('kanekalon_grams', '0') }}" />
         </div>
         <div>
           <label>Кудри, г</label>
-          <input type="number" name="kudri_grams" min="0" step="1" value="0" />
+          <input type="number" name="kudri_grams" min="0" step="1" value="{{ fp.get('kudri_grams', '0') }}" />
         </div>
         <div>
           <label>Смешка</label>
           <select name="mix_source">
-            <option value="">—</option>
-            <option value="FROM_STOCK">Из наличия</option>
-            <option value="NO_MIX">Без смешки</option>
-            <option value="SELF_MIXED">Сама мешала</option>
+            <option value="" {% if not fp.get('mix_source') %}selected{% endif %}>—</option>
+            <option value="FROM_STOCK" {% if fp.get('mix_source') == 'FROM_STOCK' %}selected{% endif %}>Из наличия</option>
+            <option value="NO_MIX" {% if fp.get('mix_source') == 'NO_MIX' %}selected{% endif %}>Без смешки</option>
+            <option value="SELF_MIXED" {% if fp.get('mix_source') == 'SELF_MIXED' %}selected{% endif %}>Сама мешала</option>
           </select>
         </div>
       </div>
@@ -101,19 +158,19 @@
         <div>
           <label>Сложность смешки</label>
           <select name="mix_complexity">
-            <option value="">—</option>
-            <option value="SIMPLE">Простая (1 ₽/г)</option>
-            <option value="MEDIUM">Средняя (1.5 ₽/г)</option>
-            <option value="HARD">Сложная (2 ₽/г)</option>
+            <option value="" {% if not fp.get('mix_complexity') %}selected{% endif %}>—</option>
+            <option value="SIMPLE" {% if fp.get('mix_complexity') == 'SIMPLE' %}selected{% endif %}>Простая (1 ₽/г)</option>
+            <option value="MEDIUM" {% if fp.get('mix_complexity') == 'MEDIUM' %}selected{% endif %}>Средняя (1.5 ₽/г)</option>
+            <option value="HARD" {% if fp.get('mix_complexity') == 'HARD' %}selected{% endif %}>Сложная (2 ₽/г)</option>
           </select>
         </div>
         <div>
           <label>Амортизация</label>
           <select name="amortization_level">
-            <option value="">—</option>
-            <option value="MIN">Минимальная (100 ₽)</option>
-            <option value="MID">Средняя (200 ₽)</option>
-            <option value="MAX">Увеличенная (500 ₽)</option>
+            <option value="" {% if not fp.get('amortization_level') %}selected{% endif %}>—</option>
+            <option value="MIN" {% if fp.get('amortization_level') == 'MIN' %}selected{% endif %}>Минимальная (100 ₽)</option>
+            <option value="MID" {% if fp.get('amortization_level') == 'MID' %}selected{% endif %}>Средняя (200 ₽)</option>
+            <option value="MAX" {% if fp.get('amortization_level') == 'MAX' %}selected{% endif %}>Увеличенная (500 ₽)</option>
           </select>
         </div>
       </div>
@@ -122,22 +179,22 @@
       <div class="row">
         <div>
           <label>Количество баз *</label>
-          <input type="number" name="bases_count" min="0" required value="40" />
+          <input type="number" name="bases_count" min="0" required value="{{ fp.get('bases_count', '40') }}" />
         </div>
         <div>
           <label>Количество заготовок *</label>
-          <input type="number" name="blanks_count" min="0" required value="12" />
+          <input type="number" name="blanks_count" min="0" required value="{{ fp.get('blanks_count', '12') }}" />
         </div>
       </div>
       <div style="margin-bottom: 12px;">
         <label>Комментарий</label>
-        <textarea name="service_comment" rows="2" placeholder="Разметка, несколько заготовок в базу…"></textarea>
+        <textarea name="service_comment" rows="2" placeholder="Разметка, несколько заготовок в базу…">{{ fp.get('service_comment', '') }}</textarea>
       </div>
 
       <h3>Комплект</h3>
-      <label><input type="radio" name="kit_kind" value="STOCK" checked onchange="kitKind()" /> Из наличия</label>
-      <label><input type="radio" name="kit_kind" value="NEW" onchange="kitKind()" /> Новый</label>
-      <label><input type="radio" name="kit_kind" value="OWN" onchange="kitKind()" /> Свой</label>
+      <label><input type="radio" name="kit_kind" value="STOCK" onchange="kitKind()" {% if fp.get('kit_kind', 'STOCK') == 'STOCK' %}checked{% endif %} /> Из наличия</label>
+      <label><input type="radio" name="kit_kind" value="NEW" onchange="kitKind()" {% if fp.get('kit_kind', 'STOCK') == 'NEW' %}checked{% endif %} /> Новый</label>
+      <label><input type="radio" name="kit_kind" value="OWN" onchange="kitKind()" {% if fp.get('kit_kind', 'STOCK') == 'OWN' %}checked{% endif %} /> Свой</label>
 
       <div id="blk-stock" class="card" style="margin-top: 10px;">
         <strong>Из наличия</strong>
@@ -146,27 +203,27 @@
           <select name="stock_kit_id">
             <option value="">—</option>
             {% for k in kits %}
-              <option value="{{ k.id }}">{{ k.sku }} — {{ k.title }} (остаток {{ k.pieces_available }})</option>
+              <option value="{{ k.id }}" {% if fp.get('stock_kit_id')|string == k.id|string %}selected{% endif %}>{{ k.sku }} — {{ k.title }} (остаток {{ k.pieces_available }})</option>
             {% endfor %}
           </select>
         </div>
-        <label><input type="checkbox" name="stock_use_entire" /> Весь комплект (все доступные заготовки)</label>
+        <label><input type="checkbox" name="stock_use_entire" {% if fp.get('stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект (все доступные заготовки)</label>
         <div>
           <label>Или заготовок списать</label>
-          <input type="number" name="stock_blanks_used" min="0" value="12" />
+          <input type="number" name="stock_blanks_used" min="0" value="{{ fp.get('stock_blanks_used', '12') }}" />
         </div>
       </div>
 
       <div id="blk-new" class="card" style="margin-top: 10px; display: none;">
         <strong>Новый комплект</strong>
-        <div><label>Название *</label><input name="new_title" placeholder="Например, чёрный 1B" /></div>
-        <div><label>Описание</label><textarea name="new_description" rows="2"></textarea></div>
+        <div><label>Название *</label><input name="new_title" placeholder="Например, чёрный 1B" value="{{ fp.get('new_title', '') }}" /></div>
+        <div><label>Описание</label><textarea name="new_description" rows="2">{{ fp.get('new_description', '') }}</textarea></div>
         <div class="row">
-          <div><label>Всего заготовок *</label><input type="number" name="new_blanks_total" min="0" value="12" /></div>
-          <div><label>Артикул (если есть)</label><input name="new_sku" /></div>
+          <div><label>Всего заготовок *</label><input type="number" name="new_blanks_total" min="0" value="{{ fp.get('new_blanks_total', '12') }}" /></div>
+          <div><label>Артикул (если есть)</label><input name="new_sku" value="{{ fp.get('new_sku', '') }}" /></div>
         </div>
-        <label><input type="checkbox" name="new_made_by_self" checked /> Изготовил я (тот же мастер)</label>
-        <div><label>Заметки</label><input name="new_notes" /></div>
+        <label><input type="checkbox" name="new_made_by_self" {% if not fp or fp.get('new_made_by_self') == 'on' %}checked{% endif %} /> Изготовил я (тот же мастер)</label>
+        <div><label>Заметки</label><input name="new_notes" value="{{ fp.get('new_notes', '') }}" /></div>
       </div>
 
       <div id="blk-own" class="card" style="margin-top: 10px; display: none;">
@@ -174,39 +231,39 @@
         <div>
           <label>Происхождение</label>
           <select name="own_origin">
-            <option value="">—</option>
-            <option value="STUDIO">Нашей студии</option>
-            <option value="FOREIGN">Чужой</option>
+            <option value="" {% if not fp.get('own_origin') %}selected{% endif %}>—</option>
+            <option value="STUDIO" {% if fp.get('own_origin') == 'STUDIO' %}selected{% endif %}>Нашей студии</option>
+            <option value="FOREIGN" {% if fp.get('own_origin') == 'FOREIGN' %}selected{% endif %}>Чужой</option>
           </select>
         </div>
-        <label><input type="checkbox" name="own_correction" /> Коррекция</label>
-        <label><input type="checkbox" name="own_extra_blanks" id="own_extra_blanks" onchange="ownExtra()" /> Доп. заготовки</label>
+        <label><input type="checkbox" name="own_correction" {% if fp.get('own_correction') == 'on' %}checked{% endif %} /> Коррекция</label>
+        <label><input type="checkbox" name="own_extra_blanks" id="own_extra_blanks" onchange="ownExtra()" {% if fp.get('own_extra_blanks') == 'on' %}checked{% endif %} /> Доп. заготовки</label>
 
         <div id="blk-own-extra" style="display: none; margin-top: 8px;">
           <label>Источник доп.</label>
           <select name="own_extra_source" id="own_extra_source" onchange="ownExtraSrc()">
-            <option value="">—</option>
-            <option value="STOCK">Из наличия</option>
-            <option value="NEW">Новые</option>
+            <option value="" {% if not fp.get('own_extra_source') %}selected{% endif %}>—</option>
+            <option value="STOCK" {% if fp.get('own_extra_source') == 'STOCK' %}selected{% endif %}>Из наличия</option>
+            <option value="NEW" {% if fp.get('own_extra_source') == 'NEW' %}selected{% endif %}>Новые</option>
           </select>
           <div id="blk-own-extra-stock" style="display: none; margin-top: 8px;">
             <label>Комплект</label>
             <select name="own_extra_stock_kit_id">
               <option value="">—</option>
               {% for k in kits %}
-                <option value="{{ k.id }}">{{ k.sku }} — остаток {{ k.pieces_available }}</option>
+                <option value="{{ k.id }}" {% if fp.get('own_extra_stock_kit_id')|string == k.id|string %}selected{% endif %}>{{ k.sku }} — остаток {{ k.pieces_available }}</option>
               {% endfor %}
             </select>
-            <label><input type="checkbox" name="own_extra_stock_use_entire" /> Весь комплект</label>
-            <input type="number" name="own_extra_stock_blanks_used" min="0" value="2" placeholder="заготовок" />
+            <label><input type="checkbox" name="own_extra_stock_use_entire" {% if fp.get('own_extra_stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект</label>
+            <input type="number" name="own_extra_stock_blanks_used" min="0" value="{{ fp.get('own_extra_stock_blanks_used', '2') }}" placeholder="заготовок" />
           </div>
           <div id="blk-own-extra-new" style="display: none; margin-top: 8px;">
-            <input name="own_extra_new_title" placeholder="Название новых заготовок" />
-            <textarea name="own_extra_new_description" rows="1" placeholder="Описание"></textarea>
-            <input type="number" name="own_extra_new_blanks_total" min="0" value="4" placeholder="шт" />
-            <input name="own_extra_new_sku" placeholder="артикул" />
-            <label><input type="checkbox" name="own_extra_new_made_by_self" checked /> Изготовил я</label>
-            <input name="own_extra_new_notes" placeholder="заметки" />
+            <input name="own_extra_new_title" placeholder="Название новых заготовок" value="{{ fp.get('own_extra_new_title', '') }}" />
+            <textarea name="own_extra_new_description" rows="1" placeholder="Описание">{{ fp.get('own_extra_new_description', '') }}</textarea>
+            <input type="number" name="own_extra_new_blanks_total" min="0" value="{{ fp.get('own_extra_new_blanks_total', '4') }}" placeholder="шт" />
+            <input name="own_extra_new_sku" placeholder="артикул" value="{{ fp.get('own_extra_new_sku', '') }}" />
+            <label><input type="checkbox" name="own_extra_new_made_by_self" {% if not fp or fp.get('own_extra_new_made_by_self') == 'on' %}checked{% endif %} /> Изготовил я</label>
+            <input name="own_extra_new_notes" placeholder="заметки" value="{{ fp.get('own_extra_new_notes', '') }}" />
           </div>
         </div>
       </div>
@@ -218,6 +275,78 @@
     </form>
   </div>
   <script>
+    function escapeHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+    let suggestTimer = null;
+    function clientMode() {
+      const draft = document.querySelector('input[name="client_mode"]:checked').value === 'draft';
+      document.getElementById('blk-client-existing').style.display = draft ? 'none' : 'block';
+      document.getElementById('blk-client-draft').style.display = draft ? 'block' : 'none';
+      const nameInp = document.getElementById('draft_client_name');
+      if (draft) {
+        document.getElementById('existing_client_id').value = '';
+        document.getElementById('selected_client_box').style.display = 'none';
+        nameInp.setAttribute('required', 'required');
+      } else {
+        nameInp.removeAttribute('required');
+      }
+    }
+    function renderSelectedClient(name, isDraft) {
+      const box = document.getElementById('selected_client_box');
+      const line = document.getElementById('selected_client_line');
+      box.style.display = 'block';
+      const draftNote = isDraft ? ' <span class="muted">(черновик)</span>' : '';
+      line.innerHTML = 'Выбрано: <strong>' + escapeHtml(name) + '</strong>' + draftNote;
+    }
+    function selectClient(id, name, isDraft) {
+      document.getElementById('existing_client_id').value = String(id);
+      renderSelectedClient(name, isDraft);
+      document.getElementById('client_suggest_list').innerHTML = '';
+    }
+    async function clientSuggest() {
+      const q = document.getElementById('client_search_q').value.trim();
+      const res = await fetch('/master/clients/suggest?q=' + encodeURIComponent(q));
+      if (!res.ok) return;
+      const data = await res.json();
+      const ul = document.getElementById('client_suggest_list');
+      ul.innerHTML = '';
+      for (const c of data.clients || []) {
+        const li = document.createElement('li');
+        li.style.marginBottom = '8px';
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'secondary';
+        b.textContent = c.name + (c.is_draft ? ' (черновик)' : '');
+        b.onclick = function () { selectClient(c.id, c.name, c.is_draft); };
+        const hint = document.createElement('span');
+        hint.className = 'muted';
+        hint.style.marginLeft = '8px';
+        hint.textContent = c.hint || '';
+        li.appendChild(b);
+        li.appendChild(hint);
+        ul.appendChild(li);
+      }
+    }
+    function scheduleSuggest() {
+      clearTimeout(suggestTimer);
+      suggestTimer = setTimeout(clientSuggest, 350);
+    }
+    document.getElementById('client_search_q').addEventListener('input', scheduleSuggest);
+
+    document.getElementById('visit-form').addEventListener('submit', function (e) {
+      const mode = document.querySelector('input[name="client_mode"]:checked').value;
+      if (mode === 'existing') {
+        const id = document.getElementById('existing_client_id').value.trim();
+        if (!id) {
+          e.preventDefault();
+          alert('Выберите клиента из списка поиска или переключитесь на «Новый черновик».');
+        }
+      }
+    });
+
     function kitKind() {
       const v = document.querySelector('input[name="kit_kind"]:checked').value;
       document.getElementById('blk-stock').style.display = v === 'STOCK' ? 'block' : 'none';
@@ -234,8 +363,12 @@
       document.getElementById('blk-own-extra-stock').style.display = s === 'STOCK' ? 'block' : 'none';
       document.getElementById('blk-own-extra-new').style.display = s === 'NEW' ? 'block' : 'none';
     }
+    clientMode();
     kitKind();
     ownExtra();
     ownExtraSrc();
+    {% if selected_client %}
+    renderSelectedClient({{ selected_client.name|tojson }}, {{ (not selected_client.is_confirmed)|tojson }});
+    {% endif %}
   </script>
 {% endblock %}

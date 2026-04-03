@@ -8,7 +8,7 @@
     <h3>Клиент</h3>
     <p><strong>{{ visit.client.name }}</strong>{% if visit.client.contact %} · {{ visit.client.contact }}{% endif %}</p>
     <p class="muted">
-      Тип клиента — <strong>{{ client_type_ru }}</strong>,
+      {% if visit.client_type.value == 'SELF' %}<strong>Свой клиент</strong> · {% endif %}
       прайс — <strong>{{ price_type_ru }}</strong>,
       длительность — {{ visit.duration_minutes }} мин
     </p>
@@ -23,12 +23,13 @@
       <tr><td>Выручка (с клиента)</td><td>{{ "%.0f"|format(visit.amount_from_client) }} ₽</td></tr>
       <tr><td>Себестоимость (материалы + комплект)</td><td>{{ "%.0f"|format(visit.cost_total) }} ₽</td></tr>
       <tr><td>Прибыль до распределения</td><td>{{ "%.0f"|format(visit.profit_before_split) }} ₽</td></tr>
-      <tr><td>Доля салона (снимок, 0..1)</td><td>{{ visit.salon_cut_pct_at_time }}</td></tr>
+      <tr><td>Амортизация</td><td>{{ "%.0f"|format(visit.amortization_amount or 0) }} ₽</td></tr>
+      <tr><td>Доля салона</td><td>{{ visit.salon_cut_pct_at_time }}</td></tr>
       <tr><td>Заработок студии</td><td>{{ "%.0f"|format(visit.salon_profit) }} ₽</td></tr>
       <tr><td>ЗП мастеров (суммарно)</td><td>{{ "%.0f"|format(visit.masters_pool) }} ₽</td></tr>
     </table>
 
-    <h3>Материал (снимок)</h3>
+    <h3>Материал</h3>
     <p class="muted">
       Учитывался в расчёте: <strong>{{ materials_used_ru }}</strong> ·
       Канек {{ visit.kanekalon_grams }} г · Кудри {{ visit.kudri_grams }} г ·
@@ -36,22 +37,15 @@
     </p>
     <p class="muted">
       Сложность смешки: <strong>{{ mix_complexity_ru }}</strong> ·
-      Стоимость смешки (снимок): {{ "%.0f"|format(visit.mix_cost_amount) }} ₽
+      Стоимость смешки: {{ "%.0f"|format(visit.mix_cost_amount) }} ₽
       {% if visit.mix_bonus_amount and visit.mix_bonus_amount > 0 %}
-        · Бонус мастеру за смешку: {{ "%.0f"|format(visit.mix_bonus_amount) }} ₽
+        · Бонус за смешку, мастер <strong>{{ mix_bonus_master_label or "—" }}</strong>: {{ "%.0f"|format(visit.mix_bonus_amount) }} ₽
       {% endif %}
     </p>
     <p class="muted">
       Цены на момент визита (₽/г):
       канек {% if visit.kanekalon_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kanekalon_price_per_gram_at_time) }}{% else %}—{% endif %},
       кудри {% if visit.kudri_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kudri_price_per_gram_at_time) }}{% else %}—{% endif %}
-    </p>
-
-    <h3>Амортизация</h3>
-    <p class="muted">
-      Уровень: <strong>{{ visit.amortization_level or "—" }}</strong> ·
-      Сумма: {{ "%.0f"|format(visit.amortization_amount) }} ₽ ·
-      В фонд студии: {{ "%.0f"|format(visit.studio_fund_amount) }} ₽
     </p>
 
     <h3>Услуги и анкета</h3>
