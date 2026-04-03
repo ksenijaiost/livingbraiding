@@ -82,12 +82,15 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
         ("Услуга", vs.service_name),
     ]
     if not vs.details_json:
-        return {"blocks": blocks}
+        catalog_line = f"{vs.category_name} / {vs.subcategory_name} / {vs.service_name}"
+        return {"blocks": blocks, "catalog_line": catalog_line, "detail_blocks": []}
 
     try:
         data = json.loads(vs.details_json)
     except (json.JSONDecodeError, TypeError):
-        return {"blocks": blocks + [("Детали", "не удалось разобрать")]}
+        err_blocks = blocks + [("Детали", "не удалось разобрать")]
+        catalog_line = f"{vs.category_name} / {vs.subcategory_name} / {vs.service_name}"
+        return {"blocks": err_blocks, "catalog_line": catalog_line, "detail_blocks": err_blocks[3:]}
 
     sf = data.get("service_fields") or {}
     if "bases_count" in sf:
@@ -148,7 +151,9 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
                 if nk.get("blanks_total") is not None:
                     blocks.append(("Количество доп. заготовок", str(nk["blanks_total"])))
 
-    return {"blocks": blocks}
+    catalog_line = f"{vs.category_name} / {vs.subcategory_name} / {vs.service_name}"
+    detail_blocks = blocks[3:]
+    return {"blocks": blocks, "catalog_line": catalog_line, "detail_blocks": detail_blocks}
 
 
 def visit_services_catalog_line(visit: Visit) -> str:

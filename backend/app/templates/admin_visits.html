@@ -20,7 +20,9 @@
         {% for v in visits %}
           <tr>
             <td><a href="/admin/visits/{{ v.id }}">{{ v.id }}</a></td>
-            <td>{{ v.performed_date.strftime("%d.%m.%Y") }}</td>
+            <td>
+              <a href="/admin/visits/{{ v.id }}">{{ v.performed_date.strftime("%d.%m.%Y") }}</a>
+            </td>
             <td>{{ v.client.name }}</td>
             <td>
               {% if v.services %}

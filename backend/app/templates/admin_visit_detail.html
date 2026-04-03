@@ -2,21 +2,88 @@
 {% block content %}
   <div class="card">
     <p><a href="/admin/visits">← Все визиты</a></p>
-    <h2 style="margin-top: 0;">Визит #{{ visit.id }}</h2>
-    <p class="muted">Создан: {{ visit.created_at.strftime("%d.%m.%Y %H:%M") }} · Дата работы: {{ visit.performed_date.strftime("%d.%m.%Y") }}</p>
+    <h2 style="margin-top: 0;">Визит #{{ visit.id }}. Дата: {{ visit.performed_date.strftime("%d.%m.%Y") }}</h2>
+    <p class="muted">
+      Создан: {{ visit.created_at.strftime("%d.%m.%Y %H:%M") }}
+      {% if visit_creator_label %}· {{ visit_creator_label }}{% endif %}
+    </p>
+    <p class="muted" style="font-size: 12px; margin-top: 4px;">Сведения о последнем редактировании — позже.</p>
+
+    {% if client_err %}
+      <div class="error" style="margin:12px 0;">
+        {% if client_err == 'need_confirm' %}
+          Отметьте подтверждение смены клиента после истечения окна редактирования.
+        {% elif client_err == 'bad_id' %}
+          Укажите клиента и повторите сохранение.
+        {% elif client_err == 'not_found' %}
+          Клиент не найден.
+        {% elif client_err == 'same' %}
+          Выбран тот же клиент.
+        {% else %}
+          Не удалось сохранить изменение клиента.
+        {% endif %}
+      </div>
+    {% endif %}
 
     <h3>Клиент</h3>
-    <p><strong>{{ visit.client.name }}</strong>{% if visit.client.contact %} · {{ visit.client.contact }}{% endif %}</p>
-    <p class="muted">
-      {% if visit.client_type.value == 'SELF' %}<strong>Свой клиент</strong> · {% endif %}
-      прайс — <strong>{{ price_type_ru }}</strong>,
-      длительность — {{ visit.duration_minutes }} мин
+    <p>
+      <strong><a href="/admin/clients/{{ visit.client_id }}">{{ visit.client.name }}</a></strong>
     </p>
-    <p class="muted">Мастера:
+    <p class="muted">
+      Свой: {% if visit.client_type.value == 'SELF' %}да{% else %}нет{% endif %}
+      · Прайс: <strong>{{ price_type_ru }}</strong>
+    </p>
+
+    <h3>Услуга</h3>
+
+    <h4 style="margin: 14px 0 6px; font-size: 1rem;">Услуга</h4>
+    {% if visit.services %}
+      {% for disp in service_displays %}
+        {% if service_displays|length > 1 %}
+          <p class="muted" style="margin: 8px 0 2px; font-size: 12px;">Услуга {{ loop.index }}</p>
+        {% endif %}
+        <p style="margin: 4px 0;">{{ disp.catalog_line }}</p>
+      {% endfor %}
+    {% else %}
+      <p class="muted">—</p>
+    {% endif %}
+
+    <h4 style="margin: 16px 0 6px; font-size: 1rem;">Мастера</h4>
+    <p style="margin: 4px 0;">
       {% for vm in visit.masters %}
         {{ vm.master.display_name }} ({{ vm.percent|int }}%){% if not loop.last %}, {% endif %}
       {% else %}—{% endfor %}
     </p>
+
+    <h4 style="margin: 16px 0 6px; font-size: 1rem;">Длительность</h4>
+    <p style="margin: 4px 0;">{{ duration_h }} ч {{ duration_m }} мин</p>
+
+    <h4 style="margin: 16px 0 6px; font-size: 1rem;">Информация об услуге</h4>
+    {% if service_displays %}
+      {% for disp in service_displays %}
+        {% if service_displays|length > 1 %}
+          <p class="muted" style="margin: 8px 0 2px; font-size: 12px;">Услуга {{ loop.index }}</p>
+        {% endif %}
+        {% if disp.detail_blocks %}
+          <ul style="margin: 4px 0 10px; padding-left: 1.2rem; line-height: 1.35;">
+            {% for label, val in disp.detail_blocks %}
+              <li style="margin-bottom: 4px;"><span style="color:#6b7280;">{{ label }}:</span> {{ val }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted" style="margin: 4px 0;">Нет данных анкеты.</p>
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      <p class="muted">—</p>
+    {% endif %}
+
+    <h4 style="margin: 16px 0 6px; font-size: 1rem;">Материал</h4>
+    <div class="muted" style="line-height: 1.35; font-size: 0.95rem;">
+      <div style="margin: 2px 0;">Учитывался в расчёте: <strong>{{ materials_used_ru }}</strong> · Канек {{ visit.kanekalon_grams }} г · Кудри {{ visit.kudri_grams }} г · Смешка: <strong>{{ mix_source_ru }}</strong></div>
+      <div style="margin: 2px 0;">Сложность смешки: <strong>{{ mix_complexity_ru }}</strong> · Стоимость смешки: {{ "%.0f"|format(visit.mix_cost_amount) }} ₽{% if visit.mix_bonus_amount and visit.mix_bonus_amount > 0 %} · Бонус за смешку, мастер <strong>{{ mix_bonus_master_label or "—" }}</strong>: {{ "%.0f"|format(visit.mix_bonus_amount) }} ₽{% endif %}</div>
+      <div style="margin: 2px 0;">Цены на момент визита (₽/г): канек {% if visit.kanekalon_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kanekalon_price_per_gram_at_time) }}{% else %}—{% endif %}, кудри {% if visit.kudri_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kudri_price_per_gram_at_time) }}{% else %}—{% endif %}</div>
+    </div>
 
     <h3>Деньги</h3>
     <table>
@@ -28,36 +95,6 @@
       <tr><td>Заработок студии</td><td>{{ "%.0f"|format(visit.salon_profit) }} ₽</td></tr>
       <tr><td>ЗП мастеров (суммарно)</td><td>{{ "%.0f"|format(visit.masters_pool) }} ₽</td></tr>
     </table>
-
-    <h3>Материал</h3>
-    <p class="muted">
-      Учитывался в расчёте: <strong>{{ materials_used_ru }}</strong> ·
-      Канек {{ visit.kanekalon_grams }} г · Кудри {{ visit.kudri_grams }} г ·
-      Смешка: <strong>{{ mix_source_ru }}</strong>
-    </p>
-    <p class="muted">
-      Сложность смешки: <strong>{{ mix_complexity_ru }}</strong> ·
-      Стоимость смешки: {{ "%.0f"|format(visit.mix_cost_amount) }} ₽
-      {% if visit.mix_bonus_amount and visit.mix_bonus_amount > 0 %}
-        · Бонус за смешку, мастер <strong>{{ mix_bonus_master_label or "—" }}</strong>: {{ "%.0f"|format(visit.mix_bonus_amount) }} ₽
-      {% endif %}
-    </p>
-    <p class="muted">
-      Цены на момент визита (₽/г):
-      канек {% if visit.kanekalon_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kanekalon_price_per_gram_at_time) }}{% else %}—{% endif %},
-      кудри {% if visit.kudri_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kudri_price_per_gram_at_time) }}{% else %}—{% endif %}
-    </p>
-
-    <h3>Услуги и анкета</h3>
-    {% for disp in service_displays %}
-      <div class="card" style="margin-bottom:12px;">
-        <table>
-          {% for label, val in disp.blocks %}
-            <tr><td style="width:40%; color:#6b7280;">{{ label }}</td><td>{{ val }}</td></tr>
-          {% endfor %}
-        </table>
-      </div>
-    {% endfor %}
 
     <h3>Списания комплектов со склада</h3>
     {% if visit.kit_usages %}

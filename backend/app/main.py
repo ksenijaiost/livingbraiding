@@ -44,6 +44,7 @@ from app.db.models import (
     User,
     UserRole,
     Visit,
+    VisitAuditLog,
     VisitKitUsage,
     VisitMaster,
 )
@@ -55,6 +56,7 @@ from app.kit_inlay_visit import (
     save_kit_inlay_visit,
 )
 from app.seed import ensure_seed_data
+from app.visit_edit_policy import visit_client_change_policy
 from app.ui_visit_display import (
     build_service_human_display,
     kit_usages_empty_explanation,
@@ -505,12 +507,7 @@ def _form_to_str_map(form) -> dict[str, str]:
     return out
 
 
-@app.get("/master/clients/suggest")
-def master_clients_suggest(
-    q: str = "",
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
-    db: Session = Depends(get_db),
-):
+def _client_suggest_items(db: Session, q: str) -> list[dict[str, str | int | bool]]:
     needle = (q or "").strip()
     stmt = select(Client).order_by(Client.name.asc()).limit(30)
     if needle:
@@ -543,7 +540,25 @@ def master_clients_suggest(
                 "is_draft": not c.is_confirmed,
             }
         )
-    return JSONResponse({"clients": clients})
+    return clients
+
+
+@app.get("/master/clients/suggest")
+def master_clients_suggest(
+    q: str = "",
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    return JSONResponse({"clients": _client_suggest_items(db, q)})
+
+
+@app.get("/admin/clients/suggest")
+def admin_clients_suggest(
+    q: str = "",
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    return JSONResponse({"clients": _client_suggest_items(db, q)})
 
 
 @app.get("/master/visit/new", response_class=HTMLResponse)
@@ -643,7 +658,8 @@ def admin_visits(
 def admin_visit_detail(
     visit_id: int,
     request: Request,
-    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    client_err: str | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
     visit = db.scalar(
@@ -669,6 +685,15 @@ def admin_visit_detail(
         else:
             mix_bonus_master_label = f"ID {visit.mix_bonus_master_id}"
 
+    visit_creator_label: str | None = None
+    if visit.created_by_user_id:
+        cu = db.get(User, visit.created_by_user_id)
+        if cu and (cu.display_name or "").strip():
+            visit_creator_label = cu.display_name.strip()
+
+    duration_h = visit.duration_minutes // 60
+    duration_m = visit.duration_minutes % 60
+
     return templates.TemplateResponse(
         "admin_visit_detail.html",
         _ctx(
@@ -682,8 +707,63 @@ def admin_visit_detail(
             mix_complexity_ru=ru_mix_complexity(getattr(visit, "mix_complexity", None)),
             materials_used_ru="Да" if (visit.kanekalon_grams > 0 or visit.kudri_grams > 0) else "Нет",
             kit_usages_note=kit_usages_empty_explanation(),
+            visit_creator_label=visit_creator_label,
+            duration_h=duration_h,
+            duration_m=duration_m,
+            client_err=client_err,
         ),
     )
+
+
+@app.post("/admin/visits/{visit_id}/client")
+async def admin_visit_change_client(
+    visit_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    visit = db.get(Visit, visit_id)
+    if visit is None:
+        raise HTTPException(status_code=404, detail="Визит не найден")
+
+    policy = visit_client_change_policy(visit, current_user, db)
+    if not policy.can_change:
+        raise HTTPException(status_code=403, detail=policy.message_when_blocked or "Недостаточно прав")
+
+    form = await request.form()
+    raw = form.get("new_client_id")
+    try:
+        new_cid = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return RedirectResponse(url=f"/admin/visits/{visit_id}?client_err=bad_id", status_code=303)
+
+    confirm_late = str(form.get("confirm_late") or "").lower() in ("1", "on", "true", "yes")
+    if policy.super_outside_window and not confirm_late:
+        return RedirectResponse(url=f"/admin/visits/{visit_id}?client_err=need_confirm", status_code=303)
+
+    if new_cid == visit.client_id:
+        return RedirectResponse(url=f"/admin/visits/{visit_id}?client_err=same", status_code=303)
+
+    new_client = db.get(Client, new_cid)
+    if new_client is None:
+        return RedirectResponse(url=f"/admin/visits/{visit_id}?client_err=not_found", status_code=303)
+
+    old_id = visit.client_id
+    visit.client_id = new_cid
+    visit.client_age_group = new_client.age_group
+    visit.updated_at = datetime.utcnow()
+    visit.updated_by_user_id = current_user.id
+    db.add(
+        VisitAuditLog(
+            visit_id=visit.id,
+            changed_by_user_id=current_user.id,
+            field_name="client_id",
+            old_value=str(old_id),
+            new_value=str(new_cid),
+        )
+    )
+    db.commit()
+    return RedirectResponse(url=f"/admin/visits/{visit_id}", status_code=303)
 
 
 @app.get("/admin/settings", response_class=HTMLResponse)
