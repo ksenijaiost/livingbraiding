@@ -74,6 +74,7 @@ from app.kit_inlay_visit import (
     kit_reserve_hint_by_id,
     list_kit_inlay_services_catalog,
     parse_kit_inlay_form,
+    read_visit_master_form_state,
     save_kit_inlay_visit,
     suggest_kits_for_stock,
 )
@@ -649,6 +650,16 @@ def admin_clients_suggest(
     return JSONResponse({"clients": _client_suggest_items(db, q)})
 
 
+def _masters_for_visit_form(db: Session) -> list[User]:
+    return list(
+        db.scalars(
+            select(User)
+            .where(User.is_active.is_(True), User.role == UserRole.MASTER)
+            .order_by(User.display_name.asc(), User.username.asc())
+        ).all()
+    )
+
+
 @app.get("/master/visit/new", response_class=HTMLResponse)
 def master_visit_new_get(
     request: Request,
@@ -669,6 +680,9 @@ def master_visit_new_get(
             request,
             current_user=current_user,
             service_catalog=service_catalog,
+            masters_for_visit=_masters_for_visit_form(db),
+            visit_master_on_ids=[current_user.id],
+            visit_master_pct_str={},
             stock_kit_selected_label=None,
             stock_kit_reserve_hint=None,
             extra_stock_kit_selected_label=None,
@@ -690,8 +704,9 @@ async def master_visit_new_post(
     db: Session = Depends(get_db),
 ):
     form = await request.form()
-    inp = parse_kit_inlay_form(form)
+    vm_on_ids, vm_pct_str = read_visit_master_form_state(form)
     try:
+        inp = parse_kit_inlay_form(form)
         visit = save_kit_inlay_visit(
             db,
             current_user.id,
@@ -712,6 +727,9 @@ async def master_visit_new_post(
                 request,
                 current_user=current_user,
                 service_catalog=service_catalog,
+                masters_for_visit=_masters_for_visit_form(db),
+                visit_master_on_ids=vm_on_ids,
+                visit_master_pct_str=vm_pct_str,
                 stock_kit_selected_label=_kit_stock_label_from_form(db, form_map, "stock_kit_id"),
                 stock_kit_reserve_hint=_kit_reserve_hint_from_form(db, form_map, "stock_kit_id"),
                 extra_stock_kit_selected_label=_kit_stock_label_from_form(

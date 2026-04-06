@@ -118,6 +118,32 @@
           <input type="number" name="duration_m" min="0" value="{{ fp.get('duration_m', '0') }}" />
         </div>
       </div>
+      <div class="card" style="margin-top: 12px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Мастера на визит</div>
+        <p class="muted" style="font-size: 12px; margin: -4px 0 10px;">
+          Вы отмечены автоматически. Для нескольких мастеров укажите долю пула целыми процентами; сумма по отмеченным — ровно 100.
+          Если отмечен только один мастер, поле «Доля, %» можно не заполнять (считается 100%).
+        </p>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          {% for m in masters_for_visit %}
+            <div class="row" style="align-items: center; flex-wrap: wrap; gap: 10px 16px;">
+              <label style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 12rem;">
+                <input type="checkbox" name="visit_master_on" value="{{ m.id }}"
+                  {% if m.id in visit_master_on_ids %}checked{% endif %} />
+                <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
+              </label>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <label class="muted" style="font-size: 12px; margin: 0;">Доля, %</label>
+                <input type="number" name="visit_master_pct_{{ m.id }}" min="0" max="100" step="1"
+                  value="{{ visit_master_pct_str.get(m.id, '') }}" style="width: 5rem;" />
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        {% if not masters_for_visit %}
+          <p class="muted" style="margin: 8px 0 0;">Нет активных пользователей с ролью «мастер» — обратитесь к администратору.</p>
+        {% endif %}
+      </div>
       <div class="row">
         <div>
           <label>Категория</label>
@@ -196,22 +222,6 @@
       <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">Дополнительные поля из каталога (подкатегория, затем услуга). Если вопросов нет — блок пустой.</p>
       <div id="merged-questionnaire-host" class="card" style="margin-bottom: 14px; background: #fafafa;"></div>
 
-      <h3>По услуге</h3>
-      <div class="row">
-        <div>
-          <label>Количество баз *</label>
-          <input type="number" name="bases_count" min="0" required value="{{ fp.get('bases_count', '40') }}" />
-        </div>
-        <div>
-          <label>Количество заготовок *</label>
-          <input type="number" name="blanks_count" min="0" required value="{{ fp.get('blanks_count', '12') }}" />
-        </div>
-      </div>
-      <div style="margin-bottom: 12px;">
-        <label>Комментарий</label>
-        <textarea name="service_comment" rows="2" placeholder="Разметка, несколько заготовок в базу…">{{ fp.get('service_comment', '') }}</textarea>
-      </div>
-
       <h3>Комплект</h3>
       <label><input type="radio" name="kit_kind" value="STOCK" onchange="kitKind()" {% if fp.get('kit_kind', 'STOCK') == 'STOCK' %}checked{% endif %} /> Из наличия</label>
       <label><input type="radio" name="kit_kind" value="OWN" onchange="kitKind()" {% if fp.get('kit_kind', 'STOCK') == 'OWN' %}checked{% endif %} /> Свой</label>
@@ -242,7 +252,7 @@
         <label><input type="checkbox" name="stock_use_entire" {% if fp.get('stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект (все доступные заготовки)</label>
         <div>
           <label>Или заготовок списать</label>
-          <input type="number" name="stock_blanks_used" min="0" value="{{ fp.get('stock_blanks_used', '12') }}" />
+          <input type="number" name="stock_blanks_used" min="0" value="{{ fp.get('stock_blanks_used', '') }}" />
         </div>
       </div>
 

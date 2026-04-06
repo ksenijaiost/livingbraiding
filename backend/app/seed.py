@@ -18,10 +18,12 @@ from app.db.models import (
     Kit,
     MaterialPriceCurrent,
     MaterialType,
+    QuestionnaireFieldType,
     Service,
     ServiceCategory,
     ServiceSubcategory,
     Setting,
+    SubcategoryQuestionnaireField,
     User,
     UserRole,
     MasterLevel,
@@ -78,9 +80,65 @@ def ensure_seed_data(db: Session) -> None:
             )
         )
 
+    if not db.scalar(select(User).where(User.username == "master2")):
+        db.add(
+            User(
+                username="master2",
+                display_name="Мастер 2",
+                role=UserRole.MASTER,
+                password_hash=hash_password("master2"),
+                is_active=True,
+                master_level=MasterLevel.MIDDLE,
+            )
+        )
+
     _ensure_demo_catalog_and_kits(db)
 
     db.commit()
+
+
+def _ensure_inlay_subcategory_questionnaire_fields(db: Session, subcategory_id: int) -> None:
+    """Общие вопросы вплетения для «В 2 руки» и «в 4 руки» (подкатегория в БД)."""
+    if db.scalar(
+        select(SubcategoryQuestionnaireField.id).where(
+            SubcategoryQuestionnaireField.subcategory_id == subcategory_id,
+            SubcategoryQuestionnaireField.field_key == "inlay_bases_count",
+        )
+    ):
+        return
+    db.add(
+        SubcategoryQuestionnaireField(
+            subcategory_id=subcategory_id,
+            field_key="inlay_bases_count",
+            field_type=QuestionnaireFieldType.NUMBER,
+            label="Количество баз",
+            required=True,
+            sort_order=10,
+            min_value=0.0,
+        )
+    )
+    db.add(
+        SubcategoryQuestionnaireField(
+            subcategory_id=subcategory_id,
+            field_key="inlay_blanks_count",
+            field_type=QuestionnaireFieldType.NUMBER,
+            label="Количество заготовок (в работе)",
+            required=True,
+            sort_order=20,
+            min_value=0.0,
+        )
+    )
+    db.add(
+        SubcategoryQuestionnaireField(
+            subcategory_id=subcategory_id,
+            field_key="inlay_service_comment",
+            field_type=QuestionnaireFieldType.TEXTAREA,
+            label="Комментарий по услуге",
+            required=False,
+            sort_order=30,
+            placeholder="Разметка, несколько заготовок в базу…",
+        )
+    )
 
 
 def _ensure_demo_catalog_and_kits(db: Session) -> None:
@@ -119,6 +177,8 @@ def _ensure_demo_catalog_and_kits(db: Session) -> None:
                     price_senior_to=hi,
                 )
             )
+
+    _ensure_inlay_subcategory_questionnaire_fields(db, sub.id)
 
     if not db.scalar(select(Kit).where(Kit.sku == "DEMO-001")):
         db.add(

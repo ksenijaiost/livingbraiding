@@ -51,7 +51,7 @@
     <h4 style="margin: 16px 0 6px; font-size: 1rem;">Мастера</h4>
     <p style="margin: 4px 0;">
       {% for vm in visit.masters %}
-        {{ vm.master.display_name }} ({{ vm.percent|int }}%){% if not loop.last %}, {% endif %}
+        {{ vm.master.display_name }} ({{ vm.percent|round(2) }}%){% if not loop.last %}, {% endif %}
       {% else %}—{% endfor %}
     </p>
 

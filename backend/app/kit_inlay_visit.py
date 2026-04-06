@@ -26,6 +26,8 @@ from app.db.models import (
     Service,
     ServiceSubcategory,
     Setting,
+    User,
+    UserRole,
     Visit,
     VisitClientType,
     VisitKitUsage,
@@ -117,6 +119,108 @@ def _apply_stock_kit_usage(
     if kit.pieces_available <= 0:
         kit.is_in_stock = False
     return n, cost
+
+
+def read_visit_master_form_state(form: Any) -> tuple[list[int], dict[int, str]]:
+    """Состояние блока мастеров из POST (для префилла при ошибке)."""
+    raw: list[Any] = []
+    if hasattr(form, "getlist"):
+        raw = list(form.getlist("visit_master_on"))
+    else:
+        v = form.get("visit_master_on")
+        if v is not None:
+            raw = [v]
+
+    def _field_str(name: str) -> str:
+        v = form.get(name)
+        if v is None or isinstance(v, UploadFile):
+            return ""
+        if isinstance(v, (bytes, bytearray)):
+            return v.decode().strip()
+        return str(v).strip()
+
+    seen: set[int] = set()
+    active_ids: list[int] = []
+    for x in raw:
+        if isinstance(x, UploadFile):
+            continue
+        try:
+            s = x.decode().strip() if isinstance(x, (bytes, bytearray)) else str(x).strip()
+            i = int(s)
+        except (ValueError, AttributeError):
+            continue
+        if i <= 0 or i in seen:
+            continue
+        seen.add(i)
+        active_ids.append(i)
+
+    pct_str: dict[int, str] = {}
+    for mid in active_ids:
+        pct_str[mid] = _field_str(f"visit_master_pct_{mid}")
+    return active_ids, pct_str
+
+
+def _parse_visit_master_allocations_from_form(form: Any) -> list[tuple[int, int]]:
+    """Чекбоксы `visit_master_on` + целые проценты `visit_master_pct_<id>`.
+
+    Один отмеченный мастер: пустое поле процента считается как 100%.
+    Несколько мастеров: у каждого отмеченного процент обязателен, сумма 100 (проверка ниже).
+    """
+    active_ids, pct_str = read_visit_master_form_state(form)
+    if not active_ids:
+        raise ValueError("Отметьте хотя бы одного мастера и укажите доли в процентах.")
+    rows: list[tuple[int, int]] = []
+    if len(active_ids) == 1:
+        mid = active_ids[0]
+        s = pct_str.get(mid, "").strip()
+        if not s:
+            p = 100
+        else:
+            try:
+                p = int(s)
+            except ValueError:
+                raise ValueError("Проценты мастеров должны быть целыми числами.")
+        rows.append((mid, p))
+        return rows
+    for mid in active_ids:
+        s = pct_str.get(mid, "").strip()
+        if not s:
+            raise ValueError("Для каждого отмеченного мастера укажите целый процент.")
+        try:
+            p = int(s)
+        except ValueError:
+            raise ValueError("Проценты мастеров должны быть целыми числами.")
+        rows.append((mid, p))
+    return rows
+
+
+def _resolve_visit_master_allocations(
+    db: Session, allocations: list[tuple[int, int]]
+) -> list[tuple[int, float]]:
+    if not allocations:
+        raise ValueError("Отметьте хотя бы одного мастера и укажите доли в процентах.")
+    total = sum(p for _, p in allocations)
+    if total != 100:
+        raise ValueError("Сумма долей мастеров должна быть ровно 100%.")
+    for _, p in allocations:
+        if p < 0 or p > 100:
+            raise ValueError("Процент каждого мастера должен быть от 0 до 100.")
+    seen: set[int] = set()
+    out: list[tuple[int, float]] = []
+    for mid, p in allocations:
+        if mid in seen:
+            continue
+        u = db.get(User, mid)
+        if not u or not u.is_active:
+            raise ValueError(f"Мастер (ID {mid}) не найден или отключён.")
+        if u.role != UserRole.MASTER:
+            dn = (u.display_name or u.username or "").strip() or f"ID {mid}"
+            raise ValueError(f"«{dn}» не в роли мастера.")
+        seen.add(mid)
+        out.append((mid, float(p)))
+    if len(out) != len(allocations):
+        raise ValueError("Дублирование мастера в списке долей не допускается.")
+    return out
 
 
 def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
@@ -243,9 +347,7 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
         own_extra_stock_kit_id=extra_stock_id if extra_stock_id else None,
         own_extra_stock_use_entire=g_bool("own_extra_stock_use_entire"),
         own_extra_stock_blanks_used=g_int("own_extra_stock_blanks_used", 0),
-        bases_count=g_int("bases_count", 0),
-        blanks_count=g_int("blanks_count", 0),
-        service_comment=g("service_comment") or None,
+        visit_master_allocations=_parse_visit_master_allocations_from_form(form),
         questionnaire_raw=extract_questionnaire_raw_from_form(form),
     )
 
@@ -290,19 +392,11 @@ class KitInlayFormInput:
     own_extra_stock_kit_id: int | None
     own_extra_stock_use_entire: bool
     own_extra_stock_blanks_used: int
-    # service fields
-    bases_count: int
-    blanks_count: int
-    service_comment: str | None
+    visit_master_allocations: list[tuple[int, int]]
     questionnaire_raw: dict[str, str]
 
 
 def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServiceDetailsPayload:
-    service_fields = {
-        "bases_count": inp.bases_count,
-        "blanks_count": inp.blanks_count,
-        "service_comment": inp.service_comment or None,
-    }
     kind = inp.kit_kind.upper()
     if kind == "STOCK":
         if not inp.stock_kit_id:
@@ -384,7 +478,7 @@ def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServic
 
     return parse_visit_service_details(
         {
-            "service_fields": service_fields,
+            "service_fields": {},
             "kit": kit_block.model_dump(mode="json"),
             "answers": answers,
             "answer_labels": answer_labels,
@@ -403,6 +497,8 @@ def save_kit_inlay_visit(
     """Визит с выбранным клиентом или новым черновиком; услуга, склад STOCK, расчёт."""
     if inp.service_id <= 0:
         raise ValueError("Выберите услугу")
+
+    master_rows = _resolve_visit_master_allocations(db, inp.visit_master_allocations)
 
     payload = build_payload_from_input(inp, db)
 
@@ -537,7 +633,8 @@ def save_kit_inlay_visit(
     db.add(visit)
     db.flush()
 
-    db.add(VisitMaster(visit_id=visit.id, master_id=master_id, percent=100.0))
+    for mid, pct in master_rows:
+        db.add(VisitMaster(visit_id=visit.id, master_id=mid, percent=pct))
 
     details = payload.model_dump(mode="json")
     db.add(

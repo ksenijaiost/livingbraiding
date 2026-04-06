@@ -112,31 +112,18 @@ class KitBlock(BaseModel):
         return self
 
 
-class FullHeadKitInlayServiceFields(BaseModel):
-    """Поля услуг «Вплетение комплекта»: В 2 руки / в 4 руки (одинаковые поля)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    bases_count: int = Field(..., ge=0)
-    blanks_count: int = Field(..., ge=0)
-    service_comment: str | None = None
-
-
 class VisitServiceDetailsPayload(BaseModel):
     """
     Полный `details_json` для строки услуги в визите.
 
-    service_fields — типизировано для группы «вплетение комплекта»; для других услуг
-    позже можно добавить Union или отдельные модели с дискриминатором.
-
-    answers — ответы по ключам полей из склейки анкеты (подкатегория + услуга).
-    answer_labels — снимок подписей полей на момент визита (field_key → label), для отчётов.
-    answer_display — как показывать значение в интерфейсе (SELECT → подпись варианта, bool → Да/Нет).
+    service_fields — устаревший контейнер (старые визиты с bases_count в JSON); новые — пустой {}.
+    answers — универсальная анкета (вплетение и др.) по ключам полей из БД.
+    answer_labels / answer_display — снимки для отчётов.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    service_fields: FullHeadKitInlayServiceFields
+    service_fields: dict[str, Any] = Field(default_factory=dict)
     kit: KitBlock
     answers: dict[str, Any] = Field(default_factory=dict)
     answer_labels: dict[str, str] = Field(default_factory=dict)
