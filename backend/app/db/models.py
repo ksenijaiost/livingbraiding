@@ -162,6 +162,8 @@ class ServiceCategory(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # False: не в форме визита (напр. продажа материала — отдельный поток на этапе 7).
+    include_in_visit: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
 class ServiceSubcategory(Base):

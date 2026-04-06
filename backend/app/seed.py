@@ -30,6 +30,12 @@ from app.db.models import (
 )
 from app.security import hash_password
 from app.seed_catalog_vsy_golova import ensure_vsy_golova_catalog
+from app.seed_catalog_zakaz import ensure_zakaz_catalog
+from app.seed_catalog_malishki_muzhchiny import ensure_malishki_muzhchiny_catalog
+from app.seed_catalog_miniatyura import ensure_miniatyura_catalog
+from app.seed_catalog_narashivanie import ensure_narashivanie_catalog
+from app.seed_catalog_prodazha_materiala import ensure_prodazha_materiala_catalog
+from app.seed_catalog_snjatie_ukhod import ensure_snjatie_ukhod_catalogs
 
 
 def ensure_seed_data(db: Session) -> None:
@@ -162,8 +168,14 @@ def _deactivate_legacy_inlay_4h_service(db: Session) -> None:
 
 
 def _ensure_vsy_golova_catalog_and_kits(db: Session) -> None:
-    """Каталог «Вся голова» из JSON + анкета вплетения + демо-комплекты."""
+    """Каталоги из JSON + анкета вплетения + демо-комплекты."""
     ensure_vsy_golova_catalog(db)
+    ensure_zakaz_catalog(db)
+    ensure_malishki_muzhchiny_catalog(db)
+    ensure_miniatyura_catalog(db)
+    ensure_narashivanie_catalog(db)
+    ensure_prodazha_materiala_catalog(db)
+    ensure_snjatie_ukhod_catalogs(db)
     _deactivate_legacy_inlay_4h_service(db)
 
     sub = db.scalar(

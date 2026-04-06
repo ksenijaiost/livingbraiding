@@ -24,6 +24,7 @@ from app.db.models import (
     MixSource,
     QuestionnaireFieldType,
     Service,
+    ServiceCategory,
     ServiceSubcategory,
     Setting,
     User,
@@ -500,8 +501,6 @@ def save_kit_inlay_visit(
 
     master_rows = _resolve_visit_master_allocations(db, inp.visit_master_allocations)
 
-    payload = build_payload_from_input(inp, db)
-
     service = db.scalar(
         select(Service)
         .options(selectinload(Service.subcategory).selectinload(ServiceSubcategory.category))
@@ -509,6 +508,10 @@ def save_kit_inlay_visit(
     )
     if not service or not service.subcategory or not service.subcategory.category:
         raise ValueError("Услуга не найдена")
+    if not service.subcategory.category.include_in_visit:
+        raise ValueError("Эта позиция недоступна для выбора в визите")
+
+    payload = build_payload_from_input(inp, db)
 
     mat_cost, k_snap, ku_snap = _materials_cost_and_snapshot(
         db,
@@ -672,6 +675,7 @@ def list_kit_inlay_services(db: Session) -> list[Service]:
         .where(
             ServiceSubcategory.name == "Вплетение комплекта",
             Service.is_active.is_(True),
+            ServiceCategory.include_in_visit.is_(True),
         )
         .order_by(Service.name.asc())
     )

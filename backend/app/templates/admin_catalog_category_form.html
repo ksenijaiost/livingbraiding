@@ -16,6 +16,10 @@
         <input type="checkbox" name="is_active" {% if form_active %}checked{% endif %} />
         Активна (показывать в каталоге)
       </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 10px;">
+        <input type="checkbox" name="include_in_visit" {% if form_include_in_visit %}checked{% endif %} />
+        Доступна в форме визита мастера
+      </label>
       <p style="margin-top: 16px;">
         <button type="submit">Сохранить</button>
         {% if not is_new %}

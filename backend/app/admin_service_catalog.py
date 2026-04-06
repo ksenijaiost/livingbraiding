@@ -91,6 +91,7 @@ def category_new_form(
             category=None,
             form_name="",
             form_active=True,
+            form_include_in_visit=True,
         ),
     )
 
@@ -99,13 +100,18 @@ def category_new_form(
 def category_new_save(
     name: str = Form(...),
     is_active: str | None = Form(None),
+    include_in_visit: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
     nm = (name or "").strip()
     if not nm:
         return RedirectResponse(url="/admin/catalog/categories/new?err=empty", status_code=303)
-    cat = ServiceCategory(name=nm, is_active=_is_checked(is_active))
+    cat = ServiceCategory(
+        name=nm,
+        is_active=_is_checked(is_active),
+        include_in_visit=_is_checked(include_in_visit),
+    )
     db.add(cat)
     try:
         db.commit()
@@ -136,6 +142,7 @@ def category_edit_form(
             category=cat,
             form_name=cat.name,
             form_active=cat.is_active,
+            form_include_in_visit=cat.include_in_visit,
         ),
     )
 
@@ -145,6 +152,7 @@ def category_edit_save(
     category_id: int,
     name: str = Form(...),
     is_active: str | None = Form(None),
+    include_in_visit: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -159,6 +167,7 @@ def category_edit_save(
         )
     cat.name = nm
     cat.is_active = _is_checked(is_active)
+    cat.include_in_visit = _is_checked(include_in_visit)
     try:
         db.commit()
     except IntegrityError:

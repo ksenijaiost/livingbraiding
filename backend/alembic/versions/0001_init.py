@@ -4,6 +4,8 @@ Revision ID: 0001_init
 Revises:
 Create Date: 2026-03-31
 
+service_categories.include_in_visit — участие категории в форме визита мастера.
+
 For early development: delete the SQLite file and run `alembic upgrade head` again.
 """
 
@@ -91,6 +93,12 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column(
+            "include_in_visit",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("1"),
+        ),
         sa.UniqueConstraint("name", name="uq_service_category_name"),
     )
 
