@@ -243,6 +243,7 @@ def subcategory_new_form(
             form_active=True,
             form_show_kit=False,
             form_show_material=True,
+            form_show_thermo=False,
         ),
     )
 
@@ -254,6 +255,7 @@ def subcategory_new_save(
     is_active: str | None = Form(None),
     show_kit_section: str | None = Form(None),
     show_material_description: str | None = Form(None),
+    show_thermo_visit: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -270,6 +272,7 @@ def subcategory_new_save(
         is_active=_is_checked(is_active),
         show_kit_section=_is_checked(show_kit_section),
         show_material_description=_is_checked(show_material_description),
+        show_thermo_visit=_is_checked(show_thermo_visit),
     )
     db.add(sub)
     try:
@@ -306,6 +309,7 @@ def subcategory_edit_form(
             form_active=sub.is_active,
             form_show_kit=sub.show_kit_section,
             form_show_material=sub.show_material_description,
+            form_show_thermo=sub.show_thermo_visit,
         ),
     )
 
@@ -317,6 +321,7 @@ def subcategory_edit_save(
     is_active: str | None = Form(None),
     show_kit_section: str | None = Form(None),
     show_material_description: str | None = Form(None),
+    show_thermo_visit: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -333,6 +338,7 @@ def subcategory_edit_save(
     sub.is_active = _is_checked(is_active)
     sub.show_kit_section = _is_checked(show_kit_section)
     sub.show_material_description = _is_checked(show_material_description)
+    sub.show_thermo_visit = _is_checked(show_thermo_visit)
     try:
         db.commit()
     except IntegrityError:

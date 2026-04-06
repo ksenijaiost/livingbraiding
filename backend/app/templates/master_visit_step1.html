@@ -23,6 +23,11 @@
       </div>
     {% endif %}
     <form method="post" action="/master/visit/new/continue" id="visit-form">
+      {% for k, v in fp.items() %}
+        {% if k.startswith('thermo_') %}
+          <input type="hidden" name="{{ k }}" value="{{ v|e }}" />
+        {% endif %}
+      {% endfor %}
       <h3>Клиент</h3>
       <div style="margin-bottom: 10px;">
         <label style="margin-right: 16px;">
@@ -147,7 +152,7 @@
       <div class="row">
         <div>
           <label>Категория</label>
-          <select id="service_category_id" name="service_category_id" onchange="serviceCatalogOnCategory()" {% if not service_catalog %}disabled{% endif %}>
+          <select id="service_category_id" name="service_category_id" onchange="serviceCatalogOnCategory()" {% if not service_catalog %}disabled{% endif %} style="width: 100%; box-sizing: border-box;">
             {% for c in service_catalog %}
               <option value="{{ c.id }}" {% if fp.get('service_category_id')|string == c.id|string %}selected{% endif %}>{{ c.name }}</option>
             {% endfor %}
@@ -155,20 +160,23 @@
         </div>
         <div>
           <label>Подкатегория</label>
-          <select id="service_subcategory_id" name="service_subcategory_id" onchange="serviceCatalogOnSubcategory()" {% if not service_catalog %}disabled{% endif %}>
+          <select id="service_subcategory_id" name="service_subcategory_id" onchange="serviceCatalogOnSubcategory()" {% if not service_catalog %}disabled{% endif %} style="width: 100%; box-sizing: border-box;">
           </select>
         </div>
-        <div style="flex: 1;">
-          <label>Услуга *</label>
-          <select id="service_id" name="service_id" required onchange="updateKitSectionVisibility()">
-          </select>
-        </div>
+      </div>
+      <div style="margin-top: 12px;">
+        <label for="service_id">Услуга *</label>
+        <select id="service_id" name="service_id" required onchange="updateKitSectionVisibility()"
+          style="width: 100%; max-width: 100%; box-sizing: border-box; min-height: 2.5rem;">
+        </select>
       </div>
 
       <div class="card" style="margin-top: 14px; background: #f8fafc;">
         <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 10px;">
           <strong id="amount_from_client_label" style="font-size: 1.05rem;">Сколько взяли с клиента</strong>
-          <input id="amount_from_client" type="number" name="amount_from_client" min="0" step="1" value="{{ fp.get('amount_from_client', '5000') }}" style="max-width: 12rem; font-size: 1.05rem;" />
+          <input id="amount_from_client" type="number" name="amount_from_client" min="0" step="1" inputmode="numeric" autocomplete="off"
+            value="{{ fp.get('amount_from_client', '') }}" placeholder=""
+            style="max-width: 12rem; font-size: 1.05rem;" />
           <span class="muted">₽</span>
         </div>
         <p class="muted" style="font-size: 12px; margin: 8px 0 0;">Для визита «свой клиент» сумму можно оставить 0.</p>
@@ -617,6 +625,7 @@
         const opt = document.createElement('option');
         opt.value = sc.id;
         opt.textContent = sc.name;
+        opt.title = sc.name;
         subSel.appendChild(opt);
       }
 
@@ -663,7 +672,9 @@
       for (const s of services) {
         const opt = document.createElement('option');
         opt.value = s.id;
-        opt.textContent = s.name + servicePriceHint(s);
+        const line = s.name + servicePriceHint(s);
+        opt.textContent = line;
+        opt.title = line;
         serviceSel.appendChild(opt);
       }
       updateKitSectionVisibility();

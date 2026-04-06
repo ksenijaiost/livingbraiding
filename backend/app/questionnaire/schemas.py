@@ -112,6 +112,41 @@ class KitBlock(BaseModel):
         return self
 
 
+class ThermoTemplateNumbers(BaseModel):
+    """Числовой шаблон термозамещения (пустые поля формы → 0 при сохранении)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Допускает десятичные; остальные поля шабона — только целые.
+    strand_weight_avg: float = 0.0
+    row_1: int = 0
+    row_2: int = 0
+    row_3: int = 0
+    other_rows_text: str = ""
+    temples: int = 0
+    triangles: int = 0
+    bird: int = 0
+    square: int = 0
+    comment: str = ""
+
+
+class ThermoVisitDetails(BaseModel):
+    """Основной блок термозамещения + либо новый заполненный шаблон, либо выбор сохранённого."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    curls_material: str = ""
+    material_length: str = ""
+    shade: str = ""
+    bases_total: int = 0
+    weight_with_margin: float = 0.0
+    template_mode: Literal["NEW", "OLD"]
+    old_template_id: int | None = None
+    algorithm_changes: str | None = None
+    filled_template: ThermoTemplateNumbers | None = None
+    saved_template_snapshot: ThermoTemplateNumbers | None = None
+
+
 class VisitServiceDetailsPayload(BaseModel):
     """
     Полный `details_json` для строки услуги в визите.
@@ -129,6 +164,7 @@ class VisitServiceDetailsPayload(BaseModel):
     answers: dict[str, Any] = Field(default_factory=dict)
     answer_labels: dict[str, str] = Field(default_factory=dict)
     answer_display: dict[str, str] = Field(default_factory=dict)
+    thermo: ThermoVisitDetails | None = None
 
 
 def parse_visit_service_details(data: object) -> VisitServiceDetailsPayload:

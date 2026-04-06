@@ -56,6 +56,13 @@ from app.questionnaire.schemas import (
     VisitServiceDetailsPayload,
     parse_visit_service_details,
 )
+from app.thermo_visit import (
+    ThermoFormParsed,
+    build_thermo_visit_details,
+    parse_thermo_from_form,
+    persist_new_thermo_template_if_needed,
+    service_requires_thermo_flow,
+)
 
 
 def service_requires_kit_block(service: Service) -> bool:
@@ -365,6 +372,7 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
         questionnaire_raw=extract_questionnaire_raw_from_form(form),
         addon_sales_amount=max(0.0, g_float("addon_sales_amount", 0)),
         addon_sales_description=g("addon_sales_description", ""),
+        thermo_parsed=parse_thermo_from_form(form),
     )
 
 
@@ -412,6 +420,7 @@ class KitInlayFormInput:
     questionnaire_raw: dict[str, str]
     addon_sales_amount: float
     addon_sales_description: str
+    thermo_parsed: ThermoFormParsed
 
 
 def _answers_labels_display_from_specs(
@@ -501,6 +510,23 @@ def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServic
     )
     if not service or not service.subcategory:
         raise ValueError("Услуга не найдена")
+
+    if service_requires_thermo_flow(service):
+        thermo = build_thermo_visit_details(
+            inp.thermo_parsed,
+            db,
+            client_id=inp.existing_client_id,
+        )
+        return parse_visit_service_details(
+            {
+                "service_fields": {},
+                "kit": None,
+                "answers": {},
+                "answer_labels": {},
+                "answer_display": {},
+                "thermo": thermo.model_dump(mode="json"),
+            }
+        )
 
     specs = load_merged_questionnaire_specs(db, inp.service_id)
     answers, q_errors = validate_and_coerce_answers(inp.questionnaire_raw, specs)
@@ -805,6 +831,14 @@ def save_kit_inlay_visit(
                 cost_amount=camount,
                 note=None,
             )
+        )
+
+    if payload.thermo is not None:
+        persist_new_thermo_template_if_needed(
+            db,
+            client_id=client.id,
+            details=payload.thermo,
+            label_suffix=f"Термо {performed_dt.date().isoformat()}",
         )
 
     db.commit()

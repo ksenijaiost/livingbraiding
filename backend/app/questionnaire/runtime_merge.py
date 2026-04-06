@@ -143,8 +143,11 @@ def load_merged_questionnaire_specs(db: Session, service_id: int) -> list[Merged
             .order_by(CategoryQuestionnaireField.sort_order, CategoryQuestionnaireField.id)
         ).all()
     )
-    cat_specs = [_spec_from_category_row(r) for r in cat_rows]
-    cat_specs = _filter_category_specs(cat_specs, service=svc, subcategory=sub)
+    if sub.show_thermo_visit:
+        cat_specs: list[MergedQuestionnaireFieldSpec] = []
+    else:
+        cat_specs = [_spec_from_category_row(r) for r in cat_rows]
+        cat_specs = _filter_category_specs(cat_specs, service=svc, subcategory=sub)
 
     sub_rows = list(
         db.scalars(

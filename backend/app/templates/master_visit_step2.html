@@ -59,6 +59,120 @@
         </div>
       {% endif %}
 
+      {% if is_thermo_visit %}
+      {% set tp = thermo_prefill %}
+      <h3>Термозамещение</h3>
+      <div class="card" style="margin-bottom: 14px; background: #f0f9ff; border-color: #bae6fd;">
+        <div style="margin-bottom: 12px;">
+          <div style="font-weight: 600; margin-bottom: 6px;">Кудри</div>
+          <input type="text" name="thermo_curls" style="width:100%;" value="{{ tp.get('thermo_curls', '')|e }}"
+            placeholder="Название материала" />
+        </div>
+        <div style="margin-bottom: 12px;">
+          <div style="font-weight: 600; margin-bottom: 6px;">Длина</div>
+          <input type="text" name="thermo_length" style="width:100%;" value="{{ tp.get('thermo_length', '')|e }}"
+            placeholder="Длина материала" />
+        </div>
+        <div style="margin-bottom: 12px;">
+          <div style="font-weight: 600; margin-bottom: 6px;">Оттенок</div>
+          <input type="text" name="thermo_shade" style="width:100%;" value="{{ tp.get('thermo_shade', '')|e }}"
+            placeholder="Цвет материала" />
+        </div>
+        <div style="margin-bottom: 12px;">
+          <div style="font-weight: 600; margin-bottom: 6px;">Общее количество баз (целое)</div>
+          <input type="number" name="thermo_bases_total" min="0" step="1" inputmode="numeric" style="width:100%; max-width:12rem;"
+            value="{{ tp.get('thermo_bases_total', '')|e }}" />
+        </div>
+        <div style="margin-bottom: 12px;">
+          <div style="font-weight: 600; margin-bottom: 6px;">Вес материала (всего со страховками), можно с десятыми</div>
+          <input type="number" name="thermo_weight" min="0" step="any" style="width:100%; max-width:12rem;"
+            value="{{ tp.get('thermo_weight', '')|e }}" />
+        </div>
+        <div style="margin-bottom: 12px;">
+          <div style="font-weight: 600; margin-bottom: 8px;">Какой шаблон</div>
+          <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-weight:normal;">
+            <input type="radio" name="thermo_template_mode" value="NEW"
+              {% if tp.get('thermo_template_mode', 'NEW') == 'NEW' %}checked{% endif %} onchange="thermoModeUpdate()" />
+            Новый — заполнить шаблон ниже
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:normal;">
+            <input type="radio" name="thermo_template_mode" value="OLD"
+              {% if tp.get('thermo_template_mode') == 'OLD' %}checked{% endif %} onchange="thermoModeUpdate()" />
+            Старый — выбрать из сохранённых
+          </label>
+        </div>
+
+        <div id="thermo-block-old" style="display:none; margin-top: 14px; padding-top: 12px; border-top: 1px solid #bae6fd;">
+          {% if thermo_saved_templates and thermo_saved_templates|length > 0 %}
+            <label style="display:block; font-weight:600; margin-bottom:6px;">Сохранённый шаблон</label>
+            <select name="thermo_old_template_id" style="width:100%; max-width: 28rem;">
+              <option value="">— выберите —</option>
+              {% for t in thermo_saved_templates %}
+                <option value="{{ t.id }}" {% if tp.get('thermo_old_template_id')|string == t.id|string %}selected{% endif %}>
+                  №{{ t.id }} · {{ t.label }} ({{ t.created_at }})
+                </option>
+              {% endfor %}
+            </select>
+          {% else %}
+            <p class="muted" style="margin:0;">Сохранённых шаблонов у этого клиента пока нет. Выберите «Новый» или сохраните визит после первого заполнения шаблона.</p>
+          {% endif %}
+          <div style="margin-top: 12px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">Изменения в алгоритме плетения (доп. ряды и т.д.)</div>
+            <textarea name="thermo_algorithm_changes" rows="3" style="width:100%;"
+              placeholder="Тут можно описать всё, что менялось">{{ tp.get('thermo_algorithm_changes', '') }}</textarea>
+          </div>
+        </div>
+
+        <div id="thermo-block-new" style="display:none; margin-top: 14px; padding-top: 12px; border-top: 1px solid #bae6fd;">
+          <p class="muted" style="font-size:12px; margin:0 0 10px;">Числовые поля можно оставить пустыми — при сохранении подставится 0. Средний вес пряди — можно с десятыми; ряды, виски и т.д. — только целые.</p>
+          <div style="margin-bottom: 10px;"><span style="font-weight:600;">Средний вес пряди</span>
+            <input type="number" name="thermo_tpl_strand_weight_avg" min="0" step="any" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+              value="{{ tp.get('thermo_tpl_strand_weight_avg', '')|e }}" /></div>
+          <div style="margin-bottom: 10px;"><span style="font-weight:600;">1 ряд</span>
+            <input type="number" name="thermo_tpl_row_1" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+              value="{{ tp.get('thermo_tpl_row_1', '')|e }}" /></div>
+          <div style="margin-bottom: 10px;"><span style="font-weight:600;">2 ряд</span>
+            <input type="number" name="thermo_tpl_row_2" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+              value="{{ tp.get('thermo_tpl_row_2', '')|e }}" /></div>
+          <div style="margin-bottom: 10px;"><span style="font-weight:600;">3 ряд</span>
+            <input type="number" name="thermo_tpl_row_3" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+              value="{{ tp.get('thermo_tpl_row_3', '')|e }}" /></div>
+          <div style="margin-bottom: 10px;"><span style="font-weight:600;">Другие ряды</span>
+            <textarea name="thermo_tpl_other_rows" rows="2" style="width:100%; margin-top:4px;"
+              placeholder="Если есть доп ряды, напиши номер ряда и число баз">{{ tp.get('thermo_tpl_other_rows', '') }}</textarea></div>
+          <div style="margin-bottom: 10px;"><span style="font-weight:600;">Виски</span>
+            <input type="number" name="thermo_tpl_temples" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+              value="{{ tp.get('thermo_tpl_temples', '')|e }}" /></div>
+          <div style="margin-bottom: 10px;"><span style="font-weight:600;">Треугольники</span>
+            <input type="number" name="thermo_tpl_triangles" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+              value="{{ tp.get('thermo_tpl_triangles', '')|e }}" /></div>
+          <div style="margin-bottom: 10px;"><span style="font-weight:600;">Птичка</span>
+            <input type="number" name="thermo_tpl_bird" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+              value="{{ tp.get('thermo_tpl_bird', '')|e }}" /></div>
+          <div style="margin-bottom: 10px;"><span style="font-weight:600;">Квадрат</span>
+            <input type="number" name="thermo_tpl_square" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+              value="{{ tp.get('thermo_tpl_square', '')|e }}" /></div>
+          <div style="margin-bottom: 4px;"><span style="font-weight:600;">Комментарий</span>
+            <textarea name="thermo_tpl_comment" rows="2" style="width:100%; margin-top:4px;"
+              placeholder="Другие ряды и/или изменения в алгоритме.">{{ tp.get('thermo_tpl_comment', '') }}</textarea></div>
+        </div>
+      </div>
+      <script>
+        function thermoModeUpdate() {
+          const r = document.querySelector('input[name="thermo_template_mode"]:checked');
+          const m = r ? r.value : 'NEW';
+          const bn = document.getElementById('thermo-block-new');
+          const bo = document.getElementById('thermo-block-old');
+          if (bn) bn.style.display = m === 'NEW' ? 'block' : 'none';
+          if (bo) bo.style.display = m === 'OLD' ? 'block' : 'none';
+        }
+        document.querySelectorAll('input[name="thermo_template_mode"]').forEach(function(el) {
+          el.addEventListener('change', thermoModeUpdate);
+        });
+        thermoModeUpdate();
+      </script>
+      {% endif %}
+
       <p style="margin-top: 16px;">
         <button type="submit" formaction="/master/visit/new/back-to-step1" formmethod="post" class="secondary">Назад</button>
         <button type="submit">Сохранить визит</button>

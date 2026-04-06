@@ -255,6 +255,19 @@ def _ensure_sphinx_subcategory_questionnaire_fields(db: Session) -> None:
             )
 
 
+def _ensure_thermo_subcategory_flag(db: Session) -> None:
+    sub = db.scalar(
+        select(ServiceSubcategory)
+        .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
+        .where(
+            ServiceCategory.name == "Вся голова",
+            ServiceSubcategory.name == "Термозамещение",
+        )
+    )
+    if sub:
+        sub.show_thermo_visit = True
+
+
 def _ensure_subcategory_kit_and_material_flags(db: Session) -> None:
     kit_pairs = (
         ("Вся голова", "Вплетение комплекта"),
@@ -356,6 +369,7 @@ def _ensure_visit_questionnaire_layout(db: Session) -> None:
     _ensure_category_questionnaire_vsy_golova_and_miniatyura(db)
     _remove_inlay_fields_from_subcategory_vpletenie(db)
     _ensure_sphinx_subcategory_questionnaire_fields(db)
+    _ensure_thermo_subcategory_flag(db)
     _ensure_subcategory_kit_and_material_flags(db)
     _ensure_service_kit_material_overrides(db)
     _move_muzhchiny_services_between_subcategories(db)

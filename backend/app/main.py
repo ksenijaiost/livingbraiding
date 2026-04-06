@@ -50,6 +50,7 @@ from app.client_validation import (
 )
 from app.db.models import (
     Client,
+    ClientThermoTemplate,
     Kit,
     MaterialPriceCurrent,
     MaterialType,
@@ -87,6 +88,11 @@ from app.kit_inlay_visit import (
 )
 from app.questionnaire.runtime_merge import load_merged_questionnaire_specs
 from app.seed import ensure_seed_data
+from app.thermo_visit import (
+    collect_thermo_prefill_from_form,
+    list_client_thermo_templates_for_visit,
+    service_requires_thermo_flow,
+)
 from app.visit_edit_policy import visit_client_change_policy
 from app.ui_visit_display import (
     build_service_human_display,
@@ -613,6 +619,14 @@ def admin_client_detail(
     )
     kit_rows = list(db.scalars(kit_stmt).all())
 
+    thermo_tpls = list(
+        db.scalars(
+            select(ClientThermoTemplate)
+            .where(ClientThermoTemplate.client_id == client_id)
+            .order_by(ClientThermoTemplate.created_at.desc(), ClientThermoTemplate.id.desc())
+        ).all()
+    )
+
     show_admin_actions = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
     return templates.TemplateResponse(
         "admin_client_detail.html",
@@ -622,6 +636,7 @@ def admin_client_detail(
             client=client,
             visit_rows=visit_rows,
             kit_rows=kit_rows,
+            thermo_templates=thermo_tpls,
             birth_display=format_client_birth_display(
                 client.birth_day, client.birth_month, client.birth_year
             ),
@@ -902,6 +917,17 @@ async def master_visit_continue_post(
         )
 
     q_fields = [s.to_client_json() for s in specs]
+    is_thermo = service_requires_thermo_flow(svc_row)
+    thermo_saved = []
+    if is_thermo:
+        thermo_saved = [
+            {
+                "id": t.id,
+                "label": t.label,
+                "created_at": t.created_at.strftime("%d.%m.%Y %H:%M"),
+            }
+            for t in list_client_thermo_templates_for_visit(db, inp.existing_client_id)
+        ]
     return templates.TemplateResponse(
         "master_visit_step2.html",
         _ctx(
@@ -910,7 +936,10 @@ async def master_visit_continue_post(
             step1_hiddens=step1_hiddens,
             questionnaire_fields=q_fields,
             questionnaire_prefill={},
-            no_questionnaire=len(specs) == 0,
+            no_questionnaire=len(specs) == 0 and not is_thermo,
+            is_thermo_visit=is_thermo,
+            thermo_saved_templates=thermo_saved,
+            thermo_prefill={},
             service_display=service_display,
             error=None,
         ),
@@ -974,6 +1003,28 @@ async def master_visit_new_post(
                 f"{svc_row.subcategory.category.name} / {svc_row.subcategory.name} / {svc_row.name}"
             )
         q_fields = [s.to_client_json() for s in specs]
+        is_thermo = service_requires_thermo_flow(svc_row) if svc_row else False
+        thermo_saved = []
+        if is_thermo and svc_row:
+            eid_raw = form.get("existing_client_id")
+            eid_visit: int | None = None
+            if eid_raw is not None and not isinstance(eid_raw, UploadFile):
+                es = (
+                    eid_raw.decode().strip()
+                    if isinstance(eid_raw, (bytes, bytearray))
+                    else str(eid_raw).strip()
+                )
+                if es.isdigit():
+                    eid_visit = int(es)
+            thermo_saved = [
+                {
+                    "id": t.id,
+                    "label": t.label,
+                    "created_at": t.created_at.strftime("%d.%m.%Y %H:%M"),
+                }
+                for t in list_client_thermo_templates_for_visit(db, eid_visit)
+            ]
+        thermo_pf = collect_thermo_prefill_from_form(form)
         return templates.TemplateResponse(
             "master_visit_step2.html",
             _ctx(
@@ -982,7 +1033,10 @@ async def master_visit_new_post(
                 step1_hiddens=step1_hiddens,
                 questionnaire_fields=q_fields,
                 questionnaire_prefill=q_prefill,
-                no_questionnaire=len(specs) == 0,
+                no_questionnaire=len(specs) == 0 and not is_thermo,
+                is_thermo_visit=is_thermo,
+                thermo_saved_templates=thermo_saved,
+                thermo_prefill=thermo_pf,
                 service_display=service_display,
                 error=str(exc),
             ),

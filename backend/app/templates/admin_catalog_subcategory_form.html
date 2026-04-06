@@ -28,6 +28,10 @@
         <input type="checkbox" name="show_material_description" {% if form_show_material %}checked{% endif %} />
         Показывать поле «Описание про материал» из анкеты категории (если оно задано)
       </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+        <input type="checkbox" name="show_thermo_visit" {% if form_show_thermo %}checked{% endif %} />
+        Блок «Термозамещение» на шаге 2 визита (без общих полей анкеты категории)
+      </label>
       <p style="margin-top: 16px;">
         <button type="submit">Сохранить</button>
         <a href="/admin/catalog/categories/{{ category.id }}/subcategories"><button type="button" class="secondary">Отмена</button></a>

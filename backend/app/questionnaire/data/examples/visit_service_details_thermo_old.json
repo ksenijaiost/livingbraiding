@@ -1,0 +1,30 @@
+{
+  "service_fields": {},
+  "kit": null,
+  "answers": {},
+  "answer_labels": {},
+  "answer_display": {},
+  "thermo": {
+    "curls_material": "Y",
+    "material_length": "60",
+    "shade": "2",
+    "bases_total": 42,
+    "weight_with_margin": 100,
+    "template_mode": "OLD",
+    "old_template_id": 5,
+    "algorithm_changes": "Добавлен ряд",
+    "filled_template": null,
+    "saved_template_snapshot": {
+      "strand_weight_avg": 2,
+      "row_1": 8,
+      "row_2": 8,
+      "row_3": 8,
+      "other_rows_text": "4 ряд: 4",
+      "temples": 1,
+      "triangles": 0,
+      "bird": 0,
+      "square": 1,
+      "comment": ""
+    }
+  }
+}

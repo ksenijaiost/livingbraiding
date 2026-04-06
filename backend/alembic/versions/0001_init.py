@@ -72,6 +72,15 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "client_thermo_templates",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("label", sa.String(length=200), nullable=False),
+        sa.Column("template_json", sa.Text(), nullable=False),
+    )
+
+    op.create_table(
         "studio_expense_categories",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("name", sa.String(length=120), nullable=False),
@@ -114,6 +123,7 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
         sa.Column("show_kit_section", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column("show_material_description", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("show_thermo_visit", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.UniqueConstraint("category_id", "name", name="uq_subcategory_per_category"),
     )
 
@@ -367,6 +377,7 @@ def downgrade() -> None:
     op.drop_table("service_categories")
     op.drop_table("studio_expenses")
     op.drop_table("studio_expense_categories")
+    op.drop_table("client_thermo_templates")
     op.drop_table("clients")
     op.drop_table("users")
     op.drop_table("settings")

@@ -115,6 +115,22 @@
     {% endif %}
 
     <h3 class="section-title">Термозамещение</h3>
-    <p class="muted">Нет данных (блок будет заполнен позже).</p>
+    {% if thermo_templates %}
+      <p class="muted" style="margin-bottom:8px;">Сохранённые шаблоны (для выбора «Старый» во визите).</p>
+      <table>
+        <thead><tr><th>№</th><th>Подпись</th><th>Создан</th></tr></thead>
+        <tbody>
+          {% for tt in thermo_templates %}
+            <tr>
+              <td>{{ tt.id }}</td>
+              <td>{{ tt.label }}</td>
+              <td>{{ tt.created_at.strftime("%d.%m.%Y %H:%M") }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">Сохранённых шаблонов термозамещения пока нет (появятся после визита с типом шаблона «Новый»).</p>
+    {% endif %}
   </div>
 {% endblock %}

@@ -135,6 +135,25 @@ class Client(Base):
     # Snapshot at creation: e.g. "Анна (MASTER)" — set by app from current user display_name + role
     created_by_label: Mapped[str | None] = mapped_column(String(240), nullable=True)
 
+    thermo_templates: Mapped[list["ClientThermoTemplate"]] = relationship(
+        back_populates="client",
+        order_by="ClientThermoTemplate.id",
+    )
+
+
+class ClientThermoTemplate(Base):
+    """Сохранённый шаблон термозамещения клиента (для выбора «Старый» во визите)."""
+
+    __tablename__ = "client_thermo_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    template_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+    client: Mapped["Client"] = relationship(back_populates="thermo_templates")
+
 
 class StudioExpenseCategory(Base):
     __tablename__ = "studio_expense_categories"
@@ -211,6 +230,8 @@ class ServiceSubcategory(Base):
     show_kit_section: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Показывать поле «Описание про материал» из анкеты категории (если оно задано на категории).
     show_material_description: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Расширенный блок термозамещения на шаге 2 визита + шаблоны клиента (без общих полей категории).
+    show_thermo_visit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     category: Mapped[ServiceCategory] = relationship()
     questionnaire_fields: Mapped[list[SubcategoryQuestionnaireField]] = relationship(
