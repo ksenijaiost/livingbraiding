@@ -1,5 +1,6 @@
 {
   "category": "Заказ",
+  "include_in_visit": false,
   "subcategories": [
     {
       "name": "Комплект",

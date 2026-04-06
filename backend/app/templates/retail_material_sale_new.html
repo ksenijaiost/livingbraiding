@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Продажа материала из наличия</h2>
+    <p class="muted">Отдельная операция вне визита. Каталог: «Продажа материала». Доступно мастеру и админам.</p>
+    {% if error %}
+      <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
+    {% endif %}
+    {% if not services %}
+      <div class="error" style="margin-bottom: 12px;">
+        Нет активных услуг в категории «Продажа материала». Добавьте категорию и услуги в каталоге или проверьте сиды.
+      </div>
+    {% endif %}
+
+    <p><a href="/sales/material"><button type="button" class="secondary">Список продаж</button></a></p>
+
+    <form method="post" action="/sales/material/new" id="retail-form">
+      <h3>Клиент</h3>
+      <div class="card" style="margin-top: 8px;">
+        <input type="hidden" name="existing_client_id" id="existing_client_id" value="{{ fp.get('existing_client_id', '') }}" />
+        <div class="row" style="align-items: flex-end;">
+          <div style="flex:1;">
+            <label>Поиск клиента по имени</label>
+            <input type="search" id="client_search_q" autocomplete="off" placeholder="Начни вводить имя и подожди или нажми «Найти»" value="" />
+          </div>
+          <div>
+            <button type="button" class="secondary" onclick="clientSuggest()">Найти</button>
+          </div>
+        </div>
+        <ul id="client_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+        <div id="selected_client_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not selected_client %}display:none;{% endif %}">
+          <p id="selected_client_line" style="margin:0;">
+            {% if selected_client %}
+              Выбрано: <strong>{{ selected_client.name }}</strong>{% if not selected_client.is_confirmed %} <span class="muted">(черновик)</span>{% endif %}
+            {% endif %}
+          </p>
+        </div>
+      </div>
+
+      <h3 style="margin-top: 18px;">Реквизиты продажи</h3>
+      <div class="row">
+        <div>
+          <label>Дата *</label>
+          <input type="date" name="performed_date" required value="{{ default_date }}" />
+        </div>
+        <div>
+          <label>Услуга из каталога «Продажа материала»</label>
+          <select name="service_id">
+            <option value="">— не указано —</option>
+            {% for s in services %}
+              <option value="{{ s.id }}" {% if fp.get('service_id')|string == s.id|string %}selected{% endif %}>
+                {{ s.subcategory.name }} — {{ s.name }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top: 10px;">
+        <div>
+          <label>Количество, г *</label>
+          <input type="text" name="grams" inputmode="decimal" required placeholder="например 12.5" value="{{ fp.get('grams', '') }}" />
+        </div>
+        <div>
+          <label>Стоимость продажи, ₽ (целое) *</label>
+          <input type="number" name="sale_price" min="0" step="1" required value="{{ fp.get('sale_price', '') }}" />
+        </div>
+      </div>
+      <div style="margin-top: 10px;">
+        <label>Описание материала</label>
+        <textarea name="description" rows="3" maxlength="2000" placeholder="Цвет материала, название, описание">{{ fp.get('description', '') }}</textarea>
+      </div>
+
+      <p style="margin-top: 18px;">
+        <button type="submit" {% if not services %}disabled{% endif %}>Сохранить</button>
+      </p>
+    </form>
+  </div>
+
+  <script>
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+      });
+    }
+    function renderSelectedClient(name, isDraft) {
+      const box = document.getElementById('selected_client_box');
+      const line = document.getElementById('selected_client_line');
+      box.style.display = 'block';
+      const draftNote = isDraft ? ' <span class="muted">(черновик)</span>' : '';
+      line.innerHTML = 'Выбрано: <strong>' + escapeHtml(name) + '</strong>' + draftNote;
+    }
+    function selectClient(id, name, isDraft) {
+      document.getElementById('existing_client_id').value = String(id);
+      renderSelectedClient(name, isDraft);
+      document.getElementById('client_suggest_list').innerHTML = '';
+    }
+    async function clientSuggest() {
+      const q = document.getElementById('client_search_q').value.trim();
+      const res = await fetch('/master/clients/suggest?q=' + encodeURIComponent(q));
+      if (!res.ok) return;
+      const data = await res.json();
+      const ul = document.getElementById('client_suggest_list');
+      ul.innerHTML = '';
+      for (const c of data.clients || []) {
+        const li = document.createElement('li');
+        li.style.marginBottom = '8px';
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'secondary';
+        b.textContent = c.name + (c.is_draft ? ' (черновик)' : '');
+        b.onclick = function () { selectClient(c.id, c.name, c.is_draft); };
+        const hint = document.createElement('span');
+        hint.className = 'muted';
+        hint.style.marginLeft = '8px';
+        hint.textContent = c.hint || '';
+        li.appendChild(b);
+        li.appendChild(hint);
+        ul.appendChild(li);
+      }
+    }
+    let suggestTimer = null;
+    function scheduleSuggest() {
+      clearTimeout(suggestTimer);
+      suggestTimer = setTimeout(clientSuggest, 350);
+    }
+    document.getElementById('client_search_q').addEventListener('input', scheduleSuggest);
+    (function () {
+      const id = document.getElementById('existing_client_id').value.trim();
+      const line = document.getElementById('selected_client_line');
+      if (id && line && line.textContent.trim()) {
+        document.getElementById('selected_client_box').style.display = 'block';
+      }
+    })();
+  </script>
+{% endblock %}

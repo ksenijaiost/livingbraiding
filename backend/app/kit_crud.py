@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import delete
+from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
 
-from app.db.models import Kit
+from app.db.models import Kit, KitAuthorStaff, User, UserRole
 
 
 def _g_str(form: Any, name: str, default: str = "") -> str:
@@ -117,7 +119,46 @@ def validate_kit_admin_form(d: KitAdminFormData, *, for_create: bool) -> None:
         raise ValueError("Название слишком длинное")
 
 
-def kit_new_error_prefill(form: Any) -> dict[str, str | int]:
+def parse_kit_author_user_ids_from_form(form: Any) -> list[int]:
+    raw: list[Any] = []
+    if hasattr(form, "getlist"):
+        raw = list(form.getlist("kit_author_on"))
+    else:
+        v = form.get("kit_author_on")
+        if v is not None:
+            raw = [v]
+    seen: set[int] = set()
+    out: list[int] = []
+    for x in raw:
+        if isinstance(x, UploadFile):
+            continue
+        try:
+            s = x.decode().strip() if isinstance(x, (bytes, bytearray)) else str(x).strip()
+            i = int(s)
+        except (ValueError, AttributeError):
+            continue
+        if i <= 0 or i in seen:
+            continue
+        seen.add(i)
+        out.append(i)
+    return out
+
+
+def sync_kit_authors(db: Session, kit: Kit, form: Any) -> None:
+    uids = parse_kit_author_user_ids_from_form(form)
+    kit.author_external = _g_bool(form, "author_external")
+    for uid in uids:
+        u = db.get(User, uid)
+        if not u or not u.is_active:
+            raise ValueError("Выберите авторов только из активных сотрудников.")
+        if u.role not in (UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
+            raise ValueError("Автор комплекта — только сотрудник студии.")
+    db.execute(delete(KitAuthorStaff).where(KitAuthorStaff.kit_id == kit.id))
+    for i, uid in enumerate(uids):
+        db.add(KitAuthorStaff(kit_id=kit.id, user_id=uid, sort_order=i))
+
+
+def kit_new_error_prefill(form: Any) -> dict[str, Any]:
     """Восстановление полей формы «новый комплект» после ошибки валидации."""
     d = parse_kit_admin_form(form, for_create=True)
     pi = _g_int(form, "pieces_initial", 0)
@@ -137,10 +178,12 @@ def kit_new_error_prefill(form: Any) -> dict[str, str | int]:
         "notes": d.notes or "",
         "stock_price_total": _g_str(form, "stock_price_total"),
         "cost_total": _g_str(form, "cost_total"),
+        "author_external": "on" if _g_bool(form, "author_external") else "",
+        "kit_author_ids": parse_kit_author_user_ids_from_form(form),
     }
 
 
-def kit_edit_error_prefill(form: Any) -> dict[str, str | int]:
+def kit_edit_error_prefill(form: Any) -> dict[str, Any]:
     d = parse_kit_admin_form(form, for_create=False)
     return {
         "sku": d.sku,
@@ -159,10 +202,12 @@ def kit_edit_error_prefill(form: Any) -> dict[str, str | int]:
         "notes": d.notes or "",
         "stock_price_total": _g_str(form, "stock_price_total"),
         "cost_total": _g_str(form, "cost_total"),
+        "author_external": "on" if _g_bool(form, "author_external") else "",
+        "kit_author_ids": parse_kit_author_user_ids_from_form(form),
     }
 
 
-def kit_to_form_prefill(kit: Kit) -> dict[str, str | int | bool]:
+def kit_to_form_prefill(kit: Kit) -> dict[str, Any]:
     """Значения для шаблона формы редактирования (чекбоксы — 'on' или '')."""
     w = "" if kit.weight_grams is None else str(kit.weight_grams).replace(",", ".")
     ln = "" if kit.length_cm is None else str(kit.length_cm).replace(",", ".")
@@ -186,6 +231,14 @@ def kit_to_form_prefill(kit: Kit) -> dict[str, str | int | bool]:
         "notes": kit.notes or "",
         "stock_price_total": sp,
         "cost_total": ct,
+        "author_external": "on" if kit.author_external else "",
+        "kit_author_ids": [
+            l.user_id
+            for l in sorted(
+                kit.author_staff_links or [],
+                key=lambda x: (x.sort_order, x.id),
+            )
+        ],
     }
 
 

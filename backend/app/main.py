@@ -52,6 +52,7 @@ from app.db.models import (
     Client,
     ClientThermoTemplate,
     Kit,
+    KitAuthorStaff,
     MaterialPriceCurrent,
     MaterialType,
     Service,
@@ -72,8 +73,10 @@ from app.kit_crud import (
     kit_new_error_prefill,
     kit_to_form_prefill,
     parse_kit_admin_form,
+    sync_kit_authors,
     validate_kit_admin_form,
 )
+from app import retail_material_sale as retail_material_sale_routes
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
     collect_step1_fields_for_step2_hidden,
@@ -106,6 +109,7 @@ from app.ui_visit_display import (
 app = FastAPI(title="livingbraiding")
 app.include_router(admin_service_catalog_router)
 app.include_router(admin_questionnaire_fields_router)
+app.include_router(retail_material_sale_routes.router)
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_master_level"] = ru_master_level
 templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_type
@@ -1094,9 +1098,10 @@ def admin_kit_new_get(
             current_user=current_user,
             is_new=True,
             kit=None,
-            fp={},
+            fp={"kit_author_ids": []},
             form_action="/admin/kits/new",
             error=None,
+            staff_for_kit_authors=_staff_users_for_reserve(db),
         ),
     )
 
@@ -1116,6 +1121,8 @@ async def admin_kit_new_post(
         kit = Kit()
         apply_kit_admin_form(kit, d)
         db.add(kit)
+        db.flush()
+        sync_kit_authors(db, kit, form)
         db.commit()
         return RedirectResponse(url=f"/admin/kits/{kit.id}?msg=created", status_code=303)
     except ValueError as exc:
@@ -1129,6 +1136,7 @@ async def admin_kit_new_post(
                 fp=kit_new_error_prefill(form),
                 form_action="/admin/kits/new",
                 error=str(exc),
+                staff_for_kit_authors=_staff_users_for_reserve(db),
             ),
             status_code=400,
         )
@@ -1151,6 +1159,7 @@ def admin_kit_detail(
             selectinload(Kit.reserved_by_user),
             selectinload(Kit.reserved_for_client),
             selectinload(Kit.reserved_for_user),
+            selectinload(Kit.author_staff_links).selectinload(KitAuthorStaff.user),
         )
         .where(Kit.id == kit_id)
     )
@@ -1177,7 +1186,11 @@ def admin_kit_edit_get(
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    kit = db.get(Kit, kit_id)
+    kit = db.scalar(
+        select(Kit)
+        .options(selectinload(Kit.author_staff_links))
+        .where(Kit.id == kit_id)
+    )
     if not kit:
         raise HTTPException(status_code=404, detail="Комплект не найден")
     return templates.TemplateResponse(
@@ -1190,6 +1203,7 @@ def admin_kit_edit_get(
             fp=kit_to_form_prefill(kit),
             form_action=f"/admin/kits/{kit_id}/edit",
             error=None,
+            staff_for_kit_authors=_staff_users_for_reserve(db),
         ),
     )
 
@@ -1213,6 +1227,7 @@ async def admin_kit_edit_post(
             if oid:
                 raise ValueError("Комплект с таким артикулом уже есть")
         apply_kit_admin_form(kit, d)
+        sync_kit_authors(db, kit, form)
         db.commit()
         return RedirectResponse(url=f"/admin/kits/{kit_id}?msg=saved", status_code=303)
     except ValueError as exc:
@@ -1227,6 +1242,7 @@ async def admin_kit_edit_post(
                 fp=fp,
                 form_action=f"/admin/kits/{kit_id}/edit",
                 error=str(exc),
+                staff_for_kit_authors=_staff_users_for_reserve(db),
             ),
             status_code=400,
         )

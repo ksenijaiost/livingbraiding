@@ -391,9 +391,53 @@ class Kit(Base):
     reserved_for_client: Mapped[Client | None] = relationship(foreign_keys=[reserved_for_client_id])
     reserved_for_user: Mapped[User | None] = relationship(foreign_keys=[reserved_for_user_id])
 
+    # Автор(ы) комплекта: сотрудники студии и/или отметка «Извне» (заполняется при внесении карточки).
+    author_external: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    author_staff_links: Mapped[list["KitAuthorStaff"]] = relationship(
+        back_populates="kit",
+        cascade="all, delete-orphan",
+        order_by="KitAuthorStaff.sort_order",
+    )
+
     @property
     def is_reserved(self) -> bool:
         return self.reserved_at is not None
+
+
+class KitAuthorStaff(Base):
+    """Связь комплект — сотрудник (авторство); «Извне» — флаг `Kit.author_external`."""
+
+    __tablename__ = "kit_author_staff"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kit_id: Mapped[int] = mapped_column(ForeignKey("kits.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    kit: Mapped["Kit"] = relationship(back_populates="author_staff_links")
+    user: Mapped["User"] = relationship()
+
+    __table_args__ = (UniqueConstraint("kit_id", "user_id", name="uq_kit_author_staff_kit_user"),)
+
+
+class MaterialRetailSale(Base):
+    """Розница: продажа материала из наличия (без визита), категория «Продажа материала»."""
+
+    __tablename__ = "material_retail_sales"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    service_id: Mapped[int | None] = mapped_column(ForeignKey("services.id"), nullable=True)
+    grams: Mapped[float] = mapped_column(Float, nullable=False)
+    sale_price: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    client: Mapped["Client"] = relationship()
+    service: Mapped["Service | None"] = relationship()
 
 
 class Visit(Base):

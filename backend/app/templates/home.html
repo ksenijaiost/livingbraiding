@@ -10,6 +10,7 @@
           <h3 style="margin-top: 0;">Мастер</h3>
           <p>Вплетение комплекта — форма визита.</p>
           <a href="/master/visit/new"><button>Новый визит</button></a>
+          <a href="/sales/material/new"><button class="secondary">Продажа материала</button></a>
           <a href="/service-catalog"><button class="secondary">Каталог услуг</button></a>
         </div>
         <div class="card">
@@ -24,6 +25,7 @@
           <p>Быстрые ссылки:</p>
           <p>
             <a href="/admin/clients"><button>Клиенты</button></a>
+            <a href="/sales/material/new"><button class="secondary">Продажа материала</button></a>
             <a href="/service-catalog"><button class="secondary">Каталог услуг</button></a>
             <a href="/admin/visits"><button class="secondary">Визиты</button></a>
             <a href="/admin/settings"><button class="secondary">Настройки</button></a>
@@ -32,6 +34,20 @@
         <div class="card">
           <h3 style="margin-top: 0;">Что дальше</h3>
           <p class="muted">Добавим CRUD справочников и анкету, включая комплекты и термозамещение.</p>
+        </div>
+      </div>
+    {% elif current_user.role.value == "ADMIN_SUPER" %}
+      <div class="row">
+        <div class="card">
+          <h3 style="margin-top: 0;">Суперадмин</h3>
+          <p>Быстрые ссылки:</p>
+          <p>
+            <a href="/admin/clients"><button>Клиенты</button></a>
+            <a href="/sales/material/new"><button class="secondary">Продажа материала</button></a>
+            <a href="/service-catalog"><button class="secondary">Каталог услуг</button></a>
+            <a href="/admin/visits"><button class="secondary">Визиты</button></a>
+            <a href="/admin/settings"><button class="secondary">Настройки</button></a>
+          </p>
         </div>
       </div>
     {% endif %}

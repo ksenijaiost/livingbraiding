@@ -61,6 +61,16 @@
       <dt class="muted">Название</dt>
       <dd style="margin:0;">{{ kit.title }}</dd>
 
+      <dt class="muted">Авторство</dt>
+      <dd style="margin:0;">
+        {% if kit.author_external %}<span>Извне</span>{% endif %}
+        {% if kit.author_external and kit.author_staff_links %} · {% endif %}
+        {% for link in kit.author_staff_links %}
+          {{ link.user.display_name or link.user.username }}{% if not loop.last %}, {% endif %}
+        {% endfor %}
+        {% if not kit.author_external and not kit.author_staff_links %}—{% endif %}
+      </dd>
+
       <dt class="muted">Заготовок</dt>
       <dd style="margin:0;">изначально {{ kit.pieces_total }}, остаток {{ kit.pieces_available }}</dd>
 

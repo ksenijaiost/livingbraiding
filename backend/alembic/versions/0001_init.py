@@ -252,7 +252,17 @@ def upgrade() -> None:
         sa.Column("reserved_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("reserved_for_client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=True),
         sa.Column("reserved_for_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("author_external", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.UniqueConstraint("sku", name="uq_kits_sku"),
+    )
+
+    op.create_table(
+        "kit_author_staff",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("kit_id", sa.Integer(), sa.ForeignKey("kits.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("sort_order", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.UniqueConstraint("kit_id", "user_id", name="uq_kit_author_staff_kit_user"),
     )
 
     op.create_table(
@@ -360,13 +370,28 @@ def upgrade() -> None:
         sa.Column("new_value", sa.Text(), nullable=True),
     )
 
+    op.create_table(
+        "material_retail_sales",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("performed_date", sa.DateTime(), nullable=False),
+        sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=False),
+        sa.Column("service_id", sa.Integer(), sa.ForeignKey("services.id"), nullable=True),
+        sa.Column("grams", sa.Float(), nullable=False),
+        sa.Column("sale_price", sa.Integer(), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("material_retail_sales")
     op.drop_table("visit_audit_logs")
     op.drop_table("visit_kit_usages")
     op.drop_table("visit_services")
     op.drop_table("visit_masters")
     op.drop_table("visits")
+    op.drop_table("kit_author_staff")
     op.drop_table("kits")
     op.drop_table("material_prices_current")
     op.drop_table("service_questionnaire_fields")
