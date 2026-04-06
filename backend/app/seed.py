@@ -29,6 +29,7 @@ from app.db.models import (
     MasterLevel,
 )
 from app.security import hash_password
+from app.seed_catalog_vsy_golova import ensure_vsy_golova_catalog
 
 
 def ensure_seed_data(db: Session) -> None:
@@ -92,7 +93,7 @@ def ensure_seed_data(db: Session) -> None:
             )
         )
 
-    _ensure_demo_catalog_and_kits(db)
+    _ensure_vsy_golova_catalog_and_kits(db)
 
     db.commit()
 
@@ -141,7 +142,30 @@ def _ensure_inlay_subcategory_questionnaire_fields(db: Session, subcategory_id: 
     )
 
 
-def _ensure_demo_catalog_and_kits(db: Session) -> None:
+def _deactivate_legacy_inlay_4h_service(db: Session) -> None:
+    """
+    Раньше услуга называлась «в 4 руки»; актуальная — «В 4 руки» из JSON.
+    Старую строку оставляем неактивной как пример в каталоге (при каждом старте сида снова is_active=False).
+    """
+    svc = db.scalar(
+        select(Service)
+        .join(ServiceSubcategory, Service.subcategory_id == ServiceSubcategory.id)
+        .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
+        .where(
+            ServiceCategory.name == "Вся голова",
+            ServiceSubcategory.name == "Вплетение комплекта",
+            Service.name == "в 4 руки",
+        )
+    )
+    if svc is not None:
+        svc.is_active = False
+
+
+def _ensure_vsy_golova_catalog_and_kits(db: Session) -> None:
+    """Каталог «Вся голова» из JSON + анкета вплетения + демо-комплекты."""
+    ensure_vsy_golova_catalog(db)
+    _deactivate_legacy_inlay_4h_service(db)
+
     sub = db.scalar(
         select(ServiceSubcategory)
         .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
@@ -150,35 +174,8 @@ def _ensure_demo_catalog_and_kits(db: Session) -> None:
             ServiceSubcategory.name == "Вплетение комплекта",
         )
     )
-    if not sub:
-        cat = db.scalar(select(ServiceCategory).where(ServiceCategory.name == "Вся голова"))
-        if not cat:
-            cat = ServiceCategory(name="Вся голова")
-            db.add(cat)
-            db.flush()
-        sub = ServiceSubcategory(category_id=cat.id, name="Вплетение комплекта")
-        db.add(sub)
-        db.flush()
-
-    if not db.scalar(select(Service.id).where(Service.subcategory_id == sub.id, Service.name == "В 2 руки")):
-        for name, lo, hi in (
-            ("В 2 руки", 4500, 5000),
-            ("в 4 руки", 6000, 7000),
-        ):
-            db.add(
-                Service(
-                    subcategory_id=sub.id,
-                    name=name,
-                    price_junior_from=lo,
-                    price_junior_to=hi,
-                    price_middle_from=lo,
-                    price_middle_to=hi,
-                    price_senior_from=lo,
-                    price_senior_to=hi,
-                )
-            )
-
-    _ensure_inlay_subcategory_questionnaire_fields(db, sub.id)
+    if sub:
+        _ensure_inlay_subcategory_questionnaire_fields(db, sub.id)
 
     if not db.scalar(select(Kit).where(Kit.sku == "DEMO-001")):
         db.add(
