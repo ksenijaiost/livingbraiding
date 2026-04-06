@@ -60,8 +60,8 @@ class VisitPriceType(str, enum.Enum):
 
 
 class MixSource(str, enum.Enum):
-    FROM_STOCK = "FROM_STOCK"
     NO_MIX = "NO_MIX"
+    FROM_STOCK = "FROM_STOCK"
     SELF_MIXED = "SELF_MIXED"
 
 
@@ -261,6 +261,7 @@ class Service(Base):
     kit_section_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Не показывать «Описание про материал» даже если подкатегория позволяет.
     hide_material_description: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    order_rubber_extra_time_amort: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     subcategory: Mapped[ServiceSubcategory] = relationship()
     questionnaire_fields: Mapped[list[ServiceQuestionnaireField]] = relationship(
@@ -438,6 +439,130 @@ class MaterialRetailSale(Base):
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
     client: Mapped["Client"] = relationship()
     service: Mapped["Service | None"] = relationship()
+
+
+class StudioOrderSubcategoryKey(str, enum.Enum):
+    """Подкатегория каталога «Заказ» (одна на запись)."""
+
+    KOMPLEKT = "KOMPLEKT"
+    ZAGOTOVKI = "ZAGOTOVKI"
+    REZINKI = "REZINKI"
+    KORREKTSIYA = "KORREKTSIYA"
+
+
+class StudioOrder(Base):
+    """Заказ (категория «Заказ»), вне формы визита; расчёт прибыли как у визита."""
+
+    __tablename__ = "studio_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    client_type: Mapped[VisitClientType] = mapped_column(Enum(VisitClientType), nullable=False)
+    price_type: Mapped[VisitPriceType] = mapped_column(Enum(VisitPriceType), nullable=False)
+    client_age_group: Mapped[ClientAgeGroup | None] = mapped_column(Enum(ClientAgeGroup), nullable=True)
+
+    kanekalon_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    kudri_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    mix_source: Mapped[MixSource | None] = mapped_column(Enum(MixSource), nullable=True)
+    mix_complexity: Mapped[MixComplexity | None] = mapped_column(Enum(MixComplexity), nullable=True)
+    mix_cost_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    mix_bonus_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mix_bonus_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    kanekalon_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    kudri_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    materials_cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    amount_from_client: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    addons_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    addons_details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    amortization_level: Mapped[AmortizationLevel | None] = mapped_column(Enum(AmortizationLevel), nullable=True)
+    amortization_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    studio_fund_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    profit_before_split: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    salon_cut_pct_at_time: Mapped[float] = mapped_column(Float, default=0.3, nullable=False)
+    salon_profit: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    masters_pool: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    subcategory_key: Mapped[StudioOrderSubcategoryKey] = mapped_column(
+        Enum(StudioOrderSubcategoryKey, native_enum=False, length=24),
+        nullable=False,
+    )
+    rubber_length_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rubber_blanks_on_elastic: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rubber_weight_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rubber_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    korrekciya_blanks_in_kit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    korrekciya_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    client: Mapped["Client"] = relationship()
+    staff_rows: Mapped[list["StudioOrderStaff"]] = relationship(
+        back_populates="studio_order", cascade="all, delete-orphan"
+    )
+    kit_usages: Mapped[list["StudioOrderKitUsage"]] = relationship(
+        back_populates="studio_order", cascade="all, delete-orphan"
+    )
+    service_lines: Mapped[list["StudioOrderServiceLine"]] = relationship(
+        back_populates="studio_order", cascade="all, delete-orphan"
+    )
+
+
+class StudioOrderStaff(Base):
+    __tablename__ = "studio_order_staff"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    studio_order_id: Mapped[int] = mapped_column(
+        ForeignKey("studio_orders.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    percent: Mapped[float] = mapped_column(Float, nullable=False)
+
+    studio_order: Mapped["StudioOrder"] = relationship(back_populates="staff_rows")
+    user: Mapped["User"] = relationship()
+
+    __table_args__ = (UniqueConstraint("studio_order_id", "user_id", name="uq_studio_order_staff_order_user"),)
+
+
+class StudioOrderKitUsage(Base):
+    __tablename__ = "studio_order_kit_usages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    studio_order_id: Mapped[int] = mapped_column(
+        ForeignKey("studio_orders.id", ondelete="CASCADE"), nullable=False
+    )
+    kit_id: Mapped[int] = mapped_column(ForeignKey("kits.id"), nullable=False)
+    pieces_used: Mapped[int] = mapped_column(Integer, nullable=False)
+    cost_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    studio_order: Mapped["StudioOrder"] = relationship(back_populates="kit_usages")
+    kit: Mapped["Kit"] = relationship()
+
+
+class StudioOrderServiceLine(Base):
+    __tablename__ = "studio_order_service_lines"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    studio_order_id: Mapped[int] = mapped_column(
+        ForeignKey("studio_orders.id", ondelete="CASCADE"), nullable=False
+    )
+    service_id: Mapped[int] = mapped_column(ForeignKey("services.id"), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    studio_order: Mapped["StudioOrder"] = relationship(back_populates="service_lines")
+    service: Mapped["Service"] = relationship()
 
 
 class Visit(Base):

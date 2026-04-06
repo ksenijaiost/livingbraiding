@@ -244,8 +244,14 @@ def _resolve_visit_master_allocations(
     return out
 
 
-def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
-    """Разбор `starlette.datastructures.FormData` после `await request.form()`."""
+def parse_kit_inlay_form(
+    form: Any, *, single_master_default_id: int | None = None
+) -> KitInlayFormInput:
+    """Разбор `starlette.datastructures.FormData` после `await request.form()`.
+
+    Если передан `single_master_default_id` и галочка «несколько мастеров» не отмечена,
+    доля 100% уходит этому пользователю (остальные отметки в форме игнорируются).
+    """
 
     def g(name: str, default: str = "") -> str:
         v = form.get(name)
@@ -331,6 +337,11 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
     eid = g_int("existing_client_id", 0)
     existing_client_id = eid if eid > 0 else None
 
+    if single_master_default_id is not None and not g_bool("visit_use_multi_masters"):
+        visit_master_allocations = [(single_master_default_id, 100)]
+    else:
+        visit_master_allocations = _parse_visit_master_allocations_from_form(form)
+
     return KitInlayFormInput(
         client_mode=client_mode,
         existing_client_id=existing_client_id,
@@ -368,7 +379,7 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
         own_extra_stock_kit_id=extra_stock_id if extra_stock_id else None,
         own_extra_stock_use_entire=g_bool("own_extra_stock_use_entire"),
         own_extra_stock_blanks_used=g_int("own_extra_stock_blanks_used", 0),
-        visit_master_allocations=_parse_visit_master_allocations_from_form(form),
+        visit_master_allocations=visit_master_allocations,
         questionnaire_raw=extract_questionnaire_raw_from_form(form),
         addon_sales_amount=max(0.0, g_float("addon_sales_amount", 0)),
         addon_sales_description=g("addon_sales_description", ""),

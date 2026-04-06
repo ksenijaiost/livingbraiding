@@ -1,0 +1,105 @@
+{# Общие поля карточки комплекта (админка + заказ + далее «работа в наличие»).
+   field_prefix — префикс имён полей (пустая строка для /admin/kits). #}
+<div class="row">
+  <div>
+    <label>Артикул <span class="muted">*</span></label>
+    <input name="{{ field_prefix }}sku" required maxlength="80" value="{{ fp.get('sku', '') }}" />
+  </div>
+  <div>
+    <label>Название <span class="muted">*</span></label>
+    <input name="{{ field_prefix }}title" required maxlength="200" value="{{ fp.get('title', '') }}" />
+  </div>
+</div>
+
+<p style="margin:12px 0 6px;"><strong>Тип заготовок</strong> <span class="muted">*</span> (можно оба)</p>
+<div style="display:flex; flex-wrap:wrap; gap:20px; align-items:center;">
+  <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
+    <input type="checkbox" name="{{ field_prefix }}blank_type_de" {% if fp.get('blank_type_de') %}checked{% endif %} />
+    <span>D.E.</span>
+  </label>
+  <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
+    <input type="checkbox" name="{{ field_prefix }}blank_type_se" {% if fp.get('blank_type_se') %}checked{% endif %} />
+    <span>S.E.</span>
+  </label>
+</div>
+
+{% if is_new %}
+  <div style="margin-top:12px;">
+    <label>Количество заготовок <span class="muted">*</span></label>
+    <input name="{{ field_prefix }}pieces_initial" type="number" min="1" required value="{{ fp.get('pieces_initial', '') }}" />
+  </div>
+{% else %}
+  <div class="row" style="margin-top:12px;">
+    <div>
+      <label>Всего заготовок (изначально) <span class="muted">*</span></label>
+      <input name="{{ field_prefix }}pieces_total" type="number" min="1" required value="{{ fp.get('pieces_total', kit.pieces_total) }}" />
+    </div>
+    <div>
+      <label>Остаток на складе <span class="muted">*</span></label>
+      <input name="{{ field_prefix }}pieces_available" type="number" min="0" required value="{{ fp.get('pieces_available', kit.pieces_available) }}" />
+    </div>
+  </div>
+{% endif %}
+
+<div class="row" style="margin-top:12px;">
+  <div>
+    <label>Вес, г</label>
+    <input name="{{ field_prefix }}weight_grams" type="text" inputmode="decimal" placeholder="необязательно" value="{{ fp.get('weight_grams', '') }}" />
+  </div>
+  <div>
+    <label>Длина, см</label>
+    <input name="{{ field_prefix }}length_cm" type="text" inputmode="decimal" placeholder="необязательно" value="{{ fp.get('length_cm', '') }}" />
+  </div>
+</div>
+
+<label style="margin-top:12px;"><input type="checkbox" name="{{ field_prefix }}has_decorations" {% if fp.get('has_decorations') %}checked{% endif %} /> Украшения</label>
+
+<div style="margin-top:12px;">
+  <label>Материалы</label>
+  <textarea name="{{ field_prefix }}materials_text" rows="2" placeholder="Список использованных материалов (например, названия канекалона)">{{ fp.get('materials_text', '') }}</textarea>
+</div>
+<div style="margin-top:8px;">
+  <label>Цвет</label>
+  <input name="{{ field_prefix }}color_text" maxlength="200" placeholder="Цвет материала с пачки и/или словесное описание" value="{{ fp.get('color_text', '') }}" />
+</div>
+<div style="margin-top:8px;">
+  <label>Виды заготовок</label>
+  <textarea name="{{ field_prefix }}blanks_kinds_text" rows="2" placeholder="Виды кос, дредов и т.д.">{{ fp.get('blanks_kinds_text', '') }}</textarea>
+</div>
+<div style="margin-top:8px;">
+  <label>Описание комплекта</label>
+  <textarea name="{{ field_prefix }}description" rows="2" placeholder="Если нужно как-то ещё описать комплект, это можно сделать тут">{{ fp.get('description', '') }}</textarea>
+</div>
+<div style="margin-top:8px;">
+  <label>Примечание</label>
+  <textarea name="{{ field_prefix }}notes" rows="3" placeholder="Тут можно рассказать про украшения в комплекте, какие-то важные нюансы">{{ fp.get('notes', '') }}</textarea>
+</div>
+
+<p style="margin:16px 0 8px;"><strong>Авторство</strong> <span class="muted">(кто изготовил / отметить «Извне»)</span></p>
+<div class="card" style="margin-bottom:12px;padding:12px;background:#fafafa;">
+  <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-weight:normal;">
+    <input type="checkbox" name="{{ field_prefix }}author_external" {% if fp.get('author_external') %}checked{% endif %} />
+    Извне <span class="muted">(не сотрудник студии)</span>
+  </label>
+  <div style="font-size:13px;margin-bottom:6px;">Сотрудники (можно несколько):</div>
+  <div style="display:flex;flex-direction:column;gap:6px;">
+    {% for u in staff_for_kit_authors %}
+      <label style="display:flex;align-items:center;gap:8px;font-weight:normal;">
+        <input type="checkbox" name="{{ field_prefix }}kit_author_on" value="{{ u.id }}"
+          {% if u.id in (fp.get('kit_author_ids') or []) %}checked{% endif %} />
+        {{ u.display_name or u.username }} ({{ u.role.value }})
+      </label>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="row" style="margin-top:12px;">
+  <div>
+    <label>Цена комплекта на складе (всего), ₽ <span class="muted">*</span></label>
+    <input name="{{ field_prefix }}stock_price_total" type="text" inputmode="decimal" required placeholder="например, 3500" value="{{ fp.get('stock_price_total', '') }}" />
+  </div>
+  <div>
+    <label>Себестоимость (всего), ₽</label>
+    <input name="{{ field_prefix }}cost_total" type="text" inputmode="decimal" placeholder="необязательно" value="{{ fp.get('cost_total', '') }}" />
+  </div>
+</div>

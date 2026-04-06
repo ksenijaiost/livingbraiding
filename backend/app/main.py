@@ -65,6 +65,10 @@ from app.db.models import (
     VisitAuditLog,
     VisitKitUsage,
     VisitMaster,
+    StudioOrder,
+    StudioOrderKitUsage,
+    StudioOrderServiceLine,
+    StudioOrderStaff,
 )
 from app.db.session import get_db
 from app.kit_crud import (
@@ -77,6 +81,7 @@ from app.kit_crud import (
     validate_kit_admin_form,
 )
 from app import retail_material_sale as retail_material_sale_routes
+from app import studio_order as studio_order_routes
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
     collect_step1_fields_for_step2_hidden,
@@ -110,6 +115,7 @@ app = FastAPI(title="livingbraiding")
 app.include_router(admin_service_catalog_router)
 app.include_router(admin_questionnaire_fields_router)
 app.include_router(retail_material_sale_routes.router)
+app.include_router(studio_order_routes.router)
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_master_level"] = ru_master_level
 templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_type
@@ -770,7 +776,9 @@ def _kit_reservation_tooltip(kit: Kit, db: Session) -> str:
 @app.get("/master/clients/suggest")
 def master_clients_suggest(
     q: str = "",
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
     db: Session = Depends(get_db),
 ):
     return JSONResponse({"clients": _client_suggest_items(db, q)})
@@ -779,7 +787,9 @@ def master_clients_suggest(
 @app.get("/master/kits/suggest")
 def master_kits_suggest(
     q: str = "",
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
     db: Session = Depends(get_db),
 ):
     return JSONResponse({"kits": suggest_kits_for_stock(db, q)})
@@ -885,7 +895,7 @@ async def master_visit_continue_post(
     form = await request.form()
     vm_on_ids, vm_pct_str = read_visit_master_form_state(form)
     try:
-        inp = parse_kit_inlay_form(form)
+        inp = parse_kit_inlay_form(form, single_master_default_id=current_user.id)
         validate_master_visit_step1(db, inp)
     except ValueError as exc:
         form_map = _form_to_str_map(form)
@@ -981,7 +991,7 @@ async def master_visit_new_post(
 ):
     form = await request.form()
     try:
-        inp = parse_kit_inlay_form(form)
+        inp = parse_kit_inlay_form(form, single_master_default_id=current_user.id)
         visit = save_kit_inlay_visit(
             db,
             current_user.id,
@@ -1408,6 +1418,46 @@ def admin_visit_detail(
             duration_h=duration_h,
             duration_m=duration_m,
             client_err=client_err,
+        ),
+    )
+
+
+@app.get("/admin/studio-orders/{order_id}", response_class=HTMLResponse)
+def admin_studio_order_detail(
+    order_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    order = db.scalar(
+        select(StudioOrder)
+        .options(
+            selectinload(StudioOrder.client),
+            selectinload(StudioOrder.staff_rows).selectinload(StudioOrderStaff.user),
+            selectinload(StudioOrder.service_lines).selectinload(StudioOrderServiceLine.service),
+            selectinload(StudioOrder.kit_usages).selectinload(StudioOrderKitUsage.kit),
+        )
+        .where(StudioOrder.id == order_id)
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+
+    order_creator_label: str | None = None
+    if order.created_by_user_id:
+        cu = db.get(User, order.created_by_user_id)
+        if cu and (cu.display_name or "").strip():
+            order_creator_label = cu.display_name.strip()
+
+    return templates.TemplateResponse(
+        "admin_studio_order_detail.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            order=order,
+            price_type_ru=ru_price_type(order.price_type),
+            mix_source_ru=ru_mix_source(order.mix_source),
+            mix_complexity_ru=ru_mix_complexity(getattr(order, "mix_complexity", None)),
+            order_creator_label=order_creator_label,
         ),
     )
 

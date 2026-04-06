@@ -57,6 +57,10 @@
         <input type="checkbox" name="hide_material_description" {% if form_hide_material %}checked{% endif %} />
         Не показывать «Описание про материал» (даже если подкатегория разрешает)
       </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 12px;">
+        <input type="checkbox" name="order_rubber_extra_time_amort" {% if form_order_rubber %}checked{% endif %} />
+        Форма «Заказ» (резинки): при выборе этой услуги — длительность работы и амортизация
+      </label>
       <p class="muted" style="margin-top:12px;">Дополнительные поля анкеты услуги — отдельный шаг.</p>
       <p style="margin-top: 16px;">
         <button type="submit">Сохранить</button>

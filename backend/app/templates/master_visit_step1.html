@@ -125,11 +125,19 @@
       </div>
       <div class="card" style="margin-top: 12px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Мастера на визит</div>
-        <p class="muted" style="font-size: 12px; margin: -4px 0 10px;">
-          Вы отмечены автоматически. Для нескольких мастеров укажите долю пула целыми процентами; сумма по отмеченным — ровно 100.
-          Если отмечен только один мастер, поле «Доля, %» можно не заполнять (считается 100%).
+        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+          <input type="checkbox" name="visit_use_multi_masters" id="visit_use_multi_masters"
+            {% if fp.get('visit_use_multi_masters') == 'on' %}checked{% endif %}
+            onchange="visitMastersModeSync()" />
+          <span>Выбрать несколько мастеров</span>
+        </label>
+        <p id="visit_masters_single_note" class="muted" style="font-size: 12px; margin: -4px 0 10px;">
+          Сейчас в пул идёт только вы, 100%. Включите галочку выше, чтобы распределить доли между мастерами.
         </p>
-        <div style="display: flex; flex-direction: column; gap: 10px;">
+        <p id="visit_masters_multi_note" class="muted" style="font-size: 12px; margin: -4px 0 10px; display: none;">
+          Отметьте мастеров и укажите доли целыми процентами; сумма по отмеченным — ровно 100. Если отмечен один мастер, долю можно не заполнять (100%).
+        </p>
+        <div id="visit_masters_multi_block" style="display: none; flex-direction: column; gap: 10px;">
           {% for m in masters_for_visit %}
             <div class="row" style="align-items: center; flex-wrap: wrap; gap: 10px 16px;">
               <label style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 12rem;">
@@ -325,6 +333,19 @@
     </form>
   </div>
   <script>
+    function visitMastersModeSync() {
+      const cb = document.getElementById('visit_use_multi_masters');
+      if (!cb) return;
+      const m = cb.checked;
+      const blk = document.getElementById('visit_masters_multi_block');
+      const sn = document.getElementById('visit_masters_single_note');
+      const mn = document.getElementById('visit_masters_multi_note');
+      if (blk) blk.style.display = m ? 'flex' : 'none';
+      if (sn) sn.style.display = m ? 'none' : 'block';
+      if (mn) mn.style.display = m ? 'block' : 'none';
+    }
+    document.addEventListener('DOMContentLoaded', visitMastersModeSync);
+
     function escapeHtml(s) {
       const d = document.createElement('div');
       d.textContent = s;

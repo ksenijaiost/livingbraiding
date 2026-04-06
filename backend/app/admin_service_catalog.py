@@ -408,6 +408,7 @@ def service_new_form(
             form_st="",
             form_kit_override="",
             form_hide_material=False,
+            form_order_rubber=False,
         ),
     )
 
@@ -425,6 +426,7 @@ def service_new_save(
     price_senior_to: str | None = Form(None),
     kit_section_override: str | None = Form(None),
     hide_material_description: str | None = Form(None),
+    order_rubber_extra_time_amort: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -458,6 +460,7 @@ def service_new_save(
         price_senior_to=st,
         kit_section_override=_parse_kit_section_override(kit_section_override),
         hide_material_description=_is_checked(hide_material_description),
+        order_rubber_extra_time_amort=_is_checked(order_rubber_extra_time_amort),
     )
     db.add(svc)
     try:
@@ -510,6 +513,7 @@ def service_edit_form(
                 else ("1" if svc.kit_section_override else "0")
             ),
             form_hide_material=svc.hide_material_description,
+            form_order_rubber=svc.order_rubber_extra_time_amort,
         ),
     )
 
@@ -527,6 +531,7 @@ def service_edit_save(
     price_senior_to: str | None = Form(None),
     kit_section_override: str | None = Form(None),
     hide_material_description: str | None = Form(None),
+    order_rubber_extra_time_amort: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -562,6 +567,7 @@ def service_edit_save(
     svc.price_senior_to = st
     svc.kit_section_override = _parse_kit_section_override(kit_section_override)
     svc.hide_material_description = _is_checked(hide_material_description)
+    svc.order_rubber_extra_time_amort = _is_checked(order_rubber_extra_time_amort)
     try:
         db.commit()
     except IntegrityError:

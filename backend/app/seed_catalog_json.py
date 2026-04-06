@@ -84,11 +84,14 @@ def _ensure_service_row(
     price_senior_from: float | None,
     price_senior_to: float | None,
     is_active: bool = True,
+    order_rubber_extra_time_amort: bool | None = None,
 ) -> None:
-    exists = db.scalar(
-        select(Service.id).where(Service.subcategory_id == subcategory_id, Service.name == name)
+    existing = db.scalar(
+        select(Service).where(Service.subcategory_id == subcategory_id, Service.name == name)
     )
-    if exists:
+    if existing:
+        if order_rubber_extra_time_amort is not None:
+            existing.order_rubber_extra_time_amort = bool(order_rubber_extra_time_amort)
         return
     db.add(
         Service(
@@ -101,6 +104,9 @@ def _ensure_service_row(
             price_middle_to=price_middle_to,
             price_senior_from=price_senior_from,
             price_senior_to=price_senior_to,
+            order_rubber_extra_time_amort=bool(order_rubber_extra_time_amort)
+            if order_rubber_extra_time_amort is not None
+            else False,
         )
     )
 
@@ -135,6 +141,9 @@ def apply_service_catalog_from_dict(db: Session, data: dict[str, Any]) -> None:
             pmf, pmt = _resolve_level_prices(svc_raw, "middle", common)
             psf, pst = _resolve_level_prices(svc_raw, "senior", common)
 
+            rubber_raw = svc_raw.get("order_rubber_extra_time_amort")
+            rubber_opt = bool(rubber_raw) if rubber_raw is not None else None
+
             _ensure_service_row(
                 db,
                 sub.id,
@@ -146,6 +155,7 @@ def apply_service_catalog_from_dict(db: Session, data: dict[str, Any]) -> None:
                 price_senior_from=psf,
                 price_senior_to=pst,
                 is_active=is_active,
+                order_rubber_extra_time_amort=rubber_opt,
             )
 
 

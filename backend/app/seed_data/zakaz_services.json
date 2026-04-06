@@ -109,12 +109,14 @@
       "services": [
         {
           "name": "Прикрепление хвоста",
+          "order_rubber_extra_time_amort": true,
           "price": {
             "from": 800
           }
         },
         {
           "name": "Брейд под хвост",
+          "order_rubber_extra_time_amort": true,
           "price": {
             "from": 1000,
             "to": 1400

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <p><a href="/sales/order">← Все заказы</a></p>
+    <h2 style="margin-top: 0;">Заказ #{{ order.id }} · {{ order.subcategory_key.value }}</h2>
+    <p class="muted">
+      Дата: {{ order.performed_date.strftime("%d.%m.%Y") }}
+      {% if order_creator_label %}· {{ order_creator_label }}{% endif %}
+    </p>
+    <p class="muted" style="font-size: 12px;">Создан: {{ order.created_at.strftime("%d.%m.%Y %H:%M") }}</p>
+
+    <h3>Клиент</h3>
+    <p><strong><a href="/admin/clients/{{ order.client_id }}">{{ order.client.name }}</a></strong></p>
+    <p class="muted">
+      Свой: {% if order.client_type.value == 'SELF' %}да{% else %}нет{% endif %}
+      · Прайс: <strong>{{ price_type_ru }}</strong>
+    </p>
+
+    <h3>Сотрудники (доли пула)</h3>
+    <p>
+      {% for row in order.staff_rows %}
+        {{ row.user.display_name or row.user.username }} ({{ row.percent|round(2) }}%){% if not loop.last %}, {% endif %}
+      {% else %}—{% endfor %}
+    </p>
+
+    <h3>Услуги в заказе</h3>
+    {% if order.service_lines %}
+      <ul style="margin: 4px 0; padding-left: 1.2rem;">
+        {% for line in order.service_lines %}
+          <li>{{ line.service.name }}{% if line.details_json %} <span class="muted" style="font-size:12px;">({{ line.details_json[:120] }}{% if line.details_json|length > 120 %}…{% endif %})</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">—</p>
+    {% endif %}
+
+    {% if order.subcategory_key.value == 'REZINKI' %}
+      <h3>Резинки (общие поля)</h3>
+      <p class="muted" style="line-height:1.4;">
+        Длина: {{ order.rubber_length_cm or '—' }} см · Заготовок на резинке: {{ order.rubber_blanks_on_elastic or '—' }}
+        · Вес: {{ order.rubber_weight_grams or '—' }}<br/>
+        Описание: {{ order.rubber_description or '—' }}
+      </p>
+    {% endif %}
+    {% if order.subcategory_key.value == 'KORREKTSIYA' %}
+      <h3>Коррекция</h3>
+      <p class="muted">Заготовок в комплекте: {{ order.korrekciya_blanks_in_kit or '—' }}<br/>{{ order.korrekciya_comment or '' }}</p>
+    {% endif %}
+
+    <h3>Материал</h3>
+    <div class="muted" style="line-height: 1.35; font-size: 0.95rem;">
+      <div>Канек {{ order.kanekalon_grams|int }} г · Кудри {{ order.kudri_grams|int }} г · Смешка: <strong>{{ mix_source_ru }}</strong></div>
+      <div>Сложность: <strong>{{ mix_complexity_ru }}</strong> · Смешка, ₽: {{ "%.0f"|format(order.mix_cost_amount) }}</div>
+    </div>
+
+    {% if order.comment %}
+      <h3>Комментарий</h3>
+      <p>{{ order.comment }}</p>
+    {% endif %}
+
+    <h3>Деньги</h3>
+    <table>
+      <tr><td>С клиента</td><td>{{ "%.0f"|format(order.amount_from_client) }} ₽</td></tr>
+      <tr><td>Доп. продажи (в расход)</td><td>{{ "%.0f"|format(order.addons_total) }} ₽</td></tr>
+      <tr><td>Расходы (снимок)</td><td>{{ "%.0f"|format(order.cost_total) }} ₽</td></tr>
+      <tr><td>Прибыль до распределения</td><td>{{ "%.0f"|format(order.profit_before_split) }} ₽</td></tr>
+      <tr><td>Амортизация</td><td>{{ "%.0f"|format(order.amortization_amount or 0) }} ₽</td></tr>
+      <tr><td>Длительность (мин)</td><td>{{ order.duration_minutes }}</td></tr>
+      <tr><td>Доля салона</td><td>{{ order.salon_cut_pct_at_time }}</td></tr>
+      <tr><td>Заработок студии</td><td>{{ "%.0f"|format(order.salon_profit) }} ₽</td></tr>
+      <tr><td>Пул сотрудников</td><td>{{ "%.0f"|format(order.masters_pool) }} ₽</td></tr>
+    </table>
+
+    <h3>Списания комплектов</h3>
+    {% if order.kit_usages %}
+      <table>
+        <thead><tr><th>Артикул</th><th>Заготовок</th><th>В расчёт, ₽</th></tr></thead>
+        <tbody>
+          {% for u in order.kit_usages %}
+            <tr>
+              <td>{{ u.kit.sku }}</td>
+              <td>{{ u.pieces_used }}</td>
+              <td>{{ "%.0f"|format(u.cost_amount) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">Нет списаний со склада по этому заказу.</p>
+    {% endif %}
+  </div>
+{% endblock %}
