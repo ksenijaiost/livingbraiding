@@ -74,13 +74,18 @@ from app.kit_crud import (
     validate_kit_admin_form,
 )
 from app.kit_inlay_visit import (
+    collect_questionnaire_prefill_from_form,
+    collect_step1_fields_for_step2_hidden,
     kit_reserve_hint_by_id,
-    list_kit_inlay_services_catalog,
+    list_master_visit_services_catalog,
+    master_visit_step1_prefill_from_form,
     parse_kit_inlay_form,
     read_visit_master_form_state,
     save_kit_inlay_visit,
     suggest_kits_for_stock,
+    validate_master_visit_step1,
 )
+from app.questionnaire.runtime_merge import load_merged_questionnaire_specs
 from app.seed import ensure_seed_data
 from app.visit_edit_policy import visit_client_change_policy
 from app.ui_visit_display import (
@@ -780,6 +785,52 @@ def _masters_for_visit_form(db: Session) -> list[User]:
     )
 
 
+def _master_visit_step1_template_response(
+    request: Request,
+    *,
+    current_user: AuthUser,
+    db: Session,
+    form_prefill: dict[str, str],
+    visit_master_on_ids: list[int],
+    visit_master_pct_str: dict[int, str],
+    error: str | None = None,
+    saved: str | None = None,
+    saved_draft_client: bool = False,
+    selected_client: Client | None = None,
+    default_date: str | None = None,
+    status_code: int = 200,
+):
+    performed = (form_prefill.get("performed_date") or "").strip() or (
+        default_date or date.today().isoformat()
+    )
+    return templates.TemplateResponse(
+        "master_visit_step1.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            service_catalog=list_master_visit_services_catalog(db),
+            masters_for_visit=_masters_for_visit_form(db),
+            visit_master_on_ids=visit_master_on_ids,
+            visit_master_pct_str=visit_master_pct_str,
+            stock_kit_selected_label=_kit_stock_label_from_form(db, form_prefill, "stock_kit_id"),
+            stock_kit_reserve_hint=_kit_reserve_hint_from_form(db, form_prefill, "stock_kit_id"),
+            extra_stock_kit_selected_label=_kit_stock_label_from_form(
+                db, form_prefill, "own_extra_stock_kit_id"
+            ),
+            extra_stock_kit_reserve_hint=_kit_reserve_hint_from_form(
+                db, form_prefill, "own_extra_stock_kit_id"
+            ),
+            default_date=performed,
+            form_prefill=form_prefill,
+            selected_client=selected_client,
+            error=error,
+            saved=saved,
+            saved_draft_client=saved_draft_client,
+        ),
+        status_code=status_code,
+    )
+
+
 @app.get("/master/visit/new", response_class=HTMLResponse)
 def master_visit_new_get(
     request: Request,
@@ -787,33 +838,105 @@ def master_visit_new_get(
     current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
-    service_catalog = list_kit_inlay_services_catalog(db)
     saved_draft_client = False
     if saved and saved.isdigit():
         vid = int(saved)
         v = db.scalar(select(Visit).where(Visit.id == vid).options(selectinload(Visit.client)))
         if v and v.client and not v.client.is_confirmed:
             saved_draft_client = True
+    return _master_visit_step1_template_response(
+        request,
+        current_user=current_user,
+        db=db,
+        form_prefill={},
+        visit_master_on_ids=[current_user.id],
+        visit_master_pct_str={},
+        saved=saved,
+        saved_draft_client=saved_draft_client,
+        default_date=date.today().isoformat(),
+    )
+
+
+@app.post("/master/visit/new/continue")
+async def master_visit_continue_post(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    vm_on_ids, vm_pct_str = read_visit_master_form_state(form)
+    try:
+        inp = parse_kit_inlay_form(form)
+        validate_master_visit_step1(db, inp)
+    except ValueError as exc:
+        form_map = _form_to_str_map(form)
+        selected_client = None
+        eid = (form_map.get("existing_client_id") or "").strip()
+        if eid.isdigit():
+            selected_client = db.get(Client, int(eid))
+        return _master_visit_step1_template_response(
+            request,
+            current_user=current_user,
+            db=db,
+            form_prefill=form_map,
+            visit_master_on_ids=vm_on_ids,
+            visit_master_pct_str=vm_pct_str,
+            error=str(exc),
+            selected_client=selected_client,
+            status_code=400,
+        )
+
+    step1_hiddens = collect_step1_fields_for_step2_hidden(form)
+    specs = load_merged_questionnaire_specs(db, inp.service_id)
+    svc_row = db.scalar(
+        select(Service)
+        .options(
+            selectinload(Service.subcategory).selectinload(ServiceSubcategory.category),
+        )
+        .where(Service.id == inp.service_id)
+    )
+    service_display = "—"
+    if svc_row and svc_row.subcategory and svc_row.subcategory.category:
+        service_display = (
+            f"{svc_row.subcategory.category.name} / {svc_row.subcategory.name} / {svc_row.name}"
+        )
+
+    q_fields = [s.to_client_json() for s in specs]
     return templates.TemplateResponse(
-        "master_visit_kit_inlay.html",
+        "master_visit_step2.html",
         _ctx(
             request,
             current_user=current_user,
-            service_catalog=service_catalog,
-            masters_for_visit=_masters_for_visit_form(db),
-            visit_master_on_ids=[current_user.id],
-            visit_master_pct_str={},
-            stock_kit_selected_label=None,
-            stock_kit_reserve_hint=None,
-            extra_stock_kit_selected_label=None,
-            extra_stock_kit_reserve_hint=None,
-            default_date=date.today().isoformat(),
-            form_prefill={},
-            selected_client=None,
+            step1_hiddens=step1_hiddens,
+            questionnaire_fields=q_fields,
+            questionnaire_prefill={},
+            no_questionnaire=len(specs) == 0,
+            service_display=service_display,
             error=None,
-            saved=saved,
-            saved_draft_client=saved_draft_client,
         ),
+    )
+
+
+@app.post("/master/visit/new/back-to-step1")
+async def master_visit_back_to_step1_post(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    fp, vm_on_ids, vm_pct_str = master_visit_step1_prefill_from_form(form)
+    selected_client = None
+    eid = (fp.get("existing_client_id") or "").strip()
+    if eid.isdigit():
+        selected_client = db.get(Client, int(eid))
+    return _master_visit_step1_template_response(
+        request,
+        current_user=current_user,
+        db=db,
+        form_prefill=fp,
+        visit_master_on_ids=vm_on_ids,
+        visit_master_pct_str=vm_pct_str,
+        selected_client=selected_client,
     )
 
 
@@ -824,7 +947,6 @@ async def master_visit_new_post(
     db: Session = Depends(get_db),
 ):
     form = await request.form()
-    vm_on_ids, vm_pct_str = read_visit_master_form_state(form)
     try:
         inp = parse_kit_inlay_form(form)
         visit = save_kit_inlay_visit(
@@ -834,36 +956,35 @@ async def master_visit_new_post(
             created_by_label=format_created_by_label(current_user),
         )
     except ValueError as exc:
-        service_catalog = list_kit_inlay_services_catalog(db)
-        form_map = _form_to_str_map(form)
-        selected_client = None
-        eid = (form_map.get("existing_client_id") or "").strip()
-        if eid.isdigit():
-            selected_client = db.get(Client, int(eid))
-        performed = (form_map.get("performed_date") or "").strip() or date.today().isoformat()
+        step1_hiddens = collect_step1_fields_for_step2_hidden(form)
+        q_prefill = collect_questionnaire_prefill_from_form(form)
+        sid_raw = form.get("service_id")
+        sid = int(sid_raw) if sid_raw and str(sid_raw).strip().isdigit() else 0
+        specs = load_merged_questionnaire_specs(db, sid) if sid > 0 else []
+        svc_row = db.scalar(
+            select(Service)
+            .options(
+                selectinload(Service.subcategory).selectinload(ServiceSubcategory.category),
+            )
+            .where(Service.id == sid)
+        )
+        service_display = "—"
+        if svc_row and svc_row.subcategory and svc_row.subcategory.category:
+            service_display = (
+                f"{svc_row.subcategory.category.name} / {svc_row.subcategory.name} / {svc_row.name}"
+            )
+        q_fields = [s.to_client_json() for s in specs]
         return templates.TemplateResponse(
-            "master_visit_kit_inlay.html",
+            "master_visit_step2.html",
             _ctx(
                 request,
                 current_user=current_user,
-                service_catalog=service_catalog,
-                masters_for_visit=_masters_for_visit_form(db),
-                visit_master_on_ids=vm_on_ids,
-                visit_master_pct_str=vm_pct_str,
-                stock_kit_selected_label=_kit_stock_label_from_form(db, form_map, "stock_kit_id"),
-                stock_kit_reserve_hint=_kit_reserve_hint_from_form(db, form_map, "stock_kit_id"),
-                extra_stock_kit_selected_label=_kit_stock_label_from_form(
-                    db, form_map, "own_extra_stock_kit_id"
-                ),
-                extra_stock_kit_reserve_hint=_kit_reserve_hint_from_form(
-                    db, form_map, "own_extra_stock_kit_id"
-                ),
-                default_date=performed,
-                form_prefill=form_map,
-                selected_client=selected_client,
+                step1_hiddens=step1_hiddens,
+                questionnaire_fields=q_fields,
+                questionnaire_prefill=q_prefill,
+                no_questionnaire=len(specs) == 0,
+                service_display=service_display,
                 error=str(exc),
-                saved=None,
-                saved_draft_client=False,
             ),
             status_code=400,
         )

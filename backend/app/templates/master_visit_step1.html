@@ -2,8 +2,8 @@
 {% block content %}
   {% set fp = form_prefill %}
   <div class="card">
-    <h2 style="margin-top: 0;">Новый визит — вплетение комплекта</h2>
-    <p class="muted">Заполни форму и сохрани. В админке: Визиты → открой запись по ID.</p>
+    <h2 style="margin-top: 0;">Новый визит — шаг 1 из 2</h2>
+    <p class="muted">Клиент, работа, услуга, материал; блок «Комплект» показывается, если это включено для подкатегории или услуги в каталоге. Затем — вопросы по услуге.</p>
     {% if saved %}
       <div class="card" style="border-color:#86efac; background:#f0fdf4; margin-bottom: 12px;">
         <p style="margin:0;">Визит <strong>#{{ saved }}</strong> сохранён. Зайди как админ и открой запись по ID вручную.</p>
@@ -19,10 +19,10 @@
     {% endif %}
     {% if not service_catalog %}
       <div class="error" style="margin-bottom: 12px;">
-        В базе нет услуг «Вплетение комплекта». Останови сервер, удали <code>data/livingbraiding.db</code>, снова <code>alembic upgrade head</code> и запусти приложение (сиды создадут каталог).
+        Нет услуг для визита (каталог пуст или все категории скрыты из визита). Проверьте сиды и настройки категорий.
       </div>
     {% endif %}
-    <form method="post" action="/master/visit/new" id="visit-form">
+    <form method="post" action="/master/visit/new/continue" id="visit-form">
       <h3>Клиент</h3>
       <div style="margin-bottom: 10px;">
         <label style="margin-right: 16px;">
@@ -160,7 +160,7 @@
         </div>
         <div style="flex: 1;">
           <label>Услуга *</label>
-          <select id="service_id" name="service_id" required onchange="renderMergedQuestionnaire()">
+          <select id="service_id" name="service_id" required onchange="updateKitSectionVisibility()">
           </select>
         </div>
       </div>
@@ -209,7 +209,7 @@
           <label><input type="radio" name="mix_source" value="SELF_MIXED" {% if fp.get('mix_source') == 'SELF_MIXED' %}checked{% endif %} /> Сама мешала</label>
         </div>
       </div>
-      <div id="mix_complexity_block" style="margin-top: 12px; display: none;">
+        <div id="mix_complexity_block" style="margin-top: 12px; display: none;">
         <div style="font-weight: 600; margin-bottom: 8px;">Сложность смешки *</div>
         <div style="display: flex; flex-wrap: wrap; gap: 12px 16px;">
           <label><input type="radio" name="mix_complexity" value="SIMPLE" {% if (fp.get('mix_complexity') or 'SIMPLE') == 'SIMPLE' %}checked{% endif %} /> Простая</label>
@@ -218,10 +218,22 @@
         </div>
       </div>
 
-      <h3>Вопросы по услуге</h3>
-      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">Дополнительные поля из каталога (подкатегория, затем услуга). Если вопросов нет — блок пустой.</p>
-      <div id="merged-questionnaire-host" class="card" style="margin-bottom: 14px; background: #fafafa;"></div>
+      <h3>Доп. продажи</h3>
+      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">Необязательно. Сумма учитывается как расход при расчёте выручки визита.</p>
+      <div class="card" style="margin-bottom: 14px; background: #fafafa;">
+        <div class="row">
+          <div>
+            <label>Сумма, ₽</label>
+            <input type="number" name="addon_sales_amount" min="0" step="1" value="{{ fp.get('addon_sales_amount', '') }}" placeholder="0" />
+          </div>
+          <div style="flex: 1;">
+            <label>Описание</label>
+            <input type="text" name="addon_sales_description" maxlength="500" value="{{ fp.get('addon_sales_description', '') }}" placeholder="Что было продано" style="width:100%;" />
+          </div>
+        </div>
+      </div>
 
+      <div id="kit-section-wrap">
       <h3>Комплект</h3>
       <label><input type="radio" name="kit_kind" value="STOCK" onchange="kitKind()" {% if fp.get('kit_kind', 'STOCK') == 'STOCK' %}checked{% endif %} /> Из наличия</label>
       <label><input type="radio" name="kit_kind" value="OWN" onchange="kitKind()" {% if fp.get('kit_kind', 'STOCK') == 'OWN' %}checked{% endif %} /> Свой</label>
@@ -296,9 +308,10 @@
           </div>
         </div>
       </div>
+      </div>
 
       <p style="margin-top: 16px;">
-        <button type="submit">Сохранить визит</button>
+        <button type="submit">Далее</button>
         <a href="/"><button type="button" class="secondary">Отмена</button></a>
       </p>
     </form>
@@ -524,23 +537,27 @@
           return;
         }
       }
-      const kk = document.querySelector('input[name="kit_kind"]:checked');
-      if (kk && kk.value === 'STOCK') {
-        const sid = document.getElementById('stock_kit_id').value.trim();
-        if (!sid) {
-          e.preventDefault();
-          alert('Выберите комплект из наличия (поиск по артикулу).');
-          return;
-        }
-      }
-      if (kk && kk.value === 'OWN') {
-        const ownEx = document.getElementById('own_extra_blanks');
-        if (ownEx && ownEx.checked) {
-          const eid = document.getElementById('own_extra_stock_kit_id').value.trim();
-          if (!eid) {
+      const svc = getSelectedService();
+      const needKit = !!(svc && svc.requires_kit_block);
+      if (needKit) {
+        const kk = document.querySelector('input[name="kit_kind"]:checked');
+        if (kk && kk.value === 'STOCK') {
+          const sid = document.getElementById('stock_kit_id').value.trim();
+          if (!sid) {
             e.preventDefault();
-            alert('Выберите комплект для доп. заготовок (поиск по артикулу).');
+            alert('Выберите комплект из наличия (поиск по артикулу).');
             return;
+          }
+        }
+        if (kk && kk.value === 'OWN') {
+          const ownEx = document.getElementById('own_extra_blanks');
+          if (ownEx && ownEx.checked) {
+            const eid = document.getElementById('own_extra_stock_kit_id').value.trim();
+            if (!eid) {
+              e.preventDefault();
+              alert('Выберите комплект для доп. заготовок (поиск по артикулу).');
+              return;
+            }
           }
         }
       }
@@ -550,9 +567,7 @@
     const visitMasterLevel = {{ (current_user.master_level.value if current_user.master_level else None) | tojson }};
     const serviceCatalog = {{ service_catalog|tojson }};
 
-    function renderMergedQuestionnaire() {
-      const host = document.getElementById('merged-questionnaire-host');
-      if (!host) return;
+    function getSelectedService() {
       const subSel = document.getElementById('service_subcategory_id');
       const serviceSel = document.getElementById('service_id');
       const subId = parseInt(subSel.value || '0', 10);
@@ -568,91 +583,17 @@
       }
       const services = (sc && sc.services) ? sc.services : [];
       const sid = parseInt(serviceSel.value || '0', 10);
-      const svc = services.find((x) => x.id === sid);
-      const fields = (svc && svc.questionnaire_fields) ? svc.questionnaire_fields : [];
-      host.innerHTML = '';
-      if (!fields.length) {
-        host.innerHTML = '<p class="muted" style="margin:0;">Дополнительных вопросов нет.</p>';
-        return;
-      }
-      const fp = formPrefill && typeof formPrefill === 'object' ? formPrefill : {};
-      for (const f of fields) {
-        const qname = 'q_' + f.field_key;
-        const wrap = document.createElement('div');
-        wrap.style.marginBottom = '14px';
-        const lab = document.createElement('div');
-        lab.style.fontWeight = '600';
-        lab.style.marginBottom = '6px';
-        lab.textContent = f.label + (f.required ? ' *' : '');
-        wrap.appendChild(lab);
-        const ph = fp[qname] != null ? String(fp[qname]) : '';
-        if (f.field_type === 'TEXT') {
-          const inp = document.createElement('input');
-          inp.type = 'text';
-          inp.name = qname;
-          if (f.placeholder) inp.placeholder = f.placeholder;
-          inp.value = ph;
-          inp.style.width = '100%';
-          wrap.appendChild(inp);
-        } else if (f.field_type === 'TEXTAREA') {
-          const ta = document.createElement('textarea');
-          ta.name = qname;
-          ta.rows = 3;
-          ta.style.width = '100%';
-          ta.value = ph;
-          wrap.appendChild(ta);
-        } else if (f.field_type === 'NUMBER') {
-          const inp = document.createElement('input');
-          inp.type = 'number';
-          inp.name = qname;
-          inp.step = 'any';
-          if (f.min_value != null) inp.setAttribute('min', String(f.min_value));
-          if (f.max_value != null) inp.setAttribute('max', String(f.max_value));
-          inp.value = ph;
-          inp.style.width = '100%';
-          wrap.appendChild(inp);
-        } else if (f.field_type === 'CHECKBOX') {
-          const lb = document.createElement('label');
-          lb.style.fontWeight = 'normal';
-          lb.style.display = 'flex';
-          lb.style.alignItems = 'center';
-          lb.style.gap = '8px';
-          const cb = document.createElement('input');
-          cb.type = 'checkbox';
-          cb.name = qname;
-          cb.value = 'on';
-          if (ph === 'on' || ph === 'true' || ph === '1') cb.checked = true;
-          lb.appendChild(cb);
-          lb.appendChild(document.createTextNode(f.placeholder || 'Да'));
-          wrap.appendChild(lb);
-        } else if (f.field_type === 'SELECT') {
-          const sel = document.createElement('select');
-          sel.name = qname;
-          sel.style.width = '100%';
-          const opt0 = document.createElement('option');
-          opt0.value = '';
-          opt0.textContent = '—';
-          sel.appendChild(opt0);
-          for (const o of (f.options || [])) {
-            const op = document.createElement('option');
-            op.value = o.value;
-            op.textContent = o.label;
-            if (ph === o.value) op.selected = true;
-            sel.appendChild(op);
-          }
-          wrap.appendChild(sel);
-        }
-        if (f.help_text) {
-          const ht = document.createElement('p');
-          ht.className = 'muted';
-          ht.style.fontSize = '12px';
-          ht.style.margin = '6px 0 0';
-          ht.textContent = f.help_text;
-          wrap.appendChild(ht);
-        }
-        host.appendChild(wrap);
-      }
+      return services.find((x) => x.id === sid) || null;
     }
+
+    function updateKitSectionVisibility() {
+      const wrap = document.getElementById('kit-section-wrap');
+      if (!wrap) return;
+      const svc = getSelectedService();
+      const need = !!(svc && svc.requires_kit_block);
+      wrap.style.display = need ? 'block' : 'none';
+    }
+
     const serviceMetaById = {};
     for (const c of serviceCatalog || []) {
       for (const sc of (c.subcategories || [])) {
@@ -725,7 +666,7 @@
         opt.textContent = s.name + servicePriceHint(s);
         serviceSel.appendChild(opt);
       }
-      renderMergedQuestionnaire();
+      updateKitSectionVisibility();
     }
 
     function serviceCatalogOnCategory() {
@@ -758,7 +699,7 @@
       if (initialServiceId) {
         serviceSel.value = String(initialServiceId);
       }
-      renderMergedQuestionnaire();
+      updateKitSectionVisibility();
     })();
 
     function kitKind() {
@@ -775,6 +716,7 @@
     ownExtra();
     updateMixBlockUI();
     syncAmountRequired();
+    updateKitSectionVisibility();
     {% if selected_client %}
     renderSelectedClient({{ selected_client.name|tojson }}, {{ (not selected_client.is_confirmed)|tojson }});
     {% endif %}

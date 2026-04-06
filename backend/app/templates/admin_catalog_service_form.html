@@ -45,6 +45,18 @@
         <div><label>До<input name="price_senior_to" value="{{ form_st }}" placeholder="например 5500" /></label></div>
       </div>
 
+      <p class="muted" style="margin: 16px 0 8px;">Визит мастера</p>
+      <label style="display:block; margin-top: 8px;">Блок «Комплект» (склад)
+        <select name="kit_section_override" style="display:block; margin-top:4px; max-width: 28rem;">
+          <option value="" {% if form_kit_override == '' %}selected{% endif %}>Как у подкатегории</option>
+          <option value="1" {% if form_kit_override == '1' %}selected{% endif %}>Всегда показывать</option>
+          <option value="0" {% if form_kit_override == '0' %}selected{% endif %}>Не показывать</option>
+        </select>
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 12px;">
+        <input type="checkbox" name="hide_material_description" {% if form_hide_material %}checked{% endif %} />
+        Не показывать «Описание про материал» (даже если подкатегория разрешает)
+      </label>
       <p class="muted" style="margin-top:12px;">Дополнительные поля анкеты услуги — отдельный шаг.</p>
       <p style="margin-top: 16px;">
         <button type="submit">Сохранить</button>

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, require_role
 from app.db.models import (
+    CategoryQuestionnaireField,
     Service,
     ServiceCategory,
     ServiceQuestionnaireField,
@@ -78,6 +79,18 @@ def _next_sort_order_service(db: Session, service_id: int) -> int:
         )
     )
     return int(m) + 1
+
+
+def _category_field_key_exists(db: Session, category_id: int, field_key: str) -> bool:
+    return (
+        db.scalar(
+            select(CategoryQuestionnaireField.id).where(
+                CategoryQuestionnaireField.category_id == category_id,
+                CategoryQuestionnaireField.field_key == field_key,
+            ).limit(1)
+        )
+        is not None
+    )
 
 
 def _service_field_key_exists(db: Session, subcategory_id: int, field_key: str) -> bool:
@@ -286,6 +299,39 @@ def subcategory_field_new_save(
     if _service_field_key_exists(db, subcategory_id, norm.field_key):
         errors = [
             f"Ключ «{norm.field_key}» уже используется в анкете одной из услуг этой подкатегории — выберите другой."
+        ]
+        cat = db.get(ServiceCategory, sub.category_id)
+        return templates.TemplateResponse(
+            "admin_questionnaire_field_form.html",
+            _ctx(
+                request,
+                current_user,
+                scope="subcategory",
+                category=cat,
+                subcategory=sub,
+                service=None,
+                field=None,
+                is_new=True,
+                field_types=FIELD_TYPE_CHOICES,
+                form={
+                    "field_key": field_key,
+                    "field_type": field_type,
+                    "label": label,
+                    "required": _is_checked(required),
+                    "placeholder": placeholder or "",
+                    "help_text": help_text or "",
+                    "options_json": options_json or "",
+                    "min_value": min_value or "",
+                    "max_value": max_value or "",
+                },
+                errors=errors,
+            ),
+            status_code=422,
+        )
+
+    if _category_field_key_exists(db, sub.category_id, norm.field_key):
+        errors = [
+            f"Ключ «{norm.field_key}» уже задан в анкете категории — выберите другой."
         ]
         cat = db.get(ServiceCategory, sub.category_id)
         return templates.TemplateResponse(
@@ -635,6 +681,38 @@ def service_field_new_save(
                 scope="service",
                 category=cat,
                 subcategory=sub,
+                service=svc,
+                field=None,
+                is_new=True,
+                field_types=FIELD_TYPE_CHOICES,
+                form={
+                    "field_key": field_key,
+                    "field_type": field_type,
+                    "label": label,
+                    "required": _is_checked(required),
+                    "placeholder": placeholder or "",
+                    "help_text": help_text or "",
+                    "options_json": options_json or "",
+                    "min_value": min_value or "",
+                    "max_value": max_value or "",
+                },
+                errors=errors,
+            ),
+            status_code=422,
+        )
+
+    sub_for_cat = db.get(ServiceSubcategory, svc.subcategory_id)
+    if sub_for_cat and _category_field_key_exists(db, sub_for_cat.category_id, norm.field_key):
+        errors = [f"Ключ «{norm.field_key}» уже задан в анкете категории — выберите другой."]
+        cat = db.get(ServiceCategory, sub_for_cat.category_id)
+        return templates.TemplateResponse(
+            "admin_questionnaire_field_form.html",
+            _ctx(
+                request,
+                current_user,
+                scope="service",
+                category=cat,
+                subcategory=sub_for_cat,
                 service=svc,
                 field=None,
                 is_new=True,

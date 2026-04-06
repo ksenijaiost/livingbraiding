@@ -165,6 +165,40 @@ class ServiceCategory(Base):
     # False: не в форме визита (напр. продажа материала — отдельный поток на этапе 7).
     include_in_visit: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    questionnaire_fields: Mapped[list["CategoryQuestionnaireField"]] = relationship(
+        back_populates="category",
+        order_by="CategoryQuestionnaireField.sort_order",
+    )
+
+
+class CategoryQuestionnaireField(Base):
+    """Поля анкеты, общие для всех услуг категории (до полей подкатегории и услуги)."""
+
+    __tablename__ = "category_questionnaire_fields"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    category_id: Mapped[int] = mapped_column(
+        ForeignKey("service_categories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    field_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    field_type: Mapped[QuestionnaireFieldType] = mapped_column(Enum(QuestionnaireFieldType), nullable=False)
+    label: Mapped[str] = mapped_column(String(500), nullable=False)
+    required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    placeholder: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    help_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    options_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    min_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    visibility_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    category: Mapped[ServiceCategory] = relationship(back_populates="questionnaire_fields")
+
+    __table_args__ = (
+        UniqueConstraint("category_id", "field_key", name="uq_category_questionnaire_field_key"),
+    )
+
 
 class ServiceSubcategory(Base):
     __tablename__ = "service_subcategories"
@@ -173,6 +207,10 @@ class ServiceSubcategory(Base):
     category_id: Mapped[int] = mapped_column(ForeignKey("service_categories.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Форма визита: блок «Комплект» (склад) для услуг этой подкатегории, если у услуги нет своего override.
+    show_kit_section: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Показывать поле «Описание про материал» из анкеты категории (если оно задано на категории).
+    show_material_description: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     category: Mapped[ServiceCategory] = relationship()
     questionnaire_fields: Mapped[list[SubcategoryQuestionnaireField]] = relationship(
@@ -198,6 +236,10 @@ class Service(Base):
     price_middle_to: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_senior_from: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_senior_to: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # None — брать из подкатегории show_kit_section; True/False — принудительно.
+    kit_section_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Не показывать «Описание про материал» даже если подкатегория позволяет.
+    hide_material_description: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     subcategory: Mapped[ServiceSubcategory] = relationship()
     questionnaire_fields: Mapped[list[ServiceQuestionnaireField]] = relationship(

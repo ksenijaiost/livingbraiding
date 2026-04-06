@@ -52,6 +52,21 @@ def _is_checked(raw: object | None) -> bool:
     return str(raw).lower() in ("1", "on", "true", "yes")
 
 
+def _parse_kit_section_override(raw: object | None) -> bool | None:
+    """Пусто → наследовать от подкатегории (NULL в БД)."""
+    if raw is None:
+        return None
+    t = str(raw).strip()
+    if not t:
+        return None
+    low = t.lower()
+    if low in ("1", "on", "true", "yes"):
+        return True
+    if low in ("0", "off", "false", "no"):
+        return False
+    return None
+
+
 @router.get("", response_class=HTMLResponse)
 def catalog_index(
     request: Request,
@@ -217,7 +232,18 @@ def subcategory_new_form(
         raise HTTPException(status_code=404, detail="Категория не найдена")
     return templates.TemplateResponse(
         "admin_catalog_subcategory_form.html",
-        _ctx(request, current_user, err=err, is_new=True, category=cat, sub=None, form_name="", form_active=True),
+        _ctx(
+            request,
+            current_user,
+            err=err,
+            is_new=True,
+            category=cat,
+            sub=None,
+            form_name="",
+            form_active=True,
+            form_show_kit=False,
+            form_show_material=True,
+        ),
     )
 
 
@@ -226,6 +252,8 @@ def subcategory_new_save(
     category_id: int = Form(...),
     name: str = Form(...),
     is_active: str | None = Form(None),
+    show_kit_section: str | None = Form(None),
+    show_material_description: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -236,7 +264,13 @@ def subcategory_new_save(
     if not nm:
         q = quote(str(category_id))
         return RedirectResponse(url=f"/admin/catalog/subcategories/new?category_id={q}&err=empty", status_code=303)
-    sub = ServiceSubcategory(category_id=category_id, name=nm, is_active=_is_checked(is_active))
+    sub = ServiceSubcategory(
+        category_id=category_id,
+        name=nm,
+        is_active=_is_checked(is_active),
+        show_kit_section=_is_checked(show_kit_section),
+        show_material_description=_is_checked(show_material_description),
+    )
     db.add(sub)
     try:
         db.commit()
@@ -270,6 +304,8 @@ def subcategory_edit_form(
             sub=sub,
             form_name=sub.name,
             form_active=sub.is_active,
+            form_show_kit=sub.show_kit_section,
+            form_show_material=sub.show_material_description,
         ),
     )
 
@@ -279,6 +315,8 @@ def subcategory_edit_save(
     subcategory_id: int,
     name: str = Form(...),
     is_active: str | None = Form(None),
+    show_kit_section: str | None = Form(None),
+    show_material_description: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -293,6 +331,8 @@ def subcategory_edit_save(
         )
     sub.name = nm
     sub.is_active = _is_checked(is_active)
+    sub.show_kit_section = _is_checked(show_kit_section)
+    sub.show_material_description = _is_checked(show_material_description)
     try:
         db.commit()
     except IntegrityError:
@@ -360,6 +400,8 @@ def service_new_form(
             form_mt="",
             form_sf="",
             form_st="",
+            form_kit_override="",
+            form_hide_material=False,
         ),
     )
 
@@ -375,6 +417,8 @@ def service_new_save(
     price_middle_to: str | None = Form(None),
     price_senior_from: str | None = Form(None),
     price_senior_to: str | None = Form(None),
+    kit_section_override: str | None = Form(None),
+    hide_material_description: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -406,6 +450,8 @@ def service_new_save(
         price_middle_to=mt,
         price_senior_from=sf,
         price_senior_to=st,
+        kit_section_override=_parse_kit_section_override(kit_section_override),
+        hide_material_description=_is_checked(hide_material_description),
     )
     db.add(svc)
     try:
@@ -452,6 +498,12 @@ def service_edit_form(
             form_mt=_fmt_price_input(svc.price_middle_to),
             form_sf=_fmt_price_input(svc.price_senior_from),
             form_st=_fmt_price_input(svc.price_senior_to),
+            form_kit_override=(
+                ""
+                if svc.kit_section_override is None
+                else ("1" if svc.kit_section_override else "0")
+            ),
+            form_hide_material=svc.hide_material_description,
         ),
     )
 
@@ -467,6 +519,8 @@ def service_edit_save(
     price_middle_to: str | None = Form(None),
     price_senior_from: str | None = Form(None),
     price_senior_to: str | None = Form(None),
+    kit_section_override: str | None = Form(None),
+    hide_material_description: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -500,6 +554,8 @@ def service_edit_save(
     svc.price_middle_to = mt
     svc.price_senior_from = sf
     svc.price_senior_to = st
+    svc.kit_section_override = _parse_kit_section_override(kit_section_override)
+    svc.hide_material_description = _is_checked(hide_material_description)
     try:
         db.commit()
     except IntegrityError:

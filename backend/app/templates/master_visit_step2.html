@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Новый визит — шаг 2 из 2</h2>
+    <p class="muted">Услуга: <strong>{{ service_display }}</strong></p>
+    {% if error %}
+      <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
+    {% endif %}
+
+    {% if no_questionnaire %}
+      <div class="card" style="background:#fffbeb;border-color:#fbbf24;margin-bottom:14px;">
+        <p style="margin:0;">Для выбранной услуги в каталоге пока нет полей анкеты (подкатегория и услуга). Шаг с вопросами пропускается — можно сразу сохранить визит.</p>
+      </div>
+    {% endif %}
+
+    <form method="post" action="/master/visit/new" id="visit-step2-form">
+      {% for name, values in step1_hiddens.items() %}
+        {% for v in values %}
+          <input type="hidden" name="{{ name }}" value="{{ v|e }}" />
+        {% endfor %}
+      {% endfor %}
+
+      {% if questionnaire_fields %}
+        <h3>Вопросы по услуге</h3>
+        <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">Поля из каталога (подкатегория и услуга).</p>
+        <div class="card" style="margin-bottom: 14px; background: #fafafa;">
+          {% for f in questionnaire_fields %}
+            {% set qn = 'q_' ~ f.field_key %}
+            <div style="margin-bottom: 14px;">
+              <div style="font-weight: 600; margin-bottom: 6px;">{{ f.label }}{% if f.required %} *{% endif %}</div>
+              {% if f.field_type == 'TEXT' %}
+                <input type="text" name="{{ qn }}" style="width:100%;" value="{{ questionnaire_prefill.get(qn, '')|e }}"
+                  {% if f.placeholder %}placeholder="{{ f.placeholder|e }}"{% endif %} />
+              {% elif f.field_type == 'TEXTAREA' %}
+                <textarea name="{{ qn }}" rows="3" style="width:100%;">{{ questionnaire_prefill.get(qn, '') }}</textarea>
+              {% elif f.field_type == 'NUMBER' %}
+                <input type="number" name="{{ qn }}" step="any" style="width:100%;" value="{{ questionnaire_prefill.get(qn, '')|e }}"
+                  {% if f.min_value is not none %}min="{{ f.min_value }}"{% endif %}
+                  {% if f.max_value is not none %}max="{{ f.max_value }}"{% endif %} />
+              {% elif f.field_type == 'CHECKBOX' %}
+                <label style="display:flex;align-items:center;gap:8px;font-weight:normal;">
+                  <input type="checkbox" name="{{ qn }}" value="on"
+                    {% if questionnaire_prefill.get(qn) in ['on', 'true', '1'] %}checked{% endif %} />
+                  {{ f.placeholder or 'Да' }}
+                </label>
+              {% elif f.field_type == 'SELECT' %}
+                <select name="{{ qn }}" style="width:100%;">
+                  <option value="">—</option>
+                  {% for o in f.options %}
+                    <option value="{{ o.value|e }}" {% if questionnaire_prefill.get(qn) == o.value %}selected{% endif %}>{{ o.label }}</option>
+                  {% endfor %}
+                </select>
+              {% endif %}
+              {% if f.help_text %}
+                <p class="muted" style="font-size:12px;margin:6px 0 0;">{{ f.help_text }}</p>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <p style="margin-top: 16px;">
+        <button type="submit" formaction="/master/visit/new/back-to-step1" formmethod="post" class="secondary">Назад</button>
+        <button type="submit">Сохранить визит</button>
+        <a href="/"><button type="button" class="secondary">Отмена</button></a>
+      </p>
+    </form>
+  </div>
+{% endblock %}

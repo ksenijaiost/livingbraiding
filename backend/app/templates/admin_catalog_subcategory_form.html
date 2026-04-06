@@ -19,6 +19,15 @@
         <input type="checkbox" name="is_active" {% if form_active %}checked{% endif %} />
         Активна
       </label>
+      <p class="muted" style="margin: 16px 0 8px;">Визит мастера</p>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+        <input type="checkbox" name="show_kit_section" {% if form_show_kit %}checked{% endif %} />
+        Раздел «Комплект» (склад) для услуг этой подкатегории
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+        <input type="checkbox" name="show_material_description" {% if form_show_material %}checked{% endif %} />
+        Показывать поле «Описание про материал» из анкеты категории (если оно задано)
+      </label>
       <p style="margin-top: 16px;">
         <button type="submit">Сохранить</button>
         <a href="/admin/catalog/categories/{{ category.id }}/subcategories"><button type="button" class="secondary">Отмена</button></a>

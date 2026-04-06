@@ -1,6 +1,8 @@
 """
-Визит с услугой «Вплетение комплекта»: разбор формы мастера, сохранение визита,
-расчёт материалов/смешки/амортизации и блок комплекта в `visit_services.details_json`.
+Форма визита мастера: разбор POST, сохранение визита, расчёт материалов/смешки/амортизации.
+
+Блок комплекта (склад, свой) только для подкатегории «Вплетение комплекта»;
+остальные услуги сохраняют `details_json` с `kit: null` и ответами анкеты.
 """
 
 from __future__ import annotations
@@ -41,7 +43,11 @@ from app.questionnaire.answer_validate import (
     extract_questionnaire_raw_from_form,
     validate_and_coerce_answers,
 )
-from app.questionnaire.runtime_merge import load_merged_questionnaire_specs, merged_questionnaire_client_json
+from app.questionnaire.runtime_merge import (
+    MergedQuestionnaireFieldSpec,
+    load_merged_questionnaire_specs,
+    merged_questionnaire_client_json,
+)
 from app.questionnaire.schemas import (
     KitBlock,
     KitFromStock,
@@ -50,6 +56,13 @@ from app.questionnaire.schemas import (
     VisitServiceDetailsPayload,
     parse_visit_service_details,
 )
+
+
+def service_requires_kit_block(service: Service) -> bool:
+    if service.kit_section_override is not None:
+        return bool(service.kit_section_override)
+    sub = service.subcategory
+    return bool(sub and sub.show_kit_section)
 
 
 def get_salon_cut_pct(db: Session) -> float:
@@ -350,6 +363,8 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
         own_extra_stock_blanks_used=g_int("own_extra_stock_blanks_used", 0),
         visit_master_allocations=_parse_visit_master_allocations_from_form(form),
         questionnaire_raw=extract_questionnaire_raw_from_form(form),
+        addon_sales_amount=max(0.0, g_float("addon_sales_amount", 0)),
+        addon_sales_description=g("addon_sales_description", ""),
     )
 
 
@@ -395,9 +410,31 @@ class KitInlayFormInput:
     own_extra_stock_blanks_used: int
     visit_master_allocations: list[tuple[int, int]]
     questionnaire_raw: dict[str, str]
+    addon_sales_amount: float
+    addon_sales_description: str
 
 
-def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServiceDetailsPayload:
+def _answers_labels_display_from_specs(
+    specs: list[MergedQuestionnaireFieldSpec], answers: dict[str, Any]
+) -> tuple[dict[str, str], dict[str, str]]:
+    answer_labels = {spec.field_key: spec.label for spec in specs if spec.field_key in answers}
+    answer_display: dict[str, str] = {}
+    for spec in specs:
+        fk = spec.field_key
+        if fk not in answers:
+            continue
+        v = answers[fk]
+        if spec.field_type == QuestionnaireFieldType.SELECT and isinstance(v, str):
+            opt_lbl = next((o["label"] for o in spec.options if o.get("value") == v), None)
+            answer_display[fk] = opt_lbl if opt_lbl is not None else v
+        elif isinstance(v, bool):
+            answer_display[fk] = "Да" if v else "Нет"
+        else:
+            answer_display[fk] = str(v)
+    return answer_labels, answer_display
+
+
+def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock:
     kind = inp.kit_kind.upper()
     if kind == "STOCK":
         if not inp.stock_kit_id:
@@ -408,7 +445,7 @@ def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServic
             use_entire=inp.stock_use_entire,
             blanks_used=inp.stock_blanks_used,
         )
-        kit_block = KitBlock(
+        return KitBlock(
             kind="STOCK",
             from_stock=KitFromStock(
                 sku=kit_row.sku,
@@ -418,10 +455,9 @@ def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServic
             new_kit=None,
             own=None,
         )
-    elif kind == "NEW":
-        # В текущем шаге анкеты «Новый комплект» недоступен (используй только из наличия или свой).
+    if kind == "NEW":
         raise ValueError("Режим «Новый комплект» временно отключён. Выберите «Из наличия» или «Свой».")
-    elif kind == "OWN":
+    if kind == "OWN":
         if inp.own_origin not in ("STUDIO", "FOREIGN"):
             raise ValueError("Укажите происхождение своего комплекта")
         extra: KitOwnExtra | None = None
@@ -443,7 +479,7 @@ def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServic
                 ),
                 new_kit=None,
             )
-        kit_block = KitBlock(
+        return KitBlock(
             kind="OWN",
             from_stock=None,
             new_kit=None,
@@ -454,38 +490,140 @@ def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServic
                 extra=extra,
             ),
         )
-    else:
-        raise ValueError("Неверный тип комплекта")
+    raise ValueError("Неверный тип комплекта")
+
+
+def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServiceDetailsPayload:
+    service = db.scalar(
+        select(Service)
+        .options(selectinload(Service.subcategory))
+        .where(Service.id == inp.service_id, Service.is_active.is_(True))
+    )
+    if not service or not service.subcategory:
+        raise ValueError("Услуга не найдена")
 
     specs = load_merged_questionnaire_specs(db, inp.service_id)
     answers, q_errors = validate_and_coerce_answers(inp.questionnaire_raw, specs)
     if q_errors:
         raise ValueError("; ".join(q_errors))
 
-    answer_labels = {spec.field_key: spec.label for spec in specs if spec.field_key in answers}
-    answer_display: dict[str, str] = {}
-    for spec in specs:
-        fk = spec.field_key
-        if fk not in answers:
-            continue
-        v = answers[fk]
-        if spec.field_type == QuestionnaireFieldType.SELECT and isinstance(v, str):
-            opt_lbl = next((o["label"] for o in spec.options if o.get("value") == v), None)
-            answer_display[fk] = opt_lbl if opt_lbl is not None else v
-        elif isinstance(v, bool):
-            answer_display[fk] = "Да" if v else "Нет"
-        else:
-            answer_display[fk] = str(v)
+    answer_labels, answer_display = _answers_labels_display_from_specs(specs, answers)
+
+    if service_requires_kit_block(service):
+        kit_block = _build_kit_block_from_input(inp, db)
+        return parse_visit_service_details(
+            {
+                "service_fields": {},
+                "kit": kit_block.model_dump(mode="json"),
+                "answers": answers,
+                "answer_labels": answer_labels,
+                "answer_display": answer_display,
+            }
+        )
 
     return parse_visit_service_details(
         {
             "service_fields": {},
-            "kit": kit_block.model_dump(mode="json"),
+            "kit": None,
             "answers": answers,
             "answer_labels": answer_labels,
             "answer_display": answer_display,
         }
     )
+
+
+def validate_master_visit_step1(db: Session, inp: KitInlayFormInput) -> None:
+    """Проверки до перехода на шаг с вопросами анкеты (без ответов q_*)."""
+    if inp.service_id <= 0:
+        raise ValueError("Выберите услугу")
+
+    service = db.scalar(
+        select(Service)
+        .options(selectinload(Service.subcategory).selectinload(ServiceSubcategory.category))
+        .where(Service.id == inp.service_id, Service.is_active.is_(True))
+    )
+    if not service or not service.subcategory or not service.subcategory.category:
+        raise ValueError("Услуга не найдена")
+    if not service.subcategory.category.include_in_visit:
+        raise ValueError("Эта позиция недоступна для выбора в визите")
+
+    _resolve_visit_master_allocations(db, inp.visit_master_allocations)
+
+    if inp.client_mode == "draft":
+        if not inp.draft_name.strip():
+            raise ValueError("Укажите имя клиента для черновика.")
+        if not client_has_any_contact(
+            inp.draft_phone,
+            inp.draft_telegram,
+            inp.draft_vk,
+            inp.draft_instagram,
+            inp.draft_other_contact,
+        ):
+            raise ValueError("Для черновика нужен хотя бы один контакт (телефон или соцсеть).")
+    else:
+        if not inp.existing_client_id:
+            raise ValueError("Найдите и выберите клиента из списка или переключитесь на «Новый черновик».")
+
+    grams_total = max(0.0, inp.kanekalon_grams) + max(0.0, inp.kudri_grams)
+    if grams_total > 0 and inp.mix_source and inp.mix_source != MixSource.NO_MIX:
+        if inp.mix_complexity is None:
+            raise ValueError("Укажите сложность смешки")
+
+    if inp.client_type != VisitClientType.SELF and inp.amount_from_client <= 0:
+        raise ValueError("Укажите сумму, взятую с клиента.")
+
+    if service_requires_kit_block(service):
+        _build_kit_block_from_input(inp, db)
+
+
+def collect_step1_fields_for_step2_hidden(form: Any) -> dict[str, list[str]]:
+    """Поля шага 1 для hidden inputs на шаге 2 (без ответов анкеты q_*)."""
+    out: dict[str, list[str]] = {}
+    for key in form.keys():
+        if key.startswith("q_"):
+            continue
+        vals: list[str] = []
+        for v in form.getlist(key):
+            if isinstance(v, UploadFile):
+                continue
+            s = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+            vals.append(s)
+        if vals:
+            out[key] = vals
+    return out
+
+
+def collect_questionnaire_prefill_from_form(form: Any) -> dict[str, str]:
+    """Поля q_* для повторного показа шага 2 после ошибки."""
+    out: dict[str, str] = {}
+    for k in form.keys():
+        if not isinstance(k, str) or not k.startswith("q_"):
+            continue
+        vs = [v for v in form.getlist(k) if not isinstance(v, UploadFile)]
+        if not vs:
+            continue
+        v = vs[-1]
+        out[k] = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+    return out
+
+
+def master_visit_step1_prefill_from_form(form: Any) -> tuple[dict[str, str], list[int], dict[int, str]]:
+    """Восстановление шага 1 после «Назад» с шага 2."""
+    vm_on_ids, vm_pct_str = read_visit_master_form_state(form)
+    fp: dict[str, str] = {}
+    for key in form.keys():
+        if key == "visit_master_on" or key.startswith("visit_master_pct_"):
+            continue
+        if key.startswith("q_"):
+            continue
+        last: str | None = None
+        for v in form.getlist(key):
+            if isinstance(v, UploadFile):
+                continue
+            last = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+        if last is not None:
+            fp[key] = last
+    return fp, vm_on_ids, vm_pct_str
 
 
 def save_kit_inlay_visit(
@@ -523,28 +661,35 @@ def save_kit_inlay_visit(
     kit_cost_total = 0.0
     usages: list[tuple[int, int, float]] = []
 
-    kind = inp.kit_kind.upper()
-    if kind == "STOCK" and inp.stock_kit_id:
-        n, cost = _apply_stock_kit_usage(
-            db,
-            kit_id=inp.stock_kit_id,
-            use_entire=inp.stock_use_entire,
-            blanks_used=inp.stock_blanks_used,
-        )
-        usages.append((inp.stock_kit_id, n, cost))
-        kit_cost_total += cost
-    if kind == "OWN" and inp.own_extra_blanks and inp.own_extra_stock_kit_id:
-        n, cost = _apply_stock_kit_usage(
-            db,
-            kit_id=inp.own_extra_stock_kit_id,
-            use_entire=inp.own_extra_stock_use_entire,
-            blanks_used=inp.own_extra_stock_blanks_used,
-        )
-        usages.append((inp.own_extra_stock_kit_id, n, cost))
-        kit_cost_total += cost
+    if service_requires_kit_block(service):
+        kind = inp.kit_kind.upper()
+        if kind == "STOCK" and inp.stock_kit_id:
+            n, cost = _apply_stock_kit_usage(
+                db,
+                kit_id=inp.stock_kit_id,
+                use_entire=inp.stock_use_entire,
+                blanks_used=inp.stock_blanks_used,
+            )
+            usages.append((inp.stock_kit_id, n, cost))
+            kit_cost_total += cost
+        if kind == "OWN" and inp.own_extra_blanks and inp.own_extra_stock_kit_id:
+            n, cost = _apply_stock_kit_usage(
+                db,
+                kit_id=inp.own_extra_stock_kit_id,
+                use_entire=inp.own_extra_stock_use_entire,
+                blanks_used=inp.own_extra_stock_blanks_used,
+            )
+            usages.append((inp.own_extra_stock_kit_id, n, cost))
+            kit_cost_total += cost
 
-    # Доп. услуги к визиту: пока 0 (позже — сумма и детализация)
-    addons = 0.0
+    addons = max(0.0, float(inp.addon_sales_amount or 0.0))
+    addons_detail: dict[str, Any] = {}
+    ad = (inp.addon_sales_description or "").strip()
+    if ad:
+        addons_detail["description"] = ad
+    addons_details_json = (
+        json.dumps(addons_detail, ensure_ascii=False) if addons_detail else None
+    )
 
     grams_total = max(0.0, inp.kanekalon_grams) + max(0.0, inp.kudri_grams)
     mix_cost = 0.0
@@ -622,7 +767,7 @@ def save_kit_inlay_visit(
         materials_cost_total=mat_cost,
         amount_from_client=inp.amount_from_client,
         addons_total=addons,
-        addons_details_json=None,
+        addons_details_json=addons_details_json,
         amortization_level=inp.amortization_level,
         amortization_amount=amort_amount,
         studio_fund_amount=amort_amount,
@@ -667,33 +812,33 @@ def save_kit_inlay_visit(
     return visit
 
 
-def list_kit_inlay_services(db: Session) -> list[Service]:
-    q = (
-        select(Service)
-        .join(Service.subcategory)
-        .join(ServiceSubcategory.category)
-        .where(
-            ServiceSubcategory.name == "Вплетение комплекта",
-            Service.is_active.is_(True),
-            ServiceCategory.include_in_visit.is_(True),
-        )
-        .order_by(Service.name.asc())
+def list_master_visit_services(db: Session) -> list[Service]:
+    return list(
+        db.scalars(
+            select(Service)
+            .options(selectinload(Service.subcategory))
+            .join(ServiceSubcategory, Service.subcategory_id == ServiceSubcategory.id)
+            .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
+            .where(
+                Service.is_active.is_(True),
+                ServiceCategory.include_in_visit.is_(True),
+            )
+            .order_by(
+                ServiceCategory.name.asc(),
+                ServiceSubcategory.name.asc(),
+                Service.name.asc(),
+            )
+        ).all()
     )
-    return list(db.scalars(q).all())
 
 
-def list_kit_inlay_services_catalog(db: Session) -> list[dict[str, Any]]:
-    """
-    Упрощенный каталог для UI: категория -> подкатегория -> услуга.
-
-    Сейчас страница мастера поддерживает только услугу «Вплетение комплекта»,
-    поэтому каталог тоже ограничен этим набором сервисов.
-    """
+def list_master_visit_services_catalog(db: Session) -> list[dict[str, Any]]:
+    """Категория → подкатегория → услуга для формы визита (все категории с include_in_visit)."""
 
     def _opt_f(v: float | None) -> float | None:
         return None if v is None else float(v)
 
-    services = list_kit_inlay_services(db)
+    services = list_master_visit_services(db)
     cats: dict[int, dict[str, Any]] = {}
     for s in services:
         sub = getattr(s, "subcategory", None)
@@ -715,6 +860,7 @@ def list_kit_inlay_services_catalog(db: Session) -> list[dict[str, Any]]:
             {
                 "id": int(s.id),
                 "name": s.name,
+                "requires_kit_block": service_requires_kit_block(s),
                 "price_junior_from": _opt_f(s.price_junior_from),
                 "price_junior_to": _opt_f(s.price_junior_to),
                 "price_middle_from": _opt_f(s.price_middle_from),
@@ -734,6 +880,11 @@ def list_kit_inlay_services_catalog(db: Session) -> list[dict[str, Any]]:
             subs_out.append(sc)
         out.append({"id": c["id"], "name": c["name"], "subcategories": subs_out})
     return out
+
+
+def list_kit_inlay_services_catalog(db: Session) -> list[dict[str, Any]]:
+    """Совместимость: то же, что полный каталог для визита."""
+    return list_master_visit_services_catalog(db)
 
 
 def list_kits_for_stock(db: Session) -> list[Kit]:

@@ -102,12 +102,18 @@ def upgrade() -> None:
         sa.UniqueConstraint("name", name="uq_service_category_name"),
     )
 
+    questionnaire_field_type = sa.Enum(
+        "TEXT", "NUMBER", "TEXTAREA", "CHECKBOX", "SELECT", name="questionnairefieldtype"
+    )
+
     op.create_table(
         "service_subcategories",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("category_id", sa.Integer(), sa.ForeignKey("service_categories.id"), nullable=False),
         sa.Column("name", sa.String(length=160), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("show_kit_section", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("show_material_description", sa.Boolean(), nullable=False, server_default=sa.text("1")),
         sa.UniqueConstraint("category_id", "name", name="uq_subcategory_per_category"),
     )
 
@@ -123,11 +129,32 @@ def upgrade() -> None:
         sa.Column("price_middle_to", sa.Float(), nullable=True),
         sa.Column("price_senior_from", sa.Float(), nullable=True),
         sa.Column("price_senior_to", sa.Float(), nullable=True),
+        sa.Column("kit_section_override", sa.Boolean(), nullable=True),
+        sa.Column("hide_material_description", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.UniqueConstraint("subcategory_id", "name", name="uq_service_per_subcategory"),
     )
 
-    questionnaire_field_type = sa.Enum(
-        "TEXT", "NUMBER", "TEXTAREA", "CHECKBOX", "SELECT", name="questionnairefieldtype"
+    op.create_table(
+        "category_questionnaire_fields",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "category_id",
+            sa.Integer(),
+            sa.ForeignKey("service_categories.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("field_key", sa.String(length=100), nullable=False),
+        sa.Column("field_type", questionnaire_field_type, nullable=False),
+        sa.Column("label", sa.String(length=500), nullable=False),
+        sa.Column("required", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("sort_order", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("placeholder", sa.String(length=500), nullable=True),
+        sa.Column("help_text", sa.Text(), nullable=True),
+        sa.Column("options_json", sa.Text(), nullable=True),
+        sa.Column("min_value", sa.Float(), nullable=True),
+        sa.Column("max_value", sa.Float(), nullable=True),
+        sa.Column("visibility_json", sa.Text(), nullable=True),
+        sa.UniqueConstraint("category_id", "field_key", name="uq_category_questionnaire_field_key"),
     )
 
     op.create_table(
@@ -333,8 +360,9 @@ def downgrade() -> None:
     op.drop_table("kits")
     op.drop_table("material_prices_current")
     op.drop_table("service_questionnaire_fields")
-    op.drop_table("services")
     op.drop_table("subcategory_questionnaire_fields")
+    op.drop_table("category_questionnaire_fields")
+    op.drop_table("services")
     op.drop_table("service_subcategories")
     op.drop_table("service_categories")
     op.drop_table("studio_expenses")

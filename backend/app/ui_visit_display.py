@@ -74,6 +74,30 @@ def kit_usages_empty_explanation() -> str:
     )
 
 
+def _format_card_scalar(v: Any) -> str:
+    """Для карточки визита: целые числа без «.0» (JSON часто отдаёт float)."""
+    if v is None:
+        return "—"
+    if isinstance(v, bool):
+        return "Да" if v else "Нет"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        return str(int(v)) if v.is_integer() else str(v)
+    if isinstance(v, str):
+        t = v.strip()
+        if not t:
+            return "—"
+        try:
+            f = float(t.replace(",", "."))
+            if f == int(f):
+                return str(int(f))
+        except ValueError:
+            pass
+        return v
+    return str(v)
+
+
 def build_service_human_display(vs: VisitService) -> dict[str, Any]:
     """Блоки для карточки услуги без сырого JSON."""
     blocks: list[tuple[str, str]] = [
@@ -94,9 +118,9 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
 
     sf = data.get("service_fields") or {}
     if "bases_count" in sf:
-        blocks.append(("Количество баз", str(sf["bases_count"])))
+        blocks.append(("Количество баз", _format_card_scalar(sf["bases_count"])))
     if "blanks_count" in sf:
-        blocks.append(("Количество заготовок (в работе)", str(sf["blanks_count"])))
+        blocks.append(("Количество заготовок (в работе)", _format_card_scalar(sf["blanks_count"])))
     com = sf.get("service_comment")
     if com:
         blocks.append(("Комментарий по услуге", str(com)))
@@ -114,14 +138,19 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
             elif av is None:
                 avs = "—"
             else:
-                avs = str(av)
+                avs = _format_card_scalar(av)
             hdr = labels.get(ak) if isinstance(labels, dict) else None
             if hdr:
                 blocks.append((hdr, avs))
             else:
                 blocks.append((f"Вопрос ({ak})", avs))
 
-    kit = data.get("kit") or {}
+    kit = data.get("kit")
+    if not kit or not isinstance(kit, dict):
+        catalog_line = f"{vs.category_name} / {vs.subcategory_name} / {vs.service_name}"
+        detail_blocks = blocks[3:]
+        return {"blocks": blocks, "catalog_line": catalog_line, "detail_blocks": detail_blocks}
+
     kind = kit.get("kind") or "?"
     blocks.append(("Тип комплекта", ru_kit_kind(kind)))
 
@@ -133,13 +162,16 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
         if ent:
             blocks.append(("Со склада", f"арт. {sku}, весь комплект"))
         else:
-            blocks.append(("Со склада", f"арт. {sku}, заготовок: {bu}"))
+            blocks.append(("Со склада", f"арт. {sku}, заготовок: {_format_card_scalar(bu)}"))
     elif kind == "NEW":
         nk = kit.get("new_kit") or {}
         blocks.append(("Новый комплект", nk.get("title") or "—"))
         if nk.get("description"):
             blocks.append(("Описание комплекта", str(nk["description"])))
-        blocks.append(("Всего заготовок в комплекте", str(nk.get("blanks_total", "—"))))
+        bt = nk.get("blanks_total")
+        blocks.append(
+            ("Всего заготовок в комплекте", "—" if bt is None else _format_card_scalar(bt))
+        )
         if nk.get("sku"):
             blocks.append(("Артикул", str(nk["sku"])))
         blocks.append(
@@ -164,12 +196,17 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
                 if fs.get("use_entire_kit"):
                     blocks.append(("Доп. со склада", f"арт. {sku}, весь комплект"))
                 else:
-                    blocks.append(("Доп. со склада", f"арт. {sku}, шт: {fs.get('blanks_used', 0)}"))
+                    blocks.append(
+                        (
+                            "Доп. со склада",
+                            f"арт. {sku}, шт: {_format_card_scalar(fs.get('blanks_used', 0))}",
+                        )
+                    )
             elif src == "NEW":
                 nk = ex.get("new_kit") or {}
                 blocks.append(("Доп. новые заготовки", nk.get("title") or "—"))
                 if nk.get("blanks_total") is not None:
-                    blocks.append(("Количество доп. заготовок", str(nk["blanks_total"])))
+                    blocks.append(("Количество доп. заготовок", _format_card_scalar(nk["blanks_total"])))
 
     catalog_line = f"{vs.category_name} / {vs.subcategory_name} / {vs.service_name}"
     detail_blocks = blocks[3:]

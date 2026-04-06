@@ -124,7 +124,8 @@ class VisitServiceDetailsPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     service_fields: dict[str, Any] = Field(default_factory=dict)
-    kit: KitBlock
+    # None — услуги без блока комплекта (не «Вплетение комплекта»).
+    kit: KitBlock | None = None
     answers: dict[str, Any] = Field(default_factory=dict)
     answer_labels: dict[str, str] = Field(default_factory=dict)
     answer_display: dict[str, str] = Field(default_factory=dict)

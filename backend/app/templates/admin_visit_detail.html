@@ -80,7 +80,7 @@
 
     <h4 style="margin: 16px 0 6px; font-size: 1rem;">Материал</h4>
     <div class="muted" style="line-height: 1.35; font-size: 0.95rem;">
-      <div style="margin: 2px 0;">Учитывался в расчёте: <strong>{{ materials_used_ru }}</strong> · Канек {{ visit.kanekalon_grams }} г · Кудри {{ visit.kudri_grams }} г · Смешка: <strong>{{ mix_source_ru }}</strong></div>
+      <div style="margin: 2px 0;">Учитывался в расчёте: <strong>{{ materials_used_ru }}</strong> · Канек {{ visit.kanekalon_grams|int }} г · Кудри {{ visit.kudri_grams|int }} г · Смешка: <strong>{{ mix_source_ru }}</strong></div>
       <div style="margin: 2px 0;">Сложность смешки: <strong>{{ mix_complexity_ru }}</strong> · Стоимость смешки: {{ "%.0f"|format(visit.mix_cost_amount) }} ₽{% if visit.mix_bonus_amount and visit.mix_bonus_amount > 0 %} · Бонус за смешку, мастер <strong>{{ mix_bonus_master_label or "—" }}</strong>: {{ "%.0f"|format(visit.mix_bonus_amount) }} ₽{% endif %}</div>
       <div style="margin: 2px 0;">Цены на момент визита (₽/г): канек {% if visit.kanekalon_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kanekalon_price_per_gram_at_time) }}{% else %}—{% endif %}, кудри {% if visit.kudri_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kudri_price_per_gram_at_time) }}{% else %}—{% endif %}</div>
     </div>
