@@ -101,6 +101,26 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
     if com:
         blocks.append(("Комментарий по услуге", str(com)))
 
+    ans = data.get("answers") or {}
+    labels = data.get("answer_labels") or {}
+    displays = data.get("answer_display") or {}
+    if isinstance(ans, dict) and ans:
+        for ak in sorted(ans.keys()):
+            av = ans[ak]
+            if isinstance(displays, dict) and ak in displays:
+                avs = displays[ak]
+            elif isinstance(av, bool):
+                avs = "Да" if av else "Нет"
+            elif av is None:
+                avs = "—"
+            else:
+                avs = str(av)
+            hdr = labels.get(ak) if isinstance(labels, dict) else None
+            if hdr:
+                blocks.append((hdr, avs))
+            else:
+                blocks.append((f"Вопрос ({ak})", avs))
+
     kit = data.get("kit") or {}
     kind = kit.get("kind") or "?"
     blocks.append(("Тип комплекта", ru_kit_kind(kind)))

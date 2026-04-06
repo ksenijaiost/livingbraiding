@@ -7,7 +7,7 @@ Pydantic-схемы для `details_json` в `visit_services`.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -128,12 +128,19 @@ class VisitServiceDetailsPayload(BaseModel):
 
     service_fields — типизировано для группы «вплетение комплекта»; для других услуг
     позже можно добавить Union или отдельные модели с дискриминатором.
+
+    answers — ответы по ключам полей из склейки анкеты (подкатегория + услуга).
+    answer_labels — снимок подписей полей на момент визита (field_key → label), для отчётов.
+    answer_display — как показывать значение в интерфейсе (SELECT → подпись варианта, bool → Да/Нет).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     service_fields: FullHeadKitInlayServiceFields
     kit: KitBlock
+    answers: dict[str, Any] = Field(default_factory=dict)
+    answer_labels: dict[str, str] = Field(default_factory=dict)
+    answer_display: dict[str, str] = Field(default_factory=dict)
 
 
 def parse_visit_service_details(data: object) -> VisitServiceDetailsPayload:

@@ -22,6 +22,7 @@ from app.db.models import (
     AmortizationLevel,
     MixComplexity,
     MixSource,
+    QuestionnaireFieldType,
     Service,
     ServiceSubcategory,
     Setting,
@@ -33,6 +34,11 @@ from app.db.models import (
     VisitService,
 )
 from app.client_validation import client_has_any_contact, strip_or_none
+from app.questionnaire.answer_validate import (
+    extract_questionnaire_raw_from_form,
+    validate_and_coerce_answers,
+)
+from app.questionnaire.runtime_merge import load_merged_questionnaire_specs, merged_questionnaire_client_json
 from app.questionnaire.schemas import (
     KitBlock,
     KitFromStock,
@@ -240,6 +246,7 @@ def parse_kit_inlay_form(form: Any) -> KitInlayFormInput:
         bases_count=g_int("bases_count", 0),
         blanks_count=g_int("blanks_count", 0),
         service_comment=g("service_comment") or None,
+        questionnaire_raw=extract_questionnaire_raw_from_form(form),
     )
 
 
@@ -287,6 +294,7 @@ class KitInlayFormInput:
     bases_count: int
     blanks_count: int
     service_comment: str | None
+    questionnaire_raw: dict[str, str]
 
 
 def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServiceDetailsPayload:
@@ -354,10 +362,33 @@ def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServic
     else:
         raise ValueError("Неверный тип комплекта")
 
+    specs = load_merged_questionnaire_specs(db, inp.service_id)
+    answers, q_errors = validate_and_coerce_answers(inp.questionnaire_raw, specs)
+    if q_errors:
+        raise ValueError("; ".join(q_errors))
+
+    answer_labels = {spec.field_key: spec.label for spec in specs if spec.field_key in answers}
+    answer_display: dict[str, str] = {}
+    for spec in specs:
+        fk = spec.field_key
+        if fk not in answers:
+            continue
+        v = answers[fk]
+        if spec.field_type == QuestionnaireFieldType.SELECT and isinstance(v, str):
+            opt_lbl = next((o["label"] for o in spec.options if o.get("value") == v), None)
+            answer_display[fk] = opt_lbl if opt_lbl is not None else v
+        elif isinstance(v, bool):
+            answer_display[fk] = "Да" if v else "Нет"
+        else:
+            answer_display[fk] = str(v)
+
     return parse_visit_service_details(
         {
             "service_fields": service_fields,
             "kit": kit_block.model_dump(mode="json"),
+            "answers": answers,
+            "answer_labels": answer_labels,
+            "answer_display": answer_display,
         }
     )
 
@@ -589,6 +620,7 @@ def list_kit_inlay_services_catalog(db: Session) -> list[dict[str, Any]]:
                 "price_middle_to": _opt_f(s.price_middle_to),
                 "price_senior_from": _opt_f(s.price_senior_from),
                 "price_senior_to": _opt_f(s.price_senior_to),
+                "questionnaire_fields": merged_questionnaire_client_json(db, int(s.id)),
             }
         )
 

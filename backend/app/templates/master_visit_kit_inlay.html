@@ -134,7 +134,7 @@
         </div>
         <div style="flex: 1;">
           <label>Услуга *</label>
-          <select id="service_id" name="service_id" required>
+          <select id="service_id" name="service_id" required onchange="renderMergedQuestionnaire()">
           </select>
         </div>
       </div>
@@ -191,6 +191,10 @@
           <label><input type="radio" name="mix_complexity" value="HARD" {% if fp.get('mix_complexity') == 'HARD' %}checked{% endif %} /> Сложная</label>
         </div>
       </div>
+
+      <h3>Вопросы по услуге</h3>
+      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">Дополнительные поля из каталога (подкатегория, затем услуга). Если вопросов нет — блок пустой.</p>
+      <div id="merged-questionnaire-host" class="card" style="margin-bottom: 14px; background: #fafafa;"></div>
 
       <h3>По услуге</h3>
       <div class="row">
@@ -532,8 +536,113 @@
       }
     });
 
+    const formPrefill = {{ fp|tojson }};
     const visitMasterLevel = {{ (current_user.master_level.value if current_user.master_level else None) | tojson }};
     const serviceCatalog = {{ service_catalog|tojson }};
+
+    function renderMergedQuestionnaire() {
+      const host = document.getElementById('merged-questionnaire-host');
+      if (!host) return;
+      const subSel = document.getElementById('service_subcategory_id');
+      const serviceSel = document.getElementById('service_id');
+      const subId = parseInt(subSel.value || '0', 10);
+      let sc = null;
+      for (const c of serviceCatalog || []) {
+        for (const ssc of (c.subcategories || [])) {
+          if (ssc.id === subId) {
+            sc = ssc;
+            break;
+          }
+        }
+        if (sc) break;
+      }
+      const services = (sc && sc.services) ? sc.services : [];
+      const sid = parseInt(serviceSel.value || '0', 10);
+      const svc = services.find((x) => x.id === sid);
+      const fields = (svc && svc.questionnaire_fields) ? svc.questionnaire_fields : [];
+      host.innerHTML = '';
+      if (!fields.length) {
+        host.innerHTML = '<p class="muted" style="margin:0;">Дополнительных вопросов нет.</p>';
+        return;
+      }
+      const fp = formPrefill && typeof formPrefill === 'object' ? formPrefill : {};
+      for (const f of fields) {
+        const qname = 'q_' + f.field_key;
+        const wrap = document.createElement('div');
+        wrap.style.marginBottom = '14px';
+        const lab = document.createElement('div');
+        lab.style.fontWeight = '600';
+        lab.style.marginBottom = '6px';
+        lab.textContent = f.label + (f.required ? ' *' : '');
+        wrap.appendChild(lab);
+        const ph = fp[qname] != null ? String(fp[qname]) : '';
+        if (f.field_type === 'TEXT') {
+          const inp = document.createElement('input');
+          inp.type = 'text';
+          inp.name = qname;
+          if (f.placeholder) inp.placeholder = f.placeholder;
+          inp.value = ph;
+          inp.style.width = '100%';
+          wrap.appendChild(inp);
+        } else if (f.field_type === 'TEXTAREA') {
+          const ta = document.createElement('textarea');
+          ta.name = qname;
+          ta.rows = 3;
+          ta.style.width = '100%';
+          ta.value = ph;
+          wrap.appendChild(ta);
+        } else if (f.field_type === 'NUMBER') {
+          const inp = document.createElement('input');
+          inp.type = 'number';
+          inp.name = qname;
+          inp.step = 'any';
+          if (f.min_value != null) inp.setAttribute('min', String(f.min_value));
+          if (f.max_value != null) inp.setAttribute('max', String(f.max_value));
+          inp.value = ph;
+          inp.style.width = '100%';
+          wrap.appendChild(inp);
+        } else if (f.field_type === 'CHECKBOX') {
+          const lb = document.createElement('label');
+          lb.style.fontWeight = 'normal';
+          lb.style.display = 'flex';
+          lb.style.alignItems = 'center';
+          lb.style.gap = '8px';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.name = qname;
+          cb.value = 'on';
+          if (ph === 'on' || ph === 'true' || ph === '1') cb.checked = true;
+          lb.appendChild(cb);
+          lb.appendChild(document.createTextNode(f.placeholder || 'Да'));
+          wrap.appendChild(lb);
+        } else if (f.field_type === 'SELECT') {
+          const sel = document.createElement('select');
+          sel.name = qname;
+          sel.style.width = '100%';
+          const opt0 = document.createElement('option');
+          opt0.value = '';
+          opt0.textContent = '—';
+          sel.appendChild(opt0);
+          for (const o of (f.options || [])) {
+            const op = document.createElement('option');
+            op.value = o.value;
+            op.textContent = o.label;
+            if (ph === o.value) op.selected = true;
+            sel.appendChild(op);
+          }
+          wrap.appendChild(sel);
+        }
+        if (f.help_text) {
+          const ht = document.createElement('p');
+          ht.className = 'muted';
+          ht.style.fontSize = '12px';
+          ht.style.margin = '6px 0 0';
+          ht.textContent = f.help_text;
+          wrap.appendChild(ht);
+        }
+        host.appendChild(wrap);
+      }
+    }
     const serviceMetaById = {};
     for (const c of serviceCatalog || []) {
       for (const sc of (c.subcategories || [])) {
@@ -606,6 +715,7 @@
         opt.textContent = s.name + servicePriceHint(s);
         serviceSel.appendChild(opt);
       }
+      renderMergedQuestionnaire();
     }
 
     function serviceCatalogOnCategory() {
@@ -638,6 +748,7 @@
       if (initialServiceId) {
         serviceSel.value = String(initialServiceId);
       }
+      renderMergedQuestionnaire();
     })();
 
     function kitKind() {
