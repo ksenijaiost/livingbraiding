@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Каталог услуг</h2>
+    <p class="muted" style="margin-top: -6px;">
+      Выберите категорию и подкатегорию — отобразятся услуги и все диапазоны цен по уровням мастера (без учёта вашего уровня в системе).
+      Сначала идут активные услуги, неактивные — в конце списка.
+    </p>
+
+    {% if mismatch %}
+      <div class="error" style="margin-bottom: 12px;">
+        Подкатегория не относится к выбранной категории. Согласуйте оба поля и нажмите «Показать цены».
+      </div>
+    {% endif %}
+
+    <form method="get" action="/service-catalog" class="card" style="background: #f8fafc; margin-bottom: 16px;">
+      <div class="row" style="align-items: flex-end;">
+        <div>
+          <label for="cat_sel">Категория</label>
+          <select id="cat_sel" name="category_id" onchange="document.getElementById('sub_sel').value='0'; this.form.submit();">
+            <option value="0" {% if not selected_category %}selected{% endif %}>— выберите —</option>
+            {% for c in categories %}
+              <option value="{{ c.id }}" {% if selected_category and c.id == selected_category.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="sub_sel">Подкатегория</label>
+          <select id="sub_sel" name="subcategory_id" {% if not selected_category %}disabled{% endif %}>
+            <option value="0" {% if not selected_subcategory %}selected{% endif %}>— выберите —</option>
+            {% for sc in subcategories %}
+              <option value="{{ sc.id }}" {% if selected_subcategory and sc.id == selected_subcategory.id %}selected{% endif %}>{{ sc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="flex: 0 0 auto; min-width: auto;">
+          <label style="visibility: hidden;">Действие</label>
+          <button type="submit" {% if not selected_category %}disabled{% endif %}>Показать цены</button>
+        </div>
+      </div>
+    </form>
+
+    {% if selected_subcategory and not mismatch %}
+      <p class="muted" style="font-size: 13px;">
+        <strong>{{ selected_category.name }}</strong> → <strong>{{ selected_subcategory.name }}</strong>
+      </p>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th rowspan="2">Услуга</th>
+              <th rowspan="2">Активна</th>
+              <th colspan="2">{{ ru_master_level('JUNIOR')|capitalize }}</th>
+              <th colspan="2">{{ ru_master_level('MIDDLE')|capitalize }}</th>
+              <th colspan="2">{{ ru_master_level('SENIOR')|capitalize }}</th>
+            </tr>
+            <tr>
+              <th>от</th><th>до</th>
+              <th>от</th><th>до</th>
+              <th>от</th><th>до</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in services %}
+              <tr>
+                <td><strong>{{ s.name }}</strong></td>
+                <td>{% if s.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
+                <td>{% set v = format_price_integer_rub(s.price_junior_from) %}{% if v %}{{ v }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td>{% set v = format_price_integer_rub(s.price_junior_to) %}{% if v %}{{ v }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td>{% set v = format_price_integer_rub(s.price_middle_from) %}{% if v %}{{ v }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td>{% set v = format_price_integer_rub(s.price_middle_to) %}{% if v %}{{ v }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td>{% set v = format_price_integer_rub(s.price_senior_from) %}{% if v %}{{ v }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td>{% set v = format_price_integer_rub(s.price_senior_to) %}{% if v %}{{ v }}{% else %}<span class="muted">—</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if not services %}
+        <p class="muted" style="margin-top: 12px;">В этой подкатегории пока нет услуг.</p>
+      {% endif %}
+    {% elif selected_category and not selected_subcategory and not mismatch %}
+      <p class="muted">Выберите подкатегорию и нажмите «Показать цены».</p>
+    {% elif not categories %}
+      <p class="muted">В базе нет активных категорий услуг.</p>
+    {% endif %}
+  </div>
+{% endblock %}

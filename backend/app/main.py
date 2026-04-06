@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.admin_questionnaire_fields import router as admin_questionnaire_fields_router
 from app.admin_service_catalog import router as admin_service_catalog_router
 from app.auth import AuthUser, authenticate, get_current_user, login_response, logout_response, require_role
-from app.ru_labels import ru_master_level, ru_questionnaire_field_type
+from app.ru_labels import format_price_integer_rub, ru_master_level, ru_questionnaire_field_type
 from app.display_time import (
     ALLOWED_TIMEZONES,
     ALLOWED_TIMEZONE_IDS,
@@ -53,6 +53,9 @@ from app.db.models import (
     Kit,
     MaterialPriceCurrent,
     MaterialType,
+    Service,
+    ServiceCategory,
+    ServiceSubcategory,
     Setting,
     User,
     UserRole,
@@ -95,6 +98,7 @@ app.include_router(admin_questionnaire_fields_router)
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_master_level"] = ru_master_level
 templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_type
+templates.env.globals["format_price_integer_rub"] = format_price_integer_rub
 
 
 @app.on_event("startup")
@@ -176,6 +180,122 @@ def logout_action():
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, current_user=Depends(get_current_user)):
     return templates.TemplateResponse("home.html", _ctx(request, current_user=current_user))
+
+
+@app.get("/service-catalog", response_class=HTMLResponse)
+def service_catalog_view(
+    request: Request,
+    category_id: int | None = None,
+    subcategory_id: int | None = None,
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Просмотр прайса: категория → подкатегория → таблица услуг.
+    Пока все диапазоны цен (младший / мастер / старший) без фильтра по уровню текущего пользователя.
+    """
+    if category_id is not None and category_id <= 0:
+        category_id = None
+    if subcategory_id is not None and subcategory_id <= 0:
+        subcategory_id = None
+
+    categories = list(
+        db.scalars(
+            select(ServiceCategory)
+            .where(ServiceCategory.is_active.is_(True))
+            .order_by(ServiceCategory.name.asc())
+        ).all()
+    )
+
+    selected_category: ServiceCategory | None = None
+    subcategories: list[ServiceSubcategory] = []
+    selected_subcategory: ServiceSubcategory | None = None
+    services: list[Service] = []
+    mismatch = False
+
+    sub_from_q: ServiceSubcategory | None = None
+    if subcategory_id is not None and subcategory_id > 0:
+        sub_from_q = db.scalar(
+            select(ServiceSubcategory)
+            .options(selectinload(ServiceSubcategory.category))
+            .where(ServiceSubcategory.id == subcategory_id, ServiceSubcategory.is_active.is_(True))
+        )
+
+    if sub_from_q and sub_from_q.category and sub_from_q.category.is_active:
+        if category_id is not None and category_id > 0 and category_id != sub_from_q.category_id:
+            mismatch = True
+            selected_category = db.scalar(
+                select(ServiceCategory).where(
+                    ServiceCategory.id == category_id,
+                    ServiceCategory.is_active.is_(True),
+                )
+            )
+            if selected_category:
+                subcategories = list(
+                    db.scalars(
+                        select(ServiceSubcategory)
+                        .where(
+                            ServiceSubcategory.category_id == category_id,
+                            ServiceSubcategory.is_active.is_(True),
+                        )
+                        .order_by(ServiceSubcategory.name.asc())
+                    ).all()
+                )
+        else:
+            selected_subcategory = sub_from_q
+            selected_category = sub_from_q.category
+            subcategories = list(
+                db.scalars(
+                    select(ServiceSubcategory)
+                    .where(
+                        ServiceSubcategory.category_id == selected_category.id,
+                        ServiceSubcategory.is_active.is_(True),
+                    )
+                    .order_by(ServiceSubcategory.name.asc())
+                ).all()
+            )
+            services = list(
+                db.scalars(
+                    select(Service)
+                    .where(Service.subcategory_id == sub_from_q.id)
+                    .order_by(Service.is_active.desc(), Service.name.asc())
+                ).all()
+            )
+    elif category_id is not None and category_id > 0:
+        selected_category = db.scalar(
+            select(ServiceCategory).where(
+                ServiceCategory.id == category_id,
+                ServiceCategory.is_active.is_(True),
+            )
+        )
+        if selected_category:
+            subcategories = list(
+                db.scalars(
+                    select(ServiceSubcategory)
+                    .where(
+                        ServiceSubcategory.category_id == category_id,
+                        ServiceSubcategory.is_active.is_(True),
+                    )
+                    .order_by(ServiceSubcategory.name.asc())
+                ).all()
+            )
+
+    return templates.TemplateResponse(
+        "service_catalog_view.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            title="Каталог услуг",
+            categories=categories,
+            selected_category=selected_category,
+            subcategories=subcategories,
+            selected_subcategory=selected_subcategory,
+            services=services,
+            mismatch=mismatch,
+        ),
+    )
 
 
 @app.get("/admin/clients", response_class=HTMLResponse)

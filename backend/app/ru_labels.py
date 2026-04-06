@@ -42,3 +42,11 @@ def ru_questionnaire_field_type(ft: QuestionnaireFieldType | str) -> str:
         except ValueError:
             return ft
     return RU_QUESTIONNAIRE_FIELD_TYPE.get(ft, str(ft))
+
+
+def format_price_integer_rub(amount: float | int | None) -> str | None:
+    """Цена для просмотра каталога: целое число и символ ₽ (без копеек и без .0)."""
+    if amount is None:
+        return None
+    n = int(round(float(amount)))
+    return f"{n} ₽"
