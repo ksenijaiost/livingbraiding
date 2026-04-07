@@ -68,6 +68,7 @@ class KitAdminFormData:
     description: str | None
     stock_price_total: float | None
     cost_total: float | None
+    author_cost_total: float | None
 
 
 def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
@@ -95,6 +96,7 @@ def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
         description=_g_str(form, "description") or None,
         stock_price_total=_g_float_opt(form, "stock_price_total"),
         cost_total=_g_float_opt(form, "cost_total"),
+        author_cost_total=_g_float_opt(form, "author_cost_total"),
     )
 
 
@@ -178,6 +180,7 @@ def kit_new_error_prefill(form: Any) -> dict[str, Any]:
         "notes": d.notes or "",
         "stock_price_total": _g_str(form, "stock_price_total"),
         "cost_total": _g_str(form, "cost_total"),
+        "author_cost_total": _g_str(form, "author_cost_total"),
         "author_external": "on" if _g_bool(form, "author_external") else "",
         "kit_author_ids": parse_kit_author_user_ids_from_form(form),
     }
@@ -202,6 +205,7 @@ def kit_edit_error_prefill(form: Any) -> dict[str, Any]:
         "notes": d.notes or "",
         "stock_price_total": _g_str(form, "stock_price_total"),
         "cost_total": _g_str(form, "cost_total"),
+        "author_cost_total": _g_str(form, "author_cost_total"),
         "author_external": "on" if _g_bool(form, "author_external") else "",
         "kit_author_ids": parse_kit_author_user_ids_from_form(form),
     }
@@ -213,6 +217,7 @@ def kit_to_form_prefill(kit: Kit) -> dict[str, Any]:
     ln = "" if kit.length_cm is None else str(kit.length_cm).replace(",", ".")
     sp = "" if kit.stock_price_total is None else str(kit.stock_price_total).replace(",", ".")
     ct = "" if kit.cost_total is None else str(kit.cost_total).replace(",", ".")
+    ac = "" if kit.author_cost_total is None else str(kit.author_cost_total).replace(",", ".")
     return {
         "sku": kit.sku,
         "title": kit.title,
@@ -231,6 +236,7 @@ def kit_to_form_prefill(kit: Kit) -> dict[str, Any]:
         "notes": kit.notes or "",
         "stock_price_total": sp,
         "cost_total": ct,
+        "author_cost_total": ac,
         "author_external": "on" if kit.author_external else "",
         "kit_author_ids": [
             l.user_id
@@ -259,6 +265,7 @@ def apply_kit_admin_form(kit: Kit, d: KitAdminFormData) -> None:
     kit.description = d.description
     kit.stock_price_total = d.stock_price_total
     kit.cost_total = d.cost_total
+    kit.author_cost_total = d.author_cost_total
     if kit.pieces_available <= 0:
         kit.is_in_stock = False
     else:

@@ -103,3 +103,8 @@
     <input name="{{ field_prefix }}cost_total" type="text" inputmode="decimal" placeholder="необязательно" value="{{ fp.get('cost_total', '') }}" />
   </div>
 </div>
+
+<div style="margin-top:8px;">
+  <label>ЗП авторов (всего), ₽ <span class="muted">(для расчёта фонда студии при продаже)</span></label>
+  <input name="{{ field_prefix }}author_cost_total" type="text" inputmode="decimal" placeholder="необязательно" value="{{ fp.get('author_cost_total', '') }}" />
+</div>

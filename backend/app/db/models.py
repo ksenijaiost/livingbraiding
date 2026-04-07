@@ -378,6 +378,8 @@ class Kit(Base):
     stock_price_total: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Новый комплект: себестоимость (пропорционально списанным заготовкам).
     cost_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Суммарная ЗП авторов (мастеров) за изготовление всего комплекта (снимок).
+    author_cost_total: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     is_in_stock: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

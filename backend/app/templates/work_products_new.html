@@ -35,6 +35,105 @@
         </div>
       </div>
 
+      <div id="kit_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
+        <h3 style="margin-top:0;">Комплект/Заготовки (поштучно)</h3>
+        <p class="muted" style="margin-top:-6px;">
+          Введите количества заготовок по видам. Если сотрудников несколько — заполняйте по каждому.
+        </p>
+
+        <div class="row">
+          <div>
+            <label>Тип заготовок</label>
+            <label><input type="checkbox" name="kit_type_se" {% if fp.kit_type_se %}checked{% endif %} /> SE</label>
+            <label><input type="checkbox" name="kit_type_de" {% if fp.kit_type_de %}checked{% endif %} /> DE</label>
+          </div>
+          <div>
+            <label>Доп. расходы, ₽</label>
+            <input name="extra_costs_amount" type="number" step="0.01" min="0" value="{{ fp.extra_costs_amount or 0 }}" />
+            <div class="muted" style="font-size: 12px; margin-top: 6px;">
+              Например: украшения, расходники, прочие доп. затраты.
+            </div>
+          </div>
+        </div>
+
+        <div style="overflow-x:auto; margin-top: 12px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Вид</th>
+                {% for u in staff %}
+                  <th>{{ u.display_name }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="{{ 1 + staff|length }}"><strong>SE</strong></td></tr>
+              {% for key, label in kit_se_items %}
+                <tr class="kit-se-row">
+                  <td>{{ label }}</td>
+                  {% for u in staff %}
+                    <td>
+                      <input
+                        name="kit_qty_{{ u.id }}_{{ key }}"
+                        type="number"
+                        step="1"
+                        min="0"
+                        value="{{ fp.get('kit_qty_' ~ u.id ~ '_' ~ key, 0) }}"
+                      />
+                    </td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+
+              <tr><td colspan="{{ 1 + staff|length }}"><strong>DE</strong></td></tr>
+              {% for key, label in kit_de_items %}
+                <tr class="kit-de-row">
+                  <td>{{ label }}</td>
+                  {% for u in staff %}
+                    <td>
+                      <input
+                        name="kit_qty_{{ u.id }}_{{ key }}"
+                        type="number"
+                        step="1"
+                        min="0"
+                        value="{{ fp.get('kit_qty_' ~ u.id ~ '_' ~ key, 0) }}"
+                      />
+                    </td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div id="kit_stock_block" style="margin-top: 12px;">
+          <h4 style="margin: 0 0 8px;">Склад (для режима «в наличие»)</h4>
+          <div class="row">
+            <div>
+              <label>Артикул</label>
+              <input name="kit_sku" value="{{ fp.kit_sku }}" placeholder="например, KIT-001" />
+            </div>
+            <div>
+              <label>Название</label>
+              <input name="kit_title" value="{{ fp.kit_title }}" placeholder="например, Комплект SE (короткие косы)" />
+            </div>
+          </div>
+          <div class="row" style="margin-top: 8px;">
+            <div>
+              <label>Цена комплекта на складе (всего), ₽</label>
+              <input name="kit_stock_price_total" type="number" step="0.01" min="0" value="{{ fp.kit_stock_price_total or 0 }}" />
+            </div>
+            <div>
+              <label class="muted">pieces_total будет рассчитан из таблицы</label>
+              <input disabled value="—" />
+            </div>
+          </div>
+          <p class="muted" style="font-size:12px; margin-bottom:0;">
+            Склад создаём только в режиме «в наличие». ЗП авторов проставится автоматически.
+          </p>
+        </div>
+      </div>
+
       <div id="client_block" class="card" style="background:#f8fafc; margin: 12px 0;">
         <label>Клиент (обязательно для «на заказ»)</label>
         <input name="client_id" value="{{ fp.client_id }}" placeholder="ID клиента (пока вручную; подсказки подключим позже)" />
@@ -112,14 +211,30 @@
   </div>
 
   <script>
+    function syncKitBlock() {
+      var kind = document.querySelector('select[name="kind"]');
+      var kit = document.getElementById('kit_block');
+      if (!kind || !kit) return;
+      kit.style.display = (kind.value === 'KIT') ? 'block' : 'none';
+    }
     function syncClientBlock() {
       var scope = document.getElementById('scope_sel');
       var el = document.getElementById('client_block');
       if (!scope || !el) return;
       el.style.display = (scope.value === 'CUSTOM_ORDER') ? 'block' : 'none';
     }
+    function syncKitStockBlock() {
+      var scope = document.getElementById('scope_sel');
+      var el = document.getElementById('kit_stock_block');
+      if (!scope || !el) return;
+      el.style.display = (scope.value === 'IN_STOCK') ? 'block' : 'none';
+    }
     document.getElementById('scope_sel').addEventListener('change', syncClientBlock);
+    document.getElementById('scope_sel').addEventListener('change', syncKitStockBlock);
+    document.querySelector('select[name="kind"]').addEventListener('change', syncKitBlock);
     syncClientBlock();
+    syncKitBlock();
+    syncKitStockBlock();
   </script>
 {% endblock %}
 

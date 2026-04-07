@@ -20,6 +20,7 @@ from app.auth import AuthUser, require_role
 from app.client_validation import format_created_by_label
 from app.db.models import (
     Client,
+    Kit,
     MixComplexity,
     MixSource,
     User,
@@ -183,6 +184,70 @@ def _kind_label(k: WorkKind) -> str:
     }[k]
 
 
+def _kit_se_items() -> list[tuple[str, str]]:
+    return [
+        ("SE_BRAID_SHORT", "SE: коса короткая"),
+        ("SE_BRAID_LONG", "SE: коса длинная"),
+        ("SE_BRAID_FREE_TIP", "SE: коса свободный кончик"),
+        ("SE_TIP_ADDON", "SE: доплёт кончиков"),
+        ("SE_TRIM_SHORT", "SE: стрижка короткой косы"),
+        ("SE_TRIM_LONG", "SE: стрижка длинной косы"),
+    ]
+
+
+def _kit_de_items() -> list[tuple[str, str]]:
+    return [
+        ("DE_BRAID_SHORT", "DE: коса короткая"),
+        ("DE_BRAID_LONG", "DE: коса длинная"),
+        ("DE_BRAID_NEW_FMT", "DE: коса новый формат"),
+        ("DE_CURL", "DE: кудря"),
+        ("DE_DREAD_FREE_TIP", "DE: дред свободный кончик"),
+        ("DE_DREAD_SHORT", "DE: дред короткий"),
+        ("DE_DREAD_LONG", "DE: дред длинный"),
+        ("DE_TRIM", "DE: стрижка"),
+    ]
+
+
+def _kit_rates_defaults() -> dict[str, dict[str, Any]]:
+    """
+    Ставки ЗП за 1 шт по видам (по умолчанию). Пороговые цены — только для конкретного вида.
+    Значения можно переопределить позже через work_rates (следующий шаг расширит настройки).
+    """
+    return {
+        "SE": {
+            "SE_BRAID_SHORT": {"base": 12.5, "threshold_qty": 140, "threshold_rate": 11.0},
+            "SE_BRAID_LONG": {"base": 15.0, "threshold_qty": 120, "threshold_rate": 13.5},
+            "SE_BRAID_FREE_TIP": {"base": 11.0},
+            "SE_TIP_ADDON": {"base": 5.0},
+            "SE_TRIM_SHORT": {"base": 2.0},
+            "SE_TRIM_LONG": {"base": 2.5},
+        },
+        "DE": {
+            "DE_BRAID_SHORT": {"base": 25.0},
+            "DE_BRAID_LONG": {"base": 30.0},
+            "DE_BRAID_NEW_FMT": {"base": 35.0},
+            "DE_CURL": {"base": 25.0},
+            "DE_DREAD_FREE_TIP": {"base": 35.0},
+            "DE_DREAD_SHORT": {"base": 40.0},
+            "DE_DREAD_LONG": {"base": 50.0},
+            "DE_TRIM": {"base": 5.0},
+        },
+    }
+
+
+def _kit_rate_for_item(rates: dict[str, dict[str, Any]], item_key: str, qty_total: int) -> float:
+    for group in ("SE", "DE"):
+        if item_key in rates.get(group, {}):
+            cfg = rates[group][item_key]
+            base = float(cfg.get("base") or 0.0)
+            th_qty = int(cfg.get("threshold_qty") or 0)
+            th_rate = float(cfg.get("threshold_rate") or 0.0)
+            if th_qty > 0 and qty_total >= th_qty and th_rate > 0:
+                return th_rate
+            return base
+    return 0.0
+
+
 @router.get("/new", response_class=HTMLResponse)
 def work_new_get(
     request: Request,
@@ -202,6 +267,8 @@ def work_new_get(
             default_date=date.today().isoformat(),
             kinds=[{"value": k.value, "label": _kind_label(k)} for k in WorkKind],
             scopes=[{"value": s.value, "label": ("В наличие" if s == WorkScope.IN_STOCK else "На заказ")} for s in WorkScope],
+            kit_se_items=_kit_se_items(),
+            kit_de_items=_kit_de_items(),
         ),
     )
 
@@ -271,6 +338,50 @@ async def work_new_post(
         if mix_complexity is not None:
             details["mix_complexity"] = mix_complexity.value
 
+        extra_costs_amount = max(0.0, _g_float(form, "extra_costs_amount", 0.0))
+
+        # KIT: parse blanks + compute master/studio profit
+        kit_rates = _kit_rates_defaults()
+        kit_totals: dict[str, int] = {}
+        kit_by_staff: dict[int, dict[str, int]] = {}
+        kit_pieces_total = 0
+        kit_blank_type_se = _g_bool(form, "kit_type_se")
+        kit_blank_type_de = _g_bool(form, "kit_type_de")
+        if kind == WorkKind.KIT:
+            if not kit_blank_type_se and not kit_blank_type_de:
+                raise ValueError("Для комплекта выберите тип заготовок: SE и/или DE.")
+            # Only consider checked staff in alloc
+            staff_ids = [uid for uid, _ in alloc]
+            all_items = []
+            if kit_blank_type_se:
+                all_items.extend(_kit_se_items())
+            if kit_blank_type_de:
+                all_items.extend(_kit_de_items())
+            any_qty = False
+            for uid in staff_ids:
+                per: dict[str, int] = {}
+                for item_key, _ in all_items:
+                    raw = _g_str(form, f"kit_qty_{uid}_{item_key}", "0")
+                    try:
+                        q = int(raw or "0")
+                    except ValueError:
+                        q = 0
+                    q = max(0, q)
+                    if q > 0:
+                        any_qty = True
+                    per[item_key] = q
+                    kit_totals[item_key] = kit_totals.get(item_key, 0) + q
+                kit_by_staff[uid] = per
+            if not any_qty:
+                raise ValueError("Для комплекта укажите хотя бы одно количество заготовок.")
+            kit_pieces_total = sum(kit_totals.values())
+            details["kit"] = {
+                "blank_type_se": kit_blank_type_se,
+                "blank_type_de": kit_blank_type_de,
+                "totals": kit_totals,
+                "by_staff": kit_by_staff,
+            }
+
         ready_date_raw = _g_str(form, "ready_date", "")
         ready_dt = None
         if ready_date_raw:
@@ -278,6 +389,26 @@ async def work_new_post(
                 ready_dt = datetime.combine(date.fromisoformat(ready_date_raw), datetime.min.time())
             except ValueError:
                 raise ValueError("Некорректная дата готовности (ожидается YYYY-MM-DD).")
+
+        # Compute profits (MVP for 6.3.3: KIT uses piece rates; other kinds stay 0 for now)
+        staff_master_profit: dict[int, float] = {uid: 0.0 for uid, _ in alloc}
+        if kind == WorkKind.KIT:
+            for item_key, total_qty in kit_totals.items():
+                rate = _kit_rate_for_item(kit_rates, item_key, total_qty)
+                if rate <= 0:
+                    continue
+                for uid, _share in alloc:
+                    q = int(kit_by_staff.get(uid, {}).get(item_key, 0))
+                    if q > 0:
+                        staff_master_profit[uid] += rate * q
+
+        master_total = float(sum(staff_master_profit.values()))
+        studio_share = _studio_share_snapshot(db)
+        studio_total = 0.0
+        if studio_share > 0 and studio_share < 1 and master_total > 0:
+            studio_total = master_total * (studio_share / (1.0 - studio_share))
+        profit_total = master_total + studio_total
+        cost_total_amount = mat_cost + extra_costs_amount
 
         work = WorkForInventory(
             created_by_user_id=current_user.id,
@@ -292,15 +423,14 @@ async def work_new_post(
             kanekalon_price_per_gram_at_time=k_snap,
             kudri_price_per_gram_at_time=ku_snap,
             materials_cost_total=mat_cost,
-            studio_share_snapshot=_studio_share_snapshot(db),
+            studio_share_snapshot=studio_share,
             rates_snapshot_json=None,
             details_json=json.dumps(details, ensure_ascii=False) if details else None,
-            # деньги пока нули — считаем в следующих подшагах
-            extra_costs_amount=0.0,
-            cost_total_amount=0.0,
-            master_profit_amount=0.0,
-            studio_profit_amount=0.0,
-            profit_total_amount=0.0,
+            extra_costs_amount=extra_costs_amount,
+            cost_total_amount=cost_total_amount,
+            master_profit_amount=master_total,
+            studio_profit_amount=studio_total,
+            profit_total_amount=profit_total,
         )
         db.add(work)
         db.flush()
@@ -311,10 +441,48 @@ async def work_new_post(
                     work_id=work.id,
                     user_id=uid,
                     share=share,
-                    master_profit_amount=0.0,
+                    master_profit_amount=float(staff_master_profit.get(uid, 0.0)),
                     details_json=None,
                 )
             )
+
+        # Create Kit in stock for IN_STOCK + KIT
+        if kind == WorkKind.KIT and scope == WorkScope.IN_STOCK:
+            sku = (_g_str(form, "kit_sku", "") or "").strip()
+            title = (_g_str(form, "kit_title", "") or "").strip()
+            stock_price_total = max(0.0, _g_float(form, "kit_stock_price_total", 0.0))
+            if not sku:
+                raise ValueError("Для «в наличие» укажите артикул комплекта.")
+            if not title:
+                raise ValueError("Для «в наличие» укажите название комплекта.")
+            if stock_price_total <= 0:
+                raise ValueError("Для «в наличие» укажите цену комплекта на складе (всего), ₽.")
+            if db.scalar(select(Kit.id).where(Kit.sku == sku)):
+                raise ValueError("Комплект с таким артикулом уже есть — укажите другой.")
+            kit = Kit(
+                sku=sku[:80],
+                title=title[:200],
+                description=None,
+                is_active=True,
+                pieces_total=kit_pieces_total,
+                pieces_available=kit_pieces_total,
+                blank_type_se=kit_blank_type_se,
+                blank_type_de=kit_blank_type_de,
+                weight_grams=None,
+                length_cm=None,
+                has_decorations=False,
+                materials_text=None,
+                color_text=None,
+                blanks_kinds_text=None,
+                notes=None,
+                stock_price_total=stock_price_total,
+                cost_total=cost_total_amount,
+                author_cost_total=master_total,
+                created_at=datetime.utcnow(),
+                is_in_stock=True,
+                is_archived=False,
+            )
+            db.add(kit)
 
         db.commit()
         return RedirectResponse(url="/sales/work?msg=saved", status_code=303)
@@ -339,6 +507,8 @@ async def work_new_post(
                     {"value": s.value, "label": ("В наличие" if s == WorkScope.IN_STOCK else "На заказ")}
                     for s in WorkScope
                 ],
+                kit_se_items=_kit_se_items(),
+                kit_de_items=_kit_de_items(),
             ),
             status_code=400,
         )

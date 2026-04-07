@@ -249,6 +249,7 @@ def upgrade() -> None:
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("stock_price_total", sa.Float(), nullable=True),
         sa.Column("cost_total", sa.Float(), nullable=True),
+        sa.Column("author_cost_total", sa.Float(), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(),

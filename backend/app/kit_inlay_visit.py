@@ -128,18 +128,24 @@ def _apply_stock_kit_usage(
     kit_id: int,
     use_entire: bool,
     blanks_used: int,
-) -> tuple[int, float]:
-    """Списание: (pieces_used, cost_amount)."""
+) -> tuple[int, float, float]:
+    """Списание: (pieces_used, cost_amount, studio_fund_amount)."""
     kit = _validate_stock_selection(db, kit_id=kit_id, use_entire=use_entire, blanks_used=blanks_used)
     avail = kit.pieces_available
     n = avail if use_entire else blanks_used
     price = kit.stock_price_total or 0.0
     total_pieces = kit.pieces_total or 1
     cost = price * (n / total_pieces) if total_pieces else 0.0
+    # Фонд ЗП студии от продажи комплекта (пропорционально списанию):
+    # (цена - себестоимость - ЗП авторов) * k
+    kit_cost = kit.cost_total or 0.0
+    kit_author = kit.author_cost_total or 0.0
+    k = (n / total_pieces) if total_pieces else 0.0
+    studio_fund = max(0.0, (price - kit_cost - kit_author) * k)
     kit.pieces_available = avail - n
     if kit.pieces_available <= 0:
         kit.is_in_stock = False
-    return n, cost
+    return n, cost, studio_fund
 
 
 def read_visit_master_form_state(form: Any) -> tuple[list[int], dict[int, str]]:
@@ -697,11 +703,12 @@ def save_kit_inlay_visit(
 
     kit_cost_total = 0.0
     usages: list[tuple[int, int, float]] = []
+    kit_studio_fund = 0.0
 
     if service_requires_kit_block(service):
         kind = inp.kit_kind.upper()
         if kind == "STOCK" and inp.stock_kit_id:
-            n, cost = _apply_stock_kit_usage(
+            n, cost, sf = _apply_stock_kit_usage(
                 db,
                 kit_id=inp.stock_kit_id,
                 use_entire=inp.stock_use_entire,
@@ -709,8 +716,9 @@ def save_kit_inlay_visit(
             )
             usages.append((inp.stock_kit_id, n, cost))
             kit_cost_total += cost
+            kit_studio_fund += sf
         if kind == "OWN" and inp.own_extra_blanks and inp.own_extra_stock_kit_id:
-            n, cost = _apply_stock_kit_usage(
+            n, cost, sf = _apply_stock_kit_usage(
                 db,
                 kit_id=inp.own_extra_stock_kit_id,
                 use_entire=inp.own_extra_stock_use_entire,
@@ -718,6 +726,7 @@ def save_kit_inlay_visit(
             )
             usages.append((inp.own_extra_stock_kit_id, n, cost))
             kit_cost_total += cost
+            kit_studio_fund += sf
 
     addons = max(0.0, float(inp.addon_sales_amount or 0.0))
     addons_detail: dict[str, Any] = {}
@@ -807,7 +816,7 @@ def save_kit_inlay_visit(
         addons_details_json=addons_details_json,
         amortization_level=inp.amortization_level,
         amortization_amount=amort_amount,
-        studio_fund_amount=amort_amount,
+        studio_fund_amount=amort_amount + kit_studio_fund,
         cost_total=cost_total,
         profit_before_split=profit_before,
         salon_cut_pct_at_time=salon_pct,

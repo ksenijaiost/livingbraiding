@@ -476,6 +476,7 @@ def save_studio_order_from_form(
     addons_details_json = json.dumps(addons_detail, ensure_ascii=False) if addons_detail else None
 
     kit_cost_total = 0.0
+    kit_studio_fund = 0.0
     kit_usages: list[tuple[int, int, float]] = []
     service_lines: list[tuple[Service, int, dict[str, Any]]] = []
 
@@ -502,12 +503,13 @@ def save_studio_order_from_form(
             if not sk:
                 raise ValueError("Выберите комплект из наличия.")
             details["kit"] = _kit_block_stock_json(db, sk, ue, bu)
-            n, cost = _apply_stock_kit_usage(db, kit_id=sk, use_entire=ue, blanks_used=bu)
+            n, cost, sf = _apply_stock_kit_usage(db, kit_id=sk, use_entire=ue, blanks_used=bu)
             kit_usages.append((sk, n, cost))
             kit_cost_total += cost
+            kit_studio_fund += sf
         elif mode == "NEW":
             kit = _create_kit_from_prefixed_form(db, form, "komplekt_new_")
-            n, cost = _apply_stock_kit_usage(
+            n, cost, sf = _apply_stock_kit_usage(
                 db,
                 kit_id=kit.id,
                 use_entire=True,
@@ -525,6 +527,7 @@ def save_studio_order_from_form(
             }
             kit_usages.append((kit.id, n, cost))
             kit_cost_total += cost
+            kit_studio_fund += sf
         else:
             raise ValueError("Укажите комплект: из наличия или новый.")
         service_lines.append((svc, sort_i, details))
@@ -552,13 +555,14 @@ def save_studio_order_from_form(
                 if not sk:
                     raise ValueError(f"Выберите комплект из наличия ({svc.name}).")
                 det["kit"] = _kit_block_stock_json(db, sk, ue, bu)
-                n, cost = _apply_stock_kit_usage(db, kit_id=sk, use_entire=ue, blanks_used=bu)
+                n, cost, sf = _apply_stock_kit_usage(db, kit_id=sk, use_entire=ue, blanks_used=bu)
                 kit_usages.append((sk, n, cost))
                 kit_cost_total += cost
+                kit_studio_fund += sf
             elif mode == "NEW":
                 prefix = f"z_new_{svc.id}_"
                 kit = _create_kit_from_prefixed_form(db, form, prefix)
-                n, cost = _apply_stock_kit_usage(db, kit_id=kit.id, use_entire=True, blanks_used=0)
+                n, cost, sf = _apply_stock_kit_usage(db, kit_id=kit.id, use_entire=True, blanks_used=0)
                 det["kit"] = {
                     "kind": "STOCK",
                     "from_stock": {
@@ -571,6 +575,7 @@ def save_studio_order_from_form(
                 }
                 kit_usages.append((kit.id, n, cost))
                 kit_cost_total += cost
+                kit_studio_fund += sf
             else:
                 raise ValueError(f"Выберите тип комплекта для услуги «{svc.name}».")
             service_lines.append((svc, sort_i, det))
@@ -670,7 +675,7 @@ def save_studio_order_from_form(
         addons_details_json=addons_details_json,
         amortization_level=amort_level,
         amortization_amount=amort_amount,
-        studio_fund_amount=amort_amount,
+        studio_fund_amount=amort_amount + kit_studio_fund,
         cost_total=cost_total,
         profit_before_split=profit_before,
         salon_cut_pct_at_time=salon_pct,
