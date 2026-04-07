@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Прайс · Товары</h2>
+    <p class="muted" style="margin-top:-6px;">
+      Категории — вкладки. Внутри категории показан список позиций.
+    </p>
+
+    <div style="margin-bottom: 12px;">
+      <a href="/price"><button class="secondary" type="button">← Прайс</button></a>
+    </div>
+
+    {% if categories %}
+      <div style="display:flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
+        {% for c in categories %}
+          <a href="/price/products?category={{ c|urlencode }}">
+            <button type="button" class="{% if c == selected_category %}{% else %}secondary{% endif %}">
+              {{ c }}
+            </button>
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if selected_category %}
+      <p class="muted" style="font-size: 13px;">
+        Категория: <strong>{{ selected_category }}</strong>
+      </p>
+    {% endif %}
+
+    {% if rows %}
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Подкатегория</th>
+              <th>Наименование</th>
+              <th>Цена</th>
+              <th>Актуально</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+              <tr>
+                <td>{{ r.subcategory_name }}</td>
+                <td><strong>{{ r.name }}</strong></td>
+                <td>
+                  {% if r.price is not none %}
+                    {{ r.price }}
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>{% if r.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Пока нет позиций товаров.</p>
+    {% endif %}
+  </div>
+{% endblock %}
+

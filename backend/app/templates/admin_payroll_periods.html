@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 980px;">
+    <h2 style="margin-top: 0;">Периоды ЗП (каркас)</h2>
+    <p class="muted" style="margin-top:-6px;">
+      Закрытый период блокирует редактирование денежных полей в записях работ (проводки будут позже).
+    </p>
+
+    {% if msg %}
+      <div class="card" style="border-color:#bbf7d0; background:#f0fdf4; margin-bottom: 12px;">
+        {{ msg }}
+      </div>
+    {% endif %}
+    {% if err %}
+      <div class="error" style="margin-bottom: 12px;">{{ err }}</div>
+    {% endif %}
+
+    <div class="card" style="background:#f8fafc; margin-bottom: 16px;">
+      <h3 style="margin-top: 0;">Новый период</h3>
+      <form method="post" action="/admin/payroll-periods/new">
+        <div class="row" style="align-items: flex-end;">
+          <div>
+            <label>Дата начала (UTC)</label>
+            <input name="date_from" placeholder="2026-04-01" value="{{ default_from }}" />
+          </div>
+          <div>
+            <label>Дата конца (UTC)</label>
+            <input name="date_to" placeholder="2026-04-15" value="{{ default_to }}" />
+          </div>
+          <div style="flex:0 0 auto; min-width:auto;">
+            <label style="visibility:hidden;">action</label>
+            <button type="submit">Создать</button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <h3 style="margin-top: 0;">Список периодов</h3>
+    {% if periods %}
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>С</th>
+              <th>По</th>
+              <th>Закрыт</th>
+              <th>Кем</th>
+              <th>Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in periods %}
+              <tr>
+                <td>{{ p.id }}</td>
+                <td>{{ p.date_from }}</td>
+                <td>{{ p.date_to }}</td>
+                <td>
+                  {% if p.closed_at %}
+                    {{ p.closed_at }}
+                  {% else %}
+                    <span class="muted">нет</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if p.closed_by_name %}
+                    {{ p.closed_by_name }} ({{ p.closed_by_role }})
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if not p.closed_at %}
+                    <form method="post" action="/admin/payroll-periods/{{ p.id }}/close" style="margin:0;">
+                      <button type="submit" class="secondary">Закрыть</button>
+                    </form>
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Периоды ещё не созданы.</p>
+    {% endif %}
+
+    <p style="margin-top: 16px;">
+      <a href="/admin/settings"><button type="button" class="secondary">← Настройки</button></a>
+    </p>
+  </div>
+{% endblock %}
+

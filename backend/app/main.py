@@ -12,6 +12,7 @@ As the project grows, we can split routes into modules (e.g. `routes/admin.py`,
 `routes/master.py`) while keeping templates in `app/templates/`.
 """
 
+import json
 from datetime import date, datetime
 from typing import Any
 from urllib.parse import quote
@@ -51,10 +52,12 @@ from app.client_validation import (
 from app.db.models import (
     Client,
     ClientThermoTemplate,
+    CatalogProduct,
     Kit,
     KitAuthorStaff,
     MaterialPriceCurrent,
     MaterialType,
+    PayrollPeriod,
     Service,
     ServiceCategory,
     ServiceSubcategory,
@@ -69,6 +72,7 @@ from app.db.models import (
     StudioOrderKitUsage,
     StudioOrderServiceLine,
     StudioOrderStaff,
+    WorkRate,
 )
 from app.db.session import get_db
 from app.kit_crud import (
@@ -315,6 +319,64 @@ def service_catalog_view(
             selected_subcategory=selected_subcategory,
             services=services,
             mismatch=mismatch,
+        ),
+    )
+
+
+@app.get("/price", response_class=HTMLResponse)
+def price_index(
+    request: Request,
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
+):
+    return templates.TemplateResponse(
+        "price_index.html",
+        _ctx(request, current_user=current_user),
+    )
+
+
+@app.get("/price/products", response_class=HTMLResponse)
+def products_catalog_view(
+    request: Request,
+    category: str | None = None,
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
+    db: Session = Depends(get_db),
+):
+    cats = list(
+        db.execute(
+            select(CatalogProduct.category_name)
+            .distinct()
+            .order_by(CatalogProduct.category_name.asc())
+        )
+        .scalars()
+        .all()
+    )
+    selected = (category or "").strip() or (cats[0] if cats else None)
+    rows = []
+    if selected:
+        rows = list(
+            db.scalars(
+                select(CatalogProduct)
+                .where(CatalogProduct.category_name == selected)
+                .order_by(
+                    CatalogProduct.sort_order.asc(),
+                    CatalogProduct.subcategory_name.asc(),
+                    CatalogProduct.is_active.desc(),
+                    CatalogProduct.name.asc(),
+                )
+            ).all()
+        )
+    return templates.TemplateResponse(
+        "products_catalog_view.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            categories=cats,
+            selected_category=selected,
+            rows=rows,
         ),
     )
 
@@ -1529,6 +1591,29 @@ def admin_settings_page(
     kanek_per_100 = str((pk.price_per_gram * 100) if pk else 400.0)
     kudri_per_100 = str((pku.price_per_gram * 100) if pku else 800.0)
     display_tz = get_display_timezone(db)
+
+    def _wr_float(key: str, default: float) -> float:
+        r = db.scalar(select(WorkRate).where(WorkRate.key == key, WorkRate.is_active.is_(True)))
+        if not r:
+            return default
+        try:
+            v = json.loads(r.value_json)
+            return float(v)
+        except Exception:
+            return default
+
+    work_rates = {
+        "studio_share": _wr_float("studio_share", 0.30),
+        "mix_simple": _wr_float("mix_simple", 1.0),
+        "mix_medium": _wr_float("mix_medium", 1.5),
+        "mix_hard": _wr_float("mix_hard", 2.0),
+        "rubber_tail_elastic_per_attach": _wr_float("rubber_tail_elastic_per_attach", 10.0),
+        "rubber_tail_crab": _wr_float("rubber_tail_crab", 500.0),
+        "rubber_tail_net": _wr_float("rubber_tail_net", 550.0),
+        "rubber_braids_elastic_per_braid": _wr_float("rubber_braids_elastic_per_braid", 15.0),
+        "custom_order_bonus_multiplier": _wr_float("custom_order_bonus_multiplier", 1.0),
+    }
+
     return templates.TemplateResponse(
         "admin_settings.html",
         _ctx(
@@ -1541,8 +1626,78 @@ def admin_settings_page(
             display_timezone=display_tz,
             timezone_choices=ALLOWED_TIMEZONES,
             saved=bool(saved),
+            work_rates=work_rates,
+            work_rates_open=False,
+            work_rates_saved=False,
+            work_rates_error=None,
+            payroll_open=False,
         ),
     )
+
+
+@app.get("/admin/payroll-periods", response_class=HTMLResponse)
+def admin_payroll_periods_list(
+    request: Request,
+    msg: str | None = None,
+    err: str | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    periods = list(db.scalars(select(PayrollPeriod).order_by(PayrollPeriod.id.desc())).all())
+    today = date.today()
+    default_from = today.replace(day=1).isoformat()
+    default_to = today.isoformat()
+    return templates.TemplateResponse(
+        "admin_payroll_periods.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            periods=periods,
+            msg=msg,
+            err=err,
+            default_from=default_from,
+            default_to=default_to,
+        ),
+    )
+
+
+@app.post("/admin/payroll-periods/new")
+async def admin_payroll_periods_new(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    df_raw = str(form.get("date_from") or "").strip()
+    dt_raw = str(form.get("date_to") or "").strip()
+    try:
+        df = datetime.combine(date.fromisoformat(df_raw), datetime.min.time())
+        dt = datetime.combine(date.fromisoformat(dt_raw), datetime.min.time())
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-periods?err=bad_date", status_code=303)
+    if dt < df:
+        return RedirectResponse(url="/admin/payroll-periods?err=range", status_code=303)
+    db.add(PayrollPeriod(date_from=df, date_to=dt))
+    db.commit()
+    return RedirectResponse(url="/admin/payroll-periods?msg=created", status_code=303)
+
+
+@app.post("/admin/payroll-periods/{period_id}/close")
+def admin_payroll_periods_close(
+    period_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    p = db.get(PayrollPeriod, period_id)
+    if not p:
+        return RedirectResponse(url="/admin/payroll-periods?err=not_found", status_code=303)
+    if p.closed_at:
+        return RedirectResponse(url="/admin/payroll-periods?msg=already_closed", status_code=303)
+    p.closed_at = datetime.utcnow()
+    p.closed_by_name = current_user.display_name
+    p.closed_by_role = current_user.role.value
+    db.commit()
+    return RedirectResponse(url="/admin/payroll-periods?msg=closed", status_code=303)
 
 
 @app.post("/admin/settings")
@@ -1610,6 +1765,112 @@ def admin_settings_save(
     else:
         tz_row.value = tz_raw
 
+    db.commit()
+    return RedirectResponse(url="/admin/settings?saved=1", status_code=303)
+
+
+@app.post("/admin/settings/work-rates")
+async def admin_settings_work_rates_save(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+
+    def _p(name: str, default: float = 0.0) -> float:
+        try:
+            return float(str(form.get(name) or str(default)).strip().replace(",", "."))
+        except ValueError:
+            raise ValueError(f"Некорректное число: {name}")
+
+    try:
+        studio_share = _p("studio_share", 0.30)
+        if studio_share < 0 or studio_share > 1:
+            raise ValueError("Доля студии должна быть в диапазоне 0..1.")
+
+        payload: dict[str, float] = {
+            "studio_share": studio_share,
+            "mix_simple": _p("mix_simple", 1.0),
+            "mix_medium": _p("mix_medium", 1.5),
+            "mix_hard": _p("mix_hard", 2.0),
+            "rubber_tail_elastic_per_attach": _p("rubber_tail_elastic_per_attach", 10.0),
+            "rubber_tail_crab": _p("rubber_tail_crab", 500.0),
+            "rubber_tail_net": _p("rubber_tail_net", 550.0),
+            "rubber_braids_elastic_per_braid": _p("rubber_braids_elastic_per_braid", 15.0),
+            "custom_order_bonus_multiplier": _p("custom_order_bonus_multiplier", 1.0),
+        }
+        for k, v in payload.items():
+            if v < 0:
+                raise ValueError(f"Значение не может быть отрицательным: {k}")
+    except ValueError as exc:
+        # Re-render settings with error and open section
+        # Reuse GET handler logic by collecting current values and overriding with submitted where possible.
+        salon = db.get(Setting, "salon_cut_pct")
+        salon_cut_pct = salon.value if salon else "0.3"
+        edit_days = db.get(Setting, "edit_window_days")
+        edit_window_days = edit_days.value if edit_days else "2"
+        pk = db.get(MaterialPriceCurrent, MaterialType.KANEKALON)
+        pku = db.get(MaterialPriceCurrent, MaterialType.KUDRI)
+        kanek_per_100 = str((pk.price_per_gram * 100) if pk else 400.0)
+        kudri_per_100 = str((pku.price_per_gram * 100) if pku else 800.0)
+        display_tz = get_display_timezone(db)
+
+        def _safe(name: str, d: float) -> float:
+            try:
+                return float(str(form.get(name) or str(d)).strip().replace(",", "."))
+            except ValueError:
+                return d
+
+        work_rates = {
+            "studio_share": _safe("studio_share", 0.30),
+            "mix_simple": _safe("mix_simple", 1.0),
+            "mix_medium": _safe("mix_medium", 1.5),
+            "mix_hard": _safe("mix_hard", 2.0),
+            "rubber_tail_elastic_per_attach": _safe("rubber_tail_elastic_per_attach", 10.0),
+            "rubber_tail_crab": _safe("rubber_tail_crab", 500.0),
+            "rubber_tail_net": _safe("rubber_tail_net", 550.0),
+            "rubber_braids_elastic_per_braid": _safe("rubber_braids_elastic_per_braid", 15.0),
+            "custom_order_bonus_multiplier": _safe("custom_order_bonus_multiplier", 1.0),
+        }
+        return templates.TemplateResponse(
+            "admin_settings.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                salon_cut_pct=salon_cut_pct,
+                edit_window_days=edit_window_days,
+                kanek_per_100g=kanek_per_100,
+                kudri_per_100g=kudri_per_100,
+                display_timezone=display_tz,
+                timezone_choices=ALLOWED_TIMEZONES,
+                saved=False,
+                work_rates=work_rates,
+                work_rates_open=True,
+                work_rates_saved=False,
+                work_rates_error=str(exc),
+                payroll_open=False,
+            ),
+            status_code=400,
+        )
+
+    now = datetime.utcnow()
+    for k, v in payload.items():
+        row = db.scalar(select(WorkRate).where(WorkRate.key == k))
+        if not row:
+            db.add(
+                WorkRate(
+                    key=k,
+                    value_json=json.dumps(v, ensure_ascii=False),
+                    is_active=True,
+                    updated_at=now,
+                    updated_by_user_id=current_user.id,
+                )
+            )
+        else:
+            row.value_json = json.dumps(v, ensure_ascii=False)
+            row.is_active = True
+            row.updated_at = now
+            row.updated_by_user_id = current_user.id
     db.commit()
     return RedirectResponse(url="/admin/settings?saved=1", status_code=303)
 

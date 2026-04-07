@@ -505,8 +505,98 @@ def upgrade() -> None:
         sa.Column("description", sa.Text(), nullable=True),
     )
 
+    # ---- Прайс «Товары» (вне визита) ----
+    op.create_table(
+        "catalog_products",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("category_name", sa.String(length=120), nullable=False),
+        sa.Column("subcategory_name", sa.String(length=160), nullable=False),
+        sa.Column("name", sa.String(length=200), nullable=False),
+        sa.Column("price", sa.Float(), nullable=True),
+        sa.Column("meta_json", sa.Text(), nullable=True),
+        sa.Column("sort_order", sa.Integer(), nullable=False, server_default=sa.text("0")),
+    )
+
+    # ---- «Работа с товарами»: история + участники ----
+    op.create_table(
+        "work_for_inventory",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("display_number", sa.String(length=40), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("kind", sa.String(length=32), nullable=False),
+        sa.Column("scope", sa.String(length=24), nullable=False),
+        sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=True),
+        sa.Column("ready_date", sa.DateTime(), nullable=True),
+        sa.Column("comment", sa.Text(), nullable=True),
+        sa.Column("kanekalon_grams", sa.Float(), nullable=False, server_default=sa.text("0")),
+        sa.Column("kudri_grams", sa.Float(), nullable=False, server_default=sa.text("0")),
+        sa.Column(
+            "mix_source",
+            sa.Enum("NO_MIX", "FROM_STOCK", "SELF_MIXED", name="mixsource"),
+            nullable=True,
+        ),
+        sa.Column("kanekalon_price_per_gram_at_time", sa.Float(), nullable=True),
+        sa.Column("kudri_price_per_gram_at_time", sa.Float(), nullable=True),
+        sa.Column("materials_cost_total", sa.Float(), nullable=False, server_default=sa.text("0")),
+        sa.Column("extra_costs_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
+        sa.Column("cost_total_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
+        sa.Column("master_profit_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
+        sa.Column("studio_profit_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
+        sa.Column("profit_total_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
+        sa.Column("studio_share_snapshot", sa.Numeric(3, 2), nullable=False, server_default=sa.text("0")),
+        sa.Column("rates_snapshot_json", sa.Text(), nullable=True),
+        sa.Column("details_json", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "work_for_inventory_staff",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "work_id",
+            sa.Integer(),
+            sa.ForeignKey("work_for_inventory.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("share", sa.Numeric(3, 2), nullable=False, server_default=sa.text("0")),
+        sa.Column("master_profit_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
+        sa.Column("details_json", sa.Text(), nullable=True),
+        sa.UniqueConstraint("work_id", "user_id", name="uq_work_for_inventory_staff_work_user"),
+    )
+
+    # ---- Настройки ставок работ (JSON) ----
+    op.create_table(
+        "work_rates",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("key", sa.String(length=100), nullable=False),
+        sa.Column("value_json", sa.Text(), nullable=False),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("updated_at", sa.DateTime(), nullable=False),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.UniqueConstraint("key", name="uq_work_rates_key"),
+    )
+
+    # ---- Payroll периоды (каркас) ----
+    op.create_table(
+        "payroll_periods",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("date_from", sa.DateTime(), nullable=False),
+        sa.Column("date_to", sa.DateTime(), nullable=False),
+        sa.Column("closed_at", sa.DateTime(), nullable=True),
+        sa.Column("closed_by_name", sa.String(length=200), nullable=True),
+        sa.Column("closed_by_role", sa.String(length=50), nullable=True),
+        sa.Column("comment", sa.Text(), nullable=True),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("payroll_periods")
+    op.drop_table("work_rates")
+    op.drop_table("work_for_inventory_staff")
+    op.drop_table("work_for_inventory")
+    op.drop_table("catalog_products")
     op.drop_table("material_retail_sales")
     op.drop_table("studio_order_service_lines")
     op.drop_table("studio_order_kit_usages")

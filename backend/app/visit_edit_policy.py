@@ -5,10 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import AuthUser
-from app.db.models import Setting, UserRole, Visit
+from app.db.models import PayrollPeriod, Setting, UserRole, Visit
 
 
 def edit_window_days(db: Session) -> int:
@@ -28,6 +29,21 @@ def within_edit_window(visit: Visit, days: int, *, now: datetime | None = None) 
     return visit.created_at + timedelta(days=days) >= now
 
 
+def is_in_closed_payroll_period(db: Session, created_at: datetime) -> bool:
+    """
+    True если дата создания записи попадает в закрытый период ЗП.
+    В этом случае блокируем редактирование (денежные поля и всё, что влияет на расчёты).
+    """
+    p = db.scalar(
+        select(PayrollPeriod).where(
+            PayrollPeriod.closed_at.is_not(None),
+            PayrollPeriod.date_from <= created_at,
+            PayrollPeriod.date_to >= created_at,
+        )
+    )
+    return p is not None
+
+
 @dataclass(frozen=True)
 class VisitClientChangePolicy:
     """can_change: показать форму смены клиента; super_outside_window — нужно подтверждение при POST."""
@@ -38,6 +54,12 @@ class VisitClientChangePolicy:
 
 
 def visit_client_change_policy(visit: Visit, user: AuthUser, db: Session) -> VisitClientChangePolicy:
+    if is_in_closed_payroll_period(db, visit.created_at):
+        return VisitClientChangePolicy(
+            can_change=False,
+            message_when_blocked="Визит относится к закрытому периоду ЗП — редактирование запрещено.",
+            super_outside_window=False,
+        )
     days = edit_window_days(db)
     inside = within_edit_window(visit, days)
 

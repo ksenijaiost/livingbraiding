@@ -19,6 +19,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -439,6 +440,142 @@ class MaterialRetailSale(Base):
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
     client: Mapped["Client"] = relationship()
     service: Mapped["Service | None"] = relationship()
+
+
+class CatalogProduct(Base):
+    """
+    Прайс «Товары» (вне визита).
+    Категории/подкатегории — для UI-таблицы и фильтрации.
+    """
+
+    __tablename__ = "catalog_products"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    category_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    subcategory_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class WorkScope(str, enum.Enum):
+    IN_STOCK = "IN_STOCK"
+    CUSTOM_ORDER = "CUSTOM_ORDER"
+
+
+class WorkKind(str, enum.Enum):
+    KIT = "KIT"
+    MIX = "MIX"
+    RUBBER = "RUBBER"
+    KIT_CORRECTION = "KIT_CORRECTION"
+    HAIR_EXT_PREP = "HAIR_EXT_PREP"
+
+
+class WorkForInventory(Base):
+    """История «работа с товарами» (в наличие / на заказ)."""
+
+    __tablename__ = "work_for_inventory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    display_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    kind: Mapped[WorkKind] = mapped_column(
+        Enum(WorkKind, native_enum=False, length=32),
+        nullable=False,
+    )
+    scope: Mapped[WorkScope] = mapped_column(
+        Enum(WorkScope, native_enum=False, length=24),
+        nullable=False,
+    )
+
+    client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
+    ready_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Материал (как в визите) + снимки цен/ставок на момент записи
+    kanekalon_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    kudri_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    mix_source: Mapped[MixSource | None] = mapped_column(Enum(MixSource), nullable=True)
+    kanekalon_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    kudri_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    materials_cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    # Деньги (всё — снимки, без пересчёта задним числом)
+    extra_costs_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    cost_total_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    master_profit_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    studio_profit_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    profit_total_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    studio_share_snapshot: Mapped[float] = mapped_column(Numeric(3, 2), nullable=False, default=0)
+    rates_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    client: Mapped["Client | None"] = relationship()
+    staff_rows: Mapped[list["WorkForInventoryStaff"]] = relationship(
+        back_populates="work",
+        cascade="all, delete-orphan",
+    )
+
+
+class WorkForInventoryStaff(Base):
+    __tablename__ = "work_for_inventory_staff"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    work_id: Mapped[int] = mapped_column(
+        ForeignKey("work_for_inventory.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    share: Mapped[float] = mapped_column(Numeric(3, 2), nullable=False, default=0)
+    master_profit_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    work: Mapped["WorkForInventory"] = relationship(back_populates="staff_rows")
+    user: Mapped["User"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("work_id", "user_id", name="uq_work_for_inventory_staff_work_user"),
+    )
+
+
+class WorkRate(Base):
+    """Справочник ставок/коэффициентов (JSON) для «работ с товарами»."""
+
+    __tablename__ = "work_rates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    value_json: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+
+
+class PayrollPeriod(Base):
+    """Периоды начисления/закрытия (каркас; проводки будут позже)."""
+
+    __tablename__ = "payroll_periods"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date_from: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    date_to: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    closed_by_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    closed_by_role: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class StudioOrderSubcategoryKey(str, enum.Enum):
