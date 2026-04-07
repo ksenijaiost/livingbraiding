@@ -86,6 +86,7 @@ from app.kit_crud import (
 )
 from app import retail_material_sale as retail_material_sale_routes
 from app import studio_order as studio_order_routes
+from app import work_products as work_products_routes
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
     collect_step1_fields_for_step2_hidden,
@@ -120,6 +121,7 @@ app.include_router(admin_service_catalog_router)
 app.include_router(admin_questionnaire_fields_router)
 app.include_router(retail_material_sale_routes.router)
 app.include_router(studio_order_routes.router)
+app.include_router(work_products_routes.router)
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_master_level"] = ru_master_level
 templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_type

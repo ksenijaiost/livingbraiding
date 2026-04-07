@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Работы с товарами</h2>
+
+    {% if msg == 'saved' %}
+      <div class="card" style="border-color:#bbf7d0; background:#f0fdf4; margin-bottom: 12px;">
+        Сохранено.
+      </div>
+    {% endif %}
+
+    <p>
+      <a href="/sales/work/new"><button>Новая работа</button></a>
+    </p>
+
+    {% if rows %}
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Создано</th>
+              <th>Режим</th>
+              <th>Вид</th>
+              <th>Клиент</th>
+              <th>Сотрудники</th>
+              <th>Материал (г)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for w in rows %}
+              <tr>
+                <td>{{ w.id }}</td>
+                <td>{{ w.created_at }}</td>
+                <td>{{ w.scope.value }}</td>
+                <td>{{ w.kind.value }}</td>
+                <td>
+                  {% if w.client %}
+                    {{ w.client.name }}
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% for s in w.staff_rows %}
+                    <div class="muted" style="font-size: 12px;">
+                      {{ s.user.display_name }} ({{ s.share }})
+                    </div>
+                  {% endfor %}
+                </td>
+                <td>
+                  {{ w.kanekalon_grams }} / {{ w.kudri_grams }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Пока нет записей.</p>
+    {% endif %}
+  </div>
+{% endblock %}
+

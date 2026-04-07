@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Работа с товарами</h2>
+    <p class="muted" style="margin-top:-6px;">
+      Этап 6.3.2: общий каркас (режим, клиент, участники, материал). Детальные анкеты по видам — дальше.
+    </p>
+
+    <p style="margin-top: 0;">
+      <a href="/sales/work"><button type="button" class="secondary">Список работ</button></a>
+    </p>
+
+    {% if error %}
+      <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/sales/work/new">
+      <div class="row">
+        <div>
+          <label>Режим</label>
+          <select name="scope" id="scope_sel">
+            {% for s in scopes %}
+              <option value="{{ s.value }}" {% if fp.scope == s.value %}selected{% endif %}>{{ s.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Вид работы</label>
+          <select name="kind">
+            <option value="" {% if not fp.kind %}selected{% endif %}>— выберите —</option>
+            {% for k in kinds %}
+              <option value="{{ k.value }}" {% if fp.kind == k.value %}selected{% endif %}>{{ k.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div id="client_block" class="card" style="background:#f8fafc; margin: 12px 0;">
+        <label>Клиент (обязательно для «на заказ»)</label>
+        <input name="client_id" value="{{ fp.client_id }}" placeholder="ID клиента (пока вручную; подсказки подключим позже)" />
+        <div class="muted" style="font-size: 12px; margin-top: 6px;">
+          На следующем подшаге подключим поиск клиента как в визите/заказе.
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Дата готовности (для истории)</label>
+          <input name="ready_date" value="{{ fp.ready_date or default_date }}" placeholder="YYYY-MM-DD" />
+        </div>
+        <div>
+          <label>Комментарий</label>
+          <input name="comment" value="{{ fp.comment }}" placeholder="необязательно" />
+        </div>
+      </div>
+
+      <div class="card" style="background:#f8fafc; margin: 12px 0;">
+        <label><input type="checkbox" name="work_use_multi_staff" {% if fp.work_use_multi_staff %}checked{% endif %} /> Несколько сотрудников</label>
+        <div class="muted" style="font-size: 12px; margin-top: 6px;">
+          Доли указываются как числа 0..1 (до сотых). Сумма должна быть 1.00.
+        </div>
+        <div style="margin-top: 10px;">
+          {% for u in staff %}
+            <div style="display:flex; gap: 10px; align-items:center; margin-bottom: 8px;">
+              <label style="margin:0; flex: 1;">
+                <input type="checkbox" name="work_staff_on" value="{{ u.id }}" {% if u.id in staff_on_ids %}checked{% endif %} />
+                {{ u.display_name }} ({{ u.role.value }})
+              </label>
+              <input
+                style="width: 140px;"
+                name="work_staff_share_{{ u.id }}"
+                placeholder="доля (0..1)"
+                value="{{ staff_share_str.get(u.id) }}"
+              />
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="card" style="background:#f8fafc; margin: 12px 0;">
+        <h3 style="margin-top: 0;">Материал</h3>
+        <div class="row">
+          <div>
+            <label>Канекалон (г)</label>
+            <input name="kanekalon_grams" type="number" step="0.01" min="0" value="{{ fp.kanekalon_grams or 0 }}" />
+          </div>
+          <div>
+            <label>Кудри (г)</label>
+            <input name="kudri_grams" type="number" step="0.01" min="0" value="{{ fp.kudri_grams or 0 }}" />
+          </div>
+        </div>
+
+        <div style="margin-top: 10px;">
+          <label>Смешка</label>
+          <label><input type="radio" name="mix_source" value="NO_MIX" {% if (fp.mix_source or 'NO_MIX') == 'NO_MIX' %}checked{% endif %} /> Без смешки</label>
+          <label><input type="radio" name="mix_source" value="FROM_STOCK" {% if fp.mix_source == 'FROM_STOCK' %}checked{% endif %} /> Из наличия</label>
+          <label><input type="radio" name="mix_source" value="SELF_MIXED" {% if fp.mix_source == 'SELF_MIXED' %}checked{% endif %} /> Сама мешала</label>
+        </div>
+        <div style="margin-top: 10px;">
+          <label>Сложность смешки (пока сохраняем в details_json)</label>
+          <select name="mix_complexity">
+            <option value="" {% if not fp.mix_complexity %}selected{% endif %}>—</option>
+            <option value="SIMPLE" {% if fp.mix_complexity == 'SIMPLE' %}selected{% endif %}>SIMPLE</option>
+            <option value="MEDIUM" {% if fp.mix_complexity == 'MEDIUM' %}selected{% endif %}>MEDIUM</option>
+            <option value="HARD" {% if fp.mix_complexity == 'HARD' %}selected{% endif %}>HARD</option>
+          </select>
+        </div>
+      </div>
+
+      <button type="submit">Сохранить</button>
+    </form>
+  </div>
+
+  <script>
+    function syncClientBlock() {
+      var scope = document.getElementById('scope_sel');
+      var el = document.getElementById('client_block');
+      if (!scope || !el) return;
+      el.style.display = (scope.value === 'CUSTOM_ORDER') ? 'block' : 'none';
+    }
+    document.getElementById('scope_sel').addEventListener('change', syncClientBlock);
+    syncClientBlock();
+  </script>
+{% endblock %}
+
