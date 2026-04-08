@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Работа с товарами — детали</h2>
+
+    <p style="margin-top: 0;">
+      <a href="/sales/work"><button type="button" class="secondary">← К списку</button></a>
+    </p>
+
+    {% if saved %}
+      <div class="card" style="border-color:#bbf7d0; background:#f0fdf4; margin-bottom: 12px;">
+        Сохранено.
+      </div>
+    {% endif %}
+
+    {% if err %}
+      <div class="error" style="margin-bottom: 12px;">{{ err }}</div>
+    {% endif %}
+
+    {% if not row %}
+      <p class="muted">Нет данных.</p>
+    {% else %}
+      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+        <div class="row">
+          <div><strong>ID</strong><div class="muted">{{ row.id }}</div></div>
+          <div><strong>Создано</strong><div class="muted">{{ row.created_at.strftime('%Y-%m-%d %H:%M') if row.created_at else '—' }}</div></div>
+        </div>
+        <div class="row" style="margin-top: 10px;">
+          <div><strong>Режим</strong><div class="muted">{{ "В наличие" if row.scope.value == "IN_STOCK" else "На заказ" }}</div></div>
+          <div>
+            <strong>Вид</strong>
+            <div class="muted">
+              {% if row.kind.value == "KIT" %}Комплект/Заготовки
+              {% elif row.kind.value == "MIX" %}Смешка
+              {% elif row.kind.value == "RUBBER" %}Хвосты/резинки
+              {% elif row.kind.value == "KIT_CORRECTION" %}Коррекция комплекта
+              {% else %}{{ row.kind.value }}
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="row" style="margin-top: 10px;">
+          <div>
+            <strong>Клиент</strong>
+            <div class="muted">
+              {% if row.client %}{{ row.client.name }}{% else %}—{% endif %}
+            </div>
+          </div>
+          <div>
+            <strong>Сумма от клиента</strong>
+            <div class="muted">{% if row.amount_from_client is not none %}{{ row.amount_from_client }} ₽{% else %}—{% endif %}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+        <strong>Мастера</strong>
+        {% if row.staff_rows %}
+          {% for s in row.staff_rows %}
+            <div class="muted" style="font-size: 12px; margin-top: 6px;">
+              {{ s.user.display_name }} ({{ s.share }})
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="muted" style="margin-top: 6px;">—</div>
+        {% endif %}
+      </div>
+
+      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+        <strong>Материал</strong>
+        <div class="muted" style="margin-top: 6px;">Канекалон: {{ row.kanekalon_grams }} г · Кудри: {{ row.kudri_grams }} г</div>
+        <div class="muted" style="font-size: 12px; margin-top: 6px;">Себестоимость материалов: {{ row.materials_cost_total }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 2px;">Доп. расходы: {{ row.extra_costs_amount }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 2px;">Себестоимость всего: {{ row.cost_total_amount }}</div>
+        {% if row.kanekalon_grams == 0 and row.kudri_grams == 0 %}
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Смешка: —</div>
+        {% else %}
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Смешка: {{ "Без смешки" if (row.mix_source and row.mix_source.value == "NO_MIX") else ("Из наличия" if (row.mix_source and row.mix_source.value == "FROM_STOCK") else ("Сама мешала" if (row.mix_source and row.mix_source.value == "SELF_MIXED") else "—")) }}</div>
+          {% if details.get("mix_complexity") and row.mix_source and row.mix_source.value != "NO_MIX" %}
+            <div class="muted" style="font-size: 12px; margin-top: 2px;">Сложность: {{ "Простая" if details.get("mix_complexity") == "SIMPLE" else ("Средняя" if details.get("mix_complexity") == "MEDIUM" else ("Сложная" if details.get("mix_complexity") == "HARD" else "—")) }}</div>
+          {% endif %}
+        {% endif %}
+      </div>
+
+      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+        <strong>Профит</strong>
+        <div class="muted" style="font-size: 12px; margin-top: 6px;">Мастер: {{ row.master_profit_amount }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 2px;">Студия: {{ row.studio_profit_amount }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 2px;">Всего: {{ row.profit_total_amount }}</div>
+      </div>
+
+      {% if row.kind.value == "RUBBER" and details.get("rubber") %}
+        <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+          <strong>Хвосты/резинки</strong>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Тип: {{ details.rubber.type }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Вариант: {{ details.rubber.variant }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Количество: {{ details.rubber.qty }}</div>
+        </div>
+      {% endif %}
+
+      {% if row.kind.value == "KIT_CORRECTION" and details.get("correction") %}
+        <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+          <strong>Коррекция комплекта</strong>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Стрижка (шт): {{ details.correction.trim_qty }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Стирка: {{ "да" if details.correction.wash else "нет" }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Отпаривание: {{ "да" if details.correction.steam else "нет" }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Одевание на круг: {{ "да" if details.correction.circle else "нет" }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Коррекция дреда (шт): {{ details.correction.dread_qty }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Коррекция кудрей (шт): {{ details.correction.curl_qty }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Сложность кудрей: {{ "Сложная" if details.correction.curl_complexity == "HARD" else "Обычная" }}</div>
+        </div>
+      {% endif %}
+
+      {% if can_edit %}
+        {% if edit_allowed %}
+          <p style="margin-top: 0;">
+            <a href="/sales/work/{{ row.id }}/edit"><button type="button">Редактировать</button></a>
+          </p>
+        {% else %}
+          <div class="card" style="border-color:#fde68a; background:#fffbeb; margin-top: 12px;">
+            {{ edit_block_msg }}
+          </div>
+        {% endif %}
+      {% endif %}
+    {% endif %}
+  </div>
+{% endblock %}
+

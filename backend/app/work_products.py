@@ -36,14 +36,29 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.kit_inlay_visit import _materials_cost_and_snapshot
+from app.visit_edit_policy import edit_window_days, is_in_closed_payroll_period, within_edit_window
 
 templates = Jinja2Templates(directory="app/templates")
 router = APIRouter(prefix="/sales/work", tags=["work-products"])
-_STAFF = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
+_VIEW = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
+_MASTER = Depends(require_role(UserRole.MASTER))
+_SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
 
 
 def _ctx(request: Request, current_user: AuthUser, **kwargs):
     return {"request": request, "current_user": current_user, **kwargs}
+
+
+def _work_edit_allowed(db: Session, work: WorkForInventory) -> tuple[bool, str]:
+    if is_in_closed_payroll_period(db, work.created_at):
+        return False, "Работа относится к закрытому периоду ЗП — редактирование запрещено."
+    days = edit_window_days(db)
+    if not within_edit_window(work, days):
+        return False, (
+            f"Редактирование доступно только в течение {days} дн. с даты создания "
+            "(параметр «Окно редактирования» в настройках студии)."
+        )
+    return True, ""
 
 
 def _g_str(form: Any, name: str, default: str = "") -> str:
@@ -268,6 +283,30 @@ def _zakaz_subcategory_services_map(
     return out
 
 
+def _details_obj(details_json: str | None) -> dict[str, Any]:
+    if not details_json:
+        return {}
+    try:
+        v = json.loads(details_json)
+        return v if isinstance(v, dict) else {}
+    except Exception:
+        return {}
+
+
+def _ru_mix_source(v: MixSource | None) -> str:
+    if v == MixSource.NO_MIX:
+        return "Без смешки"
+    if v == MixSource.FROM_STOCK:
+        return "Из наличия"
+    if v == MixSource.SELF_MIXED:
+        return "Сама мешала"
+    return "—"
+
+
+def _ru_mix_complexity(v: str | None) -> str:
+    return {"SIMPLE": "Простая", "MEDIUM": "Средняя", "HARD": "Сложная"}.get(v or "", "—")
+
+
 def _kind_label(k: WorkKind) -> str:
     return {
         WorkKind.KIT: "Комплект/Заготовки (поштучно)",
@@ -345,7 +384,7 @@ def _kit_rate_for_item(rates: dict[str, dict[str, Any]], item_key: str, qty_tota
 @router.get("/new", response_class=HTMLResponse)
 def work_new_get(
     request: Request,
-    current_user: AuthUser = _STAFF,
+    current_user: AuthUser = _MASTER,
     db: Session = Depends(get_db),
 ):
     masters = _list_masters_for_work_form(db)
@@ -379,7 +418,7 @@ def work_new_get(
 @router.post("/new")
 async def work_new_post(
     request: Request,
-    current_user: AuthUser = _STAFF,
+    current_user: AuthUser = _MASTER,
     db: Session = Depends(get_db),
 ):
     form = await request.form()
@@ -426,6 +465,9 @@ async def work_new_post(
                 mix_source = MixSource(mix_raw) if mix_raw else MixSource.NO_MIX
             except ValueError:
                 mix_source = MixSource.NO_MIX
+        if kind == WorkKind.MIX:
+            # For "Смешка" work type the mix is always self-mixed (UI hides the selector).
+            mix_source = MixSource.SELF_MIXED if grams_total > 0 else MixSource.NO_MIX
 
         mix_complexity: MixComplexity | None = None
         if grams_total > 0 and mix_source != MixSource.NO_MIX:
@@ -434,6 +476,10 @@ async def work_new_post(
                 mix_complexity = MixComplexity(mc_raw) if mc_raw else None
             except ValueError:
                 mix_complexity = None
+        if kind == WorkKind.MIX and grams_total <= 0:
+            raise ValueError("Для вида «Смешка» укажите граммы материала.")
+        if kind == WorkKind.MIX and mix_complexity is None:
+            raise ValueError("Для вида «Смешка» выберите сложность.")
 
         # snapshots for materials
         mat_cost, k_snap, ku_snap = _materials_cost_and_snapshot(
@@ -663,6 +709,15 @@ async def work_new_post(
             staff_master_profit[current_user.id] = mp_total * bonus
             studio_total = sp_total * bonus
             extra_costs_amount = fx_total
+        elif kind == WorkKind.MIX:
+            # "work_rates" store ₽/g for SIMPLE/MEDIUM/HARD
+            rate_map = {
+                MixComplexity.SIMPLE: _wr_float(db, "mix_simple", 1.0),
+                MixComplexity.MEDIUM: _wr_float(db, "mix_medium", 1.5),
+                MixComplexity.HARD: _wr_float(db, "mix_hard", 2.0),
+            }
+            rate = float(rate_map.get(mix_complexity or MixComplexity.SIMPLE, 0.0))
+            staff_master_profit[current_user.id] = max(0.0, float(grams_total) * rate)
 
         master_total = float(sum(staff_master_profit.values()))
         studio_share = _studio_share_snapshot(db)
@@ -788,22 +843,182 @@ async def work_new_post(
 @router.get("", response_class=HTMLResponse)
 def work_list(
     request: Request,
-    current_user: AuthUser = _STAFF,
+    current_user: AuthUser = _VIEW,
     db: Session = Depends(get_db),
 ):
     msg = request.query_params.get("msg")
-    stmt = (
+    stmt = select(WorkForInventory).options(
+        selectinload(WorkForInventory.client),
+        selectinload(WorkForInventory.staff_rows).selectinload(WorkForInventoryStaff.user),
+    )
+    if current_user.role == UserRole.MASTER:
+        stmt = (
+            stmt.outerjoin(WorkForInventoryStaff, WorkForInventoryStaff.work_id == WorkForInventory.id)
+            .where(
+                (WorkForInventory.created_by_user_id == current_user.id)
+                | (WorkForInventoryStaff.user_id == current_user.id)
+            )
+            .distinct()
+        )
+    stmt = stmt.order_by(WorkForInventory.id.desc()).limit(100)
+    rows = list(db.scalars(stmt).all())
+    return templates.TemplateResponse(
+        "work_products_list.html",
+        _ctx(request, current_user=current_user, rows=rows, msg=msg, can_create=(current_user.role == UserRole.MASTER)),
+    )
+
+
+@router.get("/{work_id}", response_class=HTMLResponse)
+def work_detail(
+    request: Request,
+    work_id: int,
+    current_user: AuthUser = _VIEW,
+    db: Session = Depends(get_db),
+):
+    w = db.get(WorkForInventory, work_id)
+    if not w:
+        return templates.TemplateResponse(
+            "work_products_detail.html",
+            _ctx(request, current_user=current_user, row=None, err="Работа не найдена."),
+            status_code=404,
+        )
+    # load relations for template
+    w = db.scalar(
         select(WorkForInventory)
         .options(
             selectinload(WorkForInventory.client),
             selectinload(WorkForInventory.staff_rows).selectinload(WorkForInventoryStaff.user),
         )
-        .order_by(WorkForInventory.id.desc())
-        .limit(100)
+        .where(WorkForInventory.id == work_id)
     )
-    rows = list(db.scalars(stmt).all())
+    if current_user.role == UserRole.MASTER:
+        allowed = (w.created_by_user_id == current_user.id) or any(
+            s.user_id == current_user.id for s in (w.staff_rows or [])
+        )
+        if not allowed:
+            return templates.TemplateResponse(
+                "work_products_detail.html",
+                _ctx(request, current_user=current_user, row=None, err="Недостаточно прав для просмотра этой работы."),
+                status_code=403,
+            )
+    can_edit = (current_user.role == UserRole.ADMIN_SUPER)
+    edit_allowed, edit_block_msg = _work_edit_allowed(db, w) if can_edit else (False, "")
+    details = _details_obj(w.details_json)
     return templates.TemplateResponse(
-        "work_products_list.html",
-        _ctx(request, current_user=current_user, rows=rows, msg=msg),
+        "work_products_detail.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            row=w,
+            details=details,
+            err=None,
+            saved=(request.query_params.get("msg") == "saved"),
+            can_edit=can_edit,
+            edit_allowed=edit_allowed,
+            edit_block_msg=edit_block_msg,
+        ),
     )
+
+
+@router.get("/{work_id}/edit", response_class=HTMLResponse)
+def work_edit_form(
+    request: Request,
+    work_id: int,
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    w = db.scalar(
+        select(WorkForInventory)
+        .options(
+            selectinload(WorkForInventory.client),
+            selectinload(WorkForInventory.staff_rows).selectinload(WorkForInventoryStaff.user),
+        )
+        .where(WorkForInventory.id == work_id)
+    )
+    if not w:
+        return templates.TemplateResponse(
+            "work_products_edit.html",
+            _ctx(request, current_user=current_user, row=None, err="Работа не найдена."),
+            status_code=404,
+        )
+    edit_allowed, edit_block_msg = _work_edit_allowed(db, w)
+    if not edit_allowed:
+        return templates.TemplateResponse(
+            "work_products_edit.html",
+            _ctx(request, current_user=current_user, row=w, err=edit_block_msg),
+            status_code=403,
+        )
+    return templates.TemplateResponse(
+        "work_products_edit.html",
+        _ctx(request, current_user=current_user, row=w, err=None),
+    )
+
+
+@router.post("/{work_id}/edit")
+async def work_edit_save(
+    request: Request,
+    work_id: int,
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    w = db.scalar(
+        select(WorkForInventory)
+        .options(
+            selectinload(WorkForInventory.client),
+            selectinload(WorkForInventory.staff_rows).selectinload(WorkForInventoryStaff.user),
+        )
+        .where(WorkForInventory.id == work_id)
+    )
+    if not w:
+        return RedirectResponse(url=f"/sales/work/{work_id}", status_code=303)
+    edit_allowed, edit_block_msg = _work_edit_allowed(db, w)
+    if not edit_allowed:
+        return templates.TemplateResponse(
+            "work_products_edit.html",
+            _ctx(request, current_user=current_user, row=w, err=edit_block_msg),
+            status_code=403,
+        )
+    form = await request.form()
+
+    def _p_float(name: str, default: float) -> float:
+        try:
+            return float(str(form.get(name) or str(default)).strip().replace(",", "."))
+        except ValueError:
+            raise ValueError(f"Некорректное число: {name}")
+
+    def _p_int_opt(name: str) -> int | None:
+        raw = (str(form.get(name) or "")).strip()
+        if not raw:
+            return None
+        try:
+            v = int(float(raw.replace(",", ".")))
+        except ValueError:
+            raise ValueError(f"Некорректное число: {name}")
+        if v < 0:
+            raise ValueError(f"Значение не может быть отрицательным: {name}")
+        return v
+
+    try:
+        # base fields
+        w.amount_from_client = _p_int_opt("amount_from_client")
+        w.comment = (_g_str(form, "comment", "") or "").strip() or None
+
+        w.kanekalon_grams = max(0.0, _p_float("kanekalon_grams", float(w.kanekalon_grams or 0.0)))
+        w.kudri_grams = max(0.0, _p_float("kudri_grams", float(w.kudri_grams or 0.0)))
+        w.materials_cost_total = max(0.0, _p_float("materials_cost_total", float(w.materials_cost_total or 0.0)))
+        w.extra_costs_amount = max(0.0, _p_float("extra_costs_amount", float(w.extra_costs_amount or 0.0)))
+        w.cost_total_amount = max(0.0, _p_float("cost_total_amount", float(w.cost_total_amount or 0.0)))
+
+        w.master_profit_amount = max(0.0, _p_float("master_profit_amount", float(w.master_profit_amount or 0.0)))
+        w.studio_profit_amount = max(0.0, _p_float("studio_profit_amount", float(w.studio_profit_amount or 0.0)))
+        w.profit_total_amount = max(0.0, _p_float("profit_total_amount", float(w.profit_total_amount or 0.0)))
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            "work_products_edit.html",
+            _ctx(request, current_user=current_user, row=w, err=str(exc)),
+            status_code=400,
+        )
+
+    db.commit()
+    return RedirectResponse(url=f"/sales/work/{work_id}?msg=saved", status_code=303)
 

@@ -45,7 +45,7 @@
           {% if current_user.role.value == "MASTER" %}
             <a href="/master/visit/new">Новый визит</a>
             <a href="/sales/material/new">Продажа материала</a>
-            <a href="/sales/work/new">Работа с товарами</a>
+            <a href="/sales/work">Работа с товарами</a>
             <a href="/price">Прайс</a>
             <a href="/admin/clients">Клиенты</a>
             <a href="/admin/visits">Визиты</a>
@@ -53,7 +53,7 @@
           {% endif %}
           {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
             <a href="/sales/material/new">Продажа материала</a>
-            <a href="/sales/work/new">Работа с товарами</a>
+            <a href="/sales/work">Работа с товарами</a>
             <a href="/price">Прайс</a>
             <a href="/admin/clients">Клиенты</a>
             <a href="/admin/visits">Визиты</a>

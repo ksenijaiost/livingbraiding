@@ -150,6 +150,11 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("0"),
         ),
+        sa.Column("master_pay_amount", sa.Float(), nullable=True),
+        sa.Column("studio_pay_amount", sa.Float(), nullable=True),
+        sa.Column("fixed_expense_amount", sa.Float(), nullable=True),
+        sa.Column("is_per_unit", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("unit_label", sa.String(length=60), nullable=True),
         sa.UniqueConstraint("subcategory_id", "name", name="uq_service_per_subcategory"),
     )
 
@@ -529,6 +534,7 @@ def upgrade() -> None:
         sa.Column("kind", sa.String(length=32), nullable=False),
         sa.Column("scope", sa.String(length=24), nullable=False),
         sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=True),
+        sa.Column("amount_from_client", sa.Integer(), nullable=True),
         sa.Column("ready_date", sa.DateTime(), nullable=True),
         sa.Column("comment", sa.Text(), nullable=True),
         sa.Column("kanekalon_grams", sa.Float(), nullable=False, server_default=sa.text("0")),

@@ -6,10 +6,6 @@
       Режим, материал; для комплекта — таблица заготовок и мастера в блоке комплекта. ЗП по заготовкам — из количеств в таблице.
     </p>
 
-    <p style="margin-top: 0;">
-      <a href="/sales/work"><button type="button" class="secondary">Список работ</button></a>
-    </p>
-
     {% if error %}
       <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
     {% endif %}
@@ -64,9 +60,6 @@
           </div>
           <div class="muted" style="font-size: 12px; margin-top: 6px;" id="price_hint_line"></div>
         </div>
-        <div class="muted" style="font-size: 12px; margin-top: 6px;">
-          Можно начать вводить имя — появятся подсказки как в визите.
-        </div>
       </div>
 
       <div class="row">
@@ -93,20 +86,19 @@
           </div>
         </div>
 
-        <div style="margin-top: 10px;">
+        <div id="mix_source_block" style="margin-top: 10px;">
           <label>Смешка</label>
           <label><input type="radio" name="mix_source" value="NO_MIX" {% if (fp.mix_source or 'NO_MIX') == 'NO_MIX' %}checked{% endif %} /> Без смешки</label>
           <label><input type="radio" name="mix_source" value="FROM_STOCK" {% if fp.mix_source == 'FROM_STOCK' %}checked{% endif %} /> Из наличия</label>
           <label><input type="radio" name="mix_source" value="SELF_MIXED" {% if fp.mix_source == 'SELF_MIXED' %}checked{% endif %} /> Сама мешала</label>
         </div>
-        <div style="margin-top: 10px;">
-          <label>Сложность смешки (пока сохраняем в details_json)</label>
-          <select name="mix_complexity">
-            <option value="" {% if not fp.mix_complexity %}selected{% endif %}>—</option>
-            <option value="SIMPLE" {% if fp.mix_complexity == 'SIMPLE' %}selected{% endif %}>SIMPLE</option>
-            <option value="MEDIUM" {% if fp.mix_complexity == 'MEDIUM' %}selected{% endif %}>MEDIUM</option>
-            <option value="HARD" {% if fp.mix_complexity == 'HARD' %}selected{% endif %}>HARD</option>
-          </select>
+        <div id="mix_complexity_block" style="margin-top: 10px; display:none;">
+          <label>Сложность смешки</label>
+          <div style="display:flex; flex-wrap: wrap; gap: 12px 16px; margin-top: 6px;">
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="SIMPLE" {% if (fp.mix_complexity or 'SIMPLE') == 'SIMPLE' %}checked{% endif %} /> Простая</label>
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="MEDIUM" {% if fp.mix_complexity == 'MEDIUM' %}checked{% endif %} /> Средняя</label>
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="HARD" {% if fp.mix_complexity == 'HARD' %}checked{% endif %} /> Сложная</label>
+          </div>
         </div>
       </div>
 
@@ -458,13 +450,56 @@
       if (!cb || !panel) return;
       panel.style.display = cb.checked ? 'block' : 'none';
     }
+    function syncMixUI() {
+      var kind = document.querySelector('select[name="kind"]');
+      var kan = document.querySelector('input[name="kanekalon_grams"]');
+      var kud = document.querySelector('input[name="kudri_grams"]');
+      var grams = 0;
+      if (kan && kan.value) grams += parseFloat(String(kan.value).replace(',', '.')) || 0;
+      if (kud && kud.value) grams += parseFloat(String(kud.value).replace(',', '.')) || 0;
+      var hasGrams = grams > 0;
+
+      var mixSourceBlock = document.getElementById('mix_source_block');
+      var mixComplexityBlock = document.getElementById('mix_complexity_block');
+
+      // For kind MIX: mix_source is always SELF_MIXED (hide selector).
+      var isMixKind = kind && kind.value === 'MIX';
+      if (mixSourceBlock) mixSourceBlock.style.display = isMixKind ? 'none' : 'block';
+
+      var src = document.querySelector('input[name="mix_source"]:checked');
+      var srcVal = src ? src.value : 'NO_MIX';
+      if (isMixKind && hasGrams) {
+        // force UI state
+        var self = document.querySelector('input[name="mix_source"][value="SELF_MIXED"]');
+        if (self) self.checked = true;
+        srcVal = 'SELF_MIXED';
+      }
+      if (!hasGrams) {
+        // No material -> no mix choice needed
+        var no = document.querySelector('input[name="mix_source"][value="NO_MIX"]');
+        if (no) no.checked = true;
+        srcVal = 'NO_MIX';
+      }
+
+      // Enable/disable mix_source radios based on grams (unless hidden by MIX kind)
+      document.querySelectorAll('input[name="mix_source"]').forEach(function (el) {
+        el.disabled = (!hasGrams) || isMixKind;
+      });
+
+      // Complexity visible only for FROM_STOCK or SELF_MIXED and grams>0
+      var showComplexity = hasGrams && (srcVal === 'FROM_STOCK' || srcVal === 'SELF_MIXED');
+      if (mixComplexityBlock) mixComplexityBlock.style.display = showComplexity ? 'block' : 'none';
+      document.querySelectorAll('input[name="mix_complexity"]').forEach(function (el) {
+        el.disabled = !showComplexity;
+      });
+    }
     document.querySelectorAll('input[name="scope"]').forEach(function (el) {
       el.addEventListener('change', syncClientBlock);
       el.addEventListener('change', syncKitStockBlock);
       el.addEventListener('change', syncPriceHint);
     });
     var kindSel = document.querySelector('select[name="kind"]');
-    if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); syncCorrectionBlock(); syncPriceHint(); });
+    if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); syncCorrectionBlock(); syncMixUI(); syncPriceHint(); });
     var rubberTypeSel = document.getElementById('rubber_type_sel');
     if (rubberTypeSel) rubberTypeSel.addEventListener('change', function () { syncRubberTypeFields(); syncPriceHint(); });
     var corrWash = document.getElementById('corr_wash');
@@ -472,6 +507,13 @@
     var corrCircle = document.getElementById('corr_circle');
     if (corrCircle) corrCircle.addEventListener('change', syncPriceHint);
     document.querySelectorAll('input[name="corr_trim_qty"], input[name="corr_dread_qty"], input[name="corr_curl_qty"], select[name="corr_curl_complexity"], input[name="corr_steam"], input[name="rubber_attach_qty"], input[name="rubber_braids_qty"], select[name="rubber_variant"]').forEach(function(el){ el.addEventListener('change', syncPriceHint); el.addEventListener('input', syncPriceHint); });
+    document.querySelectorAll('input[name="kanekalon_grams"], input[name="kudri_grams"]').forEach(function (el) {
+      el.addEventListener('change', function () { syncMixUI(); });
+      el.addEventListener('input', function () { syncMixUI(); });
+    });
+    document.querySelectorAll('input[name="mix_source"]').forEach(function (el) {
+      el.addEventListener('change', function () { syncMixUI(); });
+    });
     var kitMulti = document.getElementById('kit_use_multi_masters');
     if (kitMulti) kitMulti.addEventListener('change', function () {
       syncKitMasterPicker();
@@ -582,6 +624,7 @@
       syncRubberBlock();
       syncCorrectionBlock();
       syncKitStockBlock();
+      syncMixUI();
       syncPriceHint();
       rebuildKitTable();
     })();

@@ -9,9 +9,14 @@
       </div>
     {% endif %}
 
-    <p>
-      <a href="/sales/work/new"><button>Новая работа</button></a>
-    </p>
+    <div style="display:flex; align-items:center; justify-content: space-between; gap: 12px; margin-bottom: 10px;">
+      <div></div>
+      <div>
+        {% if can_create %}
+          <a href="/sales/work/new"><button>Новая работа</button></a>
+        {% endif %}
+      </div>
+    </div>
 
     {% if rows %}
       <div style="overflow-x:auto;">
@@ -30,10 +35,23 @@
           <tbody>
             {% for w in rows %}
               <tr>
-                <td>{{ w.id }}</td>
-                <td>{{ w.created_at }}</td>
-                <td>{{ w.scope.value }}</td>
-                <td>{{ w.kind.value }}</td>
+                <td><a href="/sales/work/{{ w.id }}">{{ w.id }}</a></td>
+                <td>
+                  {% if w.created_at %}
+                    <a href="/sales/work/{{ w.id }}">{{ w.created_at.strftime('%Y-%m-%d %H:%M') }}</a>
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>{{ "В наличие" if w.scope.value == "IN_STOCK" else "На заказ" }}</td>
+                <td>
+                  {% if w.kind.value == "KIT" %}Комплект/Заготовки
+                  {% elif w.kind.value == "MIX" %}Смешка
+                  {% elif w.kind.value == "RUBBER" %}Хвосты/резинки
+                  {% elif w.kind.value == "KIT_CORRECTION" %}Коррекция комплекта
+                  {% else %}{{ w.kind.value }}
+                  {% endif %}
+                </td>
                 <td>
                   {% if w.client %}
                     {{ w.client.name }}
