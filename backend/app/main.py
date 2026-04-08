@@ -1609,10 +1609,6 @@ def admin_settings_page(
         "mix_simple": _wr_float("mix_simple", 1.0),
         "mix_medium": _wr_float("mix_medium", 1.5),
         "mix_hard": _wr_float("mix_hard", 2.0),
-        "rubber_tail_elastic_per_attach": _wr_float("rubber_tail_elastic_per_attach", 10.0),
-        "rubber_tail_crab": _wr_float("rubber_tail_crab", 500.0),
-        "rubber_tail_net": _wr_float("rubber_tail_net", 550.0),
-        "rubber_braids_elastic_per_braid": _wr_float("rubber_braids_elastic_per_braid", 15.0),
         "custom_order_bonus_multiplier": _wr_float("custom_order_bonus_multiplier", 1.0),
     }
 
@@ -1795,10 +1791,6 @@ async def admin_settings_work_rates_save(
             "mix_simple": _p("mix_simple", 1.0),
             "mix_medium": _p("mix_medium", 1.5),
             "mix_hard": _p("mix_hard", 2.0),
-            "rubber_tail_elastic_per_attach": _p("rubber_tail_elastic_per_attach", 10.0),
-            "rubber_tail_crab": _p("rubber_tail_crab", 500.0),
-            "rubber_tail_net": _p("rubber_tail_net", 550.0),
-            "rubber_braids_elastic_per_braid": _p("rubber_braids_elastic_per_braid", 15.0),
             "custom_order_bonus_multiplier": _p("custom_order_bonus_multiplier", 1.0),
         }
         for k, v in payload.items():
@@ -1828,10 +1820,6 @@ async def admin_settings_work_rates_save(
             "mix_simple": _safe("mix_simple", 1.0),
             "mix_medium": _safe("mix_medium", 1.5),
             "mix_hard": _safe("mix_hard", 2.0),
-            "rubber_tail_elastic_per_attach": _safe("rubber_tail_elastic_per_attach", 10.0),
-            "rubber_tail_crab": _safe("rubber_tail_crab", 500.0),
-            "rubber_tail_net": _safe("rubber_tail_net", 550.0),
-            "rubber_braids_elastic_per_braid": _safe("rubber_braids_elastic_per_braid", 15.0),
             "custom_order_bonus_multiplier": _safe("custom_order_bonus_multiplier", 1.0),
         }
         return templates.TemplateResponse(

@@ -41,10 +41,31 @@
       </div>
 
       <div id="client_block" class="card" style="background:#f8fafc; margin: 12px 0;">
-        <label>Клиент (обязательно для «на заказ»)</label>
-        <input name="client_id" value="{{ fp.client_id }}" placeholder="ID клиента (пока вручную; подсказки подключим позже)" />
+        <strong style="display:block; margin-bottom: 6px;">Клиент (обязательно для «на заказ»)</strong>
+        <input type="hidden" name="client_id" id="client_id" value="{{ fp.client_id }}" />
+        <div class="row" style="align-items: flex-end;">
+          <div style="flex:1;">
+            <label>Поиск клиента по имени</label>
+            <input type="search" id="client_search_q" autocomplete="off" placeholder="Начни вводить имя и подожди или нажми «Найти»" value="" />
+          </div>
+          <div>
+            <button type="button" class="secondary" onclick="clientSuggest()">Найти</button>
+          </div>
+        </div>
+        <ul id="client_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+        <div id="selected_client_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not fp.client_id %}display:none;{% endif %}">
+          <p id="selected_client_line" style="margin:0;"></p>
+        </div>
+        <div id="amount_from_client_block" style="margin-top: 10px; display:none;">
+          <label>Сколько взяли с клиента</label>
+          <div style="display:flex; gap: 8px; align-items:center;">
+            <input name="amount_from_client" type="number" step="1" min="0" value="{{ fp.amount_from_client or '' }}" style="max-width: 12rem;" />
+            <span class="muted">₽</span>
+          </div>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;" id="price_hint_line"></div>
+        </div>
         <div class="muted" style="font-size: 12px; margin-top: 6px;">
-          На следующем подшаге подключим поиск клиента как в визите/заказе.
+          Можно начать вводить имя — появятся подсказки как в визите.
         </div>
       </div>
 
@@ -121,6 +142,42 @@
             <label>Количество кос (для кос на резинке)</label>
             <input name="rubber_braids_qty" type="number" step="1" min="1" value="{{ fp.rubber_braids_qty or '' }}" />
           </div>
+        </div>
+      </div>
+
+      <div id="correction_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
+        <h3 style="margin-top:0;">Коррекция комплекта</h3>
+        <p class="muted" style="margin-top:-6px;">Укажите количества и/или отметьте пункты. Если выбрана стирка — «одевание на круг» недоступно.</p>
+
+        <div class="row">
+          <div>
+            <label>Стрижка (1шт) — количество</label>
+            <input name="corr_trim_qty" type="number" step="1" min="0" value="{{ fp.corr_trim_qty or 0 }}" />
+          </div>
+          <div>
+            <label>Коррекция дреда (1шт) — количество</label>
+            <input name="corr_dread_qty" type="number" step="1" min="0" value="{{ fp.corr_dread_qty or 0 }}" />
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 10px;">
+          <div>
+            <label>Коррекция кудрей (1шт) — количество</label>
+            <input name="corr_curl_qty" type="number" step="1" min="0" value="{{ fp.corr_curl_qty or 0 }}" />
+          </div>
+          <div>
+            <label>Сложность кудрей</label>
+            <select name="corr_curl_complexity">
+              <option value="NORMAL" {% if (fp.corr_curl_complexity or 'NORMAL') == 'NORMAL' %}selected{% endif %}>Обычная</option>
+              <option value="HARD" {% if fp.corr_curl_complexity == 'HARD' %}selected{% endif %}>Сложная (×1.5)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-top: 10px;">
+          <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_wash" id="corr_wash" {% if fp.corr_wash %}checked{% endif %} /> Стирка</label>
+          <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_steam" {% if fp.corr_steam %}checked{% endif %} /> Отпаривание</label>
+          <label style="display:block; margin-bottom: 0;"><input type="checkbox" name="corr_circle" id="corr_circle" {% if fp.corr_circle %}checked{% endif %} /> Одевание на круг</label>
         </div>
       </div>
 
@@ -211,6 +268,7 @@
   </div>
 
   <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
+  <script type="application/json" id="work_price_meta">{{ work_price_meta_json | safe }}</script>
   <script>
     function kitTableCurrentUserId() {
       var el = document.getElementById('kit_table_state');
@@ -250,11 +308,145 @@
       a.style.display = (sel.value === 'TAIL_ELASTIC') ? 'block' : 'none';
       b.style.display = (sel.value === 'BRAIDS_ELASTIC') ? 'block' : 'none';
     }
+    function syncCorrectionBlock() {
+      var kind = document.querySelector('select[name="kind"]');
+      var el = document.getElementById('correction_block');
+      if (!kind || !el) return;
+      el.style.display = (kind.value === 'KIT_CORRECTION') ? 'block' : 'none';
+      syncCorrectionRules();
+    }
+    function syncCorrectionRules() {
+      var wash = document.getElementById('corr_wash');
+      var circle = document.getElementById('corr_circle');
+      if (!wash || !circle) return;
+      if (wash.checked) {
+        circle.checked = false;
+        circle.disabled = true;
+      } else {
+        circle.disabled = false;
+      }
+    }
+    function readWorkPriceMeta() {
+      var el = document.getElementById('work_price_meta');
+      try { return el && el.textContent ? JSON.parse(el.textContent) : {}; } catch (e) { return {}; }
+    }
+    function syncPriceHint() {
+      var hint = document.getElementById('price_hint_line');
+      if (!hint) return;
+      if (getScopeValue() !== 'CUSTOM_ORDER') { hint.textContent = ''; return; }
+      var kind = document.querySelector('select[name="kind"]');
+      if (!kind) { hint.textContent = ''; return; }
+      var meta = readWorkPriceMeta();
+      var bonus = parseFloat((meta && meta.customOrderBonus) || 1.0);
+      if (!bonus || bonus <= 0) bonus = 1.0;
+
+      function fmtRange(a, b) {
+        if (a == null && b == null) return '';
+        if (a != null && b != null && a !== b) return String(a) + '–' + String(b);
+        if (a != null) return String(a);
+        return String(b);
+      }
+
+      var line = '';
+      if (kind.value === 'RUBBER') {
+        var t = document.getElementById('rubber_type_sel');
+        var typeVal = t ? t.value : '';
+        var map = (meta && meta.rubber) ? meta.rubber : {};
+        var nameByType = { TAIL_ELASTIC: 'Хвост на резинке (1 крепление)', TAIL_CRAB: 'Хвост на крабе', TAIL_NET: 'Хвост на сетке', BRAIDS_ELASTIC: 'Косы на резинке (1 коса)' };
+        var row = map[nameByType[typeVal] || ''] || null;
+        if (row) {
+          var units = row.is_per_unit ? (typeVal === 'TAIL_ELASTIC' ? parseInt((document.querySelector('input[name="rubber_attach_qty"]')||{}).value||'1',10) : (typeVal === 'BRAIDS_ELASTIC' ? parseInt((document.querySelector('input[name="rubber_braids_qty"]')||{}).value||'1',10) : 1)) : 1;
+          if (!units || units < 1) units = 1;
+          var lo = row.client_from != null ? Math.round(row.client_from * units * bonus) : null;
+          var hi = row.client_to != null ? Math.round(row.client_to * units * bonus) : null;
+          var r = fmtRange(lo, hi);
+          if (r) line = 'По прайсу: ' + r + ' ₽';
+        }
+      } else if (kind.value === 'KIT_CORRECTION') {
+        var mapc = (meta && meta.correction) ? meta.correction : {};
+        var sumLo = 0, sumHi = 0, any = false;
+        function add(name, units) {
+          var row = mapc[name] || null;
+          if (!row) return;
+          var lo = row.client_from != null ? row.client_from : null;
+          var hi = row.client_to != null ? row.client_to : null;
+          if (lo != null) { sumLo += lo * units; any = true; }
+          if (hi != null) { sumHi += hi * units; any = true; }
+        }
+        var trimQ = parseInt((document.querySelector('input[name="corr_trim_qty"]')||{}).value||'0',10) || 0;
+        var dreadQ = parseInt((document.querySelector('input[name="corr_dread_qty"]')||{}).value||'0',10) || 0;
+        var curlQ = parseInt((document.querySelector('input[name="corr_curl_qty"]')||{}).value||'0',10) || 0;
+        var wash = (document.getElementById('corr_wash')||{}).checked;
+        var circle = (document.getElementById('corr_circle')||{}).checked;
+        var steam = (document.querySelector('input[name="corr_steam"]')||{}).checked;
+        if (trimQ > 0) add('Стрижка (1шт)', trimQ);
+        if (dreadQ > 0) add('Коррекция дреда (1шт)', dreadQ);
+        if (curlQ > 0) {
+          var cm = (document.querySelector('select[name="corr_curl_complexity"]')||{}).value === 'HARD' ? 1.5 : 1.0;
+          add('Коррекция кудрей (1шт)', curlQ * cm);
+        }
+        if (wash) add('Стирка', 1);
+        if (steam) add('Отпаривание', 1);
+        if (circle) add('Одевание на круг', 1);
+        if (any) {
+          var r = fmtRange(Math.round(sumLo), Math.round(sumHi));
+          if (r) line = 'По прайсу: ' + r + ' ₽';
+        }
+      }
+      hint.textContent = line;
+    }
     function syncClientBlock() {
       var el = document.getElementById('client_block');
       if (!el) return;
       el.style.display = (getScopeValue() === 'CUSTOM_ORDER') ? 'block' : 'none';
+      var a = document.getElementById('amount_from_client_block');
+      if (a) a.style.display = (getScopeValue() === 'CUSTOM_ORDER') ? 'block' : 'none';
     }
+    function renderSelectedClient(name, isDraft) {
+      var box = document.getElementById('selected_client_box');
+      var line = document.getElementById('selected_client_line');
+      if (!box || !line) return;
+      box.style.display = 'block';
+      line.innerHTML = 'Выбрано: <strong>' + (name || '') + '</strong>' + (isDraft ? ' <span class="muted">(черновик)</span>' : '');
+    }
+    function selectClient(id, name, isDraft) {
+      var inp = document.getElementById('client_id');
+      if (inp) inp.value = String(id);
+      renderSelectedClient(name, !!isDraft);
+      var ul = document.getElementById('client_suggest_list');
+      if (ul) ul.innerHTML = '';
+      syncPriceHint();
+    }
+    async function clientSuggest() {
+      var qEl = document.getElementById('client_search_q');
+      var q = qEl ? qEl.value.trim() : '';
+      var res = await fetch('/master/clients/suggest?q=' + encodeURIComponent(q));
+      var data = await res.json();
+      var ul = document.getElementById('client_suggest_list');
+      if (!ul) return;
+      ul.innerHTML = '';
+      for (var i = 0; i < (data.clients || []).length; i++) {
+        var c = data.clients[i];
+        var li = document.createElement('li');
+        li.style.margin = '0 0 8px';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'secondary';
+        btn.style.width = '100%';
+        btn.style.textAlign = 'left';
+        btn.textContent = c.name + (c.is_draft ? ' (черновик)' : '');
+        (function(cid, cname, cdraft){ btn.addEventListener('click', function(){ selectClient(cid, cname, cdraft); }); })(c.id, c.name, c.is_draft);
+        li.appendChild(btn);
+        ul.appendChild(li);
+      }
+    }
+    var suggestTimer = null;
+    function scheduleSuggest() {
+      if (suggestTimer) clearTimeout(suggestTimer);
+      suggestTimer = setTimeout(clientSuggest, 350);
+    }
+    var clientQ = document.getElementById('client_search_q');
+    if (clientQ) clientQ.addEventListener('input', scheduleSuggest);
     function syncKitStockBlock() {
       var el = document.getElementById('kit_stock_block');
       if (!el) return;
@@ -269,11 +461,17 @@
     document.querySelectorAll('input[name="scope"]').forEach(function (el) {
       el.addEventListener('change', syncClientBlock);
       el.addEventListener('change', syncKitStockBlock);
+      el.addEventListener('change', syncPriceHint);
     });
     var kindSel = document.querySelector('select[name="kind"]');
-    if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); });
+    if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); syncCorrectionBlock(); syncPriceHint(); });
     var rubberTypeSel = document.getElementById('rubber_type_sel');
-    if (rubberTypeSel) rubberTypeSel.addEventListener('change', syncRubberTypeFields);
+    if (rubberTypeSel) rubberTypeSel.addEventListener('change', function () { syncRubberTypeFields(); syncPriceHint(); });
+    var corrWash = document.getElementById('corr_wash');
+    if (corrWash) corrWash.addEventListener('change', function () { syncCorrectionRules(); syncPriceHint(); });
+    var corrCircle = document.getElementById('corr_circle');
+    if (corrCircle) corrCircle.addEventListener('change', syncPriceHint);
+    document.querySelectorAll('input[name="corr_trim_qty"], input[name="corr_dread_qty"], input[name="corr_curl_qty"], select[name="corr_curl_complexity"], input[name="corr_steam"], input[name="rubber_attach_qty"], input[name="rubber_braids_qty"], select[name="rubber_variant"]').forEach(function(el){ el.addEventListener('change', syncPriceHint); el.addEventListener('input', syncPriceHint); });
     var kitMulti = document.getElementById('kit_use_multi_masters');
     if (kitMulti) kitMulti.addEventListener('change', function () {
       syncKitMasterPicker();
@@ -382,7 +580,9 @@
       syncClientBlock();
       syncKitBlock();
       syncRubberBlock();
+      syncCorrectionBlock();
       syncKitStockBlock();
+      syncPriceHint();
       rebuildKitTable();
     })();
   </script>

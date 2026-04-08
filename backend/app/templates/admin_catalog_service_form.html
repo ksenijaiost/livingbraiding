@@ -45,6 +45,24 @@
         <div><label>До<input name="price_senior_to" value="{{ form_st }}" placeholder="например 5500" /></label></div>
       </div>
 
+      <p class="muted" style="margin: 18px 0 8px;">Экономика (для расчётов)</p>
+      <div class="row">
+        <div><label>ЗП мастера, ₽<input name="master_pay_amount" value="{{ form_master_pay }}" placeholder="например 500" /></label></div>
+        <div><label>ЗП студии, ₽<input name="studio_pay_amount" value="{{ form_studio_pay }}" placeholder="например 500" /></label></div>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <div><label>Фикс. расход, ₽<input name="fixed_expense_amount" value="{{ form_fixed_exp }}" placeholder="например 400" /></label></div>
+        <div>
+          <label style="display:flex; align-items:center; gap:8px; margin-top: 22px;">
+            <input type="checkbox" name="is_per_unit" {% if form_is_per_unit %}checked{% endif %} />
+            За единицу
+          </label>
+        </div>
+      </div>
+      <label style="display:block; margin-top: 8px;">Подпись единицы (необязательно)
+        <input name="unit_label" value="{{ form_unit_label }}" placeholder="например, крепление / коса / шт" maxlength="60" />
+      </label>
+
       <p class="muted" style="margin: 16px 0 8px;">Визит мастера</p>
       <label style="display:block; margin-top: 8px;">Блок «Комплект» (склад)
         <select name="kit_section_override" style="display:block; margin-top:4px; max-width: 28rem;">

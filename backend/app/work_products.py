@@ -28,6 +28,9 @@ from app.db.models import (
     WorkForInventory,
     WorkForInventoryStaff,
     WorkKind,
+    Service,
+    ServiceCategory,
+    ServiceSubcategory,
     WorkRate,
     WorkScope,
 )
@@ -202,30 +205,67 @@ def _rubber_variant_items() -> list[tuple[str, str]]:
     ]
 
 
-def _rubber_variant_multiplier_defaults() -> dict[str, float]:
-    # Conservative defaults: keep 1.0 everywhere, can be overridden via WorkRate key
-    # "rubber_variant_multipliers" (JSON object).
-    return {k: 1.0 for k, _ in _rubber_variant_items()}
+def _rubber_service_name(rubber_type: str) -> str:
+    return {
+        "TAIL_ELASTIC": "Хвост на резинке (1 крепление)",
+        "TAIL_CRAB": "Хвост на крабе",
+        "TAIL_NET": "Хвост на сетке",
+        "BRAIDS_ELASTIC": "Косы на резинке (1 коса)",
+    }[rubber_type]
 
 
-def _rubber_variant_multiplier(db: Session, variant_key: str) -> float:
-    r = db.scalar(select(WorkRate).where(WorkRate.key == "rubber_variant_multipliers", WorkRate.is_active.is_(True)))
-    multipliers = _rubber_variant_multiplier_defaults()
-    if r:
-        try:
-            payload = json.loads(r.value_json)
-            if isinstance(payload, dict):
-                for k, v in payload.items():
-                    try:
-                        multipliers[str(k)] = float(v)
-                    except Exception:
-                        continue
-        except Exception:
-            pass
-    m = float(multipliers.get(variant_key, 1.0))
-    if m <= 0:
-        return 1.0
-    return m
+def _rubber_pricing_from_catalog(db: Session, rubber_type: str) -> tuple[float, float, float, bool, str | None]:
+    """
+    Возвращает: (master_pay, studio_pay, fixed_expense, is_per_unit, unit_label).
+    Берём из каталога услуг: категория «Заказ» → подкатегория «Хвосты/резинки».
+    """
+    cat = db.scalar(select(ServiceCategory).where(ServiceCategory.name == "Заказ"))
+    if not cat:
+        raise ValueError("Не найден прайс: категория «Заказ».")
+    sub = db.scalar(
+        select(ServiceSubcategory).where(ServiceSubcategory.category_id == cat.id, ServiceSubcategory.name == "Хвосты/резинки")
+    )
+    if not sub:
+        raise ValueError("Не найден прайс: «Заказ → Хвосты/резинки».")
+    svc_name = _rubber_service_name(rubber_type)
+    svc = db.scalar(select(Service).where(Service.subcategory_id == sub.id, Service.name == svc_name))
+    if not svc or not svc.is_active:
+        raise ValueError(f"Не найден прайс для «{svc_name}».")
+    mp = float(svc.master_pay_amount or 0.0)
+    sp = float(svc.studio_pay_amount or 0.0)
+    fx = float(svc.fixed_expense_amount or 0.0)
+    return mp, sp, fx, bool(svc.is_per_unit), (svc.unit_label or None)
+
+
+def _zakaz_subcategory_services_map(
+    db: Session, subcategory_name: str
+) -> dict[str, dict[str, float | bool | None]]:
+    """
+    Возвращает map по имени услуги в подкатегории:
+    { name: {client_from, client_to, master_pay, studio_pay, fixed_expense, is_per_unit} }
+    """
+    cat = db.scalar(select(ServiceCategory).where(ServiceCategory.name == "Заказ"))
+    if not cat:
+        return {}
+    sub = db.scalar(
+        select(ServiceSubcategory).where(
+            ServiceSubcategory.category_id == cat.id, ServiceSubcategory.name == subcategory_name
+        )
+    )
+    if not sub:
+        return {}
+    rows = list(db.scalars(select(Service).where(Service.subcategory_id == sub.id, Service.is_active.is_(True))).all())
+    out: dict[str, dict[str, float | bool | None]] = {}
+    for s in rows:
+        out[s.name] = {
+            "client_from": float(s.price_middle_from) if s.price_middle_from is not None else None,
+            "client_to": float(s.price_middle_to) if s.price_middle_to is not None else None,
+            "master_pay": float(s.master_pay_amount) if s.master_pay_amount is not None else None,
+            "studio_pay": float(s.studio_pay_amount) if s.studio_pay_amount is not None else None,
+            "fixed_expense": float(s.fixed_expense_amount) if s.fixed_expense_amount is not None else None,
+            "is_per_unit": bool(s.is_per_unit),
+        }
+    return out
 
 
 def _kind_label(k: WorkKind) -> str:
@@ -309,6 +349,11 @@ def work_new_get(
     db: Session = Depends(get_db),
 ):
     masters = _list_masters_for_work_form(db)
+    work_price_meta = {
+        "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
+        "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
+        "customOrderBonus": _wr_float(db, "custom_order_bonus_multiplier", 1.0),
+    }
     return templates.TemplateResponse(
         "work_products_new.html",
         _ctx(
@@ -326,6 +371,7 @@ def work_new_get(
             kit_de_items=_kit_de_items(),
             rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
             rubber_variants=[{"value": v, "label": l} for v, l in _rubber_variant_items()],
+            work_price_meta_json=json.dumps(work_price_meta, ensure_ascii=False),
         ),
     )
 
@@ -352,6 +398,7 @@ async def work_new_post(
             raise ValueError("Выберите вид работы.")
 
         client_id: int | None = None
+        amount_from_client: int | None = None
         if scope == WorkScope.CUSTOM_ORDER:
             cid_raw = (_g_str(form, "client_id", "") or "").strip()
             if not cid_raw.isdigit():
@@ -359,6 +406,14 @@ async def work_new_post(
             client_id = int(cid_raw)
             if not db.get(Client, client_id):
                 raise ValueError("Клиент не найден.")
+            afc_raw = (_g_str(form, "amount_from_client", "") or "").strip()
+            if afc_raw:
+                try:
+                    amount_from_client = int(float(afc_raw.replace(",", ".")))
+                except ValueError:
+                    raise ValueError("Сумма от клиента должна быть числом.")
+                if amount_from_client < 0:
+                    raise ValueError("Сумма от клиента не может быть отрицательной.")
 
         kanek = max(0.0, _g_float(form, "kanekalon_grams", 0.0))
         kudri = max(0.0, _g_float(form, "kudri_grams", 0.0))
@@ -389,6 +444,7 @@ async def work_new_post(
         if mix_complexity is not None:
             details["mix_complexity"] = mix_complexity.value
 
+        # For KIT extra costs are manually entered; for RUBBER they are computed from catalog.
         extra_costs_amount = max(0.0, _g_float(form, "extra_costs_amount", 0.0))
 
         alloc: list[tuple[int, float]]
@@ -396,6 +452,13 @@ async def work_new_post(
         rubber_type = ""
         rubber_variant = ""
         rubber_qty = 1
+        corr_trim_qty = 0
+        corr_wash = False
+        corr_circle = False
+        corr_steam = False
+        corr_dread_qty = 0
+        corr_curl_qty = 0
+        corr_curl_complexity = "NORMAL"
         # KIT: parse blanks + compute master/studio profit
         kit_rates = _kit_rates_defaults()
         kit_totals: dict[str, int] = {}
@@ -476,6 +539,43 @@ async def work_new_post(
                 "qty": rubber_qty,
             }
             alloc = [(current_user.id, 1.0)]
+        elif kind == WorkKind.KIT_CORRECTION:
+            corr_trim_qty = int(_g_float(form, "corr_trim_qty", 0))
+            corr_wash = _g_bool(form, "corr_wash")
+            corr_circle = _g_bool(form, "corr_circle")
+            corr_steam = _g_bool(form, "corr_steam")
+            corr_dread_qty = int(_g_float(form, "corr_dread_qty", 0))
+            corr_curl_qty = int(_g_float(form, "corr_curl_qty", 0))
+            corr_curl_complexity = (_g_str(form, "corr_curl_complexity", "NORMAL") or "NORMAL").strip()
+            if corr_curl_complexity not in ("NORMAL", "HARD"):
+                corr_curl_complexity = "NORMAL"
+
+            if corr_wash and corr_circle:
+                raise ValueError("Если выбрана «Стирка», то «Одевание на круг» выбирать нельзя (входит в стирку).")
+
+            if any(x < 0 for x in (corr_trim_qty, corr_dread_qty, corr_curl_qty)):
+                raise ValueError("Количество должно быть неотрицательным числом.")
+
+            if (
+                (corr_trim_qty <= 0)
+                and (not corr_wash)
+                and (not corr_circle)
+                and (not corr_steam)
+                and (corr_dread_qty <= 0)
+                and (corr_curl_qty <= 0)
+            ):
+                raise ValueError("Для «Коррекция комплекта» выберите хотя бы один пункт.")
+
+            details["correction"] = {
+                "trim_qty": corr_trim_qty,
+                "wash": corr_wash,
+                "circle": corr_circle,
+                "steam": corr_steam,
+                "dread_qty": corr_dread_qty,
+                "curl_qty": corr_curl_qty,
+                "curl_complexity": corr_curl_complexity,
+            }
+            alloc = [(current_user.id, 1.0)]
         else:
             alloc = [(current_user.id, 1.0)]
 
@@ -499,25 +599,77 @@ async def work_new_post(
                     if q > 0:
                         staff_master_profit[uid] += rate * q
         elif kind == WorkKind.RUBBER:
-            m = _rubber_variant_multiplier(db, rubber_variant)
-            if rubber_type == "TAIL_ELASTIC":
-                per = _wr_float(db, "rubber_tail_elastic_per_attach", 10.0)
-                staff_master_profit[current_user.id] = float(per) * float(rubber_qty) * m
-            elif rubber_type == "TAIL_CRAB":
-                base = _wr_float(db, "rubber_tail_crab", 500.0)
-                staff_master_profit[current_user.id] = float(base) * m
-            elif rubber_type == "TAIL_NET":
-                base = _wr_float(db, "rubber_tail_net", 550.0)
-                staff_master_profit[current_user.id] = float(base) * m
-            elif rubber_type == "BRAIDS_ELASTIC":
-                per = _wr_float(db, "rubber_braids_elastic_per_braid", 15.0)
-                staff_master_profit[current_user.id] = float(per) * float(rubber_qty) * m
+            mp, sp, fx, is_per_unit, _ul = _rubber_pricing_from_catalog(db, rubber_type)
+            units = int(rubber_qty) if is_per_unit else 1
+            bonus = 1.0
+            if scope == WorkScope.CUSTOM_ORDER:
+                bonus = max(0.0, _wr_float(db, "custom_order_bonus_multiplier", 1.0))
+                if bonus <= 0:
+                    bonus = 1.0
+            staff_master_profit[current_user.id] = float(mp) * float(units) * bonus
+            # studio_profit for RUBBER is fixed from catalog (not via studio_share)
+            studio_total = float(sp) * float(units) * bonus
+            extra_costs_amount = float(fx) * float(units)
+        elif kind == WorkKind.KIT_CORRECTION:
+            corr_map = _zakaz_subcategory_services_map(db, "Коррекция комплекта")
+            bonus = 1.0
+            if scope == WorkScope.CUSTOM_ORDER:
+                bonus = max(0.0, _wr_float(db, "custom_order_bonus_multiplier", 1.0))
+                if bonus <= 0:
+                    bonus = 1.0
+
+            def _svc_sum(name: str, units: int, *, complexity_mul: float = 1.0) -> tuple[float, float, float]:
+                row = corr_map.get(name) or {}
+                mp = float(row.get("master_pay") or 0.0) * float(units) * float(complexity_mul)
+                sp = float(row.get("studio_pay") or 0.0) * float(units) * float(complexity_mul)
+                fx = float(row.get("fixed_expense") or 0.0) * float(units)
+                return mp, sp, fx
+
+            mp_total = 0.0
+            sp_total = 0.0
+            fx_total = 0.0
+            if corr_trim_qty > 0:
+                mp, sp, fx = _svc_sum("Стрижка (1шт)", corr_trim_qty)
+                mp_total += mp
+                sp_total += sp
+                fx_total += fx
+            if corr_circle:
+                mp, sp, fx = _svc_sum("Одевание на круг", 1)
+                mp_total += mp
+                sp_total += sp
+                fx_total += fx
+            if corr_wash:
+                mp, sp, fx = _svc_sum("Стирка", 1)
+                mp_total += mp
+                sp_total += sp
+                fx_total += fx
+            if corr_steam:
+                mp, sp, fx = _svc_sum("Отпаривание", 1)
+                mp_total += mp
+                sp_total += sp
+                fx_total += fx
+            if corr_dread_qty > 0:
+                mp, sp, fx = _svc_sum("Коррекция дреда (1шт)", corr_dread_qty)
+                mp_total += mp
+                sp_total += sp
+                fx_total += fx
+            if corr_curl_qty > 0:
+                cm = 1.5 if corr_curl_complexity == "HARD" else 1.0
+                mp, sp, fx = _svc_sum("Коррекция кудрей (1шт)", corr_curl_qty, complexity_mul=cm)
+                mp_total += mp
+                sp_total += sp
+                fx_total += fx
+
+            staff_master_profit[current_user.id] = mp_total * bonus
+            studio_total = sp_total * bonus
+            extra_costs_amount = fx_total
 
         master_total = float(sum(staff_master_profit.values()))
         studio_share = _studio_share_snapshot(db)
-        studio_total = 0.0
-        if studio_share > 0 and studio_share < 1 and master_total > 0:
-            studio_total = master_total * (studio_share / (1.0 - studio_share))
+        if kind not in (WorkKind.RUBBER, WorkKind.KIT_CORRECTION):
+            studio_total = 0.0
+            if studio_share > 0 and studio_share < 1 and master_total > 0:
+                studio_total = master_total * (studio_share / (1.0 - studio_share))
         profit_total = master_total + studio_total
         cost_total_amount = mat_cost + extra_costs_amount
 
@@ -526,6 +678,7 @@ async def work_new_post(
             kind=kind,
             scope=scope,
             client_id=client_id,
+            amount_from_client=amount_from_client,
             ready_date=ready_dt,
             comment=(_g_str(form, "comment", "") or "").strip() or None,
             kanekalon_grams=kanek,
@@ -599,6 +752,11 @@ async def work_new_post(
         return RedirectResponse(url="/sales/work?msg=saved", status_code=303)
     except ValueError as exc:
         masters = _list_masters_for_work_form(db)
+        work_price_meta = {
+            "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
+            "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
+            "customOrderBonus": _wr_float(db, "custom_order_bonus_multiplier", 1.0),
+        }
         kit_master_on_ids = _read_kit_master_on_ids(form)
         kit_prefill = _kit_qty_prefill_from_form(form)
         return templates.TemplateResponse(
@@ -621,6 +779,7 @@ async def work_new_post(
                 kit_de_items=_kit_de_items(),
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
                 rubber_variants=[{"value": v, "label": l} for v, l in _rubber_variant_items()],
+                work_price_meta_json=json.dumps(work_price_meta, ensure_ascii=False),
             ),
             status_code=400,
         )

@@ -1,238 +1,145 @@
 {
-  "category": "Заказ",
-  "include_in_visit": false,
-  "subcategories": [
+  "catalogs": [
     {
-      "name": "Комплект",
-      "services": [
+      "category": "Заказ",
+      "include_in_visit": false,
+      "subcategories": [
         {
-          "name": "Дредокудри",
-          "price": {
-            "from": 7700,
-            "to": 8500
-          }
+          "name": "Комплект",
+          "services": [
+            { "name": "Дредокудри", "price": { "from": 7700, "to": 8500 } },
+            { "name": "Короткие косы 100шт", "price": { "from": 6700 } },
+            { "name": "Длинные косы 100шт", "price": { "from": 7500 } },
+            { "name": "Дреды 100шт", "price": { "from": 10000 } },
+            { "name": "Микро косы (200-240 шт)", "price": { "from": 12000 } }
+          ]
         },
         {
-          "name": "Короткие косы 100шт",
-          "price": {
-            "from": 6700
-          }
+          "name": "Заготовки поштучно",
+          "services": [
+            { "name": "СЕ коса на заказ", "price": { "from": 85 } },
+            { "name": "Се коса-кудря свободный кончик", "price": { "from": 95 } },
+            { "name": "СЕ коса из наличия", "price": { "from": 75 } },
+            { "name": "ДЕ коса / се ажурка", "price": { "from": 150 } },
+            { "name": "Дред СЕ", "price": { "from": 100 } },
+            { "name": "Дред Б/У", "price": { "from": 150 } },
+            { "name": "Дред ДЕ", "price": { "from": 200 } },
+            { "name": "Дредо кудря", "price": { "from": 150 } },
+            { "name": "Дредо кудря Б/У", "price": { "from": 80, "to": 90 } },
+            { "name": "Коса б/у", "price": { "from": 50 } }
+          ]
         },
         {
-          "name": "Длинные косы 100шт",
-          "price": {
-            "from": 7500
-          }
+          "name": "Резинки",
+          "is_active": false,
+          "services": [
+            { "name": "Прикрепление хвоста", "order_rubber_extra_time_amort": true, "price": { "from": 800 } },
+            { "name": "Брейд под хвост", "order_rubber_extra_time_amort": true, "price": { "from": 1000, "to": 1400 } },
+            { "name": "Детская короткая", "price": { "from": 500, "to": 800 } },
+            { "name": "Детская длинная", "price": { "from": 800, "to": 1300 } },
+            { "name": "До плеч однотонная", "price": { "from": 1600 } },
+            { "name": "До плеч омбре", "price": { "from": 2000 } },
+            { "name": "До талии однотон", "price": { "from": 2000 } },
+            { "name": "До талии омбре", "price": { "from": 2500 } },
+            { "name": "До попы однотонная", "price": { "from": 2500 } },
+            { "name": "До попы омбре", "price": { "from": 3000 } },
+            { "name": "Ниже", "price": { "from": 3000, "to": 4000 } }
+          ]
         },
         {
-          "name": "Дреды 100шт",
-          "price": {
-            "from": 10000
-          }
+          "name": "Хвосты/резинки",
+          "services": [
+            {
+              "name": "Хвост на крабе",
+              "price": { "from": 1600, "to": 1800 },
+              "economics": { "master_pay": 500, "studio_pay": 500, "fixed_expense": 400, "is_per_unit": false }
+            },
+            {
+              "name": "Хвост на сетке",
+              "price": { "from": 1900, "to": 2500 },
+              "economics": { "master_pay": 550, "studio_pay": 500, "fixed_expense": 700, "is_per_unit": false }
+            },
+            {
+              "name": "Хвост на резинке (1 крепление)",
+              "price": { "from": 30, "to": 40 },
+              "economics": {
+                "master_pay": 10,
+                "studio_pay": 10,
+                "fixed_expense": 5,
+                "is_per_unit": true,
+                "unit_label": "крепление"
+              }
+            },
+            {
+              "name": "Косы на резинке (1 коса)",
+              "price": { "from": 40, "to": 60 },
+              "economics": { "master_pay": 15, "studio_pay": 15, "fixed_expense": 5, "is_per_unit": true, "unit_label": "коса" }
+            }
+          ]
         },
         {
-          "name": "Микро косы (200-240 шт)",
-          "price": {
-            "from": 12000
-          }
+          "name": "Хвосты/резинки - длина/цвет",
+          "services": [
+            { "name": "Детская короткая", "price": { "from": 500, "to": 800 } },
+            { "name": "Детская длинная", "price": { "from": 800, "to": 1300 } },
+            { "name": "До плеч однотонная", "price": { "from": 1600 } },
+            { "name": "До плеч омбре", "price": { "from": 2000 } },
+            { "name": "До талии однотон", "price": { "from": 2000 } },
+            { "name": "До талии омбре", "price": { "from": 2500 } },
+            { "name": "До попы однотонная", "price": { "from": 2500 } },
+            { "name": "До попы омбре", "price": { "from": 3000 } },
+            { "name": "Ниже", "price": { "from": 3000, "to": 4000 } }
+          ]
+        },
+        {
+          "name": "Коррекция комплекта",
+          "services": [
+            {
+              "name": "Стрижка (1шт)",
+              "price": { "from": 5 },
+              "economics": { "master_pay": 2.5, "studio_pay": 2.5, "fixed_expense": 0, "is_per_unit": true, "unit_label": "шт" }
+            },
+            {
+              "name": "Одевание на круг",
+              "price": { "from": 100 },
+              "economics": { "master_pay": 100, "studio_pay": 0, "fixed_expense": 0, "is_per_unit": false }
+            },
+            {
+              "name": "Стирка",
+              "price": { "from": 400 },
+              "economics": { "master_pay": 200, "studio_pay": 100, "fixed_expense": 100, "is_per_unit": false }
+            },
+            {
+              "name": "Отпаривание",
+              "price": { "from": 200 },
+              "economics": { "master_pay": 100, "studio_pay": 100, "fixed_expense": 0, "is_per_unit": false }
+            },
+            {
+              "name": "Коррекция дреда (1шт)",
+              "price": { "from": 50 },
+              "economics": { "master_pay": 40, "studio_pay": 10, "fixed_expense": 0, "is_per_unit": true, "unit_label": "шт" }
+            },
+            {
+              "name": "Коррекция кудрей (1шт)",
+              "price": { "from": 30 },
+              "economics": { "master_pay": 20, "studio_pay": 10, "fixed_expense": 0, "is_per_unit": true, "unit_label": "шт" }
+            },
+            { "name": "Комплект дредов", "price": { "from": 1000, "to": 3000 } },
+            { "name": "Коррекция дредокудрей", "price": { "from": 1000, "to": 3000 } }
+          ]
         }
       ]
     },
     {
-      "name": "Заготовки поштучно",
-      "services": [
+      "category": "Крепление хвоста",
+      "include_in_visit": true,
+      "subcategories": [
         {
-          "name": "СЕ коса на заказ",
-          "price": {
-            "from": 85
-          }
-        },
-        {
-          "name": "Се коса-кудря свободный кончик",
-          "price": {
-            "from": 95
-          }
-        },
-        {
-          "name": "СЕ коса из наличия",
-          "price": {
-            "from": 75
-          }
-        },
-        {
-          "name": "ДЕ коса / се ажурка",
-          "price": {
-            "from": 150
-          }
-        },
-        {
-          "name": "Дред СЕ",
-          "price": {
-            "from": 100
-          }
-        },
-        {
-          "name": "Дред Б/У",
-          "price": {
-            "from": 150
-          }
-        },
-        {
-          "name": "Дред ДЕ",
-          "price": {
-            "from": 200
-          }
-        },
-        {
-          "name": "Дредо кудря",
-          "price": {
-            "from": 150
-          }
-        },
-        {
-          "name": "Дредо кудря Б/У",
-          "price": {
-            "from": 80,
-            "to": 90
-          }
-        },
-        {
-          "name": "Коса б/у",
-          "price": {
-            "from": 50
-          }
-        }
-      ]
-    },
-    {
-      "name": "Резинки",
-      "services": [
-        {
-          "name": "Прикрепление хвоста",
-          "order_rubber_extra_time_amort": true,
-          "price": {
-            "from": 800
-          }
-        },
-        {
-          "name": "Брейд под хвост",
-          "order_rubber_extra_time_amort": true,
-          "price": {
-            "from": 1000,
-            "to": 1400
-          }
-        },
-        {
-          "name": "Детская короткая",
-          "price": {
-            "from": 500,
-            "to": 800
-          }
-        },
-        {
-          "name": "Детская длинная",
-          "price": {
-            "from": 800,
-            "to": 1300
-          }
-        },
-        {
-          "name": "До плеч однотонная",
-          "price": {
-            "from": 1600
-          }
-        },
-        {
-          "name": "До плеч омбре",
-          "price": {
-            "from": 2000
-          }
-        },
-        {
-          "name": "До талии однотон",
-          "price": {
-            "from": 2000
-          }
-        },
-        {
-          "name": "До талии омбре",
-          "price": {
-            "from": 2500
-          }
-        },
-        {
-          "name": "До попы однотонная",
-          "price": {
-            "from": 2500
-          }
-        },
-        {
-          "name": "До попы омбре",
-          "price": {
-            "from": 3000
-          }
-        },
-        {
-          "name": "Ниже",
-          "price": {
-            "from": 3000,
-            "to": 4000
-          }
-        }
-      ]
-    },
-    {
-      "name": "Коррекция комплекта",
-      "services": [
-        {
-          "name": "Чиканье 1 шт се-коса",
-          "price": {
-            "from": 5
-          }
-        },
-        {
-          "name": "Чиканье Комплект 120 шт",
-          "price": {
-            "from": 600
-          }
-        },
-        {
-          "name": "Одевание на круг",
-          "price": {
-            "from": 100
-          }
-        },
-        {
-          "name": "Стирка",
-          "price": {
-            "from": 400
-          }
-        },
-        {
-          "name": "Отпаривание",
-          "price": {
-            "from": 200
-          }
-        },
-        {
-          "name": "Коррекция дреда",
-          "price": {
-            "from": 50
-          }
-        },
-        {
-          "name": "Комплект дредов",
-          "price": {
-            "from": 1000,
-            "to": 3000
-          }
-        },
-        {
-          "name": "Коррекция дредокудрей",
-          "price": {
-            "from": 1000,
-            "to": 3000
-          }
+          "name": "—",
+          "services": [
+            { "name": "Прикрепление хвоста", "price": { "from": 800 } },
+            { "name": "Брейд под хвост", "price": { "from": 1000, "to": 1400 } }
+          ]
         }
       ]
     }

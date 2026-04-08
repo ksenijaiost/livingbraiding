@@ -166,7 +166,7 @@
             {% endfor %}
           </select>
         </div>
-        <div>
+        <div id="service_subcategory_wrap">
           <label>Подкатегория</label>
           <select id="service_subcategory_id" name="service_subcategory_id" onchange="serviceCatalogOnSubcategory()" {% if not service_catalog %}disabled{% endif %} style="width: 100%; box-sizing: border-box;">
           </select>
@@ -636,6 +636,7 @@
       const catSel = document.getElementById('service_category_id');
       const subSel = document.getElementById('service_subcategory_id');
       const serviceSel = document.getElementById('service_id');
+      const subWrap = document.getElementById('service_subcategory_wrap');
 
       const catId = parseInt(catSel.value || '0');
       const cat = (serviceCatalog || []).find(x => x.id === catId);
@@ -650,8 +651,15 @@
         subSel.appendChild(opt);
       }
 
-      if (subs.length > 0) {
-        subSel.value = subs[0].id;
+      if (subs.length > 0) subSel.value = subs[0].id;
+
+      // UX: if subcategory is single, no need to "choose" it.
+      if (subs.length <= 1) {
+        subSel.disabled = true;
+        if (subWrap) subWrap.style.opacity = '0.85';
+      } else {
+        subSel.disabled = false;
+        if (subWrap) subWrap.style.opacity = '1';
       }
       fillServices();
     }

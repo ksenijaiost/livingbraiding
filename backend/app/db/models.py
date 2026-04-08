@@ -264,6 +264,14 @@ class Service(Base):
     hide_material_description: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     order_rubber_extra_time_amort: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Экономика (для суперадмина): используется для автоподсчёта ЗП/студии/расходов.
+    # Если is_per_unit=True — значения ниже считаются "за 1 единицу" (крепление/коса/шт).
+    master_pay_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    studio_pay_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fixed_expense_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_per_unit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    unit_label: Mapped[str | None] = mapped_column(String(60), nullable=True)
+
     subcategory: Mapped[ServiceSubcategory] = relationship()
     questionnaire_fields: Mapped[list[ServiceQuestionnaireField]] = relationship(
         back_populates="service",
@@ -498,6 +506,7 @@ class WorkForInventory(Base):
     )
 
     client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
+    amount_from_client: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ready_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 

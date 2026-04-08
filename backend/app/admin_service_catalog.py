@@ -406,6 +406,11 @@ def service_new_form(
             form_mt="",
             form_sf="",
             form_st="",
+            form_master_pay="",
+            form_studio_pay="",
+            form_fixed_exp="",
+            form_is_per_unit=False,
+            form_unit_label="",
             form_kit_override="",
             form_hide_material=False,
             form_order_rubber=False,
@@ -424,6 +429,11 @@ def service_new_save(
     price_middle_to: str | None = Form(None),
     price_senior_from: str | None = Form(None),
     price_senior_to: str | None = Form(None),
+    master_pay_amount: str | None = Form(None),
+    studio_pay_amount: str | None = Form(None),
+    fixed_expense_amount: str | None = Form(None),
+    is_per_unit: str | None = Form(None),
+    unit_label: str | None = Form(None),
     kit_section_override: str | None = Form(None),
     hide_material_description: str | None = Form(None),
     order_rubber_extra_time_amort: str | None = Form(None),
@@ -458,6 +468,11 @@ def service_new_save(
         price_middle_to=mt,
         price_senior_from=sf,
         price_senior_to=st,
+        master_pay_amount=_parse_optional_price(master_pay_amount),
+        studio_pay_amount=_parse_optional_price(studio_pay_amount),
+        fixed_expense_amount=_parse_optional_price(fixed_expense_amount),
+        is_per_unit=_is_checked(is_per_unit),
+        unit_label=(unit_label or "").strip()[:60] or None,
         kit_section_override=_parse_kit_section_override(kit_section_override),
         hide_material_description=_is_checked(hide_material_description),
         order_rubber_extra_time_amort=_is_checked(order_rubber_extra_time_amort),
@@ -507,6 +522,11 @@ def service_edit_form(
             form_mt=_fmt_price_input(svc.price_middle_to),
             form_sf=_fmt_price_input(svc.price_senior_from),
             form_st=_fmt_price_input(svc.price_senior_to),
+            form_master_pay=_fmt_price_input(svc.master_pay_amount),
+            form_studio_pay=_fmt_price_input(svc.studio_pay_amount),
+            form_fixed_exp=_fmt_price_input(svc.fixed_expense_amount),
+            form_is_per_unit=bool(svc.is_per_unit),
+            form_unit_label=(svc.unit_label or ""),
             form_kit_override=(
                 ""
                 if svc.kit_section_override is None
@@ -529,6 +549,11 @@ def service_edit_save(
     price_middle_to: str | None = Form(None),
     price_senior_from: str | None = Form(None),
     price_senior_to: str | None = Form(None),
+    master_pay_amount: str | None = Form(None),
+    studio_pay_amount: str | None = Form(None),
+    fixed_expense_amount: str | None = Form(None),
+    is_per_unit: str | None = Form(None),
+    unit_label: str | None = Form(None),
     kit_section_override: str | None = Form(None),
     hide_material_description: str | None = Form(None),
     order_rubber_extra_time_amort: str | None = Form(None),
@@ -565,6 +590,11 @@ def service_edit_save(
     svc.price_middle_to = mt
     svc.price_senior_from = sf
     svc.price_senior_to = st
+    svc.master_pay_amount = _parse_optional_price(master_pay_amount)
+    svc.studio_pay_amount = _parse_optional_price(studio_pay_amount)
+    svc.fixed_expense_amount = _parse_optional_price(fixed_expense_amount)
+    svc.is_per_unit = _is_checked(is_per_unit)
+    svc.unit_label = (unit_label or "").strip()[:60] or None
     svc.kit_section_override = _parse_kit_section_override(kit_section_override)
     svc.hide_material_description = _is_checked(hide_material_description)
     svc.order_rubber_extra_time_amort = _is_checked(order_rubber_extra_time_amort)

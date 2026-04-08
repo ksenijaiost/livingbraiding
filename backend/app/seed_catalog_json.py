@@ -85,13 +85,35 @@ def _ensure_service_row(
     price_senior_to: float | None,
     is_active: bool = True,
     order_rubber_extra_time_amort: bool | None = None,
+    master_pay_amount: float | None = None,
+    studio_pay_amount: float | None = None,
+    fixed_expense_amount: float | None = None,
+    is_per_unit: bool | None = None,
+    unit_label: str | None = None,
 ) -> None:
     existing = db.scalar(
         select(Service).where(Service.subcategory_id == subcategory_id, Service.name == name)
     )
     if existing:
+        existing.is_active = bool(is_active)
+        existing.price_junior_from = price_junior_from
+        existing.price_junior_to = price_junior_to
+        existing.price_middle_from = price_middle_from
+        existing.price_middle_to = price_middle_to
+        existing.price_senior_from = price_senior_from
+        existing.price_senior_to = price_senior_to
         if order_rubber_extra_time_amort is not None:
             existing.order_rubber_extra_time_amort = bool(order_rubber_extra_time_amort)
+        if master_pay_amount is not None:
+            existing.master_pay_amount = float(master_pay_amount)
+        if studio_pay_amount is not None:
+            existing.studio_pay_amount = float(studio_pay_amount)
+        if fixed_expense_amount is not None:
+            existing.fixed_expense_amount = float(fixed_expense_amount)
+        if is_per_unit is not None:
+            existing.is_per_unit = bool(is_per_unit)
+        if unit_label is not None:
+            existing.unit_label = str(unit_label) if unit_label else None
         return
     db.add(
         Service(
@@ -107,6 +129,11 @@ def _ensure_service_row(
             order_rubber_extra_time_amort=bool(order_rubber_extra_time_amort)
             if order_rubber_extra_time_amort is not None
             else False,
+            master_pay_amount=float(master_pay_amount) if master_pay_amount is not None else None,
+            studio_pay_amount=float(studio_pay_amount) if studio_pay_amount is not None else None,
+            fixed_expense_amount=float(fixed_expense_amount) if fixed_expense_amount is not None else None,
+            is_per_unit=bool(is_per_unit) if is_per_unit is not None else False,
+            unit_label=str(unit_label) if unit_label else None,
         )
     )
 
@@ -127,6 +154,8 @@ def apply_service_catalog_from_dict(db: Session, data: dict[str, Any]) -> None:
         if not sub_name:
             continue
         sub = _get_or_create_subcategory(db, cat.id, sub_name)
+        if "is_active" in sub_raw:
+            sub.is_active = bool(sub_raw.get("is_active"))
 
         for svc_raw in sub_raw.get("services") or []:
             if not isinstance(svc_raw, dict):
@@ -144,6 +173,13 @@ def apply_service_catalog_from_dict(db: Session, data: dict[str, Any]) -> None:
             rubber_raw = svc_raw.get("order_rubber_extra_time_amort")
             rubber_opt = bool(rubber_raw) if rubber_raw is not None else None
 
+            econ = svc_raw.get("economics") if isinstance(svc_raw.get("economics"), dict) else {}
+            mp = econ.get("master_pay")
+            sp = econ.get("studio_pay")
+            fx = econ.get("fixed_expense")
+            ipu = econ.get("is_per_unit")
+            ul = econ.get("unit_label")
+
             _ensure_service_row(
                 db,
                 sub.id,
@@ -156,6 +192,11 @@ def apply_service_catalog_from_dict(db: Session, data: dict[str, Any]) -> None:
                 price_senior_to=pst,
                 is_active=is_active,
                 order_rubber_extra_time_amort=rubber_opt,
+                master_pay_amount=mp,
+                studio_pay_amount=sp,
+                fixed_expense_amount=fx,
+                is_per_unit=bool(ipu) if ipu is not None else None,
+                unit_label=str(ul) if ul is not None else None,
             )
 
 
