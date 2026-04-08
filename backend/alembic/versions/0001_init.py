@@ -498,17 +498,31 @@ def upgrade() -> None:
         """
     )
 
+    # ---- Продажа товаров (без услуги): материал/комплект/резинки/другое ----
     op.create_table(
-        "material_retail_sales",
+        "product_sales",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("performed_date", sa.DateTime(), nullable=False),
         sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=False),
-        sa.Column("service_id", sa.Integer(), sa.ForeignKey("services.id"), nullable=True),
-        sa.Column("grams", sa.Float(), nullable=False),
-        sa.Column("sale_price", sa.Integer(), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("amount_from_client", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("is_voided", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("voided_at", sa.DateTime(), nullable=True),
+        sa.Column("voided_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column(
+            "kind",
+            sa.Enum("MATERIAL", "KIT", "RUBBER", "OTHER", name="productsalekind"),
+            nullable=False,
+        ),
+        sa.Column("material_service_id", sa.Integer(), sa.ForeignKey("services.id"), nullable=True),
+        sa.Column("material_grams", sa.Float(), nullable=True),
+        sa.Column("material_description", sa.Text(), nullable=True),
+        sa.Column("kit_id", sa.Integer(), sa.ForeignKey("kits.id"), nullable=True),
+        sa.Column("kit_pieces_sold", sa.Integer(), nullable=True),
+        sa.Column("rubber_description", sa.Text(), nullable=True),
+        sa.Column("rubber_price_override", sa.Integer(), nullable=True),
+        sa.Column("other_description", sa.Text(), nullable=True),
     )
 
     # ---- Прайс «Товары» (вне визита) ----

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    {% if error %}
+      <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
+    {% endif %}
+
+    {% if sale %}
+      <div class="row" style="align-items:center;justify-content:space-between;gap:12px;">
+        <div>
+          <h2 style="margin:0;">Продажа #{{ sale.id }}</h2>
+          <p class="muted" style="margin:6px 0 0;">
+            Создано: {{ sale.created_at.strftime('%Y-%m-%d %H:%M') }} · Тип: {{ ru_kind }}
+            {% if sale.is_voided %} · <strong>АННУЛИРОВАНО</strong>{% endif %}
+          </p>
+        </div>
+        <div class="row" style="gap:8px; justify-content:flex-end;">
+          <a href="/sales/products"><button type="button" class="secondary">К списку</button></a>
+          {% if can_edit %}
+            <a href="/sales/products/{{ sale.id }}/edit">
+              <button type="button" {% if not edit_allowed %}disabled{% endif %}>Редактировать</button>
+            </a>
+            <form method="post" action="/sales/products/{{ sale.id }}/void" style="display:inline;">
+              <button type="submit" class="secondary" {% if not edit_allowed %}disabled{% endif %}>Аннулировать</button>
+            </form>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if can_edit and not edit_allowed %}
+        <div class="error" style="margin-top:12px;">{{ edit_block_msg }}</div>
+      {% endif %}
+
+      <div class="card" style="margin-top:14px;">
+        <h3 style="margin-top:0;">Реквизиты</h3>
+        <p style="margin:6px 0;"><strong>Дата</strong>: {{ sale.performed_date.date().isoformat() }}</p>
+        <p style="margin:6px 0;"><strong>Клиент</strong>: {{ sale.client.name }}</p>
+        <p style="margin:6px 0;"><strong>Сумма с клиента</strong>: {{ sale.amount_from_client }} ₽</p>
+        <p style="margin:6px 0;"><strong>Кто внёс</strong>: {{ sale.created_by_user.display_name if sale.created_by_user else '—' }}</p>
+        {% if sale.is_voided %}
+          <p style="margin:6px 0;">
+            <strong>Аннулировано</strong>:
+            {{ sale.voided_at.strftime('%Y-%m-%d %H:%M') if sale.voided_at else '—' }}
+            {% if sale.voided_by_user %} ({{ sale.voided_by_user.display_name }}){% endif %}
+          </p>
+        {% endif %}
+      </div>
+
+      <div class="card" style="margin-top:14px;">
+        <h3 style="margin-top:0;">Товар</h3>
+        {% if sale.kind.value == 'MATERIAL' %}
+          <p style="margin:6px 0;"><strong>Тип</strong>: Материал</p>
+          <p style="margin:6px 0;">
+            <strong>Услуга</strong>:
+            {% if sale.material_service %}
+              {{ sale.material_service.subcategory.name }} — {{ sale.material_service.name }}
+            {% else %}
+              <span class="muted">не указано</span>
+            {% endif %}
+          </p>
+          <p style="margin:6px 0;"><strong>Количество</strong>: {{ '%.1f'|format(sale.material_grams or 0) }} г</p>
+          {% if sale.material_description %}
+            <div class="card" style="margin-top:10px;background:#f8fafc;">
+              <p class="muted" style="margin:0;white-space:pre-wrap;">{{ sale.material_description }}</p>
+            </div>
+          {% endif %}
+        {% elif sale.kind.value == 'KIT' %}
+          <p style="margin:6px 0;"><strong>Тип</strong>: Комплект из наличия</p>
+          <p style="margin:6px 0;">
+            <strong>Комплект</strong>:
+            {% if sale.kit %}
+              {{ sale.kit.sku }} — {{ sale.kit.title }}
+            {% else %}
+              <span class="muted">не найден</span>
+            {% endif %}
+          </p>
+          <p style="margin:6px 0;"><strong>Списано заготовок</strong>: {{ sale.kit_pieces_sold or 0 }}</p>
+        {% elif sale.kind.value == 'RUBBER' %}
+          <p style="margin:6px 0;"><strong>Тип</strong>: Хвост/резинка</p>
+          <div class="card" style="margin-top:10px;background:#f8fafc;">
+            <p style="margin:0;white-space:pre-wrap;">{{ sale.rubber_description }}</p>
+          </div>
+          {% if sale.rubber_price_override is not none %}
+            <p style="margin:10px 0 0;"><strong>Цена товара</strong>: {{ sale.rubber_price_override }} ₽</p>
+          {% endif %}
+        {% elif sale.kind.value == 'OTHER' %}
+          <p style="margin:6px 0;"><strong>Тип</strong>: Другое</p>
+          <div class="card" style="margin-top:10px;background:#f8fafc;">
+            <p style="margin:0;white-space:pre-wrap;">{{ sale.other_description }}</p>
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
+

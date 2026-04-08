@@ -84,7 +84,7 @@ from app.kit_crud import (
     sync_kit_authors,
     validate_kit_admin_form,
 )
-from app import retail_material_sale as retail_material_sale_routes
+from app import product_sales as product_sales_routes
 from app import studio_order as studio_order_routes
 from app import work_products as work_products_routes
 from app.kit_inlay_visit import (
@@ -119,7 +119,7 @@ from app.ui_visit_display import (
 app = FastAPI(title="livingbraiding")
 app.include_router(admin_service_catalog_router)
 app.include_router(admin_questionnaire_fields_router)
-app.include_router(retail_material_sale_routes.router)
+app.include_router(product_sales_routes.router)
 app.include_router(studio_order_routes.router)
 app.include_router(work_products_routes.router)
 templates = Jinja2Templates(directory="app/templates")

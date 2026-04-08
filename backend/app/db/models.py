@@ -432,26 +432,6 @@ class KitAuthorStaff(Base):
     __table_args__ = (UniqueConstraint("kit_id", "user_id", name="uq_kit_author_staff_kit_user"),)
 
 
-class MaterialRetailSale(Base):
-    """Розница: продажа материала из наличия (без визита), категория «Продажа материала»."""
-
-    __tablename__ = "material_retail_sales"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
-    service_id: Mapped[int | None] = mapped_column(ForeignKey("services.id"), nullable=True)
-    grams: Mapped[float] = mapped_column(Float, nullable=False)
-    sale_price: Mapped[int] = mapped_column(Integer, nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
-    client: Mapped["Client"] = relationship()
-    service: Mapped["Service | None"] = relationship()
-
-
 class CatalogProduct(Base):
     """
     Прайс «Товары» (вне визита).
@@ -470,6 +450,57 @@ class CatalogProduct(Base):
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
     meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class ProductSaleKind(str, enum.Enum):
+    MATERIAL = "MATERIAL"
+    KIT = "KIT"
+    RUBBER = "RUBBER"
+    OTHER = "OTHER"
+
+
+class ProductSale(Base):
+    """Продажа товара без услуги (розница): материал/комплект/резинки/другое."""
+
+    __tablename__ = "product_sales"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    amount_from_client: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    is_voided: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    kind: Mapped[ProductSaleKind] = mapped_column(
+        Enum(ProductSaleKind, native_enum=False, length=16),
+        nullable=False,
+    )
+
+    # MATERIAL
+    material_service_id: Mapped[int | None] = mapped_column(ForeignKey("services.id"), nullable=True)
+    material_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
+    material_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # KIT
+    kit_id: Mapped[int | None] = mapped_column(ForeignKey("kits.id"), nullable=True)
+    kit_pieces_sold: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # RUBBER
+    rubber_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rubber_price_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # OTHER
+    other_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    voided_by_user: Mapped["User | None"] = relationship(foreign_keys=[voided_by_user_id])
+    client: Mapped["Client"] = relationship()
+    material_service: Mapped["Service | None"] = relationship(foreign_keys=[material_service_id])
+    kit: Mapped["Kit | None"] = relationship(foreign_keys=[kit_id])
 
 
 class WorkScope(str, enum.Enum):

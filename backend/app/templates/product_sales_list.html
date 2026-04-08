@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <div class="row" style="align-items:center;justify-content:space-between;gap:12px;">
+      <div>
+        <h2 style="margin:0;">Продажа товаров</h2>
+        <p class="muted" style="margin:6px 0 0;">Материал / комплект / хвосты/резинки / другое.</p>
+      </div>
+      <div>
+        <a href="/sales/products/new"><button>Новая продажа</button></a>
+      </div>
+    </div>
+
+    {% if msg == 'saved' %}
+      <div class="ok" style="margin-top:12px;">Сохранено.</div>
+    {% endif %}
+
+    <div style="overflow:auto;margin-top:14px;">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Создано</th>
+            <th>Дата</th>
+            <th>Клиент</th>
+            <th>Тип</th>
+            <th>Сумма с клиента</th>
+            <th>Товар (детали)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              <td><a href="/sales/products/{{ r.id }}">{{ r.id }}</a></td>
+              <td><a href="/sales/products/{{ r.id }}">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</a></td>
+              <td>{{ r.performed_date.date().isoformat() }}</td>
+              <td>{{ r.client.name }}</td>
+              <td>
+                {% if r.kind.value == 'MATERIAL' %}Материал{% endif %}
+                {% if r.kind.value == 'KIT' %}Комплект{% endif %}
+                {% if r.kind.value == 'RUBBER' %}Хвост/резинка{% endif %}
+                {% if r.kind.value == 'OTHER' %}Другое{% endif %}
+                {% if r.is_voided %} <span class="muted">(аннулировано)</span>{% endif %}
+              </td>
+              <td>{{ r.amount_from_client }} ₽</td>
+              <td>
+                {% if r.kind.value == 'MATERIAL' %}
+                  {% if r.material_service %}
+                    {{ r.material_service.subcategory.name }} — {{ r.material_service.name }}
+                  {% else %}
+                    <span class="muted">услуга не указана</span>
+                  {% endif %}
+                  {% if r.material_grams is not none %}
+                    , {{ '%.1f'|format(r.material_grams) }} г
+                  {% endif %}
+                  {% if r.material_description %}
+                    <div class="muted" style="margin-top:4px;white-space:pre-wrap;">{{ r.material_description }}</div>
+                  {% endif %}
+                {% elif r.kind.value == 'KIT' %}
+                  {% if r.kit %}
+                    {{ r.kit.sku }} — {{ r.kit.title }}
+                  {% else %}
+                    <span class="muted">комплект не найден</span>
+                  {% endif %}
+                  {% if r.kit_pieces_sold is not none %}
+                    , заготовок: {{ r.kit_pieces_sold }}
+                  {% endif %}
+                {% elif r.kind.value == 'RUBBER' %}
+                  {{ r.rubber_description }}
+                  {% if r.rubber_price_override is not none %}
+                    <div class="muted" style="margin-top:4px;">Цена товара: {{ r.rubber_price_override }} ₽</div>
+                  {% endif %}
+                {% elif r.kind.value == 'OTHER' %}
+                  {{ r.other_description }}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
+

@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    {% if sale %}
+      <h2 style="margin-top:0;">Редактировать продажу #{{ sale.id }}</h2>
+      <p class="muted">Только суперадмин. Редактирование ограничено периодом ЗП и окном дней.</p>
+    {% else %}
+      <h2 style="margin-top:0;">Редактировать продажу</h2>
+    {% endif %}
+
+    {% if error %}
+      <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
+    {% endif %}
+
+    {% if sale %}
+      <p>
+        <a href="/sales/products/{{ sale.id }}"><button type="button" class="secondary">Назад в карточку</button></a>
+        <a href="/sales/products"><button type="button" class="secondary">К списку</button></a>
+      </p>
+
+      <form method="post" action="/sales/products/{{ sale.id }}/edit" id="product-sale-edit-form">
+        <h3>Клиент</h3>
+        <div class="card" style="margin-top: 8px;">
+          <input type="hidden" name="existing_client_id" id="existing_client_id" value="{{ fp.get('existing_client_id', '') }}" />
+          <div class="row" style="align-items: flex-end;">
+            <div style="flex:1;">
+              <label>Поиск клиента по имени</label>
+              <input type="search" id="client_search_q" autocomplete="off" placeholder="Начни вводить имя и подожди или нажми «Найти»" value="" />
+            </div>
+            <div>
+              <button type="button" class="secondary" onclick="clientSuggest()">Найти</button>
+            </div>
+          </div>
+          <ul id="client_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+          <div id="selected_client_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not selected_client %}display:none;{% endif %}">
+            <p id="selected_client_line" style="margin:0;">
+              {% if selected_client %}
+                Выбрано: <strong>{{ selected_client.name }}</strong>{% if not selected_client.is_confirmed %} <span class="muted">(черновик)</span>{% endif %}
+              {% endif %}
+            </p>
+          </div>
+        </div>
+
+        <h3 style="margin-top: 18px;">Реквизиты</h3>
+        <div class="row">
+          <div>
+            <label>Дата *</label>
+            <input type="date" name="performed_date" required value="{{ fp.get('performed_date', default_date) }}" />
+          </div>
+          <div>
+            <label>Сумма с клиента, ₽ (целое) *</label>
+            <input type="number" name="amount_from_client" min="0" step="1" required value="{{ fp.get('amount_from_client', '') }}" />
+          </div>
+        </div>
+
+        <h3 style="margin-top: 18px;">Товар</h3>
+        <div class="card" style="margin-top: 8px;">
+          <div class="row" style="align-items:center;">
+            <div>
+              <label style="margin-bottom:6px;">Тип *</label>
+              {% set k = (fp.get('kind') or 'MATERIAL') %}
+              <label style="display:block;margin:2px 0;"><input type="radio" name="kind" value="MATERIAL" {% if k == 'MATERIAL' %}checked{% endif %}/> Материал</label>
+              <label style="display:block;margin:2px 0;"><input type="radio" name="kind" value="KIT" {% if k == 'KIT' %}checked{% endif %}/> Комплект из наличия</label>
+              <label style="display:block;margin:2px 0;"><input type="radio" name="kind" value="RUBBER" {% if k == 'RUBBER' %}checked{% endif %}/> Хвост/резинка</label>
+              <label style="display:block;margin:2px 0;"><input type="radio" name="kind" value="OTHER" {% if k == 'OTHER' %}checked{% endif %}/> Другое</label>
+            </div>
+          </div>
+
+          <div id="block_material" style="margin-top: 12px;">
+            <h4 style="margin: 0 0 10px;">Материал</h4>
+            <div class="row">
+              <div style="flex:1;">
+                <label>Подкатегория / услуга (каталог «Продажа материала»)</label>
+                <select name="material_service_id">
+                  <option value="">— не указано —</option>
+                  {% for s in material_services %}
+                    <option value="{{ s.id }}" {% if fp.get('material_service_id')|string == s.id|string %}selected{% endif %}>
+                      {{ s.subcategory.name }} — {{ s.name }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="row" style="margin-top: 10px;">
+              <div>
+                <label>Количество, г *</label>
+                <input type="text" name="material_grams" inputmode="decimal" placeholder="например 12.5" value="{{ fp.get('material_grams', '') }}" />
+              </div>
+            </div>
+            <div style="margin-top: 10px;">
+              <label>Описание материала</label>
+              <textarea name="material_description" rows="3" maxlength="2000">{{ fp.get('material_description', '') }}</textarea>
+            </div>
+          </div>
+
+          <div id="block_kit" style="margin-top: 12px; display:none;">
+            <h4 style="margin: 0 0 10px;">Комплект из наличия</h4>
+            <input type="hidden" name="kit_id" id="kit_id" value="{{ fp.get('kit_id', '') }}" />
+            <div class="row" style="align-items: flex-end;">
+              <div style="flex:1;">
+                <label>Поиск комплекта по артикулу/названию</label>
+                <input type="search" id="kit_search_q" autocomplete="off" placeholder="Начни вводить и подожди или нажми «Найти»" value="" />
+              </div>
+              <div>
+                <button type="button" class="secondary" onclick="kitSuggest()">Найти</button>
+              </div>
+            </div>
+            <ul id="kit_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+            <div id="selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;display:none;">
+              <p id="selected_kit_line" style="margin:0;"></p>
+            </div>
+
+            {% set km = (fp.get('kit_mode') or 'PIECES') %}
+            <div class="row" style="margin-top: 10px; align-items:flex-end;">
+              <div>
+                <label>Режим</label>
+                <select name="kit_mode" id="kit_mode">
+                  <option value="PIECES" {% if km == 'PIECES' %}selected{% endif %}>Продать заготовки</option>
+                  <option value="ALL" {% if km == 'ALL' %}selected{% endif %}>Продать весь комплект</option>
+                </select>
+              </div>
+              <div id="kit_pieces_block">
+                <label>Количество заготовок *</label>
+                <input type="number" name="kit_pieces_sold" min="1" step="1" value="{{ fp.get('kit_pieces_sold', '') }}" />
+              </div>
+            </div>
+          </div>
+
+          <div id="block_rubber" style="margin-top: 12px; display:none;">
+            <h4 style="margin: 0 0 10px;">Хвост/резинка</h4>
+            <div>
+              <label>Описание *</label>
+              <textarea name="rubber_description" rows="3" maxlength="2000">{{ fp.get('rubber_description', '') }}</textarea>
+            </div>
+            <div style="margin-top:10px;">
+              <label>Цена для товара, ₽ (если отличается от суммы с клиента)</label>
+              <input type="number" name="rubber_price_override" min="0" step="1" value="{{ fp.get('rubber_price_override', '') }}" />
+            </div>
+          </div>
+
+          <div id="block_other" style="margin-top: 12px; display:none;">
+            <h4 style="margin: 0 0 10px;">Другое</h4>
+            <div>
+              <label>Описание *</label>
+              <textarea name="other_description" rows="3" maxlength="2000">{{ fp.get('other_description', '') }}</textarea>
+            </div>
+          </div>
+        </div>
+
+        <p style="margin-top: 18px;">
+          <button type="submit">Сохранить</button>
+        </p>
+      </form>
+    {% endif %}
+  </div>
+
+  <script>
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+      });
+    }
+    function renderSelectedClient(name, isDraft) {
+      const box = document.getElementById('selected_client_box');
+      const line = document.getElementById('selected_client_line');
+      box.style.display = 'block';
+      const draftNote = isDraft ? ' <span class="muted">(черновик)</span>' : '';
+      line.innerHTML = 'Выбрано: <strong>' + escapeHtml(name) + '</strong>' + draftNote;
+    }
+    function selectClient(id, name, isDraft) {
+      document.getElementById('existing_client_id').value = String(id);
+      renderSelectedClient(name, isDraft);
+      document.getElementById('client_suggest_list').innerHTML = '';
+    }
+    async function clientSuggest() {
+      const q = document.getElementById('client_search_q').value.trim();
+      const res = await fetch('/master/clients/suggest?q=' + encodeURIComponent(q));
+      if (!res.ok) return;
+      const data = await res.json();
+      const ul = document.getElementById('client_suggest_list');
+      ul.innerHTML = '';
+      for (const c of data.clients || []) {
+        const li = document.createElement('li');
+        li.style.marginBottom = '8px';
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'secondary';
+        b.textContent = c.name + (c.is_draft ? ' (черновик)' : '');
+        b.onclick = function () { selectClient(c.id, c.name, c.is_draft); };
+        const hint = document.createElement('span');
+        hint.className = 'muted';
+        hint.style.marginLeft = '8px';
+        hint.textContent = c.hint || '';
+        li.appendChild(b);
+        li.appendChild(hint);
+        ul.appendChild(li);
+      }
+    }
+    let suggestTimer = null;
+    function scheduleSuggest() {
+      clearTimeout(suggestTimer);
+      suggestTimer = setTimeout(clientSuggest, 350);
+    }
+    document.getElementById('client_search_q').addEventListener('input', scheduleSuggest);
+
+    function renderSelectedKit(label) {
+      const box = document.getElementById('selected_kit_box');
+      const line = document.getElementById('selected_kit_line');
+      box.style.display = 'block';
+      line.innerHTML = 'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
+    }
+    function selectKit(id, label) {
+      document.getElementById('kit_id').value = String(id);
+      renderSelectedKit(label);
+      document.getElementById('kit_suggest_list').innerHTML = '';
+    }
+    async function kitSuggest() {
+      const q = document.getElementById('kit_search_q').value.trim();
+      const res = await fetch('/master/kits/suggest?q=' + encodeURIComponent(q));
+      if (!res.ok) return;
+      const data = await res.json();
+      const ul = document.getElementById('kit_suggest_list');
+      ul.innerHTML = '';
+      for (const k of data.kits || []) {
+        const li = document.createElement('li');
+        li.style.marginBottom = '8px';
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'secondary';
+        const label = (k.label || k.name || ('ID ' + k.id));
+        b.textContent = label;
+        b.onclick = function () { selectKit(k.id, label); };
+        li.appendChild(b);
+        ul.appendChild(li);
+      }
+    }
+    let kitTimer = null;
+    function scheduleKitSuggest() {
+      clearTimeout(kitTimer);
+      kitTimer = setTimeout(kitSuggest, 350);
+    }
+    document.getElementById('kit_search_q').addEventListener('input', scheduleKitSuggest);
+
+    function syncKindUI() {
+      const kind = (document.querySelector('input[name="kind"]:checked') || {}).value || 'MATERIAL';
+      const bm = document.getElementById('block_material');
+      const bk = document.getElementById('block_kit');
+      const br = document.getElementById('block_rubber');
+      const bo = document.getElementById('block_other');
+      bm.style.display = (kind === 'MATERIAL') ? 'block' : 'none';
+      bk.style.display = (kind === 'KIT') ? 'block' : 'none';
+      br.style.display = (kind === 'RUBBER') ? 'block' : 'none';
+      bo.style.display = (kind === 'OTHER') ? 'block' : 'none';
+    }
+    for (const r of document.querySelectorAll('input[name="kind"]')) {
+      r.addEventListener('change', syncKindUI);
+    }
+    syncKindUI();
+
+    function syncKitMode() {
+      const mode = (document.getElementById('kit_mode') || {}).value || 'PIECES';
+      document.getElementById('kit_pieces_block').style.display = (mode === 'PIECES') ? 'block' : 'none';
+    }
+    document.getElementById('kit_mode').addEventListener('change', syncKitMode);
+    syncKitMode();
+  </script>
+{% endblock %}
+
