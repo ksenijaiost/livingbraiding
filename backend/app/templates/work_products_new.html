@@ -3,7 +3,7 @@
   <div class="card">
     <h2 style="margin-top: 0;">Работа с товарами</h2>
     <p class="muted" style="margin-top:-6px;">
-      Этап 6.3.2: общий каркас (режим, клиент, участники, материал). Детальные анкеты по видам — дальше.
+      Режим, материал; для комплекта — таблица заготовок и мастера в блоке комплекта. ЗП по заготовкам — из количеств в таблице.
     </p>
 
     <p style="margin-top: 0;">
@@ -14,15 +14,20 @@
       <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
     {% endif %}
 
-    <form method="post" action="/sales/work/new">
+    {% set scope_val = fp.scope or 'IN_STOCK' %}
+
+    <form method="post" action="/sales/work/new" id="work_products_form">
       <div class="row">
         <div>
           <label>Режим</label>
-          <select name="scope" id="scope_sel">
+          <div style="margin-top: 6px;">
             {% for s in scopes %}
-              <option value="{{ s.value }}" {% if fp.scope == s.value %}selected{% endif %}>{{ s.label }}</option>
+              <label style="margin-right: 16px;">
+                <input type="radio" name="scope" value="{{ s.value }}" {% if scope_val == s.value %}checked{% endif %} />
+                {{ s.label }}
+              </label>
             {% endfor %}
-          </select>
+          </div>
         </div>
         <div>
           <label>Вид работы</label>
@@ -32,105 +37,6 @@
               <option value="{{ k.value }}" {% if fp.kind == k.value %}selected{% endif %}>{{ k.label }}</option>
             {% endfor %}
           </select>
-        </div>
-      </div>
-
-      <div id="kit_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
-        <h3 style="margin-top:0;">Комплект/Заготовки (поштучно)</h3>
-        <p class="muted" style="margin-top:-6px;">
-          Введите количества заготовок по видам. Если сотрудников несколько — заполняйте по каждому.
-        </p>
-
-        <div class="row">
-          <div>
-            <label>Тип заготовок</label>
-            <label><input type="checkbox" name="kit_type_se" {% if fp.kit_type_se %}checked{% endif %} /> SE</label>
-            <label><input type="checkbox" name="kit_type_de" {% if fp.kit_type_de %}checked{% endif %} /> DE</label>
-          </div>
-          <div>
-            <label>Доп. расходы, ₽</label>
-            <input name="extra_costs_amount" type="number" step="0.01" min="0" value="{{ fp.extra_costs_amount or 0 }}" />
-            <div class="muted" style="font-size: 12px; margin-top: 6px;">
-              Например: украшения, расходники, прочие доп. затраты.
-            </div>
-          </div>
-        </div>
-
-        <div style="overflow-x:auto; margin-top: 12px;">
-          <table>
-            <thead>
-              <tr>
-                <th>Вид</th>
-                {% for u in staff %}
-                  <th>{{ u.display_name }}</th>
-                {% endfor %}
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td colspan="{{ 1 + staff|length }}"><strong>SE</strong></td></tr>
-              {% for key, label in kit_se_items %}
-                <tr class="kit-se-row">
-                  <td>{{ label }}</td>
-                  {% for u in staff %}
-                    <td>
-                      <input
-                        name="kit_qty_{{ u.id }}_{{ key }}"
-                        type="number"
-                        step="1"
-                        min="0"
-                        value="{{ fp.get('kit_qty_' ~ u.id ~ '_' ~ key, 0) }}"
-                      />
-                    </td>
-                  {% endfor %}
-                </tr>
-              {% endfor %}
-
-              <tr><td colspan="{{ 1 + staff|length }}"><strong>DE</strong></td></tr>
-              {% for key, label in kit_de_items %}
-                <tr class="kit-de-row">
-                  <td>{{ label }}</td>
-                  {% for u in staff %}
-                    <td>
-                      <input
-                        name="kit_qty_{{ u.id }}_{{ key }}"
-                        type="number"
-                        step="1"
-                        min="0"
-                        value="{{ fp.get('kit_qty_' ~ u.id ~ '_' ~ key, 0) }}"
-                      />
-                    </td>
-                  {% endfor %}
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-
-        <div id="kit_stock_block" style="margin-top: 12px;">
-          <h4 style="margin: 0 0 8px;">Склад (для режима «в наличие»)</h4>
-          <div class="row">
-            <div>
-              <label>Артикул</label>
-              <input name="kit_sku" value="{{ fp.kit_sku }}" placeholder="например, KIT-001" />
-            </div>
-            <div>
-              <label>Название</label>
-              <input name="kit_title" value="{{ fp.kit_title }}" placeholder="например, Комплект SE (короткие косы)" />
-            </div>
-          </div>
-          <div class="row" style="margin-top: 8px;">
-            <div>
-              <label>Цена комплекта на складе (всего), ₽</label>
-              <input name="kit_stock_price_total" type="number" step="0.01" min="0" value="{{ fp.kit_stock_price_total or 0 }}" />
-            </div>
-            <div>
-              <label class="muted">pieces_total будет рассчитан из таблицы</label>
-              <input disabled value="—" />
-            </div>
-          </div>
-          <p class="muted" style="font-size:12px; margin-bottom:0;">
-            Склад создаём только в режиме «в наличие». ЗП авторов проставится автоматически.
-          </p>
         </div>
       </div>
 
@@ -150,29 +56,6 @@
         <div>
           <label>Комментарий</label>
           <input name="comment" value="{{ fp.comment }}" placeholder="необязательно" />
-        </div>
-      </div>
-
-      <div class="card" style="background:#f8fafc; margin: 12px 0;">
-        <label><input type="checkbox" name="work_use_multi_staff" {% if fp.work_use_multi_staff %}checked{% endif %} /> Несколько сотрудников</label>
-        <div class="muted" style="font-size: 12px; margin-top: 6px;">
-          Доли указываются как числа 0..1 (до сотых). Сумма должна быть 1.00.
-        </div>
-        <div style="margin-top: 10px;">
-          {% for u in staff %}
-            <div style="display:flex; gap: 10px; align-items:center; margin-bottom: 8px;">
-              <label style="margin:0; flex: 1;">
-                <input type="checkbox" name="work_staff_on" value="{{ u.id }}" {% if u.id in staff_on_ids %}checked{% endif %} />
-                {{ u.display_name }} ({{ u.role.value }})
-              </label>
-              <input
-                style="width: 140px;"
-                name="work_staff_share_{{ u.id }}"
-                placeholder="доля (0..1)"
-                value="{{ staff_share_str.get(u.id) }}"
-              />
-            </div>
-          {% endfor %}
         </div>
       </div>
 
@@ -206,35 +89,301 @@
         </div>
       </div>
 
+      <div id="rubber_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
+        <h3 style="margin-top:0;">Хвосты/резинки</h3>
+        <div class="row">
+          <div>
+            <label>Тип</label>
+            <select name="rubber_type" id="rubber_type_sel">
+              <option value="" {% if not fp.rubber_type %}selected{% endif %}>— выберите —</option>
+              {% for t in rubber_types %}
+                <option value="{{ t.value }}" {% if fp.rubber_type == t.value %}selected{% endif %}>{{ t.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Вариант длины/цвета</label>
+            <select name="rubber_variant">
+              <option value="" {% if not fp.rubber_variant %}selected{% endif %}>— выберите —</option>
+              {% for v in rubber_variants %}
+                <option value="{{ v.value }}" {% if fp.rubber_variant == v.value %}selected{% endif %}>{{ v.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 10px;">
+          <div id="rubber_attach_qty_block" style="display:none;">
+            <label>Количество креплений (для хвоста на резинке)</label>
+            <input name="rubber_attach_qty" type="number" step="1" min="1" value="{{ fp.rubber_attach_qty or '' }}" />
+          </div>
+          <div id="rubber_braids_qty_block" style="display:none;">
+            <label>Количество кос (для кос на резинке)</label>
+            <input name="rubber_braids_qty" type="number" step="1" min="1" value="{{ fp.rubber_braids_qty or '' }}" />
+          </div>
+        </div>
+      </div>
+
+      <div id="kit_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
+        <h3 style="margin-top:0;">Комплект/Заготовки (поштучно)</h3>
+        <p class="muted" style="margin-top:-6px;">
+          Заполните материал выше. Таблица ниже — только для мастеров, отмеченных в списке (или одна колонка — текущий мастер).
+        </p>
+
+        <div class="row">
+          <div>
+            <label>Тип заготовок</label>
+            <label><input type="checkbox" name="kit_type_se" {% if fp.kit_type_se %}checked{% endif %} /> SE</label>
+            <label><input type="checkbox" name="kit_type_de" {% if fp.kit_type_de %}checked{% endif %} /> DE</label>
+          </div>
+          <div>
+            <label>Доп. расходы, ₽</label>
+            <input name="extra_costs_amount" type="number" step="0.01" min="0" value="{{ fp.extra_costs_amount or 0 }}" />
+            <div class="muted" style="font-size: 12px; margin-top: 6px;">
+              Например: украшения, расходники, прочие доп. затраты.
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 12px;">
+          <label>
+            <input type="checkbox" name="kit_use_multi_masters" id="kit_use_multi_masters" {% if fp.kit_use_multi_masters %}checked{% endif %} />
+            Несколько мастеров (комплект)
+          </label>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">
+            Если не отмечено — одна колонка для текущего мастера (вход под мастером). Если отмечено — выберите мастеров; в таблице будут только их колонки.
+          </div>
+        </div>
+
+        <div id="kit_master_picker" style="margin-top: 10px; display: none;">
+          <strong style="display:block; margin-bottom: 8px;">Мастера для таблицы заготовок</strong>
+          {% for u in masters %}
+            <label style="display:block; margin-bottom: 6px;">
+              <input
+                type="checkbox"
+                name="kit_master_on"
+                value="{{ u.id }}"
+                class="kit-master-cb"
+                {% if (u.id == current_user.id) or (u.id in kit_master_on_ids) %}checked{% endif %}
+              />
+              {{ u.display_name }}
+            </label>
+          {% endfor %}
+        </div>
+
+        <div style="overflow-x:auto; margin-top: 12px;" id="kit_qty_table_outer">
+          <table id="kit_qty_table">
+            <thead id="kit_qty_thead"></thead>
+            <tbody id="kit_qty_tbody"></tbody>
+          </table>
+        </div>
+
+        <div id="kit_stock_block" style="margin-top: 12px;">
+          <h4 style="margin: 0 0 8px;">Склад (для режима «в наличие»)</h4>
+          <div class="row">
+            <div>
+              <label>Артикул</label>
+              <input name="kit_sku" value="{{ fp.kit_sku }}" placeholder="например, KIT-001" />
+            </div>
+            <div>
+              <label>Название</label>
+              <input name="kit_title" value="{{ fp.kit_title }}" placeholder="например, Комплект SE (короткие косы)" />
+            </div>
+          </div>
+          <div class="row" style="margin-top: 8px;">
+            <div>
+              <label>Цена комплекта на складе (всего), ₽</label>
+              <input name="kit_stock_price_total" type="number" step="0.01" min="0" value="{{ fp.kit_stock_price_total or 0 }}" />
+            </div>
+            <div>
+              <label class="muted">pieces_total будет рассчитан из таблицы</label>
+              <input disabled value="—" />
+            </div>
+          </div>
+          <p class="muted" style="font-size:12px; margin-bottom:0;">
+            Склад создаём только в режиме «в наличие». ЗП авторов проставится автоматически.
+          </p>
+        </div>
+      </div>
+
       <button type="submit">Сохранить</button>
     </form>
   </div>
 
+  <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
   <script>
+    function kitTableCurrentUserId() {
+      var el = document.getElementById('kit_table_state');
+      try {
+        if (el && el.textContent) {
+          var st = JSON.parse(el.textContent);
+          return st.currentUserId || 0;
+        }
+      } catch (e) {}
+      return 0;
+    }
+    function getScopeValue() {
+      var r = document.querySelector('input[name="scope"]:checked');
+      return r ? r.value : 'IN_STOCK';
+    }
     function syncKitBlock() {
       var kind = document.querySelector('select[name="kind"]');
       var kit = document.getElementById('kit_block');
       if (!kind || !kit) return;
       kit.style.display = (kind.value === 'KIT') ? 'block' : 'none';
+      if (kind.value === 'KIT' && typeof window.rebuildKitTable === 'function') {
+        window.rebuildKitTable();
+      }
+    }
+    function syncRubberBlock() {
+      var kind = document.querySelector('select[name="kind"]');
+      var rb = document.getElementById('rubber_block');
+      if (!kind || !rb) return;
+      rb.style.display = (kind.value === 'RUBBER') ? 'block' : 'none';
+      if (kind.value === 'RUBBER') syncRubberTypeFields();
+    }
+    function syncRubberTypeFields() {
+      var sel = document.getElementById('rubber_type_sel');
+      var a = document.getElementById('rubber_attach_qty_block');
+      var b = document.getElementById('rubber_braids_qty_block');
+      if (!sel || !a || !b) return;
+      a.style.display = (sel.value === 'TAIL_ELASTIC') ? 'block' : 'none';
+      b.style.display = (sel.value === 'BRAIDS_ELASTIC') ? 'block' : 'none';
     }
     function syncClientBlock() {
-      var scope = document.getElementById('scope_sel');
       var el = document.getElementById('client_block');
-      if (!scope || !el) return;
-      el.style.display = (scope.value === 'CUSTOM_ORDER') ? 'block' : 'none';
+      if (!el) return;
+      el.style.display = (getScopeValue() === 'CUSTOM_ORDER') ? 'block' : 'none';
     }
     function syncKitStockBlock() {
-      var scope = document.getElementById('scope_sel');
       var el = document.getElementById('kit_stock_block');
-      if (!scope || !el) return;
-      el.style.display = (scope.value === 'IN_STOCK') ? 'block' : 'none';
+      if (!el) return;
+      el.style.display = (getScopeValue() === 'IN_STOCK') ? 'block' : 'none';
     }
-    document.getElementById('scope_sel').addEventListener('change', syncClientBlock);
-    document.getElementById('scope_sel').addEventListener('change', syncKitStockBlock);
-    document.querySelector('select[name="kind"]').addEventListener('change', syncKitBlock);
-    syncClientBlock();
-    syncKitBlock();
-    syncKitStockBlock();
+    function syncKitMasterPicker() {
+      var cb = document.getElementById('kit_use_multi_masters');
+      var panel = document.getElementById('kit_master_picker');
+      if (!cb || !panel) return;
+      panel.style.display = cb.checked ? 'block' : 'none';
+    }
+    document.querySelectorAll('input[name="scope"]').forEach(function (el) {
+      el.addEventListener('change', syncClientBlock);
+      el.addEventListener('change', syncKitStockBlock);
+    });
+    var kindSel = document.querySelector('select[name="kind"]');
+    if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); });
+    var rubberTypeSel = document.getElementById('rubber_type_sel');
+    if (rubberTypeSel) rubberTypeSel.addEventListener('change', syncRubberTypeFields);
+    var kitMulti = document.getElementById('kit_use_multi_masters');
+    if (kitMulti) kitMulti.addEventListener('change', function () {
+      syncKitMasterPicker();
+      if (kitMulti.checked) {
+        var anyChecked = false;
+        document.querySelectorAll('input[name="kit_master_on"]:checked').forEach(function () { anyChecked = true; });
+        if (!anyChecked) {
+          var cur = document.querySelector('input[name="kit_master_on"][value="' + String(kitTableCurrentUserId()) + '"]');
+          if (cur) cur.checked = true;
+        }
+      }
+      if (typeof window.rebuildKitTable === 'function') window.rebuildKitTable();
+    });
+    document.querySelectorAll('.kit-master-cb').forEach(function (el) {
+      el.addEventListener('change', function () {
+        if (typeof window.rebuildKitTable === 'function') window.rebuildKitTable();
+      });
+    });
+
+    (function () {
+      var stateEl = document.getElementById('kit_table_state');
+      var state = { currentUserId: 0, masters: [], seItems: [], deItems: [], prefill: {} };
+      try {
+        if (stateEl && stateEl.textContent) state = JSON.parse(stateEl.textContent);
+      } catch (e) {}
+
+      function esc(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      function getKitColumnMasterIds() {
+        var multi = document.getElementById('kit_use_multi_masters');
+        if (!multi || !multi.checked) return [state.currentUserId];
+        var ids = [];
+        document.querySelectorAll('input[name="kit_master_on"]:checked').forEach(function (cb) {
+          var v = parseInt(cb.value, 10);
+          if (!isNaN(v) && v > 0) ids.push(v);
+        });
+        return ids;
+      }
+
+      function rebuildKitTable() {
+        var kind = document.querySelector('select[name="kind"]');
+        if (!kind || kind.value !== 'KIT') return;
+        var thead = document.getElementById('kit_qty_thead');
+        var tbody = document.getElementById('kit_qty_tbody');
+        if (!thead || !tbody) return;
+        var ids = getKitColumnMasterIds();
+        var idToName = {};
+        (state.masters || []).forEach(function (m) { idToName[m.id] = m.name; });
+
+        var headHtml = '<tr><th>Вид</th>';
+        ids.forEach(function (id) {
+          headHtml += '<th>' + esc(idToName[id] || ('ID ' + id)) + '</th>';
+        });
+        headHtml += '</tr>';
+        thead.innerHTML = headHtml;
+
+        var bodyHtml = '';
+        var pre = state.prefill || {};
+
+        function rowForItem(key, label) {
+          var tr = '<tr class="kit-data-row"><td>' + esc(label) + '</td>';
+          ids.forEach(function (uid) {
+            var name = 'kit_qty_' + uid + '_' + key;
+            var val = pre[name];
+            if (val === undefined || val === null) val = '0';
+            tr += '<td><input type="number" step="1" min="0" name="' + esc(name) + '" value="' + esc(String(val)) + '" /></td>';
+          });
+          tr += '</tr>';
+          return tr;
+        }
+
+        var kitSe = document.querySelector('input[name="kit_type_se"]');
+        var kitDe = document.querySelector('input[name="kit_type_de"]');
+        var showSe = kitSe && kitSe.checked;
+        var showDe = kitDe && kitDe.checked;
+
+        if (!showSe && !showDe) {
+          bodyHtml += '<tr><td colspan=\"' + (1 + ids.length) + '\"><span class=\"muted\">Выберите тип заготовок: SE и/или DE.</span></td></tr>';
+        }
+        if (showSe && (state.seItems || []).length) {
+          bodyHtml += '<tr><td colspan="' + (1 + ids.length) + '"><strong>SE</strong></td></tr>';
+          (state.seItems || []).forEach(function (it) {
+            bodyHtml += rowForItem(it.key, it.label);
+          });
+        }
+        if (showDe && (state.deItems || []).length) {
+          bodyHtml += '<tr><td colspan="' + (1 + ids.length) + '"><strong>DE</strong></td></tr>';
+          (state.deItems || []).forEach(function (it) {
+            bodyHtml += rowForItem(it.key, it.label);
+          });
+        }
+        tbody.innerHTML = bodyHtml;
+      }
+
+      window.rebuildKitTable = rebuildKitTable;
+
+      document.querySelectorAll('input[name="kit_type_se"], input[name="kit_type_de"]').forEach(function (el) {
+        el.addEventListener('change', rebuildKitTable);
+      });
+
+      syncKitMasterPicker();
+      syncClientBlock();
+      syncKitBlock();
+      syncRubberBlock();
+      syncKitStockBlock();
+      rebuildKitTable();
+    })();
   </script>
 {% endblock %}
-
