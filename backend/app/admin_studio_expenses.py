@@ -200,8 +200,6 @@ async def studio_expense_new(
         return RedirectResponse(url="/admin/expenses?new=1&msg=amount", status_code=303)
 
     comment = _g_str(form, "comment")
-    if not comment:
-        return RedirectResponse(url="/admin/expenses?new=1&msg=comment", status_code=303)
 
     row = StudioExpense(
         created_by_user_id=current_user.id,
@@ -209,7 +207,7 @@ async def studio_expense_new(
         date=expense_dt,
         subcategory_id=sub.id,
         amount=float(amt),
-        comment=comment,
+        comment=comment or "",
     )
     db.add(row)
     db.commit()
@@ -262,13 +260,11 @@ async def studio_expense_save(
         return RedirectResponse(url=f"/admin/expenses?edit={expense_id}&msg=amount", status_code=303)
 
     comment = _g_str(form, "comment")
-    if not comment:
-        return RedirectResponse(url=f"/admin/expenses?edit={expense_id}&msg=comment", status_code=303)
 
     row.date = expense_dt
     row.subcategory_id = sub.id
     row.amount = float(amt)
-    row.comment = comment
+    row.comment = comment or ""
     db.commit()
 
     params: list[str] = []

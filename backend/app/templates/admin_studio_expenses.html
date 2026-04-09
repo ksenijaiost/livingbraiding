@@ -1,5 +1,108 @@
 {% extends "base.html" %}
 {% block content %}
+  <style>
+    .expense-void-btn {
+      background: transparent;
+      border: none;
+      color: #4b5563;
+      cursor: pointer;
+      font-size: 1.1rem;
+      line-height: 1;
+      padding: 0 2px;
+      min-width: 1.2em;
+      vertical-align: middle;
+    }
+    .expense-void-btn:hover { color: #991b1b; }
+    .expense-col-actions .expense-row-actions {
+      justify-content: center;
+      width: 100%;
+    }
+    .expense-row-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      flex-wrap: nowrap;
+      justify-content: flex-start;
+    }
+    .expense-row-actions form {
+      display: contents;
+      margin: 0;
+      padding: 0;
+    }
+    .expense-row-actions .expense-edit-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.5em;
+      text-decoration: none;
+      font-size: 1.15rem;
+      color: #111827;
+    }
+    .expense-table-wrap {
+      width: 100%;
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+    .expense-table {
+      width: 100%;
+      max-width: 100%;
+      table-layout: fixed;
+      border-collapse: collapse;
+    }
+    .expense-table th,
+    .expense-table td {
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      vertical-align: top;
+    }
+    .expense-table .expense-col-date,
+    .expense-table .expense-col-amount {
+      white-space: nowrap;
+      word-break: normal;
+      overflow-wrap: normal;
+    }
+    .expense-table .expense-col-actions {
+      width: 4rem;
+      max-width: 4rem;
+      min-width: 4rem;
+      padding-left: 2px;
+      padding-right: 2px;
+      white-space: nowrap;
+      word-break: keep-all;
+      overflow-wrap: normal;
+      vertical-align: middle;
+      text-align: center;
+      box-sizing: border-box;
+    }
+    .expense-toolbar-main {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      width: 100%;
+      gap: 12px 24px;
+    }
+    .expense-filter-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 10px;
+      flex: 1 1 auto;
+      justify-content: flex-end;
+    }
+    .expense-filter-group > div {
+      flex: 0 1 auto;
+      min-width: 0;
+    }
+    .expense-filter-group > div.minw-date {
+      min-width: 132px;
+      max-width: 180px;
+    }
+    .expense-filter-group > div.minw-cat {
+      min-width: 160px;
+      max-width: 280px;
+    }
+  </style>
   <div class="card">
     <h2 style="margin-top:0;">Расходы студии</h2>
     <p class="muted">Только суперадмин. Редактирование и аннулирование запрещены, если дата расхода попадает в закрытый период ЗП.</p>
@@ -20,8 +123,6 @@
       <div class="error" style="margin-bottom:12px;">Выберите подкатегорию.</div>
     {% elif msg == 'amount' %}
       <div class="error" style="margin-bottom:12px;">Укажите сумму ≥ 0 (до сотых).</div>
-    {% elif msg == 'comment' %}
-      <div class="error" style="margin-bottom:12px;">Заполните комментарий.</div>
     {% elif msg == 'not_found' %}
       <div class="error" style="margin-bottom:12px;">Запись не найдена.</div>
     {% endif %}
@@ -29,45 +130,59 @@
     {% set qfilter = ('?' ~ filter_query) if filter_query else '' %}
 
     <form method="get" action="/admin/expenses" class="card" style="margin-bottom:14px;background:#f8fafc;">
-      <div class="row" style="align-items:flex-end;flex-wrap:wrap;gap:10px;">
-        <div>
-          <label>С даты</label>
-          <input type="date" name="date_from" value="{{ date_from }}" />
-        </div>
-        <div>
-          <label>По дату</label>
-          <input type="date" name="date_to" value="{{ date_to }}" />
-        </div>
-        <div>
-          <label>Категория</label>
-          <select name="category_id">
-            <option value="0">— все —</option>
-            {% for c in categories %}
-              <option value="{{ c.id }}" {% if filter_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <button type="submit">Применить фильтр</button>
-        </div>
-        <div style="margin-left:auto;">
+      <div class="expense-toolbar-main">
+        <div style="flex:0 0 auto;">
+          <label style="visibility:hidden;">.</label>
           <a href="/admin/expenses{{ qfilter }}{% if qfilter %}&{% else %}?{% endif %}new=1"><button type="button">Добавить расход</button></a>
+        </div>
+        <div class="expense-filter-group">
+          <div class="minw-date">
+            <label>С даты</label>
+            <input type="date" name="date_from" value="{{ date_from }}" />
+          </div>
+          <div class="minw-date">
+            <label>По дату</label>
+            <input type="date" name="date_to" value="{{ date_to }}" />
+          </div>
+          <div class="minw-cat">
+            <label>Категория</label>
+            <select name="category_id">
+              <option value="0">— все —</option>
+              {% for c in categories %}
+                <option value="{{ c.id }}" {% if filter_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div style="flex:0 0 auto;">
+            <label style="visibility:hidden;">.</label>
+            <button type="submit">Применить фильтр</button>
+          </div>
         </div>
       </div>
     </form>
 
-    <div style="overflow-x:auto;">
-      <table style="min-width:980px;">
+    <div class="expense-table-wrap">
+      <table class="expense-table">
+        <colgroup>
+          <col style="width:6.5rem;" />
+          <col style="width:13%;" />
+          <col style="width:15%;" />
+          <col style="width:5.5rem;" />
+          <col />
+          <col style="width:10%;" />
+          <col style="width:10%;" />
+          <col style="width:4rem;" />
+        </colgroup>
         <thead>
           <tr>
-            <th>Дата расхода</th>
+            <th class="expense-col-date">Дата расхода</th>
             <th>Категория</th>
             <th>Подкатегория</th>
-            <th>Сумма, ₽</th>
+            <th class="expense-col-amount">Сумма, ₽</th>
             <th>Комментарий</th>
-            <th>Кто внёс</th>
-            <th>Создано</th>
-            <th style="width:100px;"></th>
+            <th class="muted" style="font-weight:600;">Кто внёс</th>
+            <th class="muted" style="font-weight:600;">Создано</th>
+            <th class="expense-col-actions muted" style="font-weight:600;"> </th>
           </tr>
         </thead>
         <tbody>
@@ -101,8 +216,8 @@
                       <input type="text" name="amount" inputmode="decimal" required placeholder="0.00" style="width:100px;" />
                     </div>
                     <div style="flex:1;min-width:200px;">
-                      <label>Комментарий *</label><br/>
-                      <input type="text" name="comment" required maxlength="2000" style="width:100%;" />
+                      <label>Комментарий</label><br/>
+                      <input type="text" name="comment" maxlength="2000" placeholder="необязательно" style="width:100%;" />
                     </div>
                     <div>
                       <button type="submit">Сохранить</button>
@@ -148,8 +263,8 @@
                         <input type="text" name="amount" inputmode="decimal" required value="{{ '%.2f'|format(r.amount) }}" style="width:100px;" />
                       </div>
                       <div style="flex:1;min-width:200px;">
-                        <label>Комментарий *</label><br/>
-                        <input type="text" name="comment" required maxlength="2000" value="{{ r.comment }}" style="width:100%;" />
+                        <label>Комментарий</label><br/>
+                        <input type="text" name="comment" maxlength="2000" value="{{ r.comment }}" placeholder="необязательно" style="width:100%;" />
                       </div>
                       <div>
                         <button type="submit">Сохранить</button>
@@ -161,19 +276,21 @@
                   </form>
                 </td>
               {% else %}
-                <td>{{ r.date.date().isoformat() }}</td>
+                <td class="expense-col-date">{{ r.date.date().isoformat() }}</td>
                 <td>{{ r.subcategory.category.name if r.subcategory and r.subcategory.category else '—' }}</td>
                 <td>{{ r.subcategory.name if r.subcategory else '—' }}</td>
-                <td>{{ '%.2f'|format(r.amount) }}</td>
-                <td style="max-width:240px;white-space:pre-wrap;">{{ r.comment }}</td>
-                <td>{{ r.created_by_user.display_name if r.created_by_user else '—' }}</td>
-                <td>{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td>
+                <td class="expense-col-amount">{{ '%.2f'|format(r.amount) }}</td>
+                <td style="white-space:pre-wrap;">{{ r.comment }}</td>
+                <td class="muted">{{ r.created_by_user.display_name if r.created_by_user else '—' }}</td>
+                <td class="muted">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td class="expense-col-actions">
                   {% if not r.is_voided %}
-                    <a href="/admin/expenses{% if filter_query %}?{{ filter_query }}&amp;{% else %}?{% endif %}edit={{ r.id }}" title="Редактировать" style="text-decoration:none;font-size:1.1rem;">✎</a>
-                    <form id="void_form_{{ r.id }}" method="post" action="/admin/expenses/{{ r.id }}/void" style="display:inline;margin-left:8px;">
-                      <button type="button" title="Аннулировать" style="background:none;border:none;cursor:pointer;font-size:1.1rem;padding:0;" onclick="openVoidConfirm({{ r.id }})">⊘</button>
-                    </form>
+                    <div class="expense-row-actions">
+                      <a class="expense-edit-link" href="/admin/expenses{% if filter_query %}?{{ filter_query }}&amp;{% else %}?{% endif %}edit={{ r.id }}" title="Редактировать">✎</a>
+                      <form id="void_form_{{ r.id }}" method="post" action="/admin/expenses/{{ r.id }}/void">
+                        <button type="button" title="Аннулировать" class="expense-void-btn" onclick="openVoidConfirm({{ r.id }})">⊘</button>
+                      </form>
+                    </div>
                   {% else %}
                     <span class="muted">аннулировано{% if r.voided_at %} {{ r.voided_at.strftime('%Y-%m-%d') }}{% endif %}</span>
                   {% endif %}
