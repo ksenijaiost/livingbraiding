@@ -88,16 +88,42 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("sort_order", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.UniqueConstraint("name", name="uq_expense_category_name"),
+    )
+
+    op.create_table(
+        "studio_expense_subcategories",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "category_id",
+            sa.Integer(),
+            sa.ForeignKey("studio_expense_categories.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("name", sa.String(length=200), nullable=False),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("sort_order", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.UniqueConstraint("category_id", "name", name="uq_studio_expense_subcat_cat_name"),
     )
 
     op.create_table(
         "studio_expenses",
         sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("date", sa.DateTime(), nullable=False),
-        sa.Column("category_id", sa.Integer(), sa.ForeignKey("studio_expense_categories.id"), nullable=True),
-        sa.Column("title", sa.String(length=200), nullable=False),
+        sa.Column(
+            "subcategory_id",
+            sa.Integer(),
+            sa.ForeignKey("studio_expense_subcategories.id"),
+            nullable=False,
+        ),
         sa.Column("amount", sa.Float(), nullable=False),
+        sa.Column("comment", sa.Text(), nullable=False, server_default=sa.text("''")),
+        sa.Column("is_voided", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("voided_at", sa.DateTime(), nullable=True),
+        sa.Column("voided_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
     )
 
     op.create_table(
@@ -618,7 +644,7 @@ def downgrade() -> None:
     op.drop_table("work_for_inventory_staff")
     op.drop_table("work_for_inventory")
     op.drop_table("catalog_products")
-    op.drop_table("material_retail_sales")
+    op.drop_table("product_sales")
     op.drop_table("studio_order_service_lines")
     op.drop_table("studio_order_kit_usages")
     op.drop_table("studio_order_staff")
@@ -638,6 +664,7 @@ def downgrade() -> None:
     op.drop_table("service_subcategories")
     op.drop_table("service_categories")
     op.drop_table("studio_expenses")
+    op.drop_table("studio_expense_subcategories")
     op.drop_table("studio_expense_categories")
     op.drop_table("client_thermo_templates")
     op.drop_table("clients")

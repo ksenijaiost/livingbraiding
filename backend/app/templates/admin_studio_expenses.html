@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top:0;">Расходы студии</h2>
+    <p class="muted">Только суперадмин. Редактирование и аннулирование запрещены, если дата расхода попадает в закрытый период ЗП.</p>
+
+    {% if msg == 'saved' %}
+      <div class="ok" style="margin-bottom:12px;">Запись добавлена.</div>
+    {% elif msg == 'updated' %}
+      <div class="ok" style="margin-bottom:12px;">Изменения сохранены.</div>
+    {% elif msg == 'voided' %}
+      <div class="ok" style="margin-bottom:12px;">Расход аннулирован.</div>
+    {% elif msg == 'bad_date' %}
+      <div class="error" style="margin-bottom:12px;">Укажите корректную дату расхода.</div>
+    {% elif msg == 'closed_period' %}
+      <div class="error" style="margin-bottom:12px;">Дата попадает в закрытый период ЗП.</div>
+    {% elif msg == 'void_closed' %}
+      <div class="error" style="margin-bottom:12px;">Нельзя аннулировать: дата в закрытом периоде ЗП.</div>
+    {% elif msg == 'subcat' %}
+      <div class="error" style="margin-bottom:12px;">Выберите подкатегорию.</div>
+    {% elif msg == 'amount' %}
+      <div class="error" style="margin-bottom:12px;">Укажите сумму ≥ 0 (до сотых).</div>
+    {% elif msg == 'comment' %}
+      <div class="error" style="margin-bottom:12px;">Заполните комментарий.</div>
+    {% elif msg == 'not_found' %}
+      <div class="error" style="margin-bottom:12px;">Запись не найдена.</div>
+    {% endif %}
+
+    {% set qfilter = ('?' ~ filter_query) if filter_query else '' %}
+
+    <form method="get" action="/admin/expenses" class="card" style="margin-bottom:14px;background:#f8fafc;">
+      <div class="row" style="align-items:flex-end;flex-wrap:wrap;gap:10px;">
+        <div>
+          <label>С даты</label>
+          <input type="date" name="date_from" value="{{ date_from }}" />
+        </div>
+        <div>
+          <label>По дату</label>
+          <input type="date" name="date_to" value="{{ date_to }}" />
+        </div>
+        <div>
+          <label>Категория</label>
+          <select name="category_id">
+            <option value="0">— все —</option>
+            {% for c in categories %}
+              <option value="{{ c.id }}" {% if filter_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <button type="submit">Применить фильтр</button>
+        </div>
+        <div style="margin-left:auto;">
+          <a href="/admin/expenses{{ qfilter }}{% if qfilter %}&{% else %}?{% endif %}new=1"><button type="button">Добавить расход</button></a>
+        </div>
+      </div>
+    </form>
+
+    <div style="overflow-x:auto;">
+      <table style="min-width:980px;">
+        <thead>
+          <tr>
+            <th>Дата расхода</th>
+            <th>Категория</th>
+            <th>Подкатегория</th>
+            <th>Сумма, ₽</th>
+            <th>Комментарий</th>
+            <th>Кто внёс</th>
+            <th>Создано</th>
+            <th style="width:100px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if show_new %}
+            <tr style="background:#eff6ff;">
+              <td colspan="8" style="padding:12px;">
+                <strong>Новая запись</strong>
+                <form method="post" action="/admin/expenses/new" style="margin-top:10px;">
+                  <input type="hidden" name="_filter_date_from" value="{{ date_from }}" />
+                  <input type="hidden" name="_filter_date_to" value="{{ date_to }}" />
+                  <input type="hidden" name="_filter_category_id" value="{{ filter_category_id }}" />
+                  <div class="row" style="flex-wrap:wrap;gap:10px;align-items:flex-end;">
+                    <div>
+                      <label>Дата *</label><br/>
+                      <input type="date" name="expense_date" required value="{{ date_from or today_iso }}" />
+                    </div>
+                    <div>
+                      <label>Категория *</label><br/>
+                      <select id="new_cat" required>
+                        {% for c in categories %}
+                          <option value="{{ c.id }}">{{ c.name }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div>
+                      <label>Подкатегория *</label><br/>
+                      <select name="subcategory_id" id="new_sub" required></select>
+                    </div>
+                    <div>
+                      <label>Сумма *</label><br/>
+                      <input type="text" name="amount" inputmode="decimal" required placeholder="0.00" style="width:100px;" />
+                    </div>
+                    <div style="flex:1;min-width:200px;">
+                      <label>Комментарий *</label><br/>
+                      <input type="text" name="comment" required maxlength="2000" style="width:100%;" />
+                    </div>
+                    <div>
+                      <button type="submit">Сохранить</button>
+                    </div>
+                    <div>
+                      <a href="/admin/expenses{{ qfilter }}"><button type="button" class="secondary">Отмена</button></a>
+                    </div>
+                  </div>
+                </form>
+              </td>
+            </tr>
+          {% endif %}
+
+          {% for r in rows %}
+            {% set is_edit = (edit_id and edit_id == r.id) %}
+            {% set row_style = 'opacity:0.55;text-decoration:line-through;' if r.is_voided else '' %}
+            <tr style="{{ row_style }}">
+              {% if is_edit and not r.is_voided %}
+                <td colspan="8" style="padding:12px;background:#fffbeb;">
+                  <form method="post" action="/admin/expenses/{{ r.id }}/save">
+                    <input type="hidden" name="_filter_date_from" value="{{ date_from }}" />
+                    <input type="hidden" name="_filter_date_to" value="{{ date_to }}" />
+                    <input type="hidden" name="_filter_category_id" value="{{ filter_category_id }}" />
+                    <div class="row" style="flex-wrap:wrap;gap:10px;align-items:flex-end;">
+                      <div>
+                        <label>Дата *</label><br/>
+                        <input type="date" name="expense_date" required value="{{ r.date.date().isoformat() }}" />
+                      </div>
+                      <div>
+                        <label>Категория *</label><br/>
+                        <select id="edit_cat_{{ r.id }}" required>
+                          {% for c in categories %}
+                            <option value="{{ c.id }}" {% if c.id == r.subcategory.category_id %}selected{% endif %}>{{ c.name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div>
+                        <label>Подкатегория *</label><br/>
+                        <select name="subcategory_id" id="edit_sub_{{ r.id }}" required></select>
+                      </div>
+                      <div>
+                        <label>Сумма *</label><br/>
+                        <input type="text" name="amount" inputmode="decimal" required value="{{ '%.2f'|format(r.amount) }}" style="width:100px;" />
+                      </div>
+                      <div style="flex:1;min-width:200px;">
+                        <label>Комментарий *</label><br/>
+                        <input type="text" name="comment" required maxlength="2000" value="{{ r.comment }}" style="width:100%;" />
+                      </div>
+                      <div>
+                        <button type="submit">Сохранить</button>
+                      </div>
+                      <div>
+                        <a href="/admin/expenses{{ qfilter }}"><button type="button" class="secondary">Отмена</button></a>
+                      </div>
+                    </div>
+                  </form>
+                </td>
+              {% else %}
+                <td>{{ r.date.date().isoformat() }}</td>
+                <td>{{ r.subcategory.category.name if r.subcategory and r.subcategory.category else '—' }}</td>
+                <td>{{ r.subcategory.name if r.subcategory else '—' }}</td>
+                <td>{{ '%.2f'|format(r.amount) }}</td>
+                <td style="max-width:240px;white-space:pre-wrap;">{{ r.comment }}</td>
+                <td>{{ r.created_by_user.display_name if r.created_by_user else '—' }}</td>
+                <td>{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>
+                  {% if not r.is_voided %}
+                    <a href="/admin/expenses{% if filter_query %}?{{ filter_query }}&amp;{% else %}?{% endif %}edit={{ r.id }}" title="Редактировать" style="text-decoration:none;font-size:1.1rem;">✎</a>
+                    <form id="void_form_{{ r.id }}" method="post" action="/admin/expenses/{{ r.id }}/void" style="display:inline;margin-left:8px;">
+                      <button type="button" title="Аннулировать" style="background:none;border:none;cursor:pointer;font-size:1.1rem;padding:0;" onclick="openVoidConfirm({{ r.id }})">⊘</button>
+                    </form>
+                  {% else %}
+                    <span class="muted">аннулировано{% if r.voided_at %} {{ r.voided_at.strftime('%Y-%m-%d') }}{% endif %}</span>
+                  {% endif %}
+                </td>
+              {% endif %}
+            </tr>
+          {% endfor %}
+          {% if not rows and not show_new %}
+            <tr><td colspan="8" class="muted">Нет записей.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="void_confirm_modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(15,23,42,0.45);align-items:center;justify-content:center;padding:16px;">
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="void_confirm_title" style="max-width:420px;width:100%;margin:0;box-shadow:0 10px 40px rgba(0,0,0,0.2);">
+      <h3 id="void_confirm_title" style="margin-top:0;">Аннулировать расход?</h3>
+      <p class="muted" style="margin:0 0 16px;">Запись останется в списке как аннулированная.</p>
+      <div class="row" style="justify-content:flex-end;gap:8px;">
+        <button type="button" class="secondary" onclick="closeVoidConfirm()">Отмена</button>
+        <button type="button" onclick="submitVoidForm()">Да, аннулировать</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="application/json" id="subcats_json">{{ subcats_json | tojson }}</script>
+  <script>
+    var SUBCATS = JSON.parse(document.getElementById('subcats_json').textContent);
+    var voidTargetId = null;
+
+    function fillSubSelect(catId, subSelect, selectedSubId) {
+      subSelect.innerHTML = '';
+      var list = SUBCATS[String(catId)] || [];
+      for (var i = 0; i < list.length; i++) {
+        var o = document.createElement('option');
+        o.value = String(list[i].id);
+        o.textContent = list[i].name;
+        if (selectedSubId != null && String(list[i].id) === String(selectedSubId)) o.selected = true;
+        subSelect.appendChild(o);
+      }
+    }
+
+    function wireCategorySelect(catSel, subSel, selectedSubId) {
+      fillSubSelect(catSel.value, subSel, selectedSubId);
+      catSel.addEventListener('change', function () {
+        fillSubSelect(catSel.value, subSel, null);
+      });
+    }
+
+    (function initNewRow() {
+      var nc = document.getElementById('new_cat');
+      var ns = document.getElementById('new_sub');
+      if (nc && ns) wireCategorySelect(nc, ns, null);
+    })();
+
+    {% if edit_id %}
+      {% for r in rows %}
+        {% if r.id == edit_id and not r.is_voided %}
+          (function () {
+            var catSel = document.getElementById('edit_cat_{{ r.id }}');
+            var subSel = document.getElementById('edit_sub_{{ r.id }}');
+            if (catSel && subSel) wireCategorySelect(catSel, subSel, {{ r.subcategory_id }});
+          })();
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+  </script>
+  <script>
+    var modal = document.getElementById('void_confirm_modal');
+    function onKey(e) { if (e.key === 'Escape') closeVoidConfirm(); }
+    window.openVoidConfirm = function (id) {
+      voidTargetId = id;
+      modal.style.display = 'flex';
+      document.addEventListener('keydown', onKey);
+    };
+    window.closeVoidConfirm = function () {
+      modal.style.display = 'none';
+      document.removeEventListener('keydown', onKey);
+      voidTargetId = null;
+    };
+    window.submitVoidForm = function () {
+      if (voidTargetId == null) return;
+      var f = document.getElementById('void_form_' + voidTargetId);
+      if (f) f.submit();
+    };
+    modal.addEventListener('click', function (e) { if (e.target === modal) closeVoidConfirm(); });
+  </script>
+{% endblock %}

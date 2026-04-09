@@ -37,6 +37,7 @@ from app.seed_catalog_miniatyura import ensure_miniatyura_catalog
 from app.seed_catalog_narashivanie import ensure_narashivanie_catalog
 from app.seed_catalog_prodazha_materiala import ensure_prodazha_materiala_catalog
 from app.seed_catalog_snjatie_ukhod import ensure_snjatie_ukhod_catalogs
+from app.seed_studio_expenses_catalog import ensure_studio_expense_catalog
 
 
 def ensure_seed_data(db: Session) -> None:
@@ -101,6 +102,8 @@ def ensure_seed_data(db: Session) -> None:
         )
 
     _ensure_vsy_golova_catalog_and_kits(db)
+
+    ensure_studio_expense_catalog(db)
 
     db.commit()
 

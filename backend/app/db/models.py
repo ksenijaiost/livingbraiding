@@ -162,18 +162,52 @@ class StudioExpenseCategory(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    subcategories: Mapped[list["StudioExpenseSubcategory"]] = relationship(
+        back_populates="category",
+        order_by="StudioExpenseSubcategory.sort_order",
+    )
+
+
+class StudioExpenseSubcategory(Base):
+    __tablename__ = "studio_expense_subcategories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    category_id: Mapped[int] = mapped_column(
+        ForeignKey("studio_expense_categories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    category: Mapped["StudioExpenseCategory"] = relationship(back_populates="subcategories")
+
+    __table_args__ = (UniqueConstraint("category_id", "name", name="uq_studio_expense_subcat_cat_name"),)
 
 
 class StudioExpense(Base):
     __tablename__ = "studio_expenses"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    category_id: Mapped[int | None] = mapped_column(ForeignKey("studio_expense_categories.id"), nullable=True)
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    subcategory_id: Mapped[int] = mapped_column(
+        ForeignKey("studio_expense_subcategories.id"),
+        nullable=False,
+    )
     amount: Mapped[float] = mapped_column(Float, nullable=False)
+    comment: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
-    category: Mapped[StudioExpenseCategory | None] = relationship()
+    is_voided: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    voided_by_user: Mapped["User | None"] = relationship(foreign_keys=[voided_by_user_id])
+    subcategory: Mapped["StudioExpenseSubcategory"] = relationship()
 
 
 class ServiceCategory(Base):

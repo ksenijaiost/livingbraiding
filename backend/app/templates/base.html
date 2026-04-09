@@ -33,6 +33,7 @@
       .nav a { margin-right: 12px; text-decoration: none; opacity: 0.95; }
       .nav a:hover { text-decoration: underline; }
       .error { background: #fee2e2; border: 1px solid #fecaca; color: #991b1b; padding: 10px 12px; border-radius: 8px; }
+      .ok { background: #f0fdf4; border: 1px solid #86efac; color: #166534; padding: 10px 12px; border-radius: 8px; }
     </style>
   </head>
   <body>
@@ -60,6 +61,7 @@
             <a href="/admin/kits">Комплекты</a>
             {% if current_user.role.value == "ADMIN_SUPER" %}
               <a href="/admin/catalog">Управление каталогом</a>
+              <a href="/admin/expenses">Расходы</a>
               <a href="/admin/payroll-periods">Периоды ЗП</a>
               <a href="/admin/settings">Настройки</a>
             {% endif %}
