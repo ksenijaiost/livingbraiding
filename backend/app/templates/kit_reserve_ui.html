@@ -80,7 +80,7 @@
     }
     async function reserveClientSuggest() {
       const q = document.getElementById('reserve_client_q').value.trim();
-      const res = await fetch('/admin/clients/suggest?q=' + encodeURIComponent(q));
+      const res = await fetch('/master/clients/suggest?q=' + encodeURIComponent(q));
       if (!res.ok) return;
       const data = await res.json();
       const ul = document.getElementById('reserve_client_list');

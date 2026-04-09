@@ -13,6 +13,7 @@ In production you may want to disable this or make it explicit via a CLI task.
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from datetime import datetime, timedelta
 
 from app.db.models import (
     CategoryQuestionnaireField,
@@ -28,6 +29,21 @@ from app.db.models import (
     User,
     UserRole,
     MasterLevel,
+    Client,
+    PayrollPeriod,
+    ProductSale,
+    ProductSaleKind,
+    StudioExpense,
+    StudioExpenseSubcategory,
+    Visit,
+    VisitClientType,
+    VisitMaster,
+    VisitPriceType,
+    VisitService,
+    WorkForInventory,
+    WorkForInventoryStaff,
+    WorkKind,
+    WorkScope,
 )
 from app.security import hash_password
 from app.seed_catalog_vsy_golova import ensure_vsy_golova_catalog
@@ -104,6 +120,7 @@ def ensure_seed_data(db: Session) -> None:
     _ensure_vsy_golova_catalog_and_kits(db)
 
     ensure_studio_expense_catalog(db)
+    _ensure_demo_operational_data(db)
 
     db.commit()
 
@@ -442,4 +459,210 @@ def _ensure_vsy_golova_catalog_and_kits(db: Session) -> None:
                 is_archived=False,
             )
         )
+
+
+def _ensure_demo_operational_data(db: Session) -> None:
+    """
+    Демо-операционные данные (1–3 записи), чтобы руками не набивать каждый раз:
+    клиенты, визиты, продажа товаров, работа с товарами, расходы, периоды ЗП.
+
+    Идемпотентно: если в таблице уже есть записи — пропускаем.
+    """
+
+    # ---- Clients ----
+    if not db.scalar(select(Client).limit(1)):
+        db.add_all(
+            [
+                Client(name="Демо клиент 1", phone="+7 900 000-00-01", is_confirmed=True),
+                Client(name="Демо клиент 2", phone="+7 900 000-00-02", is_confirmed=True),
+            ]
+        )
+        db.flush()
+
+    c1 = db.scalar(select(Client).order_by(Client.id.asc()).limit(1))
+    c2 = db.scalar(select(Client).order_by(Client.id.asc()).offset(1).limit(1)) or c1
+
+    # ---- Payroll periods ----
+    if not db.scalar(select(PayrollPeriod).limit(1)):
+        now = datetime.utcnow()
+        cur_from = datetime(now.year, now.month, 1)
+        next_month = (cur_from + timedelta(days=32)).replace(day=1)
+        cur_to = next_month - timedelta(seconds=1)
+        prev_to = cur_from - timedelta(seconds=1)
+        prev_from = datetime(prev_to.year, prev_to.month, 1)
+        db.add_all(
+            [
+                PayrollPeriod(
+                    date_from=prev_from,
+                    date_to=prev_to,
+                    closed_at=now,
+                    closed_by_name="seed",
+                    closed_by_role="SYSTEM",
+                    comment="Демо закрытый период",
+                ),
+                PayrollPeriod(
+                    date_from=cur_from,
+                    date_to=cur_to,
+                    closed_at=None,
+                    closed_by_name=None,
+                    closed_by_role=None,
+                    comment="Демо открытый период",
+                ),
+            ]
+        )
+
+    # Resolve demo users
+    admin = db.scalar(select(User).where(User.username == "admin"))
+    m1 = db.scalar(select(User).where(User.username == "master1"))
+    m2 = db.scalar(select(User).where(User.username == "master2")) or m1
+
+    # ---- Visits ----
+    if not db.scalar(select(Visit).limit(1)):
+        # pick any active service from catalog to attach as line
+        svc = db.scalar(select(Service).where(Service.is_active.is_(True)).order_by(Service.id.asc()).limit(1))
+        if svc is None:
+            return
+        sub = db.get(ServiceSubcategory, svc.subcategory_id)
+        cat = db.get(ServiceCategory, sub.category_id) if sub else None
+
+        v1 = Visit(
+            created_by_user_id=admin.id if admin else None,
+            performed_date=datetime.utcnow() - timedelta(days=1),
+            duration_minutes=180,
+            client_id=c1.id,
+            client_type=VisitClientType.NEW,
+            price_type=VisitPriceType.CLIENT,
+            client_age_group=None,
+            kanekalon_grams=50.0,
+            kudri_grams=0.0,
+            mix_source=None,
+            mix_complexity=None,
+            mix_cost_amount=0.0,
+            mix_bonus_master_id=None,
+            mix_bonus_amount=0.0,
+            kanekalon_price_per_gram_at_time=4.0,
+            kudri_price_per_gram_at_time=8.0,
+            materials_cost_total=200.0,
+            amount_from_client=6000.0,
+            comment="Демо визит",
+            addons_total=0.0,
+            addons_details_json=None,
+            amortization_level=None,
+            amortization_amount=0.0,
+            studio_fund_amount=300.0,
+            cost_total=200.0,
+            profit_before_split=5800.0,
+            salon_cut_pct_at_time=0.3,
+            salon_profit=1740.0,
+            masters_pool=4060.0,
+        )
+        db.add(v1)
+        db.flush()
+        db.add_all(
+            [
+                VisitMaster(visit_id=v1.id, master_id=m1.id if m1 else 1, percent=70.0),
+                VisitMaster(visit_id=v1.id, master_id=m2.id if m2 else (m1.id if m1 else 1), percent=30.0),
+                VisitService(
+                    visit_id=v1.id,
+                    service_id=svc.id,
+                    details_json=None,
+                    category_name=(cat.name if cat else "Категория"),
+                    subcategory_name=(sub.name if sub else "Подкатегория"),
+                    service_name=svc.name,
+                ),
+            ]
+        )
+
+    # ---- Product sales ----
+    if not db.scalar(select(ProductSale).limit(1)):
+        # MATERIAL sale
+        ms = db.scalar(
+            select(Service)
+            .join(ServiceSubcategory, Service.subcategory_id == ServiceSubcategory.id)
+            .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
+            .where(ServiceCategory.name == "Продажа материала", Service.is_active.is_(True))
+            .order_by(Service.id.asc())
+            .limit(1)
+        )
+        db.add(
+            ProductSale(
+                created_by_user_id=admin.id if admin else (m1.id if m1 else 1),
+                performed_date=datetime.utcnow(),
+                client_id=c2.id,
+                amount_from_client=1200,
+                kind=ProductSaleKind.MATERIAL,
+                material_service_id=ms.id if ms else None,
+                material_grams=30.0,
+                material_description="Демо: материал",
+            )
+        )
+
+        # KIT sale (reduce stock like real flow)
+        kit = db.scalar(select(Kit).where(Kit.sku == "DEMO-001").limit(1))
+        if kit:
+            pieces = 5
+            kit.pieces_available = max(0, int(kit.pieces_available - pieces))
+            db.add(
+                ProductSale(
+                    created_by_user_id=admin.id if admin else (m1.id if m1 else 1),
+                    performed_date=datetime.utcnow(),
+                    client_id=c1.id,
+                    amount_from_client=2500,
+                    kind=ProductSaleKind.KIT,
+                    kit_id=kit.id,
+                    kit_pieces_sold=pieces,
+                )
+            )
+
+    # ---- Work for inventory ----
+    if not db.scalar(select(WorkForInventory).limit(1)):
+        w = WorkForInventory(
+            created_by_user_id=m1.id if m1 else (admin.id if admin else 1),
+            kind=WorkKind.MIX,
+            scope=WorkScope.IN_STOCK,
+            client_id=None,
+            amount_from_client=None,
+            ready_date=None,
+            comment="Демо: смешка",
+            kanekalon_grams=20.0,
+            kudri_grams=10.0,
+            mix_source=None,
+            kanekalon_price_per_gram_at_time=4.0,
+            kudri_price_per_gram_at_time=8.0,
+            materials_cost_total=160.0,
+            extra_costs_amount=0.0,
+            cost_total_amount=160.0,
+            master_profit_amount=45.0,
+            studio_profit_amount=0.0,
+            profit_total_amount=45.0,
+            studio_share_snapshot=0.0,
+            rates_snapshot_json=None,
+            details_json=None,
+        )
+        db.add(w)
+        db.flush()
+        db.add(
+            WorkForInventoryStaff(
+                work_id=w.id,
+                user_id=m1.id if m1 else 1,
+                share=1.0,
+                master_profit_amount=45.0,
+                details_json=None,
+            )
+        )
+
+    # ---- Expenses ----
+    if not db.scalar(select(StudioExpense).limit(1)):
+        sub = db.scalar(select(StudioExpenseSubcategory).order_by(StudioExpenseSubcategory.id.asc()).limit(1))
+        if sub:
+            db.add(
+                StudioExpense(
+                    created_by_user_id=admin.id if admin else (m1.id if m1 else 1),
+                    created_at=datetime.utcnow(),
+                    date=datetime.utcnow(),
+                    subcategory_id=sub.id,
+                    amount=500.0,
+                    comment="Демо расход",
+                )
+            )
 
