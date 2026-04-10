@@ -59,6 +59,30 @@ class KitOwnExtra(BaseModel):
         return self
 
 
+class KitOwnCorrectionDetails(BaseModel):
+    """Детали коррекции для своего комплекта («Новый визит»), как в работе «Коррекция комплекта»."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    trim_qty: int = Field(0, ge=0)
+    dread_qty: int = Field(0, ge=0)
+    curl_qty: int = Field(0, ge=0)
+    curl_dread_complexity: Literal["NORMAL", "HARD"] | None = None
+    wash: bool = False
+    circle: bool = False
+    steam: bool = False
+
+    @model_validator(mode="after")
+    def _validate_complexity(self):
+        if self.wash and self.circle:
+            raise ValueError("Если выбрана «Стирка», то «Одевание на круг» недоступно.")
+        if self.dread_qty <= 0 and self.curl_qty <= 0 and self.curl_dread_complexity is not None:
+            raise ValueError("Сложность задаётся только при коррекции кудрей и/или дредов.")
+        if (self.dread_qty > 0 or self.curl_qty > 0) and self.curl_dread_complexity is None:
+            raise ValueError("Укажите сложность кудрей/дредов.")
+        return self
+
+
 class KitOwn(BaseModel):
     """Свой комплект (клиента/студии)."""
 
@@ -69,6 +93,7 @@ class KitOwn(BaseModel):
         description="STUDIO — нашей студии, FOREIGN — чужой",
     )
     correction: bool
+    correction_details: KitOwnCorrectionDetails | None = Field(default=None)
     extra_blanks: bool
     extra: KitOwnExtra | None = None
 
@@ -78,6 +103,12 @@ class KitOwn(BaseModel):
             raise ValueError("При extra_blanks=true нужен блок extra")
         if not self.extra_blanks and self.extra is not None:
             raise ValueError("При extra_blanks=false блок extra должен отсутствовать")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_correction(self):
+        if not self.correction and self.correction_details is not None:
+            raise ValueError("Блок correction_details допустим только при correction=true.")
         return self
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import or_, select
 from starlette.datastructures import UploadFile
@@ -52,6 +52,7 @@ from app.questionnaire.schemas import (
     KitBlock,
     KitFromStock,
     KitOwn,
+    KitOwnCorrectionDetails,
     KitOwnExtra,
     VisitServiceDetailsPayload,
     parse_visit_service_details,
@@ -385,6 +386,13 @@ def parse_kit_inlay_form(
         own_extra_stock_kit_id=extra_stock_id if extra_stock_id else None,
         own_extra_stock_use_entire=g_bool("own_extra_stock_use_entire"),
         own_extra_stock_blanks_used=g_int("own_extra_stock_blanks_used", 0),
+        own_corr_trim_qty=g_int("own_corr_trim_qty", 0),
+        own_corr_dread_qty=g_int("own_corr_dread_qty", 0),
+        own_corr_curl_qty=g_int("own_corr_curl_qty", 0),
+        own_corr_wash=g_bool("own_corr_wash"),
+        own_corr_circle=g_bool("own_corr_circle"),
+        own_corr_steam=g_bool("own_corr_steam"),
+        own_corr_curl_dread_complexity=g("own_corr_curl_dread_complexity"),
         visit_master_allocations=visit_master_allocations,
         questionnaire_raw=extract_questionnaire_raw_from_form(form),
         addon_sales_amount=max(0.0, g_float("addon_sales_amount", 0)),
@@ -433,6 +441,13 @@ class KitInlayFormInput:
     own_extra_stock_kit_id: int | None
     own_extra_stock_use_entire: bool
     own_extra_stock_blanks_used: int
+    own_corr_trim_qty: int
+    own_corr_dread_qty: int
+    own_corr_curl_qty: int
+    own_corr_wash: bool
+    own_corr_circle: bool
+    own_corr_steam: bool
+    own_corr_curl_dread_complexity: str
     visit_master_allocations: list[tuple[int, int]]
     questionnaire_raw: dict[str, str]
     addon_sales_amount: float
@@ -486,6 +501,37 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
     if kind == "OWN":
         if inp.own_origin not in ("STUDIO", "FOREIGN"):
             raise ValueError("Укажите происхождение своего комплекта")
+        corr_details: KitOwnCorrectionDetails | None = None
+        if inp.own_correction:
+            tq, dq, cq = inp.own_corr_trim_qty, inp.own_corr_dread_qty, inp.own_corr_curl_qty
+            if inp.own_corr_wash and inp.own_corr_circle:
+                raise ValueError(
+                    "Если выбрана «Стирка» (коррекция), то «Одевание на круг» выбирать нельзя (входит в стирку)."
+                )
+            if any(x < 0 for x in (tq, dq, cq)):
+                raise ValueError("Количество в блоке коррекции должно быть неотрицательным.")
+            if (
+                (tq <= 0)
+                and (not inp.own_corr_wash)
+                and (not inp.own_corr_circle)
+                and (not inp.own_corr_steam)
+                and (dq <= 0)
+                and (cq <= 0)
+            ):
+                raise ValueError("При отмеченной коррекции укажите хотя бы одну операцию.")
+            cxc: Literal["NORMAL", "HARD"] | None = None
+            if dq > 0 or cq > 0:
+                cr = (inp.own_corr_curl_dread_complexity or "").strip().upper()
+                cxc = "HARD" if cr == "HARD" else "NORMAL"
+            corr_details = KitOwnCorrectionDetails(
+                trim_qty=tq,
+                dread_qty=dq,
+                curl_qty=cq,
+                curl_dread_complexity=cxc,
+                wash=inp.own_corr_wash,
+                circle=inp.own_corr_circle,
+                steam=inp.own_corr_steam,
+            )
         extra: KitOwnExtra | None = None
         if inp.own_extra_blanks:
             if not inp.own_extra_stock_kit_id:
@@ -512,6 +558,7 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
             own=KitOwn(
                 origin=inp.own_origin,  # type: ignore[arg-type]
                 correction=inp.own_correction,
+                correction_details=corr_details,
                 extra_blanks=inp.own_extra_blanks,
                 extra=extra,
             ),
@@ -915,6 +962,7 @@ def list_master_visit_services_catalog(db: Session) -> list[dict[str, Any]]:
                 "id": int(s.id),
                 "name": s.name,
                 "requires_kit_block": service_requires_kit_block(s),
+                "requires_thermo": service_requires_thermo_flow(s),
                 "price_junior_from": _opt_f(s.price_junior_from),
                 "price_junior_to": _opt_f(s.price_junior_to),
                 "price_middle_from": _opt_f(s.price_middle_from),
@@ -1018,7 +1066,9 @@ def suggest_kits_for_stock(db: Session, q: str, *, limit: int = 30) -> list[dict
                 "id": k.id,
                 "sku": k.sku,
                 "title": k.title,
+                "pieces_total": int(k.pieces_total or 0),
                 "pieces_available": k.pieces_available,
+                "stock_price_total": float(k.stock_price_total or 0.0),
                 "is_reserved": bool(k.reserved_at),
                 "reserved_for_label": res_label,
             }

@@ -21,6 +21,8 @@ from app.client_validation import format_created_by_label
 from app.db.models import (
     Client,
     Kit,
+    MaterialPriceCurrent,
+    MaterialType,
     MixComplexity,
     MixSource,
     User,
@@ -130,9 +132,26 @@ def _kit_qty_prefill_from_form(form: Any) -> dict[str, str]:
     return out
 
 
+# Стрижки в ЗП, но не учитываются в «количестве заготовок» для склада / предпросмотра.
+KIT_INVENTORY_PIECE_EXCLUDE_KEYS = frozenset({"SE_TRIM_SHORT", "SE_TRIM_LONG", "DE_TRIM"})
+
+
+def _material_prices_per_gram(db: Session) -> tuple[float, float]:
+    pk = db.get(MaterialPriceCurrent, MaterialType.KANEKALON)
+    pku = db.get(MaterialPriceCurrent, MaterialType.KUDRI)
+    return (
+        float(pk.price_per_gram) if pk else 0.0,
+        float(pku.price_per_gram) if pku else 0.0,
+    )
+
+
 def _kit_table_state_json(
-    current_user: AuthUser, masters: list[User], kit_qty_prefill: dict[str, str]
+    current_user: AuthUser,
+    masters: list[User],
+    kit_qty_prefill: dict[str, str],
+    db: Session,
 ) -> str:
+    kpg, kudpg = _material_prices_per_gram(db)
     return json.dumps(
         {
             "currentUserId": current_user.id,
@@ -140,6 +159,9 @@ def _kit_table_state_json(
             "seItems": [{"key": k, "label": lbl} for k, lbl in _kit_se_items()],
             "deItems": [{"key": k, "label": lbl} for k, lbl in _kit_de_items()],
             "prefill": kit_qty_prefill,
+            "kitRates": _kit_rates_defaults(),
+            "excludeFromInventoryPieceCount": sorted(KIT_INVENTORY_PIECE_EXCLUDE_KEYS),
+            "materialPricePerGram": {"kanekalon": kpg, "kudri": kudpg},
         },
         ensure_ascii=False,
     )
@@ -392,6 +414,11 @@ def work_new_get(
         "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
         "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
         "customOrderBonus": _wr_float(db, "custom_order_bonus_multiplier", 1.0),
+        "mixRates": {
+            "SIMPLE": _wr_float(db, "mix_simple", 1.0),
+            "MEDIUM": _wr_float(db, "mix_medium", 1.5),
+            "HARD": _wr_float(db, "mix_hard", 2.0),
+        },
     }
     return templates.TemplateResponse(
         "work_products_new.html",
@@ -402,7 +429,7 @@ def work_new_get(
             fp={},
             masters=masters,
             kit_master_on_ids=[],
-            kit_table_state_json=_kit_table_state_json(current_user, masters, {}),
+            kit_table_state_json=_kit_table_state_json(current_user, masters, {}, db),
             default_date=date.today().isoformat(),
             kinds=[{"value": k.value, "label": _kind_label(k)} for k in WorkKind],
             scopes=[{"value": s.value, "label": ("В наличие" if s == WorkScope.IN_STOCK else "На заказ")} for s in WorkScope],
@@ -504,7 +531,7 @@ async def work_new_post(
         corr_steam = False
         corr_dread_qty = 0
         corr_curl_qty = 0
-        corr_curl_complexity = "NORMAL"
+        corr_curl_dread_complexity: str | None = None
         # KIT: parse blanks + compute master/studio profit
         kit_rates = _kit_rates_defaults()
         kit_totals: dict[str, int] = {}
@@ -553,6 +580,9 @@ async def work_new_post(
             if not any_qty:
                 raise ValueError("Для комплекта укажите хотя бы одно количество заготовок.")
             kit_pieces_total = sum(kit_totals.values())
+            kit_pieces_inventory = sum(
+                q for k, q in kit_totals.items() if k not in KIT_INVENTORY_PIECE_EXCLUDE_KEYS
+            )
             details["kit"] = {
                 "blank_type_se": kit_blank_type_se,
                 "blank_type_de": kit_blank_type_de,
@@ -592,9 +622,13 @@ async def work_new_post(
             corr_steam = _g_bool(form, "corr_steam")
             corr_dread_qty = int(_g_float(form, "corr_dread_qty", 0))
             corr_curl_qty = int(_g_float(form, "corr_curl_qty", 0))
-            corr_curl_complexity = (_g_str(form, "corr_curl_complexity", "NORMAL") or "NORMAL").strip()
-            if corr_curl_complexity not in ("NORMAL", "HARD"):
-                corr_curl_complexity = "NORMAL"
+            corr_cd_raw = (_g_str(form, "corr_curl_dread_complexity", "") or "").strip()
+            if corr_dread_qty <= 0 and corr_curl_qty <= 0:
+                corr_curl_dread_complexity = None
+            else:
+                if corr_cd_raw not in ("NORMAL", "HARD"):
+                    corr_cd_raw = "NORMAL"
+                corr_curl_dread_complexity = corr_cd_raw
 
             if corr_wash and corr_circle:
                 raise ValueError("Если выбрана «Стирка», то «Одевание на круг» выбирать нельзя (входит в стирку).")
@@ -619,7 +653,7 @@ async def work_new_post(
                 "steam": corr_steam,
                 "dread_qty": corr_dread_qty,
                 "curl_qty": corr_curl_qty,
-                "curl_complexity": corr_curl_complexity,
+                "curl_dread_complexity": corr_curl_dread_complexity,
             }
             alloc = [(current_user.id, 1.0)]
         else:
@@ -644,6 +678,25 @@ async def work_new_post(
                     q = int(kit_by_staff.get(uid, {}).get(item_key, 0))
                     if q > 0:
                         staff_master_profit[uid] += rate * q
+            if (
+                mix_source == MixSource.SELF_MIXED
+                and grams_total > 0
+                and mix_complexity is not None
+            ):
+                rate_map = {
+                    MixComplexity.SIMPLE: _wr_float(db, "mix_simple", 1.0),
+                    MixComplexity.MEDIUM: _wr_float(db, "mix_medium", 1.5),
+                    MixComplexity.HARD: _wr_float(db, "mix_hard", 2.0),
+                }
+                mrate = float(rate_map.get(mix_complexity, 0.0))
+                mix_pay = max(0.0, float(grams_total) * mrate)
+                if mix_pay > 0:
+                    if current_user.id in staff_master_profit:
+                        staff_master_profit[current_user.id] += mix_pay
+                    elif kit_staff_ids:
+                        share = mix_pay / float(len(kit_staff_ids))
+                        for uid in kit_staff_ids:
+                            staff_master_profit[uid] += share
         elif kind == WorkKind.RUBBER:
             mp, sp, fx, is_per_unit, _ul = _rubber_pricing_from_catalog(db, rubber_type)
             units = int(rubber_qty) if is_per_unit else 1
@@ -694,14 +747,18 @@ async def work_new_post(
                 mp_total += mp
                 sp_total += sp
                 fx_total += fx
+            cm_cd = 1.5 if corr_curl_dread_complexity == "HARD" else 1.0
             if corr_dread_qty > 0:
-                mp, sp, fx = _svc_sum("Коррекция дреда (1шт)", corr_dread_qty)
+                mp, sp, fx = _svc_sum(
+                    "Коррекция дреда (1шт)", corr_dread_qty, complexity_mul=cm_cd
+                )
                 mp_total += mp
                 sp_total += sp
                 fx_total += fx
             if corr_curl_qty > 0:
-                cm = 1.5 if corr_curl_complexity == "HARD" else 1.0
-                mp, sp, fx = _svc_sum("Коррекция кудрей (1шт)", corr_curl_qty, complexity_mul=cm)
+                mp, sp, fx = _svc_sum(
+                    "Коррекция кудрей (1шт)", corr_curl_qty, complexity_mul=cm_cd
+                )
                 mp_total += mp
                 sp_total += sp
                 fx_total += fx
@@ -769,13 +826,10 @@ async def work_new_post(
         if kind == WorkKind.KIT and scope == WorkScope.IN_STOCK:
             sku = (_g_str(form, "kit_sku", "") or "").strip()
             title = (_g_str(form, "kit_title", "") or "").strip()
-            stock_price_total = max(0.0, _g_float(form, "kit_stock_price_total", 0.0))
             if not sku:
                 raise ValueError("Для «в наличие» укажите артикул комплекта.")
             if not title:
                 raise ValueError("Для «в наличие» укажите название комплекта.")
-            if stock_price_total <= 0:
-                raise ValueError("Для «в наличие» укажите цену комплекта на складе (всего), ₽.")
             if db.scalar(select(Kit.id).where(Kit.sku == sku)):
                 raise ValueError("Комплект с таким артикулом уже есть — укажите другой.")
             kit = Kit(
@@ -783,8 +837,8 @@ async def work_new_post(
                 title=title[:200],
                 description=None,
                 is_active=True,
-                pieces_total=kit_pieces_total,
-                pieces_available=kit_pieces_total,
+                pieces_total=kit_pieces_inventory,
+                pieces_available=kit_pieces_inventory,
                 blank_type_se=kit_blank_type_se,
                 blank_type_de=kit_blank_type_de,
                 weight_grams=None,
@@ -794,7 +848,7 @@ async def work_new_post(
                 color_text=None,
                 blanks_kinds_text=None,
                 notes=None,
-                stock_price_total=stock_price_total,
+                stock_price_total=None,
                 cost_total=cost_total_amount,
                 author_cost_total=master_total,
                 created_at=datetime.utcnow(),
@@ -811,6 +865,11 @@ async def work_new_post(
             "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
             "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
             "customOrderBonus": _wr_float(db, "custom_order_bonus_multiplier", 1.0),
+            "mixRates": {
+                "SIMPLE": _wr_float(db, "mix_simple", 1.0),
+                "MEDIUM": _wr_float(db, "mix_medium", 1.5),
+                "HARD": _wr_float(db, "mix_hard", 2.0),
+            },
         }
         kit_master_on_ids = _read_kit_master_on_ids(form)
         kit_prefill = _kit_qty_prefill_from_form(form)
@@ -823,7 +882,7 @@ async def work_new_post(
                 fp=fp,
                 masters=masters,
                 kit_master_on_ids=kit_master_on_ids,
-                kit_table_state_json=_kit_table_state_json(current_user, masters, kit_prefill),
+                kit_table_state_json=_kit_table_state_json(current_user, masters, kit_prefill, db),
                 default_date=date.today().isoformat(),
                 kinds=[{"value": k.value, "label": _kind_label(k)} for k in WorkKind],
                 scopes=[

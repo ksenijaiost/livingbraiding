@@ -90,22 +90,19 @@ from app import studio_order as studio_order_routes
 from app import work_products as work_products_routes
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
-    collect_step1_fields_for_step2_hidden,
+    get_salon_cut_pct,
     kit_reserve_hint_by_id,
     list_master_visit_services_catalog,
     master_visit_step1_prefill_from_form,
     parse_kit_inlay_form,
-    read_visit_master_form_state,
     save_kit_inlay_visit,
     suggest_kits_for_stock,
     validate_master_visit_step1,
 )
-from app.questionnaire.runtime_merge import load_merged_questionnaire_specs
 from app.seed import ensure_seed_data
 from app.thermo_visit import (
     collect_thermo_prefill_from_form,
     list_client_thermo_templates_for_visit,
-    service_requires_thermo_flow,
 )
 from app.visit_edit_policy import visit_client_change_policy
 from app.ui_visit_display import (
@@ -919,6 +916,27 @@ def admin_clients_suggest(
     return JSONResponse({"clients": _client_suggest_items(db, q)})
 
 
+@app.get("/master/clients/{client_id}/thermo-templates")
+def master_client_thermo_templates(
+    client_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    rows = list_client_thermo_templates_for_visit(db, client_id)
+    return JSONResponse(
+        {
+            "templates": [
+                {
+                    "id": t.id,
+                    "label": t.label,
+                    "created_at": t.created_at.strftime("%d.%m.%Y %H:%M"),
+                }
+                for t in rows
+            ]
+        }
+    )
+
+
 def _masters_for_visit_form(db: Session) -> list[User]:
     return list(
         db.scalars(
@@ -947,6 +965,14 @@ def _master_visit_step1_template_response(
     performed = (form_prefill.get("performed_date") or "").strip() or (
         default_date or date.today().isoformat()
     )
+    salon_cut_pct = get_salon_cut_pct(db)
+    # Prices per gram for preview calculation on step 1.
+    pk = db.get(MaterialPriceCurrent, MaterialType.KANEKALON)
+    pku = db.get(MaterialPriceCurrent, MaterialType.KUDRI)
+    material_price_per_gram = {
+        "kanekalon": float(pk.price_per_gram) if pk else 0.0,
+        "kudri": float(pku.price_per_gram) if pku else 0.0,
+    }
     return templates.TemplateResponse(
         "master_visit_step1.html",
         _ctx(
@@ -964,6 +990,8 @@ def _master_visit_step1_template_response(
             extra_stock_kit_reserve_hint=_kit_reserve_hint_from_form(
                 db, form_prefill, "own_extra_stock_kit_id"
             ),
+            salon_cut_pct=salon_cut_pct,
+            material_price_per_gram_json=json.dumps(material_price_per_gram, ensure_ascii=False),
             default_date=performed,
             form_prefill=form_prefill,
             selected_client=selected_client,
@@ -1001,103 +1029,6 @@ def master_visit_new_get(
     )
 
 
-@app.post("/master/visit/new/continue")
-async def master_visit_continue_post(
-    request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
-    db: Session = Depends(get_db),
-):
-    form = await request.form()
-    vm_on_ids, vm_pct_str = read_visit_master_form_state(form)
-    try:
-        inp = parse_kit_inlay_form(form, single_master_default_id=current_user.id)
-        validate_master_visit_step1(db, inp)
-    except ValueError as exc:
-        form_map = _form_to_str_map(form)
-        selected_client = None
-        eid = (form_map.get("existing_client_id") or "").strip()
-        if eid.isdigit():
-            selected_client = db.get(Client, int(eid))
-        return _master_visit_step1_template_response(
-            request,
-            current_user=current_user,
-            db=db,
-            form_prefill=form_map,
-            visit_master_on_ids=vm_on_ids,
-            visit_master_pct_str=vm_pct_str,
-            error=str(exc),
-            selected_client=selected_client,
-            status_code=400,
-        )
-
-    step1_hiddens = collect_step1_fields_for_step2_hidden(form)
-    specs = load_merged_questionnaire_specs(db, inp.service_id)
-    svc_row = db.scalar(
-        select(Service)
-        .options(
-            selectinload(Service.subcategory).selectinload(ServiceSubcategory.category),
-        )
-        .where(Service.id == inp.service_id)
-    )
-    service_display = "—"
-    if svc_row and svc_row.subcategory and svc_row.subcategory.category:
-        service_display = (
-            f"{svc_row.subcategory.category.name} / {svc_row.subcategory.name} / {svc_row.name}"
-        )
-
-    q_fields = [s.to_client_json() for s in specs]
-    is_thermo = service_requires_thermo_flow(svc_row)
-    thermo_saved = []
-    if is_thermo:
-        thermo_saved = [
-            {
-                "id": t.id,
-                "label": t.label,
-                "created_at": t.created_at.strftime("%d.%m.%Y %H:%M"),
-            }
-            for t in list_client_thermo_templates_for_visit(db, inp.existing_client_id)
-        ]
-    return templates.TemplateResponse(
-        "master_visit_step2.html",
-        _ctx(
-            request,
-            current_user=current_user,
-            step1_hiddens=step1_hiddens,
-            questionnaire_fields=q_fields,
-            questionnaire_prefill={},
-            no_questionnaire=len(specs) == 0 and not is_thermo,
-            is_thermo_visit=is_thermo,
-            thermo_saved_templates=thermo_saved,
-            thermo_prefill={},
-            service_display=service_display,
-            error=None,
-        ),
-    )
-
-
-@app.post("/master/visit/new/back-to-step1")
-async def master_visit_back_to_step1_post(
-    request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
-    db: Session = Depends(get_db),
-):
-    form = await request.form()
-    fp, vm_on_ids, vm_pct_str = master_visit_step1_prefill_from_form(form)
-    selected_client = None
-    eid = (fp.get("existing_client_id") or "").strip()
-    if eid.isdigit():
-        selected_client = db.get(Client, int(eid))
-    return _master_visit_step1_template_response(
-        request,
-        current_user=current_user,
-        db=db,
-        form_prefill=fp,
-        visit_master_on_ids=vm_on_ids,
-        visit_master_pct_str=vm_pct_str,
-        selected_client=selected_client,
-    )
-
-
 @app.post("/master/visit/new")
 async def master_visit_new_post(
     request: Request,
@@ -1114,61 +1045,22 @@ async def master_visit_new_post(
             created_by_label=format_created_by_label(current_user),
         )
     except ValueError as exc:
-        step1_hiddens = collect_step1_fields_for_step2_hidden(form)
-        q_prefill = collect_questionnaire_prefill_from_form(form)
-        sid_raw = form.get("service_id")
-        sid = int(sid_raw) if sid_raw and str(sid_raw).strip().isdigit() else 0
-        specs = load_merged_questionnaire_specs(db, sid) if sid > 0 else []
-        svc_row = db.scalar(
-            select(Service)
-            .options(
-                selectinload(Service.subcategory).selectinload(ServiceSubcategory.category),
-            )
-            .where(Service.id == sid)
-        )
-        service_display = "—"
-        if svc_row and svc_row.subcategory and svc_row.subcategory.category:
-            service_display = (
-                f"{svc_row.subcategory.category.name} / {svc_row.subcategory.name} / {svc_row.name}"
-            )
-        q_fields = [s.to_client_json() for s in specs]
-        is_thermo = service_requires_thermo_flow(svc_row) if svc_row else False
-        thermo_saved = []
-        if is_thermo and svc_row:
-            eid_raw = form.get("existing_client_id")
-            eid_visit: int | None = None
-            if eid_raw is not None and not isinstance(eid_raw, UploadFile):
-                es = (
-                    eid_raw.decode().strip()
-                    if isinstance(eid_raw, (bytes, bytearray))
-                    else str(eid_raw).strip()
-                )
-                if es.isdigit():
-                    eid_visit = int(es)
-            thermo_saved = [
-                {
-                    "id": t.id,
-                    "label": t.label,
-                    "created_at": t.created_at.strftime("%d.%m.%Y %H:%M"),
-                }
-                for t in list_client_thermo_templates_for_visit(db, eid_visit)
-            ]
-        thermo_pf = collect_thermo_prefill_from_form(form)
-        return templates.TemplateResponse(
-            "master_visit_step2.html",
-            _ctx(
-                request,
-                current_user=current_user,
-                step1_hiddens=step1_hiddens,
-                questionnaire_fields=q_fields,
-                questionnaire_prefill=q_prefill,
-                no_questionnaire=len(specs) == 0 and not is_thermo,
-                is_thermo_visit=is_thermo,
-                thermo_saved_templates=thermo_saved,
-                thermo_prefill=thermo_pf,
-                service_display=service_display,
-                error=str(exc),
-            ),
+        fp, vm_on_ids, vm_pct_str = master_visit_step1_prefill_from_form(form)
+        fp.update(collect_questionnaire_prefill_from_form(form))
+        fp.update(collect_thermo_prefill_from_form(form))
+        selected_client = None
+        eid = (fp.get("existing_client_id") or "").strip()
+        if eid.isdigit():
+            selected_client = db.get(Client, int(eid))
+        return _master_visit_step1_template_response(
+            request,
+            current_user=current_user,
+            db=db,
+            form_prefill=fp,
+            visit_master_on_ids=vm_on_ids,
+            visit_master_pct_str=vm_pct_str,
+            selected_client=selected_client,
+            error=str(exc),
             status_code=400,
         )
     return RedirectResponse(url=f"/master/visit/new?saved={visit.id}", status_code=303)

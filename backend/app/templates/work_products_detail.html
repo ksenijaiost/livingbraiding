@@ -107,7 +107,9 @@
           <div class="muted" style="font-size: 12px; margin-top: 2px;">Одевание на круг: {{ "да" if details.correction.circle else "нет" }}</div>
           <div class="muted" style="font-size: 12px; margin-top: 2px;">Коррекция дреда (шт): {{ details.correction.dread_qty }}</div>
           <div class="muted" style="font-size: 12px; margin-top: 2px;">Коррекция кудрей (шт): {{ details.correction.curl_qty }}</div>
-          <div class="muted" style="font-size: 12px; margin-top: 2px;">Сложность кудрей: {{ "Сложная" if details.correction.curl_complexity == "HARD" else "Обычная" }}</div>
+          {% set _corr = details.get("correction") or {} %}
+          {% set _ccd = _corr.get("curl_dread_complexity") %}
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Сложность кудрей / дредов: {% if _ccd == "HARD" %}Сложная{% elif _ccd == "NORMAL" %}Обычная{% else %}—{% endif %}</div>
         </div>
       {% endif %}
 

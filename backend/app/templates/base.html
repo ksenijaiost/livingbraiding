@@ -75,6 +75,25 @@
     <div class="container">
       {% block content %}{% endblock %}
     </div>
+    <script>
+      // Prevent accidental submit on Enter in inputs across the app.
+      // Use `data-allow-enter-submit="1"` on an input/form if you ever need default Enter submit back.
+      (function () {
+        document.addEventListener('keydown', function (e) {
+          if (!e || e.key !== 'Enter') return;
+          var t = e.target;
+          if (!t) return;
+          var tag = (t.tagName || '').toUpperCase();
+          if (tag === 'TEXTAREA') return;
+          if (tag === 'BUTTON') return;
+          if (t && t.getAttribute && t.getAttribute('data-allow-enter-submit') === '1') return;
+          var form = (t && t.form) ? t.form : null;
+          if (form && form.getAttribute && form.getAttribute('data-allow-enter-submit') === '1') return;
+          if (!form) return;
+          e.preventDefault();
+        });
+      })();
+    </script>
   </body>
 </html>
 

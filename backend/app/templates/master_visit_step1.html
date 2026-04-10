@@ -2,8 +2,8 @@
 {% block content %}
   {% set fp = form_prefill %}
   <div class="card">
-    <h2 style="margin-top: 0;">Новый визит — шаг 1 из 2</h2>
-    <p class="muted">Клиент, работа, услуга, материал; блок «Комплект» показывается, если это включено для подкатегории или услуги в каталоге. Затем — вопросы по услуге.</p>
+    <h2 style="margin-top: 0;">Новый визит</h2>
+    <p class="muted">Клиент, работа, услуга, материал и анкета по услуге на одной странице. Блок «Комплект» показывается, если это включено для услуги в каталоге.</p>
     {% if saved %}
       <div class="card" style="border-color:#86efac; background:#f0fdf4; margin-bottom: 12px;">
         <p style="margin:0;">Визит <strong>#{{ saved }}</strong> сохранён. Зайди как админ и открой запись по ID вручную.</p>
@@ -22,12 +22,7 @@
         Нет услуг для визита (каталог пуст или все категории скрыты из визита). Проверьте сиды и настройки категорий.
       </div>
     {% endif %}
-    <form method="post" action="/master/visit/new/continue" id="visit-form">
-      {% for k, v in fp.items() %}
-        {% if k.startswith('thermo_') %}
-          <input type="hidden" name="{{ k }}" value="{{ v|e }}" />
-        {% endif %}
-      {% endfor %}
+    <form method="post" action="/master/visit/new" id="visit-form">
       <h3>Клиент</h3>
       <div style="margin-bottom: 10px;">
         <label style="margin-right: 16px;">
@@ -174,7 +169,7 @@
       </div>
       <div style="margin-top: 12px;">
         <label for="service_id">Услуга *</label>
-        <select id="service_id" name="service_id" required onchange="updateKitSectionVisibility()"
+        <select id="service_id" name="service_id" required onchange="updateServiceDerivedUI()"
           style="width: 100%; max-width: 100%; box-sizing: border-box; min-height: 2.5rem;">
         </select>
       </div>
@@ -294,7 +289,41 @@
             <option value="FOREIGN" {% if fp.get('own_origin') == 'FOREIGN' %}selected{% endif %}>Чужой</option>
           </select>
         </div>
-        <label><input type="checkbox" name="own_correction" {% if fp.get('own_correction') == 'on' %}checked{% endif %} /> Коррекция</label>
+        <label><input type="checkbox" name="own_correction" id="own_correction" onchange="ownCorrectionPanelSync()" {% if fp.get('own_correction') == 'on' %}checked{% endif %} /> Коррекция</label>
+
+        <div id="own_correction_block" class="card" style="display: none; margin-top: 10px; background: #f8fafc;">
+          <h4 style="margin: 0 0 8px;">Коррекция комплекта</h4>
+          <p class="muted" style="margin-top: -4px; font-size: 12px;">Укажите количества и/или отметьте пункты. Если выбрана стирка — «одевание на круг» недоступно.</p>
+          <div class="row">
+            <div>
+              <label>Стрижка (1шт) — количество</label>
+              <input name="own_corr_trim_qty" type="number" step="1" min="0" value="{{ fp.get('own_corr_trim_qty', '0') }}" />
+            </div>
+            <div>
+              <label>Коррекция дреда (1шт) — количество</label>
+              <input name="own_corr_dread_qty" type="number" step="1" min="0" value="{{ fp.get('own_corr_dread_qty', '0') }}" />
+            </div>
+          </div>
+          <div class="row" style="margin-top: 10px;">
+            <div>
+              <label>Коррекция кудрей (1шт) — количество</label>
+              <input name="own_corr_curl_qty" type="number" step="1" min="0" value="{{ fp.get('own_corr_curl_qty', '0') }}" />
+            </div>
+            <div>
+              <div style="font-weight: 600; margin-bottom: 6px;">Сложность кудрей / дредов</div>
+              <div id="own_corr_curl_dread_complexity_wrap" style="display: flex; flex-wrap: wrap; gap: 10px 16px;">
+                <label><input type="radio" name="own_corr_curl_dread_complexity" value="NORMAL" {% if (fp.get('own_corr_curl_dread_complexity') or 'NORMAL') == 'NORMAL' %}checked{% endif %} /> Обычная</label>
+                <label><input type="radio" name="own_corr_curl_dread_complexity" value="HARD" {% if fp.get('own_corr_curl_dread_complexity') == 'HARD' %}checked{% endif %} /> Сложная (×1.5)</label>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top: 10px;">
+            <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="own_corr_wash" id="own_corr_wash" {% if fp.get('own_corr_wash') == 'on' %}checked{% endif %} /> Стирка</label>
+            <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="own_corr_steam" {% if fp.get('own_corr_steam') == 'on' %}checked{% endif %} /> Отпаривание</label>
+            <label style="display:block; margin-bottom: 0;"><input type="checkbox" name="own_corr_circle" id="own_corr_circle" {% if fp.get('own_corr_circle') == 'on' %}checked{% endif %} /> Одевание на круг</label>
+          </div>
+        </div>
+
         <label><input type="checkbox" name="own_extra_blanks" id="own_extra_blanks" onchange="ownExtra()" {% if fp.get('own_extra_blanks') == 'on' %}checked{% endif %} /> Доп. заготовки</label>
 
         <div id="blk-own-extra" style="display: none; margin-top: 8px;">
@@ -326,8 +355,114 @@
       </div>
       </div>
 
+      {% set tp = fp %}
+      <div id="visit_questionnaire_section" style="display: none;">
+        <h3>Вопросы по услуге</h3>
+        <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">Поля из каталога для выбранной услуги.</p>
+        <div id="visit_questionnaire_fields" class="card" style="margin-bottom: 14px; background: #fafafa;"></div>
+      </div>
+
+      <div id="visit_thermo_section" style="display: none;">
+        <h3>Термозамещение</h3>
+        <div class="card" style="margin-bottom: 14px; background: #f0f9ff; border-color: #bae6fd;">
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">Кудри</div>
+            <input type="text" name="thermo_curls" style="width:100%;" value="{{ tp.get('thermo_curls', '')|e }}"
+              placeholder="Название материала" />
+          </div>
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">Длина</div>
+            <input type="text" name="thermo_length" style="width:100%;" value="{{ tp.get('thermo_length', '')|e }}"
+              placeholder="Длина материала" />
+          </div>
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">Оттенок</div>
+            <input type="text" name="thermo_shade" style="width:100%;" value="{{ tp.get('thermo_shade', '')|e }}"
+              placeholder="Цвет материала" />
+          </div>
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">Общее количество баз (целое)</div>
+            <input type="number" name="thermo_bases_total" min="0" step="1" inputmode="numeric" style="width:100%; max-width:12rem;"
+              value="{{ tp.get('thermo_bases_total', '')|e }}" />
+          </div>
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">Вес материала (всего со страховками), можно с десятыми</div>
+            <input type="number" name="thermo_weight" min="0" step="any" style="width:100%; max-width:12rem;"
+              value="{{ tp.get('thermo_weight', '')|e }}" />
+          </div>
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; margin-bottom: 8px;">Какой шаблон</div>
+            <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-weight:normal;">
+              <input type="radio" name="thermo_template_mode" value="NEW"
+                {% if tp.get('thermo_template_mode', 'NEW') == 'NEW' %}checked{% endif %} onchange="thermoModeUpdate()" />
+              Новый — заполнить шаблон ниже
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-weight:normal;">
+              <input type="radio" name="thermo_template_mode" value="OLD"
+                {% if tp.get('thermo_template_mode') == 'OLD' %}checked{% endif %} onchange="thermoModeUpdate()" />
+              Старый — выбрать из сохранённых
+            </label>
+          </div>
+
+          <div id="thermo-block-old" style="display:none; margin-top: 14px; padding-top: 12px; border-top: 1px solid #bae6fd;">
+            <label style="display:block; font-weight:600; margin-bottom:6px;">Сохранённый шаблон</label>
+            <select name="thermo_old_template_id" id="thermo_old_template_id" style="width:100%; max-width: 28rem;">
+              <option value="">— выберите —</option>
+            </select>
+            <p id="thermo_saved_templates_empty" class="muted" style="margin:8px 0 0; display:none;">
+              Сохранённых шаблонов у этого клиента пока нет. Выберите «Новый» или сохраните визит после первого заполнения шаблона.
+            </p>
+            <div style="margin-top: 12px;">
+              <div style="font-weight: 600; margin-bottom: 6px;">Изменения в алгоритме плетения (доп. ряды и т.д.)</div>
+              <textarea name="thermo_algorithm_changes" rows="3" style="width:100%;"
+                placeholder="Тут можно описать всё, что менялось">{{ tp.get('thermo_algorithm_changes', '') }}</textarea>
+            </div>
+          </div>
+
+          <div id="thermo-block-new" style="display:none; margin-top: 14px; padding-top: 12px; border-top: 1px solid #bae6fd;">
+            <p class="muted" style="font-size:12px; margin:0 0 10px;">Числовые поля можно оставить пустыми — при сохранении подставится 0.</p>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">Средний вес пряди</span>
+              <input type="number" name="thermo_tpl_strand_weight_avg" min="0" step="any" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_strand_weight_avg', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">1 ряд</span>
+              <input type="number" name="thermo_tpl_row_1" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_row_1', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">2 ряд</span>
+              <input type="number" name="thermo_tpl_row_2" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_row_2', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">3 ряд</span>
+              <input type="number" name="thermo_tpl_row_3" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_row_3', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">Другие ряды</span>
+              <textarea name="thermo_tpl_other_rows" rows="2" style="width:100%; margin-top:4px;"
+                placeholder="Если есть доп ряды, напиши номер ряда и число баз">{{ tp.get('thermo_tpl_other_rows', '') }}</textarea></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">Виски</span>
+              <input type="number" name="thermo_tpl_temples" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_temples', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">Треугольники</span>
+              <input type="number" name="thermo_tpl_triangles" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_triangles', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">Птичка</span>
+              <input type="number" name="thermo_tpl_bird" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_bird', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">Квадрат</span>
+              <input type="number" name="thermo_tpl_square" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_square', '')|e }}" /></div>
+            <div style="margin-bottom: 4px;"><span style="font-weight:600;">Комментарий</span>
+              <textarea name="thermo_tpl_comment" rows="2" style="width:100%; margin-top:4px;"
+                placeholder="Другие ряды и/или изменения в алгоритме.">{{ tp.get('thermo_tpl_comment', '') }}</textarea></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="visit_preview_block" class="card" style="background:#fff; margin: 12px 0; border: 1px solid #e2e8f0;">
+        <h3 style="margin-top:0;">Предварительный расчёт</h3>
+        <div id="visit_preview_master_lines" style="font-size: 13px; margin-top: 8px;">—</div>
+        <div id="visit_preview_cost_line" class="muted" style="font-size: 13px; margin-top: 8px;">—</div>
+      </div>
+
       <p style="margin-top: 16px;">
-        <button type="submit">Далее</button>
+        <button type="submit">Сохранить визит</button>
         <a href="/"><button type="button" class="secondary">Отмена</button></a>
       </p>
     </form>
@@ -406,6 +541,7 @@
         nameInp.removeAttribute('required');
       }
       syncAmountRequired();
+      syncVisitThermoSection();
     }
     function renderSelectedClient(name, isDraft) {
       const box = document.getElementById('selected_client_box');
@@ -418,6 +554,7 @@
       document.getElementById('existing_client_id').value = String(id);
       renderSelectedClient(name, isDraft);
       document.getElementById('client_suggest_list').innerHTML = '';
+      syncVisitThermoSection();
     }
     async function clientSuggest() {
       const q = document.getElementById('client_search_q').value.trim();
@@ -495,6 +632,8 @@
         'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
       updateKitReserveLine('selected_stock_kit_reserve', k);
       document.getElementById('stock_kit_suggest_list').innerHTML = '';
+      selectedMainStockKit = k;
+      syncVisitPreview();
     }
     function selectExtraStockKit(k) {
       document.getElementById('own_extra_stock_kit_id').value = String(k.id);
@@ -504,6 +643,8 @@
         'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
       updateKitReserveLine('selected_extra_stock_kit_reserve', k);
       document.getElementById('extra_stock_kit_suggest_list').innerHTML = '';
+      selectedExtraStockKit = k;
+      syncVisitPreview();
     }
     async function stockKitSuggest() {
       const q = document.getElementById('stock_kit_search_q').value.trim();
@@ -531,10 +672,22 @@
     });
     const _kg = document.getElementById('kanekalon_grams');
     const _ug = document.getElementById('kudri_grams');
-    if (_kg) _kg.addEventListener('input', updateMixBlockUI);
-    if (_ug) _ug.addEventListener('input', updateMixBlockUI);
+    if (_kg) _kg.addEventListener('input', function(){ updateMixBlockUI(); syncVisitPreview(); });
+    if (_ug) _ug.addEventListener('input', function(){ updateMixBlockUI(); syncVisitPreview(); });
     const _cis = document.querySelector('input[name="client_is_self"]');
     if (_cis) _cis.addEventListener('change', syncAmountRequired);
+    const _amt = document.getElementById('amount_from_client');
+    if (_amt) { _amt.addEventListener('input', syncVisitPreview); _amt.addEventListener('change', syncVisitPreview); }
+    document.querySelectorAll('input[name="addon_sales_amount"], input[name="mix_source"], input[name="mix_complexity"], input[name="amortization_level"]').forEach(function (el) {
+      el.addEventListener('change', syncVisitPreview);
+      el.addEventListener('input', syncVisitPreview);
+    });
+    document.querySelectorAll('input[name="visit_master_on"]').forEach(function (el) { el.addEventListener('change', syncVisitPreview); });
+    document.querySelectorAll('input[name^="visit_master_pct_"]').forEach(function (el) { el.addEventListener('input', syncVisitPreview); el.addEventListener('change', syncVisitPreview); });
+    document.querySelectorAll('input[name="stock_use_entire"], input[name="stock_blanks_used"], input[name="own_extra_stock_use_entire"], input[name="own_extra_stock_blanks_used"]').forEach(function (el) {
+      el.addEventListener('input', syncVisitPreview);
+      el.addEventListener('change', syncVisitPreview);
+    });
 
     document.getElementById('visit-form').addEventListener('submit', function (e) {
       const mode = document.querySelector('input[name="client_mode"]:checked').value;
@@ -579,6 +732,35 @@
           }
         }
         if (kk && kk.value === 'OWN') {
+          const ownCorr = document.querySelector('input[name="own_correction"]');
+          if (ownCorr && ownCorr.checked) {
+            const trimQ = parseInt((document.querySelector('input[name="own_corr_trim_qty"]') || {}).value || '0', 10) || 0;
+            const dreadQ = parseInt((document.querySelector('input[name="own_corr_dread_qty"]') || {}).value || '0', 10) || 0;
+            const curlQ = parseInt((document.querySelector('input[name="own_corr_curl_qty"]') || {}).value || '0', 10) || 0;
+            const wash = (document.getElementById('own_corr_wash') || {}).checked;
+            const circle = (document.getElementById('own_corr_circle') || {}).checked;
+            const steam = (document.querySelector('input[name="own_corr_steam"]') || {}).checked;
+            if (wash && circle) {
+              e.preventDefault();
+              alert('Если выбрана «Стирка», то «Одевание на круг» выбирать нельзя.');
+              return;
+            }
+            if (
+              trimQ <= 0 && !wash && !circle && !steam && dreadQ <= 0 && curlQ <= 0
+            ) {
+              e.preventDefault();
+              alert('При отмеченной коррекции укажите хотя бы одну операцию.');
+              return;
+            }
+            if (dreadQ > 0 || curlQ > 0) {
+              const cr = document.querySelector('input[name="own_corr_curl_dread_complexity"]:checked');
+              if (!cr) {
+                e.preventDefault();
+                alert('Выберите сложность кудрей / дредов.');
+                return;
+              }
+            }
+          }
           const ownEx = document.getElementById('own_extra_blanks');
           if (ownEx && ownEx.checked) {
             const eid = document.getElementById('own_extra_stock_kit_id').value.trim();
@@ -595,6 +777,135 @@
     const formPrefill = {{ fp|tojson }};
     const visitMasterLevel = {{ (current_user.master_level.value if current_user.master_level else None) | tojson }};
     const serviceCatalog = {{ service_catalog|tojson }};
+    const currentUserId = {{ current_user.id|int }};
+    const salonCutPct = {{ salon_cut_pct|float }};
+    const materialPricePerGram = {{ (material_price_per_gram_json or '{}') | safe }};
+
+    let selectedMainStockKit = null;
+    let selectedExtraStockKit = null;
+
+    function money2(x) { return Math.round((parseFloat(x) || 0) * 100) / 100; }
+    function numVal(sel) {
+      const el = document.querySelector(sel);
+      if (!el) return 0;
+      const n = parseFloat(String(el.value || '').replace(',', '.'));
+      return isNaN(n) ? 0 : n;
+    }
+    function intVal(sel) {
+      const el = document.querySelector(sel);
+      if (!el) return 0;
+      const n = parseInt(String(el.value || '').trim(), 10);
+      return isNaN(n) ? 0 : n;
+    }
+    function isChecked(sel) {
+      const el = document.querySelector(sel);
+      return !!(el && el.checked);
+    }
+    function masterNameById(mid) {
+      const cb = document.querySelector('input[name="visit_master_on"][value="' + String(mid) + '"]');
+      if (!cb) return 'ID ' + mid;
+      const lab = cb.closest('label');
+      if (!lab) return 'ID ' + mid;
+      // Remove percent input value from label text.
+      const t = (lab.textContent || '').replace(/\s+/g, ' ').trim();
+      return t || ('ID ' + mid);
+    }
+    function readAllocationsForPreview() {
+      const ids = Array.from(document.querySelectorAll('input[name="visit_master_on"]:checked')).map((x) => parseInt(x.value, 10)).filter((x) => x > 0);
+      if (ids.length === 0) return null;
+      if (ids.length === 1) {
+        const mid = ids[0];
+        const s = (document.querySelector('input[name="visit_master_pct_' + String(mid) + '"]') || {}).value || '';
+        const p = s.trim() ? parseInt(s.trim(), 10) : 100;
+        if (!(p >= 0)) return null;
+        return [{ mid, pct: p }];
+      }
+      const rows = [];
+      let sum = 0;
+      for (const mid of ids) {
+        const s = (document.querySelector('input[name="visit_master_pct_' + String(mid) + '"]') || {}).value || '';
+        if (!String(s).trim()) return null;
+        const p = parseInt(String(s).trim(), 10);
+        if (isNaN(p)) return null;
+        sum += p;
+        rows.push({ mid, pct: p });
+      }
+      if (sum !== 100) return null;
+      return rows;
+    }
+    function kitUsageCost(kit, useEntireSel, blanksSel) {
+      if (!kit) return { piecesUsed: 0, cost: 0, warn: '' };
+      const avail = parseInt(String(kit.pieces_available || 0), 10) || 0;
+      const total = parseInt(String(kit.pieces_total || 0), 10) || 0;
+      const price = parseFloat(String(kit.stock_price_total || 0)) || 0;
+      const useEntire = isChecked(useEntireSel);
+      const blanks = Math.max(0, intVal(blanksSel));
+      const piecesUsed = useEntire ? avail : blanks;
+      if (piecesUsed <= 0) return { piecesUsed: 0, cost: 0, warn: '' };
+      if (total <= 0 || price <= 0) return { piecesUsed, cost: 0, warn: 'Нет цены/кол-ва заготовок у комплекта для расчёта себестоимости.' };
+      return { piecesUsed, cost: price * (piecesUsed / total), warn: '' };
+    }
+    function syncVisitPreview() {
+      const payEl = document.getElementById('visit_preview_master_lines');
+      const costEl = document.getElementById('visit_preview_cost_line');
+      if (!payEl || !costEl) return;
+
+      const kan = Math.max(0, numVal('#kanekalon_grams'));
+      const kud = Math.max(0, numVal('#kudri_grams'));
+      const mat = kan * (parseFloat(materialPricePerGram.kanekalon) || 0) + kud * (parseFloat(materialPricePerGram.kudri) || 0);
+
+      const addons = Math.max(0, numVal('input[name="addon_sales_amount"]'));
+
+      const gramsTotal = kan + kud;
+      const mixSource = (document.querySelector('input[name="mix_source"]:checked') || {}).value || 'NO_MIX';
+      const mixComp = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || null;
+      const coef = { SIMPLE: 1.0, MEDIUM: 1.5, HARD: 2.0 };
+      const mixCost = (gramsTotal > 0 && mixSource !== 'NO_MIX' && mixComp && coef[mixComp]) ? (gramsTotal * coef[mixComp]) : 0;
+      const mixBonus = (mixSource === 'SELF_MIXED') ? mixCost : 0;
+
+      const amort = (function () {
+        const v = (document.querySelector('input[name="amortization_level"]:checked') || {}).value || 'MIN';
+        return { MIN: 100.0, MID: 200.0, MAX: 500.0 }[v] || 0;
+      })();
+
+      let kitCostTotal = 0;
+      let warn = '';
+      const kk = (document.querySelector('input[name="kit_kind"]:checked') || {}).value || '';
+      const needKit = !!(getSelectedService() && getSelectedService().requires_kit_block);
+      if (needKit && kk === 'STOCK') {
+        const r = kitUsageCost(selectedMainStockKit, 'input[name="stock_use_entire"]', 'input[name="stock_blanks_used"]');
+        kitCostTotal += r.cost;
+        if (r.warn) warn = r.warn;
+      }
+      if (needKit && kk === 'OWN' && isChecked('#own_extra_blanks')) {
+        const r2 = kitUsageCost(selectedExtraStockKit, 'input[name="own_extra_stock_use_entire"]', 'input[name="own_extra_stock_blanks_used"]');
+        kitCostTotal += r2.cost;
+        if (r2.warn) warn = r2.warn;
+      }
+
+      const costTotal = mat + kitCostTotal + addons + mixCost + amort;
+      const amount = Math.max(0, numVal('#amount_from_client'));
+      const profitBefore = amount - costTotal;
+      const salonProfit = profitBefore * (parseFloat(salonCutPct) || 0);
+      const mastersPool = profitBefore - salonProfit;
+
+      const alloc = readAllocationsForPreview();
+      if (!alloc) {
+        payEl.innerHTML = '—';
+      } else {
+        const lines = [];
+        for (const r of alloc) {
+          const base = mastersPool * (r.pct / 100.0);
+          const bonus = (r.mid === currentUserId) ? mixBonus : 0;
+          lines.push('ЗП «' + masterNameById(r.mid) + '»: ' + money2(base + bonus) + ' ₽');
+        }
+        payEl.innerHTML = lines.map((l) => '<div>' + l + '</div>').join('');
+      }
+
+      let costLine = 'Себестоимость (итого): ' + money2(costTotal) + ' ₽ (материал + комплект + доп. продажи + смешка + амортизация)';
+      if (warn) costLine += ' · ' + warn;
+      costEl.textContent = costLine;
+    }
 
     function getSelectedService() {
       const subSel = document.getElementById('service_subcategory_id');
@@ -621,6 +932,117 @@
       const svc = getSelectedService();
       const need = !!(svc && svc.requires_kit_block);
       wrap.style.display = need ? 'block' : 'none';
+    }
+
+    function updateServiceDerivedUI() {
+      updateKitSectionVisibility();
+      rebuildVisitQuestionnaire();
+      syncVisitThermoSection();
+      syncVisitPreview();
+    }
+
+    function rebuildVisitQuestionnaire() {
+      const wrap = document.getElementById('visit_questionnaire_section');
+      const host = document.getElementById('visit_questionnaire_fields');
+      if (!wrap || !host) return;
+      const svc = getSelectedService();
+      const fields = (svc && svc.questionnaire_fields) ? svc.questionnaire_fields : [];
+      if (!fields.length) {
+        wrap.style.display = 'none';
+        host.innerHTML = '';
+        return;
+      }
+      wrap.style.display = 'block';
+      let html = '';
+      for (const f of fields) {
+        const qn = 'q_' + f.field_key;
+        const val = (formPrefill && Object.prototype.hasOwnProperty.call(formPrefill, qn))
+          ? String(formPrefill[qn])
+          : '';
+        const reqMark = f.required ? ' *' : '';
+        html += '<div style="margin-bottom: 14px;">';
+        html += '<div style="font-weight: 600; margin-bottom: 6px;">' + escapeHtml(f.label || '') + reqMark + '</div>';
+        if (f.field_type === 'TEXT') {
+          const ph = f.placeholder ? ' placeholder="' + escapeHtml(f.placeholder) + '"' : '';
+          const rq = f.required ? ' required' : '';
+          html += '<input type="text" name="' + escapeHtml(qn) + '" style="width:100%;" value="' + escapeHtml(val) + '"' + ph + rq + ' />';
+        } else if (f.field_type === 'TEXTAREA') {
+          const rq = f.required ? ' required' : '';
+          html += '<textarea name="' + escapeHtml(qn) + '" rows="3" style="width:100%;"' + rq + '>' + escapeHtml(val) + '</textarea>';
+        } else if (f.field_type === 'NUMBER') {
+          let attr = ' step="any" style="width:100%;" value="' + escapeHtml(val) + '"';
+          if (f.min_value != null) attr += ' min="' + escapeHtml(String(f.min_value)) + '"';
+          if (f.max_value != null) attr += ' max="' + escapeHtml(String(f.max_value)) + '"';
+          const rq = f.required ? ' required' : '';
+          html += '<input type="number" name="' + escapeHtml(qn) + '"' + attr + rq + ' />';
+        } else if (f.field_type === 'CHECKBOX') {
+          const chk = (val === 'on' || val === 'true' || val === '1') ? ' checked' : '';
+          html += '<label style="display:flex;align-items:center;gap:8px;font-weight:normal;"><input type="checkbox" name="' + escapeHtml(qn) + '" value="on"' + chk + ' /> ' + escapeHtml(f.placeholder || 'Да') + '</label>';
+        } else if (f.field_type === 'SELECT') {
+          const rq = f.required ? ' required' : '';
+          html += '<select name="' + escapeHtml(qn) + '" style="width:100%;"' + rq + '>';
+          html += '<option value="">—</option>';
+          for (const o of (f.options || [])) {
+            const sel = (val === o.value) ? ' selected' : '';
+            html += '<option value="' + escapeHtml(o.value) + '"' + sel + '>' + escapeHtml(o.label) + '</option>';
+          }
+          html += '</select>';
+        }
+        if (f.help_text) {
+          html += '<p class="muted" style="font-size:12px;margin:6px 0 0;">' + escapeHtml(f.help_text) + '</p>';
+        }
+        html += '</div>';
+      }
+      host.innerHTML = html;
+    }
+
+    function thermoModeUpdate() {
+      const r = document.querySelector('input[name="thermo_template_mode"]:checked');
+      const m = r ? r.value : 'NEW';
+      const bn = document.getElementById('thermo-block-new');
+      const bo = document.getElementById('thermo-block-old');
+      if (bn) bn.style.display = m === 'NEW' ? 'block' : 'none';
+      if (bo) bo.style.display = m === 'OLD' ? 'block' : 'none';
+    }
+
+    async function loadThermoTemplates(clientId) {
+      const sel = document.getElementById('thermo_old_template_id');
+      const emptyNote = document.getElementById('thermo_saved_templates_empty');
+      if (!sel) return;
+      const preferred = String(sel.value || (formPrefill && formPrefill.thermo_old_template_id) || '').trim();
+      sel.innerHTML = '<option value="">— выберите —</option>';
+      if (!clientId || clientId <= 0) {
+        if (emptyNote) emptyNote.style.display = 'none';
+        return;
+      }
+      try {
+        const res = await fetch('/master/clients/' + clientId + '/thermo-templates');
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = data.templates || [];
+        if (emptyNote) emptyNote.style.display = list.length ? 'none' : 'block';
+        for (const t of list) {
+          const opt = document.createElement('option');
+          opt.value = String(t.id);
+          opt.textContent = '№' + t.id + ' · ' + (t.label || '') + ' (' + (t.created_at || '') + ')';
+          sel.appendChild(opt);
+        }
+        if (preferred) sel.value = preferred;
+      } catch (e) {}
+    }
+
+    function syncVisitThermoSection() {
+      const sec = document.getElementById('visit_thermo_section');
+      if (!sec) return;
+      const svc = getSelectedService();
+      const show = !!(svc && svc.requires_thermo);
+      sec.style.display = show ? 'block' : 'none';
+      if (show) {
+        const cid = (document.getElementById('existing_client_id') || {}).value || '';
+        const id = parseInt(String(cid).trim(), 10) || 0;
+        loadThermoTemplates(id);
+        thermoModeUpdate();
+      }
     }
 
     const serviceMetaById = {};
@@ -706,7 +1128,7 @@
         opt.title = line;
         serviceSel.appendChild(opt);
       }
-      updateKitSectionVisibility();
+      updateServiceDerivedUI();
     }
 
     function serviceCatalogOnCategory() {
@@ -739,24 +1161,76 @@
       if (initialServiceId) {
         serviceSel.value = String(initialServiceId);
       }
-      updateKitSectionVisibility();
+      updateServiceDerivedUI();
     })();
 
+    function syncOwnCorrWashCircle() {
+      const wash = document.getElementById('own_corr_wash');
+      const circle = document.getElementById('own_corr_circle');
+      if (!wash || !circle) return;
+      if (wash.checked) {
+        circle.checked = false;
+        circle.disabled = true;
+      } else {
+        circle.disabled = false;
+      }
+    }
+    function syncOwnCorrComplexity() {
+      const dreadQ = parseInt((document.querySelector('input[name="own_corr_dread_qty"]') || {}).value || '0', 10) || 0;
+      const curlQ = parseInt((document.querySelector('input[name="own_corr_curl_qty"]') || {}).value || '0', 10) || 0;
+      const active = dreadQ > 0 || curlQ > 0;
+      document.querySelectorAll('input[name="own_corr_curl_dread_complexity"]').forEach((r) => {
+        r.disabled = !active;
+        if (!active) r.checked = false;
+      });
+      if (active) {
+        const any = document.querySelector('input[name="own_corr_curl_dread_complexity"]:checked');
+        if (!any) {
+          const n = document.querySelector('input[name="own_corr_curl_dread_complexity"][value="NORMAL"]');
+          if (n) n.checked = true;
+        }
+      }
+    }
+    function ownCorrectionPanelSync() {
+      const kk = document.querySelector('input[name="kit_kind"]:checked');
+      const cb = document.getElementById('own_correction');
+      const panel = document.getElementById('own_correction_block');
+      if (!panel || !cb || !kk) return;
+      const show = kk.value === 'OWN' && cb.checked;
+      panel.style.display = show ? 'block' : 'none';
+      if (show) {
+        syncOwnCorrWashCircle();
+        syncOwnCorrComplexity();
+      }
+    }
     function kitKind() {
       const v = document.querySelector('input[name="kit_kind"]:checked').value;
       document.getElementById('blk-stock').style.display = v === 'STOCK' ? 'block' : 'none';
       document.getElementById('blk-own').style.display = v === 'OWN' ? 'block' : 'none';
+      ownCorrectionPanelSync();
     }
     function ownExtra() {
       const on = document.getElementById('own_extra_blanks').checked;
       document.getElementById('blk-own-extra').style.display = on ? 'block' : 'none';
     }
+    const ownCorrWash = document.getElementById('own_corr_wash');
+    if (ownCorrWash) ownCorrWash.addEventListener('change', function () { syncOwnCorrWashCircle(); });
+    document.querySelectorAll('input[name="own_corr_dread_qty"], input[name="own_corr_curl_qty"]').forEach((el) => {
+      el.addEventListener('input', syncOwnCorrComplexity);
+      el.addEventListener('change', syncOwnCorrComplexity);
+    });
+
+    document.querySelectorAll('input[name="thermo_template_mode"]').forEach(function (el) {
+      el.addEventListener('change', thermoModeUpdate);
+    });
+
     clientMode();
     kitKind();
     ownExtra();
+    ownCorrectionPanelSync();
     updateMixBlockUI();
     syncAmountRequired();
-    updateKitSectionVisibility();
+    updateServiceDerivedUI();
     {% if selected_client %}
     renderSelectedClient({{ selected_client.name|tojson }}, {{ (not selected_client.is_confirmed)|tojson }});
     {% endif %}

@@ -234,6 +234,21 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
             ow = kit.get("own") or {}
             blocks.append(("Происхождение", ru_own_origin(str(ow.get("origin", "")))))
             blocks.append(("Коррекция", "Да" if ow.get("correction") else "Нет"))
+            cd = ow.get("correction_details")
+            if ow.get("correction") and isinstance(cd, dict):
+                blocks.append(("Корр.: стрижка (шт)", _format_card_scalar(cd.get("trim_qty", 0))))
+                blocks.append(("Корр.: дреды (шт)", _format_card_scalar(cd.get("dread_qty", 0))))
+                blocks.append(("Корр.: кудри (шт)", _format_card_scalar(cd.get("curl_qty", 0))))
+                cx = cd.get("curl_dread_complexity")
+                cx_lbl = "—"
+                if cx == "HARD":
+                    cx_lbl = "Сложная"
+                elif cx == "NORMAL":
+                    cx_lbl = "Обычная"
+                blocks.append(("Корр.: сложность кудрей/дредов", cx_lbl))
+                blocks.append(("Корр.: стирка", "Да" if cd.get("wash") else "Нет"))
+                blocks.append(("Корр.: отпаривание", "Да" if cd.get("steam") else "Нет"))
+                blocks.append(("Корр.: одевание на круг", "Да" if cd.get("circle") else "Нет"))
             blocks.append(("Дополнительные заготовки", "Да" if ow.get("extra_blanks") else "Нет"))
             ex = ow.get("extra")
             if ex and isinstance(ex, dict):

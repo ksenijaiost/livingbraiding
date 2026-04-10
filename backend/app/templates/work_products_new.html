@@ -158,11 +158,11 @@
             <input name="corr_curl_qty" type="number" step="1" min="0" value="{{ fp.corr_curl_qty or 0 }}" />
           </div>
           <div>
-            <label>Сложность кудрей</label>
-            <select name="corr_curl_complexity">
-              <option value="NORMAL" {% if (fp.corr_curl_complexity or 'NORMAL') == 'NORMAL' %}selected{% endif %}>Обычная</option>
-              <option value="HARD" {% if fp.corr_curl_complexity == 'HARD' %}selected{% endif %}>Сложная (×1.5)</option>
-            </select>
+            <div style="font-weight: 600; margin-bottom: 6px;">Сложность кудрей / дредов</div>
+            <div id="corr_curl_dread_complexity_wrap" style="display: flex; flex-wrap: wrap; gap: 10px 16px;">
+              <label><input type="radio" name="corr_curl_dread_complexity" value="NORMAL" {% if (fp.corr_curl_dread_complexity or 'NORMAL') == 'NORMAL' %}checked{% endif %} /> Обычная</label>
+              <label><input type="radio" name="corr_curl_dread_complexity" value="HARD" {% if fp.corr_curl_dread_complexity == 'HARD' %}checked{% endif %} /> Сложная (×1.5)</label>
+            </div>
           </div>
         </div>
 
@@ -239,20 +239,17 @@
               <input name="kit_title" value="{{ fp.kit_title }}" placeholder="например, Комплект SE (короткие косы)" />
             </div>
           </div>
-          <div class="row" style="margin-top: 8px;">
-            <div>
-              <label>Цена комплекта на складе (всего), ₽</label>
-              <input name="kit_stock_price_total" type="number" step="0.01" min="0" value="{{ fp.kit_stock_price_total or 0 }}" />
-            </div>
-            <div>
-              <label class="muted">pieces_total будет рассчитан из таблицы</label>
-              <input disabled value="—" />
-            </div>
-          </div>
           <p class="muted" style="font-size:12px; margin-bottom:0;">
-            Склад создаём только в режиме «в наличие». ЗП авторов проставится автоматически.
+            Склад создаём только в режиме «в наличие». Цену продажи комплекта задаёт администратор. Заготовок на складе будет столько, сколько в «Количество заготовок» выше (без стрижек SE/DE из таблицы). ЗП авторов — по таблице.
           </p>
         </div>
+      </div>
+
+      <div id="work_preview_block" class="card" style="background:#fff; margin: 12px 0; border: 1px solid #e2e8f0;">
+        <h3 style="margin-top:0;">Предварительный расчёт</h3>
+        <div id="work_preview_pieces_line" class="muted" style="font-size: 13px; display:none;">—</div>
+        <div id="work_preview_master_lines" style="font-size: 13px; margin-top: 8px;">—</div>
+        <div id="work_preview_cost_line" class="muted" style="font-size: 13px; margin-top: 8px;">—</div>
       </div>
 
       <button type="submit">Сохранить</button>
@@ -284,6 +281,7 @@
       if (kind.value === 'KIT' && typeof window.rebuildKitTable === 'function') {
         window.rebuildKitTable();
       }
+      if (typeof window.syncKitPreview === 'function') window.syncKitPreview();
     }
     function syncRubberBlock() {
       var kind = document.querySelector('select[name="kind"]');
@@ -306,6 +304,23 @@
       if (!kind || !el) return;
       el.style.display = (kind.value === 'KIT_CORRECTION') ? 'block' : 'none';
       syncCorrectionRules();
+      syncCorrectionComplexity();
+    }
+    function syncCorrectionComplexity() {
+      var dreadQ = parseInt((document.querySelector('input[name="corr_dread_qty"]')||{}).value||'0',10) || 0;
+      var curlQ = parseInt((document.querySelector('input[name="corr_curl_qty"]')||{}).value||'0',10) || 0;
+      var active = dreadQ > 0 || curlQ > 0;
+      document.querySelectorAll('input[name="corr_curl_dread_complexity"]').forEach(function (r) {
+        r.disabled = !active;
+        if (!active) r.checked = false;
+      });
+      if (active) {
+        var any = document.querySelector('input[name="corr_curl_dread_complexity"]:checked');
+        if (!any) {
+          var n = document.querySelector('input[name="corr_curl_dread_complexity"][value="NORMAL"]');
+          if (n) n.checked = true;
+        }
+      }
     }
     function syncCorrectionRules() {
       var wash = document.getElementById('corr_wash');
@@ -322,6 +337,198 @@
       var el = document.getElementById('work_price_meta');
       try { return el && el.textContent ? JSON.parse(el.textContent) : {}; } catch (e) { return {}; }
     }
+    function money2(x) { return Math.round((parseFloat(x) || 0) * 100) / 100; }
+    function readGrams(name) {
+      var el = document.querySelector('input[name="' + name + '"]');
+      if (!el) return 0;
+      var v = String(el.value || '').replace(',', '.');
+      var n = parseFloat(v);
+      return isNaN(n) ? 0 : Math.max(0, n);
+    }
+    function kitState() {
+      var el = document.getElementById('kit_table_state');
+      try { return el && el.textContent ? JSON.parse(el.textContent) : {}; } catch (e) { return {}; }
+    }
+    function nameByUserId(state, uid) {
+      var ms = (state && state.masters) ? state.masters : [];
+      for (var i = 0; i < ms.length; i++) if (ms[i].id === uid) return ms[i].name;
+      return 'ID ' + uid;
+    }
+
+    function syncWorkPreview() {
+      var kind = document.querySelector('select[name="kind"]');
+      var piecesEl = document.getElementById('work_preview_pieces_line');
+      var payEl = document.getElementById('work_preview_master_lines');
+      var costEl = document.getElementById('work_preview_cost_line');
+      if (!piecesEl || !payEl || !costEl) return;
+
+      var k = kind ? kind.value : '';
+      var meta = readWorkPriceMeta();
+      var st = kitState();
+      var mpg = (st && st.materialPricePerGram) ? st.materialPricePerGram : {};
+      var kan = readGrams('kanekalon_grams');
+      var kud = readGrams('kudri_grams');
+      var mat = kan * (parseFloat(mpg.kanekalon) || 0) + kud * (parseFloat(mpg.kudri) || 0);
+      var bonus = parseFloat((meta && meta.customOrderBonus) || 1.0);
+      if (!bonus || bonus <= 0) bonus = 1.0;
+      if (getScopeValue() !== 'CUSTOM_ORDER') bonus = 1.0;
+
+      function setPieces(text, show) {
+        piecesEl.style.display = show ? 'block' : 'none';
+        piecesEl.textContent = show ? text : '—';
+      }
+      function setPayLines(lines) {
+        if (!lines || !lines.length) { payEl.innerHTML = '—'; return; }
+        payEl.innerHTML = lines.map(function (l) { return '<div>' + l + '</div>'; }).join('');
+      }
+      function setCost(text) { costEl.textContent = text || '—'; }
+
+      setPieces('—', false);
+
+      if (k === 'KIT') {
+        var exMap = {};
+        (st.excludeFromInventoryPieceCount || []).forEach(function (x) { exMap[x] = true; });
+        var rates = st.kitRates || {};
+        function kitRateForItem(itemKey, qtyTotal) {
+          var groups = ['SE', 'DE'];
+          for (var gi = 0; gi < groups.length; gi++) {
+            var g = rates[groups[gi]];
+            if (!g || !g[itemKey]) continue;
+            var cfg = g[itemKey];
+            var base = parseFloat(cfg.base) || 0;
+            var thQty = parseInt(cfg.threshold_qty, 10) || 0;
+            var thRate = parseFloat(cfg.threshold_rate) || 0;
+            if (thQty > 0 && qtyTotal >= thQty && thRate > 0) return thRate;
+            return base;
+          }
+          return 0;
+        }
+
+        var totals = {};
+        document.querySelectorAll('#kit_qty_tbody input[name^="kit_qty_"]').forEach(function (inp) {
+          var m = /^kit_qty_(\d+)_(.+)$/.exec(inp.name);
+          if (!m) return;
+          var q = parseInt(inp.value, 10) || 0;
+          var key = m[2];
+          totals[key] = (totals[key] || 0) + q;
+        });
+
+        var inv = 0;
+        for (var key in totals) if (!exMap[key]) inv += totals[key] || 0;
+        setPieces('Количество заготовок: ' + String(inv), true);
+
+        var gramsTotal = kan + kud;
+        var mixSrc = (document.querySelector('input[name="mix_source"]:checked') || {}).value || 'NO_MIX';
+        var mixComp = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || 'SIMPLE';
+        var rm0 = (meta && meta.mixRates) ? meta.mixRates : {};
+        var mixRate0 = parseFloat(rm0[mixComp]) || 0;
+        var mixBonusTotal = (gramsTotal > 0 && mixSrc === 'SELF_MIXED') ? (gramsTotal * mixRate0) : 0;
+        var mixMasterId = st.currentUserId || 0;
+
+        var ids = (typeof window.getKitColumnMasterIds === 'function') ? window.getKitColumnMasterIds() : [st.currentUserId || 0];
+        var lines = [];
+        for (var ii = 0; ii < ids.length; ii++) {
+          var uid = ids[ii];
+          var sum = 0;
+          for (var itemKey in totals) {
+            var tq = totals[itemKey] || 0;
+            var r = kitRateForItem(itemKey, tq);
+            if (r <= 0) continue;
+            var inp2 = document.querySelector('input[name="kit_qty_' + uid + '_' + itemKey + '"]');
+            var q2 = inp2 ? (parseInt(inp2.value, 10) || 0) : 0;
+            if (q2 > 0) sum += r * q2;
+          }
+          if (mixBonusTotal > 0 && mixMasterId && uid === mixMasterId) {
+            sum += mixBonusTotal;
+          }
+          lines.push('ЗП «' + nameByUserId(st, uid) + '»: ' + money2(sum) + ' ₽');
+        }
+        setPayLines(lines);
+
+        var extra = parseFloat((document.querySelector('input[name="extra_costs_amount"]') || {}).value) || 0;
+        var costKit = mat + extra;
+        setCost('Себестоимость (итого): ' + money2(costKit) + ' ₽ (материал + доп. расходы)');
+        return;
+      }
+
+      if (k === 'RUBBER') {
+        var t = document.getElementById('rubber_type_sel');
+        var typeVal = t ? t.value : '';
+        var map = (meta && meta.rubber) ? meta.rubber : {};
+        var nameByType = { TAIL_ELASTIC: 'Хвост на резинке (1 крепление)', TAIL_CRAB: 'Хвост на крабе', TAIL_NET: 'Хвост на сетке', BRAIDS_ELASTIC: 'Косы на резинке (1 коса)' };
+        var row = map[nameByType[typeVal] || ''] || null;
+        var units = 1;
+        if (row && row.is_per_unit) {
+          if (typeVal === 'TAIL_ELASTIC') units = parseInt((document.querySelector('input[name="rubber_attach_qty"]') || {}).value || '1', 10) || 1;
+          else if (typeVal === 'BRAIDS_ELASTIC') units = parseInt((document.querySelector('input[name="rubber_braids_qty"]') || {}).value || '1', 10) || 1;
+          else units = 1;
+        }
+        if (!units || units < 1) units = 1;
+        var mp = row ? (parseFloat(row.master_pay) || 0) : 0;
+        var fx = row ? (parseFloat(row.fixed_expense) || 0) : 0;
+        var pay = mp * units * bonus;
+        var extra2 = fx * units;
+        var cost = mat + extra2;
+        var uid0 = st.currentUserId || 0;
+        setPayLines([('ЗП «' + nameByUserId(st, uid0) + '»: ' + money2(pay) + ' ₽')]);
+        setCost('Себестоимость (итого): ' + money2(cost) + ' ₽ (материал + доп. расходы)');
+        return;
+      }
+
+      if (k === 'KIT_CORRECTION') {
+        var mapc = (meta && meta.correction) ? meta.correction : {};
+        function svcRow(nm) { return mapc[nm] || null; }
+        function mpSum(nm, units, cmul) {
+          var r = svcRow(nm);
+          if (!r) return 0;
+          return (parseFloat(r.master_pay) || 0) * (units || 0) * (cmul || 1);
+        }
+        function fxSum(nm, units) {
+          var r = svcRow(nm);
+          if (!r) return 0;
+          return (parseFloat(r.fixed_expense) || 0) * (units || 0);
+        }
+        var trimQ = parseInt((document.querySelector('input[name="corr_trim_qty"]') || {}).value || '0', 10) || 0;
+        var dreadQ = parseInt((document.querySelector('input[name="corr_dread_qty"]') || {}).value || '0', 10) || 0;
+        var curlQ = parseInt((document.querySelector('input[name="corr_curl_qty"]') || {}).value || '0', 10) || 0;
+        var wash = (document.getElementById('corr_wash') || {}).checked;
+        var circle = (document.getElementById('corr_circle') || {}).checked;
+        var steam = (document.querySelector('input[name="corr_steam"]') || {}).checked;
+        var cdHard = (document.querySelector('input[name="corr_curl_dread_complexity"]:checked') || {}).value === 'HARD';
+        var cm = (dreadQ > 0 || curlQ > 0) && cdHard ? 1.5 : 1.0;
+
+        var payT = 0;
+        var fxT = 0;
+        if (trimQ > 0) { payT += mpSum('Стрижка (1шт)', trimQ, 1.0); fxT += fxSum('Стрижка (1шт)', trimQ); }
+        if (dreadQ > 0) { payT += mpSum('Коррекция дреда (1шт)', dreadQ, cm); fxT += fxSum('Коррекция дреда (1шт)', dreadQ); }
+        if (curlQ > 0) { payT += mpSum('Коррекция кудрей (1шт)', curlQ, cm); fxT += fxSum('Коррекция кудрей (1шт)', curlQ); }
+        if (wash) { payT += mpSum('Стирка', 1, 1.0); fxT += fxSum('Стирка', 1); }
+        if (steam) { payT += mpSum('Отпаривание', 1, 1.0); fxT += fxSum('Отпаривание', 1); }
+        if (circle) { payT += mpSum('Одевание на круг', 1, 1.0); fxT += fxSum('Одевание на круг', 1); }
+
+        var uid1 = st.currentUserId || 0;
+        setPayLines([('ЗП «' + nameByUserId(st, uid1) + '»: ' + money2(payT * bonus) + ' ₽')]);
+        setCost('Себестоимость (итого): ' + money2(mat + fxT) + ' ₽ (материал + доп. расходы)');
+        return;
+      }
+
+      if (k === 'MIX') {
+        var gramsTotal = kan + kud;
+        var mc = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || 'SIMPLE';
+        var rm = (meta && meta.mixRates) ? meta.mixRates : {};
+        var rate = parseFloat(rm[mc]) || 0;
+        var payM = gramsTotal > 0 ? gramsTotal * rate : 0;
+        var uid2 = st.currentUserId || 0;
+        setPayLines([('ЗП «' + nameByUserId(st, uid2) + '»: ' + money2(payM) + ' ₽')]);
+        setCost('Себестоимость (итого): ' + money2(mat) + ' ₽ (материал + доп. расходы)');
+        return;
+      }
+
+      // Default / unsupported kind
+      setPayLines([]);
+      setCost('Себестоимость (итого): ' + money2(mat) + ' ₽ (материал + доп. расходы)');
+    }
+
     function syncPriceHint() {
       var hint = document.getElementById('price_hint_line');
       if (!hint) return;
@@ -371,12 +578,11 @@
         var wash = (document.getElementById('corr_wash')||{}).checked;
         var circle = (document.getElementById('corr_circle')||{}).checked;
         var steam = (document.querySelector('input[name="corr_steam"]')||{}).checked;
+        var cdHard = (document.querySelector('input[name="corr_curl_dread_complexity"]:checked')||{}).value === 'HARD';
+        var cm = (dreadQ > 0 || curlQ > 0) && cdHard ? 1.5 : 1.0;
         if (trimQ > 0) add('Стрижка (1шт)', trimQ);
-        if (dreadQ > 0) add('Коррекция дреда (1шт)', dreadQ);
-        if (curlQ > 0) {
-          var cm = (document.querySelector('select[name="corr_curl_complexity"]')||{}).value === 'HARD' ? 1.5 : 1.0;
-          add('Коррекция кудрей (1шт)', curlQ * cm);
-        }
+        if (dreadQ > 0) add('Коррекция дреда (1шт)', dreadQ * cm);
+        if (curlQ > 0) add('Коррекция кудрей (1шт)', curlQ * cm);
         if (wash) add('Стирка', 1);
         if (steam) add('Отпаривание', 1);
         if (circle) add('Одевание на круг', 1);
@@ -497,22 +703,28 @@
       el.addEventListener('change', syncClientBlock);
       el.addEventListener('change', syncKitStockBlock);
       el.addEventListener('change', syncPriceHint);
+      el.addEventListener('change', syncWorkPreview);
     });
     var kindSel = document.querySelector('select[name="kind"]');
-    if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); syncCorrectionBlock(); syncMixUI(); syncPriceHint(); });
+    if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); syncCorrectionBlock(); syncMixUI(); syncPriceHint(); syncWorkPreview(); });
     var rubberTypeSel = document.getElementById('rubber_type_sel');
-    if (rubberTypeSel) rubberTypeSel.addEventListener('change', function () { syncRubberTypeFields(); syncPriceHint(); });
+    if (rubberTypeSel) rubberTypeSel.addEventListener('change', function () { syncRubberTypeFields(); syncPriceHint(); syncWorkPreview(); });
     var corrWash = document.getElementById('corr_wash');
-    if (corrWash) corrWash.addEventListener('change', function () { syncCorrectionRules(); syncPriceHint(); });
+    if (corrWash) corrWash.addEventListener('change', function () { syncCorrectionRules(); syncPriceHint(); syncWorkPreview(); });
     var corrCircle = document.getElementById('corr_circle');
-    if (corrCircle) corrCircle.addEventListener('change', syncPriceHint);
-    document.querySelectorAll('input[name="corr_trim_qty"], input[name="corr_dread_qty"], input[name="corr_curl_qty"], select[name="corr_curl_complexity"], input[name="corr_steam"], input[name="rubber_attach_qty"], input[name="rubber_braids_qty"], select[name="rubber_variant"]').forEach(function(el){ el.addEventListener('change', syncPriceHint); el.addEventListener('input', syncPriceHint); });
+    if (corrCircle) corrCircle.addEventListener('change', function(){ syncPriceHint(); syncWorkPreview(); });
+    document.querySelectorAll('input[name="corr_trim_qty"], input[name="corr_dread_qty"], input[name="corr_curl_qty"], input[name="corr_curl_dread_complexity"], input[name="corr_steam"], input[name="rubber_attach_qty"], input[name="rubber_braids_qty"], select[name="rubber_variant"], input[name="mix_complexity"], input[name="mix_source"]').forEach(function(el){ el.addEventListener('change', function(){ syncCorrectionComplexity(); syncPriceHint(); syncWorkPreview(); }); el.addEventListener('input', function(){ syncCorrectionComplexity(); syncPriceHint(); syncWorkPreview(); }); });
     document.querySelectorAll('input[name="kanekalon_grams"], input[name="kudri_grams"]').forEach(function (el) {
-      el.addEventListener('change', function () { syncMixUI(); });
-      el.addEventListener('input', function () { syncMixUI(); });
+      el.addEventListener('change', function () { syncMixUI(); syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });
+      el.addEventListener('input', function () { syncMixUI(); syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });
     });
+    var extraCostsInp = document.querySelector('input[name="extra_costs_amount"]');
+    if (extraCostsInp) {
+      extraCostsInp.addEventListener('change', function () { syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });
+      extraCostsInp.addEventListener('input', function () { syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });
+    }
     document.querySelectorAll('input[name="mix_source"]').forEach(function (el) {
-      el.addEventListener('change', function () { syncMixUI(); });
+      el.addEventListener('change', function () { syncMixUI(); syncWorkPreview(); });
     });
     var kitMulti = document.getElementById('kit_use_multi_masters');
     if (kitMulti) kitMulti.addEventListener('change', function () {
@@ -556,6 +768,7 @@
         });
         return ids;
       }
+      window.getKitColumnMasterIds = getKitColumnMasterIds;
 
       function rebuildKitTable() {
         var kind = document.querySelector('select[name="kind"]');
@@ -610,13 +823,34 @@
           });
         }
         tbody.innerHTML = bodyHtml;
+        syncKitPreview();
       }
+
+      function syncKitPreview() {
+        // Legacy hook point: use unified preview.
+        if (typeof syncWorkPreview === 'function') syncWorkPreview();
+      }
+
+      window.syncKitPreview = syncKitPreview;
 
       window.rebuildKitTable = rebuildKitTable;
 
       document.querySelectorAll('input[name="kit_type_se"], input[name="kit_type_de"]').forEach(function (el) {
         el.addEventListener('change', rebuildKitTable);
       });
+
+      // Live preview: update on any typing inside the dynamic table.
+      var kitTbody = document.getElementById('kit_qty_tbody');
+      if (kitTbody) {
+        kitTbody.addEventListener('input', function (e) {
+          var t = e && e.target;
+          if (t && t.name && String(t.name).indexOf('kit_qty_') === 0) syncKitPreview();
+        });
+        kitTbody.addEventListener('change', function (e) {
+          var t = e && e.target;
+          if (t && t.name && String(t.name).indexOf('kit_qty_') === 0) syncKitPreview();
+        });
+      }
 
       syncKitMasterPicker();
       syncClientBlock();
@@ -626,7 +860,24 @@
       syncKitStockBlock();
       syncMixUI();
       syncPriceHint();
+      syncWorkPreview();
       rebuildKitTable();
+    })();
+
+    // Prevent accidental submit on Enter in inputs.
+    (function () {
+      var form = document.querySelector('form');
+      if (!form) return;
+      form.addEventListener('keydown', function (e) {
+        if (!e || e.key !== 'Enter') return;
+        var t = e.target;
+        if (!t) return;
+        var tag = (t.tagName || '').toUpperCase();
+        if (tag === 'TEXTAREA') return;
+        // Allow Enter on buttons only.
+        if (tag === 'BUTTON') return;
+        e.preventDefault();
+      });
     })();
   </script>
 {% endblock %}
