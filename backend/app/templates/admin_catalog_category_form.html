@@ -2,7 +2,7 @@
 {% block content %}
   <div class="card">
     <h2 style="margin-top: 0;">{% if is_new %}Новая категория{% else %}Категория{% endif %}</h2>
-    <p><a href="/admin/catalog">← Каталог</a></p>
+    <p><a href="/admin/catalog">← Прайс</a></p>
     {% if err == "empty" %}
       <div class="error">Укажите название.</div>
     {% elif err == "duplicate" %}
@@ -14,7 +14,7 @@
       </label>
       <label style="display:flex; align-items:center; gap:8px; margin-top: 12px;">
         <input type="checkbox" name="is_active" {% if form_active %}checked{% endif %} />
-        Активна (показывать в каталоге)
+        Активна (показывать в прайсе)
       </label>
       <label style="display:flex; align-items:center; gap:8px; margin-top: 10px;">
         <input type="checkbox" name="include_in_visit" {% if form_include_in_visit %}checked{% endif %} />

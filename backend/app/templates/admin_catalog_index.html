@@ -2,10 +2,10 @@
 {% block content %}
   <div class="card">
     <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-      <h2 style="margin-top: 0;">Каталог услуг</h2>
+      <h2 style="margin-top: 0;">Управление прайсом</h2>
       <a href="/admin/catalog/categories/new"><button type="button">Новая категория</button></a>
     </div>
-    <p class="muted">Категории → подкатегории → услуги (только суперадмин). У услуги три шкалы цен: младший мастер, мастер, старший мастер — как уровни в карточке сотрудника; любая ступень может быть пустой (NULL).</p>
+    <p class="muted">Категории → подкатегории → позиции прайса (только суперадмин). Здесь и <strong>услуги</strong> (в т.ч. для формы визита), и <strong>товары</strong> (категории без визита, например «Продажа материала», «Заказ») — у каждой услуги три шкалы цен. Вопросы анкеты — кнопка «Анкета» у категории, подкатегории или услуги.</p>
     {% if err == "empty" %}
       <div class="error">Укажите название.</div>
     {% elif err == "duplicate" %}
@@ -29,6 +29,7 @@
             <td>{{ row.sub_count }}</td>
             <td style="white-space: nowrap;">
               <a href="/admin/catalog/categories/{{ c.id }}/subcategories"><button type="button" class="secondary">Подкатегории</button></a>
+              <a href="/admin/catalog/categories/{{ c.id }}/fields"><button type="button" class="secondary">Анкета</button></a>
               <a href="/admin/catalog/categories/{{ c.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
             </td>
           </tr>

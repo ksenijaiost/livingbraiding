@@ -3,7 +3,7 @@
   <div class="card">
     <h2 style="margin-top: 0;">{% if is_new %}Новая услуга{% else %}Услуга{% endif %}</h2>
     <p>
-      <a href="/admin/catalog">Каталог</a>
+      <a href="/admin/catalog">Прайс</a>
       → <a href="/admin/catalog/categories/{{ category.id }}/subcategories">{{ category.name }}</a>
       → <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services">{{ subcategory.name }}</a>
     </p>

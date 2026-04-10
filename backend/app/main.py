@@ -14,6 +14,7 @@ As the project grows, we can split routes into modules (e.g. `routes/admin.py`,
 
 import json
 from datetime import date, datetime
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
@@ -52,7 +53,6 @@ from app.client_validation import (
 from app.db.models import (
     Client,
     ClientThermoTemplate,
-    CatalogProduct,
     Kit,
     KitAuthorStaff,
     MaterialPriceCurrent,
@@ -230,10 +230,14 @@ def service_catalog_view(
     if subcategory_id is not None and subcategory_id <= 0:
         subcategory_id = None
 
+    # Только категории из формы визита; «Продажа материала», «Заказ» и т.п. — в прайсе «Товары» (/price/products).
     categories = list(
         db.scalars(
             select(ServiceCategory)
-            .where(ServiceCategory.is_active.is_(True))
+            .where(
+                ServiceCategory.is_active.is_(True),
+                ServiceCategory.include_in_visit.is_(True),
+            )
             .order_by(ServiceCategory.name.asc())
         ).all()
     )
@@ -252,13 +256,19 @@ def service_catalog_view(
             .where(ServiceSubcategory.id == subcategory_id, ServiceSubcategory.is_active.is_(True))
         )
 
-    if sub_from_q and sub_from_q.category and sub_from_q.category.is_active:
+    if (
+        sub_from_q
+        and sub_from_q.category
+        and sub_from_q.category.is_active
+        and sub_from_q.category.include_in_visit
+    ):
         if category_id is not None and category_id > 0 and category_id != sub_from_q.category_id:
             mismatch = True
             selected_category = db.scalar(
                 select(ServiceCategory).where(
                     ServiceCategory.id == category_id,
                     ServiceCategory.is_active.is_(True),
+                    ServiceCategory.include_in_visit.is_(True),
                 )
             )
             if selected_category:
@@ -297,6 +307,7 @@ def service_catalog_view(
             select(ServiceCategory).where(
                 ServiceCategory.id == category_id,
                 ServiceCategory.is_active.is_(True),
+                ServiceCategory.include_in_visit.is_(True),
             )
         )
         if selected_category:
@@ -316,7 +327,7 @@ def service_catalog_view(
         _ctx(
             request,
             current_user=current_user,
-            title="Каталог услуг",
+            title="Прайс · Услуги",
             categories=categories,
             selected_category=selected_category,
             subcategories=subcategories,
@@ -340,6 +351,26 @@ def price_index(
     )
 
 
+def _format_product_catalog_price(s: Service) -> str | None:
+    """Один столбец «цена»: приоритет «мастер», иначе младший/старший, диапазон или одно число."""
+    for lo, hi in (
+        (s.price_middle_from, s.price_middle_to),
+        (s.price_junior_from, s.price_junior_to),
+        (s.price_senior_from, s.price_senior_to),
+    ):
+        if lo is None and hi is None:
+            continue
+        if lo is not None and hi is not None:
+            if abs(float(lo) - float(hi)) < 0.01:
+                return format_price_integer_rub(lo)
+            return f"{int(round(float(lo)))}–{int(round(float(hi)))} ₽"
+        if lo is not None:
+            return format_price_integer_rub(lo)
+        if hi is not None:
+            return format_price_integer_rub(hi)
+    return None
+
+
 @app.get("/price/products", response_class=HTMLResponse)
 def products_catalog_view(
     request: Request,
@@ -349,30 +380,48 @@ def products_catalog_view(
     ),
     db: Session = Depends(get_db),
 ):
+    # Позиции из каталога услуг, которые не в форме визита («Продажа материала», «Заказ», …).
     cats = list(
-        db.execute(
-            select(CatalogProduct.category_name)
-            .distinct()
-            .order_by(CatalogProduct.category_name.asc())
-        )
-        .scalars()
-        .all()
+        db.scalars(
+            select(ServiceCategory.name)
+            .where(
+                ServiceCategory.is_active.is_(True),
+                ServiceCategory.include_in_visit.is_(False),
+            )
+            .order_by(ServiceCategory.name.asc())
+        ).all()
     )
     selected = (category or "").strip() or (cats[0] if cats else None)
-    rows = []
+    rows: list[SimpleNamespace] = []
     if selected:
-        rows = list(
+        services = list(
             db.scalars(
-                select(CatalogProduct)
-                .where(CatalogProduct.category_name == selected)
+                select(Service)
+                .options(selectinload(Service.subcategory))
+                .join(ServiceSubcategory, Service.subcategory_id == ServiceSubcategory.id)
+                .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
+                .where(
+                    ServiceCategory.name == selected,
+                    ServiceCategory.is_active.is_(True),
+                    ServiceCategory.include_in_visit.is_(False),
+                )
                 .order_by(
-                    CatalogProduct.sort_order.asc(),
-                    CatalogProduct.subcategory_name.asc(),
-                    CatalogProduct.is_active.desc(),
-                    CatalogProduct.name.asc(),
+                    ServiceSubcategory.name.asc(),
+                    Service.is_active.desc(),
+                    Service.name.asc(),
                 )
             ).all()
         )
+        for s in services:
+            sub = s.subcategory
+            rows.append(
+                SimpleNamespace(
+                    subcategory_name=sub.name if sub else "—",
+                    name=s.name,
+                    price=_format_product_catalog_price(s),
+                    is_active=s.is_active,
+                )
+            )
     return templates.TemplateResponse(
         "products_catalog_view.html",
         _ctx(

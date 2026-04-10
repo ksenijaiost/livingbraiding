@@ -5,7 +5,7 @@
       <h2 style="margin-top: 0;">Подкатегории: {{ category.name }}</h2>
       <a href="/admin/catalog/subcategories/new?category_id={{ category.id }}"><button type="button">Новая подкатегория</button></a>
     </div>
-    <p><a href="/admin/catalog">← Каталог</a></p>
+    <p><a href="/admin/catalog">← Прайс</a></p>
     {% if err == "empty" %}
       <div class="error">Укажите название.</div>
     {% elif err == "duplicate" %}

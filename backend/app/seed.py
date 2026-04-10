@@ -11,7 +11,7 @@ This runs on app startup to keep local development frictionless:
 In production you may want to disable this or make it explicit via a CLI task.
 """
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 
@@ -24,6 +24,7 @@ from app.db.models import (
     Service,
     ServiceCategory,
     ServiceSubcategory,
+    ServiceQuestionnaireField,
     Setting,
     SubcategoryQuestionnaireField,
     User,
@@ -173,16 +174,19 @@ def _ensure_category_questionnaire_vsy_golova_and_miniatyura(db: Session) -> Non
             sort_order=10,
             min_value=0.0,
         )
-        _ensure_category_questionnaire_field(
-            db,
-            category_id=cat.id,
-            field_key="inlay_blanks_count",
-            field_type=QuestionnaireFieldType.NUMBER,
-            label="Количество заготовок (в работе)",
-            required=True,
-            sort_order=20,
-            min_value=0.0,
-        )
+        # «Количество заготовок» на категории только у «Миниатюра»; у «Вся голова» — подкатегория «Вплетение комплекта»
+        # и отдельные услуги «Сфинкс взрослый» с блоком комплекта.
+        if cat_name == "Миниатюра":
+            _ensure_category_questionnaire_field(
+                db,
+                category_id=cat.id,
+                field_key="inlay_blanks_count",
+                field_type=QuestionnaireFieldType.NUMBER,
+                label="Количество заготовок (в работе)",
+                required=True,
+                sort_order=20,
+                min_value=0.0,
+            )
         _ensure_category_questionnaire_field(
             db,
             category_id=cat.id,
@@ -205,6 +209,81 @@ def _ensure_category_questionnaire_vsy_golova_and_miniatyura(db: Session) -> Non
         )
 
 
+def _drop_vsya_golova_category_inlay_blanks(db: Session) -> None:
+    """Убираем устаревшее поле категории (перенесено на подкатегорию / услуги)."""
+    cat = db.scalar(select(ServiceCategory).where(ServiceCategory.name == "Вся голова"))
+    if not cat:
+        return
+    row = db.scalar(
+        select(CategoryQuestionnaireField).where(
+            CategoryQuestionnaireField.category_id == cat.id,
+            CategoryQuestionnaireField.field_key == "inlay_blanks_count",
+        )
+    )
+    if row:
+        db.delete(row)
+
+
+def _ensure_inlay_blanks_vpletenie_subcat_and_sphinx_kit_services(db: Session) -> None:
+    sub = db.scalar(
+        select(ServiceSubcategory)
+        .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
+        .where(
+            ServiceCategory.name == "Вся голова",
+            ServiceSubcategory.name == "Вплетение комплекта",
+        )
+    )
+    if sub and not db.scalar(
+        select(SubcategoryQuestionnaireField.id).where(
+            SubcategoryQuestionnaireField.subcategory_id == sub.id,
+            SubcategoryQuestionnaireField.field_key == "inlay_blanks_count",
+        )
+    ):
+        db.add(
+            SubcategoryQuestionnaireField(
+                subcategory_id=sub.id,
+                field_key="inlay_blanks_count",
+                field_type=QuestionnaireFieldType.NUMBER,
+                label="Количество заготовок (в работе)",
+                required=True,
+                sort_order=20,
+                min_value=0.0,
+            )
+        )
+
+    for svc in db.scalars(
+        select(Service)
+        .join(ServiceSubcategory, Service.subcategory_id == ServiceSubcategory.id)
+        .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
+        .where(
+            ServiceCategory.name == "Вся голова",
+            ServiceSubcategory.name == "Сфинкс взрослый",
+            or_(
+                Service.kit_section_override.is_(True),
+                Service.name.startswith("Сфинкс заготовки"),
+            ),
+        )
+    ).all():
+        if db.scalar(
+            select(ServiceQuestionnaireField.id).where(
+                ServiceQuestionnaireField.service_id == svc.id,
+                ServiceQuestionnaireField.field_key == "inlay_blanks_count",
+            )
+        ):
+            continue
+        db.add(
+            ServiceQuestionnaireField(
+                service_id=svc.id,
+                field_key="inlay_blanks_count",
+                field_type=QuestionnaireFieldType.NUMBER,
+                label="Количество заготовок (в работе)",
+                required=True,
+                sort_order=20,
+                min_value=0.0,
+            )
+        )
+
+
 def _remove_inlay_fields_from_subcategory_vpletenie(db: Session) -> None:
     sub = db.scalar(
         select(ServiceSubcategory)
@@ -216,7 +295,8 @@ def _remove_inlay_fields_from_subcategory_vpletenie(db: Session) -> None:
     )
     if not sub:
         return
-    for fk in ("inlay_bases_count", "inlay_blanks_count", "inlay_service_comment"):
+    # Дубликаты с категорией убираем только для баз и комментария; «заготовки» живут на подкатегории.
+    for fk in ("inlay_bases_count", "inlay_service_comment"):
         row = db.scalar(
             select(SubcategoryQuestionnaireField).where(
                 SubcategoryQuestionnaireField.subcategory_id == sub.id,
@@ -387,11 +467,15 @@ def _move_muzhchiny_services_between_subcategories(db: Session) -> None:
 
 def _ensure_visit_questionnaire_layout(db: Session) -> None:
     _ensure_category_questionnaire_vsy_golova_and_miniatyura(db)
+    _drop_vsya_golova_category_inlay_blanks(db)
     _remove_inlay_fields_from_subcategory_vpletenie(db)
     _ensure_sphinx_subcategory_questionnaire_fields(db)
     _ensure_thermo_subcategory_flag(db)
     _ensure_subcategory_kit_and_material_flags(db)
     _ensure_service_kit_material_overrides(db)
+    db.flush()
+    # После выставления kit_section_override у «Сфинкс заготовки…» (видно следующему SELECT).
+    _ensure_inlay_blanks_vpletenie_subcat_and_sphinx_kit_services(db)
     _move_muzhchiny_services_between_subcategories(db)
 
 

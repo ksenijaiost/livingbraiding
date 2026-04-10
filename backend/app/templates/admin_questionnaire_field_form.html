@@ -3,13 +3,17 @@
   <div class="card">
     <h2 style="margin-top: 0;">{% if is_new %}Новое поле{% else %}Поле{% endif %}</h2>
     <p class="muted">
-      <a href="/admin/catalog">Каталог</a>
-      → <a href="/admin/catalog/categories/{{ category.id }}/subcategories">{{ category.name }}</a>
-      {% if scope == "subcategory" %}
-        → <a href="/admin/catalog/subcategories/{{ subcategory.id }}/fields">вопросы «{{ subcategory.name }}»</a>
+      <a href="/admin/catalog">Прайс</a>
+      {% if scope == "category" %}
+        → <a href="/admin/catalog/categories/{{ category.id }}/fields">вопросы категории «{{ category.name }}»</a>
       {% else %}
-        → <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services">{{ subcategory.name }}</a>
-        → <a href="/admin/catalog/services/{{ service.id }}/fields">«{{ service.name }}»</a>
+        → <a href="/admin/catalog/categories/{{ category.id }}/subcategories">{{ category.name }}</a>
+        {% if scope == "subcategory" %}
+          → <a href="/admin/catalog/subcategories/{{ subcategory.id }}/fields">вопросы «{{ subcategory.name }}»</a>
+        {% else %}
+          → <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services">{{ subcategory.name }}</a>
+          → <a href="/admin/catalog/services/{{ service.id }}/fields">«{{ service.name }}»</a>
+        {% endif %}
       {% endif %}
     </p>
     {% if errors %}
@@ -20,7 +24,10 @@
       </div>
     {% endif %}
 
-    {% if scope == "subcategory" %}
+    {% if scope == "category" %}
+      {% set action = "/admin/catalog/categories/" ~ category.id ~ "/fields/new" if is_new else "/admin/catalog/categories/" ~ category.id ~ "/fields/" ~ field.id ~ "/edit" %}
+      {% set back_url = "/admin/catalog/categories/" ~ category.id ~ "/fields" %}
+    {% elif scope == "subcategory" %}
       {% set action = "/admin/catalog/subcategories/" ~ subcategory.id ~ "/fields/new" if is_new else "/admin/catalog/subcategories/" ~ subcategory.id ~ "/fields/" ~ field.id ~ "/edit" %}
       {% set back_url = "/admin/catalog/subcategories/" ~ subcategory.id ~ "/fields" %}
     {% else %}

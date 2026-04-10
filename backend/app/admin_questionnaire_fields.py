@@ -1,5 +1,5 @@
 """
-Суперадмин: поля анкеты подкатегории и услуги (вопросы).
+Суперадмин: поля анкеты в карточке прайса (категория / подкатегория / позиция).
 """
 
 from __future__ import annotations
@@ -153,6 +153,64 @@ def _swap_sort(rows: list, field_id: int, direction: str, db: Session) -> bool:
     return True
 
 
+def _next_sort_order_category(db: Session, category_id: int) -> int:
+    m = db.scalar(
+        select(func.coalesce(func.max(CategoryQuestionnaireField.sort_order), -1)).where(
+            CategoryQuestionnaireField.category_id == category_id
+        )
+    )
+    return int(m) + 1
+
+
+def _move_rows_category(db: Session, category_id: int, field_id: int, direction: str) -> bool:
+    rows = list(
+        db.scalars(
+            select(CategoryQuestionnaireField)
+            .where(CategoryQuestionnaireField.category_id == category_id)
+            .order_by(CategoryQuestionnaireField.sort_order, CategoryQuestionnaireField.id)
+        ).all()
+    )
+    return _swap_sort(rows, field_id, direction, db)
+
+
+def _any_lower_scope_uses_field_key(db: Session, category_id: int, field_key: str) -> bool:
+    sub_ids = select(ServiceSubcategory.id).where(ServiceSubcategory.category_id == category_id)
+    if (
+        db.scalar(
+            select(SubcategoryQuestionnaireField.id).where(
+                SubcategoryQuestionnaireField.subcategory_id.in_(sub_ids),
+                SubcategoryQuestionnaireField.field_key == field_key,
+            ).limit(1)
+        )
+        is not None
+    ):
+        return True
+    svc_ids = select(Service.id).join(
+        ServiceSubcategory, Service.subcategory_id == ServiceSubcategory.id
+    ).where(ServiceSubcategory.category_id == category_id)
+    return (
+        db.scalar(
+            select(ServiceQuestionnaireField.id).where(
+                ServiceQuestionnaireField.service_id.in_(svc_ids),
+                ServiceQuestionnaireField.field_key == field_key,
+            ).limit(1)
+        )
+        is not None
+    )
+
+
+def _apply_normalized_category(row: CategoryQuestionnaireField, n: NormalizedQuestionnaireField) -> None:
+    row.field_key = n.field_key
+    row.field_type = n.field_type
+    row.label = n.label
+    row.required = n.required
+    row.placeholder = n.placeholder
+    row.help_text = n.help_text
+    row.options_json = n.options_json
+    row.min_value = n.min_value
+    row.max_value = n.max_value
+
+
 def _apply_normalized_subcat(row: SubcategoryQuestionnaireField, n: NormalizedQuestionnaireField) -> None:
     row.field_key = n.field_key
     row.field_type = n.field_type
@@ -167,6 +225,364 @@ def _apply_normalized_subcat(row: SubcategoryQuestionnaireField, n: NormalizedQu
 
 def _apply_normalized_service(row: ServiceQuestionnaireField, n: NormalizedQuestionnaireField) -> None:
     _apply_normalized_subcat(row, n)  # same attribute names
+
+
+# --- Category fields ---
+
+
+@router.get("/categories/{category_id}/fields", response_class=HTMLResponse)
+def category_fields_list(
+    request: Request,
+    category_id: int,
+    err: str | None = None,
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    cat = db.get(ServiceCategory, category_id)
+    if cat is None:
+        raise HTTPException(status_code=404, detail="Категория не найдена")
+    fields = list(
+        db.scalars(
+            select(CategoryQuestionnaireField)
+            .where(CategoryQuestionnaireField.category_id == category_id)
+            .order_by(CategoryQuestionnaireField.sort_order, CategoryQuestionnaireField.id)
+        ).all()
+    )
+    return templates.TemplateResponse(
+        "admin_questionnaire_fields_list.html",
+        _ctx(
+            request,
+            current_user,
+            scope="category",
+            category=cat,
+            subcategory=None,
+            service=None,
+            fields=fields,
+            err=err,
+        ),
+    )
+
+
+@router.get("/categories/{category_id}/fields/new", response_class=HTMLResponse)
+def category_field_new_form(
+    request: Request,
+    category_id: int,
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    cat = db.get(ServiceCategory, category_id)
+    if cat is None:
+        raise HTTPException(status_code=404, detail="Категория не найдена")
+    return templates.TemplateResponse(
+        "admin_questionnaire_field_form.html",
+        _ctx(
+            request,
+            current_user,
+            scope="category",
+            category=cat,
+            subcategory=None,
+            service=None,
+            field=None,
+            is_new=True,
+            field_types=FIELD_TYPE_CHOICES,
+            form={},
+            errors=[],
+        ),
+    )
+
+
+@router.post("/categories/{category_id}/fields/new")
+def category_field_new_save(
+    category_id: int,
+    request: Request,
+    field_key: str = Form(...),
+    field_type: str = Form(...),
+    label: str = Form(...),
+    required: str | None = Form(None),
+    placeholder: str | None = Form(None),
+    help_text: str | None = Form(None),
+    options_json: str | None = Form(None),
+    min_value: str | None = Form(None),
+    max_value: str | None = Form(None),
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    cat = db.get(ServiceCategory, category_id)
+    if cat is None:
+        raise HTTPException(status_code=404, detail="Категория не найдена")
+
+    norm, errors = validate_questionnaire_field_form(
+        field_key=field_key,
+        field_type_raw=field_type,
+        label=label,
+        required=_is_checked(required),
+        placeholder=placeholder,
+        help_text=help_text,
+        options_raw=options_json,
+        min_raw=min_value,
+        max_raw=max_value,
+    )
+    if norm is None:
+        return templates.TemplateResponse(
+            "admin_questionnaire_field_form.html",
+            _ctx(
+                request,
+                current_user,
+                scope="category",
+                category=cat,
+                subcategory=None,
+                service=None,
+                field=None,
+                is_new=True,
+                field_types=FIELD_TYPE_CHOICES,
+                form={
+                    "field_key": field_key,
+                    "field_type": field_type,
+                    "label": label,
+                    "required": _is_checked(required),
+                    "placeholder": placeholder or "",
+                    "help_text": help_text or "",
+                    "options_json": options_json or "",
+                    "min_value": min_value or "",
+                    "max_value": max_value or "",
+                },
+                errors=errors,
+            ),
+            status_code=422,
+        )
+
+    if _category_field_key_exists(db, category_id, norm.field_key):
+        errors = [f"Ключ «{norm.field_key}» уже есть в анкете этой категории."]
+        return templates.TemplateResponse(
+            "admin_questionnaire_field_form.html",
+            _ctx(
+                request,
+                current_user,
+                scope="category",
+                category=cat,
+                subcategory=None,
+                service=None,
+                field=None,
+                is_new=True,
+                field_types=FIELD_TYPE_CHOICES,
+                form={
+                    "field_key": field_key,
+                    "field_type": field_type,
+                    "label": label,
+                    "required": _is_checked(required),
+                    "placeholder": placeholder or "",
+                    "help_text": help_text or "",
+                    "options_json": options_json or "",
+                    "min_value": min_value or "",
+                    "max_value": max_value or "",
+                },
+                errors=errors,
+            ),
+            status_code=422,
+        )
+
+    if _any_lower_scope_uses_field_key(db, category_id, norm.field_key):
+        errors = [
+            f"Ключ «{norm.field_key}» уже занят в анкете подкатегории или услуги этой категории — выберите другой."
+        ]
+        return templates.TemplateResponse(
+            "admin_questionnaire_field_form.html",
+            _ctx(
+                request,
+                current_user,
+                scope="category",
+                category=cat,
+                subcategory=None,
+                service=None,
+                field=None,
+                is_new=True,
+                field_types=FIELD_TYPE_CHOICES,
+                form={
+                    "field_key": field_key,
+                    "field_type": field_type,
+                    "label": label,
+                    "required": _is_checked(required),
+                    "placeholder": placeholder or "",
+                    "help_text": help_text or "",
+                    "options_json": options_json or "",
+                    "min_value": min_value or "",
+                    "max_value": max_value or "",
+                },
+                errors=errors,
+            ),
+            status_code=422,
+        )
+
+    _ = norm.as_structure_dict()
+
+    row = CategoryQuestionnaireField(
+        category_id=category_id,
+        sort_order=_next_sort_order_category(db, category_id),
+    )
+    _apply_normalized_category(row, norm)
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return RedirectResponse(
+            url=f"/admin/catalog/categories/{category_id}/fields?err=duplicate",
+            status_code=303,
+        )
+    return RedirectResponse(url=f"/admin/catalog/categories/{category_id}/fields", status_code=303)
+
+
+@router.get("/categories/{category_id}/fields/{field_id}/edit", response_class=HTMLResponse)
+def category_field_edit_form(
+    request: Request,
+    category_id: int,
+    field_id: int,
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    cat = db.get(ServiceCategory, category_id)
+    if cat is None:
+        raise HTTPException(status_code=404, detail="Категория не найдена")
+    field = db.get(CategoryQuestionnaireField, field_id)
+    if field is None or field.category_id != category_id:
+        raise HTTPException(status_code=404, detail="Поле не найдено")
+    form = {
+        "field_key": field.field_key,
+        "field_type": field.field_type.value,
+        "label": field.label,
+        "required": field.required,
+        "placeholder": field.placeholder or "",
+        "help_text": field.help_text or "",
+        "options_json": _options_for_textarea(field.options_json),
+        "min_value": "" if field.min_value is None else str(field.min_value).replace(".", ","),
+        "max_value": "" if field.max_value is None else str(field.max_value).replace(".", ","),
+    }
+    return templates.TemplateResponse(
+        "admin_questionnaire_field_form.html",
+        _ctx(
+            request,
+            current_user,
+            scope="category",
+            category=cat,
+            subcategory=None,
+            service=None,
+            field=field,
+            is_new=False,
+            field_types=FIELD_TYPE_CHOICES,
+            form=form,
+            errors=[],
+        ),
+    )
+
+
+@router.post("/categories/{category_id}/fields/{field_id}/edit")
+def category_field_edit_save(
+    category_id: int,
+    field_id: int,
+    request: Request,
+    field_key: str = Form(...),
+    field_type: str = Form(...),
+    label: str = Form(...),
+    required: str | None = Form(None),
+    placeholder: str | None = Form(None),
+    help_text: str | None = Form(None),
+    options_json: str | None = Form(None),
+    min_value: str | None = Form(None),
+    max_value: str | None = Form(None),
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    cat = db.get(ServiceCategory, category_id)
+    if cat is None:
+        raise HTTPException(status_code=404, detail="Категория не найдена")
+    field_inst = db.get(CategoryQuestionnaireField, field_id)
+    if field_inst is None or field_inst.category_id != category_id:
+        raise HTTPException(status_code=404, detail="Поле не найдено")
+
+    norm, errors = validate_questionnaire_field_form(
+        field_key=field_key,
+        field_type_raw=field_type,
+        label=label,
+        required=_is_checked(required),
+        placeholder=placeholder,
+        help_text=help_text,
+        options_raw=options_json,
+        min_raw=min_value,
+        max_raw=max_value,
+        edit_field_key_locked=field_inst.field_key,
+    )
+    if norm is None:
+        return templates.TemplateResponse(
+            "admin_questionnaire_field_form.html",
+            _ctx(
+                request,
+                current_user,
+                scope="category",
+                category=cat,
+                subcategory=None,
+                service=None,
+                field=field_inst,
+                is_new=False,
+                field_types=FIELD_TYPE_CHOICES,
+                form={
+                    "field_key": field_inst.field_key,
+                    "field_type": field_type,
+                    "label": label,
+                    "required": _is_checked(required),
+                    "placeholder": placeholder or "",
+                    "help_text": help_text or "",
+                    "options_json": options_json or "",
+                    "min_value": min_value or "",
+                    "max_value": max_value or "",
+                },
+                errors=errors,
+            ),
+            status_code=422,
+        )
+
+    _ = norm.as_structure_dict()
+    _apply_normalized_category(field_inst, norm)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return RedirectResponse(
+            url=f"/admin/catalog/categories/{category_id}/fields/{field_id}/edit?err=duplicate",
+            status_code=303,
+        )
+    return RedirectResponse(url=f"/admin/catalog/categories/{category_id}/fields", status_code=303)
+
+
+@router.post("/categories/{category_id}/fields/{field_id}/delete")
+def category_field_delete(
+    category_id: int,
+    field_id: int,
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    field = db.get(CategoryQuestionnaireField, field_id)
+    if field is None or field.category_id != category_id:
+        raise HTTPException(status_code=404, detail="Поле не найдено")
+    db.delete(field)
+    db.commit()
+    return RedirectResponse(url=f"/admin/catalog/categories/{category_id}/fields", status_code=303)
+
+
+@router.post("/categories/{category_id}/fields/{field_id}/move")
+def category_field_move(
+    category_id: int,
+    field_id: int,
+    direction: str = Form(...),
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    d = (direction or "").lower()
+    if d not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="bad direction")
+    if not _move_rows_category(db, category_id, field_id, d):
+        pass
+    db.commit()
+    return RedirectResponse(url=f"/admin/catalog/categories/{category_id}/fields", status_code=303)
 
 
 # --- Subcategory fields ---
