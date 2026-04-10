@@ -3,13 +3,9 @@ from __future__ import annotations
 """
 Auth helpers for a simple internal app.
 
-We use a signed cookie session (itsdangerous serializer) with fields:
+Signed cookie session fields:
 - user_id
-
-This is intentionally minimal for MVP:
-- no refresh tokens
-- no OAuth
-- role checks are enforced per-route via dependencies
+- active_role (UserRole.value) — текущий «кабинет» при нескольких ролях
 """
 
 from dataclasses import dataclass
@@ -24,6 +20,7 @@ from app.db.models import MasterLevel, User, UserRole
 from app.db.session import get_db
 from app.security import verify_password
 from app.settings import get_settings
+from app.user_roles import default_active_role, get_roles_for_user, resolve_active_role
 
 
 @dataclass(frozen=True)
@@ -32,6 +29,9 @@ class AuthUser:
     username: str
     display_name: str
     role: UserRole
+    """Активная роль (контекст UI и require_role)."""
+    roles: tuple[UserRole, ...]
+    """Все назначенные роли."""
     master_level: MasterLevel | None = None
 
 
@@ -43,9 +43,13 @@ def _serializer() -> URLSafeSerializer:
     return URLSafeSerializer(settings.secret_key, salt="livingbraiding-session")
 
 
-def _issue_cookie(response: Response, user: User) -> None:
+def _session_token(user_id: int, active_role: UserRole) -> str:
     s = _serializer()
-    token = s.dumps({"user_id": user.id})
+    return s.dumps({"user_id": user_id, "active_role": active_role.value})
+
+
+def issue_session_cookie(response: Response, user_id: int, active_role: UserRole) -> None:
+    token = _session_token(user_id, active_role)
     response.set_cookie(
         COOKIE_NAME,
         token,
@@ -64,7 +68,9 @@ def logout_response() -> Response:
 
 def authenticate(db: Session, username: str, password: str) -> Optional[User]:
     """Return a User if credentials are valid, otherwise None."""
-    user = db.scalar(select(User).where(User.username == username, User.is_active.is_(True)))
+    user = db.scalar(
+        select(User).where(User.username == username, User.is_active.is_(True))
+    )
     if not user:
         return None
     if not verify_password(password, user.password_hash):
@@ -72,27 +78,30 @@ def authenticate(db: Session, username: str, password: str) -> Optional[User]:
     return user
 
 
-def login_response(user: User) -> Response:
+def login_response(user: User, db: Session) -> Response:
     """Issue session cookie and redirect to `/`."""
+    roles = get_roles_for_user(db, user.id)
+    active = default_active_role(roles)
     resp = Response(status_code=status.HTTP_303_SEE_OTHER)
     resp.headers["Location"] = "/"
-    _issue_cookie(resp, user)
+    issue_session_cookie(resp, user.id, active)
     return resp
 
 
-def _get_current_user_id(request: Request) -> Optional[int]:
+def _get_session_payload(request: Request) -> tuple[Optional[int], Optional[str]]:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
-        return None
+        return None, None
     s = _serializer()
     try:
         data = s.loads(token)
     except BadSignature:
-        return None
+        return None, None
     user_id = data.get("user_id")
+    ar = data.get("active_role")
     if isinstance(user_id, int):
-        return user_id
-    return None
+        return user_id, ar if isinstance(ar, str) else None
+    return None, None
 
 
 def get_current_user(
@@ -100,27 +109,32 @@ def get_current_user(
     db: Annotated[Session, Depends(get_db)],
 ) -> AuthUser:
     """Resolve session cookie to an AuthUser or redirect to login."""
-    user_id = _get_current_user_id(request)
+    user_id, active_raw = _get_session_payload(request)
     if not user_id:
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
     user = db.get(User, user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
+    roles_list = get_roles_for_user(db, user.id)
+    if not roles_list:
+        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
+    active = resolve_active_role(roles_list, active_raw)
     return AuthUser(
         id=user.id,
         username=user.username,
         display_name=user.display_name,
-        role=user.role,
+        role=active,
+        roles=tuple(roles_list),
         master_level=user.master_level,
     )
 
 
 def require_role(*roles: UserRole):
-    """Dependency factory for role-based access control."""
+    """Dependency factory for role-based access control (по активной роли)."""
+
     def _dep(user: Annotated[AuthUser, Depends(get_current_user)]) -> AuthUser:
         if user.role not in roles:
             raise HTTPException(status_code=403, detail="Forbidden")
         return user
 
     return _dep
-

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from app.db.models import MasterLevel, QuestionnaireFieldType
+from app.db.models import MasterLevel, QuestionnaireFieldType, UserRole
 
 # Прайс и уровень мастера в списках — одни и те же формулировки.
 RU_MASTER_LEVEL: dict[MasterLevel, str] = {
@@ -24,6 +24,22 @@ def ru_master_level(ml: MasterLevel | str | None) -> str:
         except ValueError:
             return ml
     return RU_MASTER_LEVEL.get(ml, str(ml))
+
+
+RU_USER_ROLE: dict[UserRole, str] = {
+    UserRole.ADMIN_SUPER: "Суперадмин",
+    UserRole.ADMIN: "Админ",
+    UserRole.MASTER: "Мастер",
+}
+
+
+def ru_user_role(r: UserRole | str) -> str:
+    if isinstance(r, str):
+        try:
+            r = UserRole(r)
+        except ValueError:
+            return r
+    return RU_USER_ROLE.get(r, str(r.value))
 
 
 RU_QUESTIONNAIRE_FIELD_TYPE: dict[QuestionnaireFieldType, str] = {

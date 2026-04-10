@@ -27,8 +27,16 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.admin_questionnaire_fields import router as admin_questionnaire_fields_router
 from app.admin_service_catalog import router as admin_service_catalog_router
-from app.auth import AuthUser, authenticate, get_current_user, login_response, logout_response, require_role
-from app.ru_labels import format_price_integer_rub, ru_master_level, ru_questionnaire_field_type
+from app.auth import (
+    AuthUser,
+    authenticate,
+    get_current_user,
+    issue_session_cookie,
+    login_response,
+    logout_response,
+    require_role,
+)
+from app.ru_labels import format_price_integer_rub, ru_master_level, ru_questionnaire_field_type, ru_user_role
 from app.display_time import (
     ALLOWED_TIMEZONES,
     ALLOWED_TIMEZONE_IDS,
@@ -111,6 +119,7 @@ from app.thermo_visit import (
     collect_thermo_prefill_from_form,
     list_client_thermo_templates_for_visit,
 )
+from app.user_roles import select_users_with_any_role, select_users_with_role, user_has_any_role
 from app.visit_edit_policy import visit_client_change_policy
 from app.ui_visit_display import (
     build_service_human_display,
@@ -131,6 +140,7 @@ app.include_router(work_products_routes.router)
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_master_level"] = ru_master_level
 templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_type
+templates.env.globals["ru_user_role"] = ru_user_role
 templates.env.globals["format_price_integer_rub"] = format_price_integer_rub
 
 
@@ -202,7 +212,25 @@ def login_action(
             _ctx(request, current_user=None, error="Неверный логин или пароль."),
             status_code=400,
         )
-    return login_response(user)
+    return login_response(user, db)
+
+
+@app.post("/session/active-role")
+def session_set_active_role(
+    request: Request,
+    role: str = Form(...),
+    current_user: AuthUser = Depends(get_current_user),
+):
+    try:
+        new_role = UserRole(role.strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Некорректная роль")
+    if new_role not in current_user.roles:
+        raise HTTPException(status_code=403, detail="Эта роль не назначена пользователю")
+    loc = request.headers.get("referer") or "/"
+    resp = RedirectResponse(url=loc, status_code=303)
+    issue_session_cookie(resp, current_user.id, new_role)
+    return resp
 
 
 @app.get("/logout")
@@ -971,12 +999,9 @@ def _kit_reserve_redirect_base(kit_id: int, form: Any) -> str:
 def _staff_users_for_reserve(db: Session) -> list[User]:
     return list(
         db.scalars(
-            select(User)
-            .where(
-                User.is_active.is_(True),
-                User.role.in_((UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
-            )
-            .order_by(User.display_name.asc())
+            select_users_with_any_role(
+                UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER
+            ).order_by(User.display_name.asc())
         ).all()
     )
 
@@ -1052,9 +1077,9 @@ def master_client_thermo_templates(
 def _masters_for_visit_form(db: Session) -> list[User]:
     return list(
         db.scalars(
-            select(User)
-            .where(User.is_active.is_(True), User.role == UserRole.MASTER)
-            .order_by(User.display_name.asc(), User.username.asc())
+            select_users_with_role(UserRole.MASTER).order_by(
+                User.display_name.asc(), User.username.asc()
+            )
         ).all()
     )
 
@@ -1628,7 +1653,9 @@ async def admin_kit_reserve_post(
             )
     if uid is not None:
         u = db.get(User, uid)
-        if not u or u.role not in (UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
+        if not u or not user_has_any_role(
+            db, uid, UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER
+        ):
             return RedirectResponse(
                 url=redirect_base + "?err=" + quote("Сотрудник не найден.", safe=""),
                 status_code=303,

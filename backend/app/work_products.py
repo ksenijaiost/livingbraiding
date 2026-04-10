@@ -38,6 +38,7 @@ from app.db.models import (
     WorkScope,
 )
 from app.db.session import get_db
+from app.user_roles import select_users_with_role, user_has_role
 from app.kit_inlay_visit import _materials_cost_and_snapshot
 from app.work_products_compute import compute_work_financials
 from app.visit_edit_policy import edit_window_days, is_in_closed_payroll_period, within_edit_window
@@ -92,9 +93,9 @@ def _g_bool(form: Any, name: str) -> bool:
 def _list_masters_for_work_form(db: Session) -> list[User]:
     return list(
         db.scalars(
-            select(User)
-            .where(User.is_active.is_(True), User.role == UserRole.MASTER)
-            .order_by(User.display_name.asc(), User.id.asc())
+            select_users_with_role(UserRole.MASTER).order_by(
+                User.display_name.asc(), User.id.asc()
+            )
         ).all()
     )
 
@@ -183,7 +184,7 @@ def _alloc_equal_shares_for_masters(db: Session, user_ids: list[int]) -> list[tu
         u = db.get(User, uid)
         if not u or not u.is_active:
             raise ValueError(f"Мастер (ID {uid}) не найден или отключён.")
-        if u.role != UserRole.MASTER:
+        if not user_has_role(db, uid, UserRole.MASTER):
             raise ValueError("В комплекте участвуют только мастера.")
     n = len(ordered)
     if n == 1:
@@ -540,7 +541,7 @@ async def work_new_post(
             else:
                 kit_staff_ids = [current_user.id]
                 cu = db.get(User, current_user.id)
-                if not cu or cu.role != UserRole.MASTER:
+                if not cu or not user_has_role(db, current_user.id, UserRole.MASTER):
                     raise ValueError(
                         "Режим одной колонки доступен только при входе под мастером; "
                         "иначе отметьте «Несколько мастеров (комплект)» и выберите мастеров."
@@ -764,7 +765,7 @@ async def work_new_post(
                     continue
                 seen_uid.add(uid)
                 mu = db.get(User, uid)
-                if mu and mu.is_active and mu.role == UserRole.MASTER:
+                if mu and mu.is_active and user_has_role(db, uid, UserRole.MASTER):
                     db.add(KitAuthorStaff(kit_id=kit.id, user_id=uid, sort_order=so))
                     so += 1
 

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
 
 from app.db.models import Kit, KitAuthorStaff, User, UserRole
+from app.user_roles import select_users_with_role, user_has_role
 
 
 def list_masters_for_kit_author_pick(db: Session) -> list[User]:
@@ -17,9 +18,9 @@ def list_masters_for_kit_author_pick(db: Session) -> list[User]:
 
     return list(
         db.scalars(
-            select(User)
-            .where(User.is_active.is_(True), User.role == UserRole.MASTER)
-            .order_by(User.display_name.asc(), User.id.asc())
+            select_users_with_role(UserRole.MASTER).order_by(
+                User.display_name.asc(), User.id.asc()
+            )
         ).all()
     )
 
@@ -217,7 +218,7 @@ def sync_kit_authors(db: Session, kit: Kit, form: Any) -> None:
         u = db.get(User, uid)
         if not u or not u.is_active:
             raise ValueError("Выберите авторов только из активных сотрудников.")
-        if u.role != UserRole.MASTER:
+        if not user_has_role(db, uid, UserRole.MASTER):
             raise ValueError("Автор комплекта указывается только среди мастеров.")
     db.execute(delete(KitAuthorStaff).where(KitAuthorStaff.kit_id == kit.id))
     for i, uid in enumerate(uids):

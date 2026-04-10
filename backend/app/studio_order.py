@@ -22,6 +22,7 @@ from app.client_validation import (
     strip_or_none,
 )
 from app.db.session import get_db
+from app.user_roles import select_users_with_any_role, user_has_any_role
 from app.db.models import (
     AmortizationLevel,
     Client,
@@ -190,7 +191,7 @@ def resolve_order_staff_allocations(
         u = db.get(User, mid)
         if not u or not u.is_active:
             raise ValueError(f"Сотрудник (ID {mid}) не найден или отключён.")
-        if u.role not in allowed:
+        if not user_has_any_role(db, mid, *allowed):
             raise ValueError("В заказе можно указывать только мастеров и админов студии.")
         seen.add(mid)
         out.append((mid, float(p)))
@@ -202,12 +203,9 @@ def resolve_order_staff_allocations(
 def list_staff_for_order_form(db: Session) -> list[User]:
     return list(
         db.scalars(
-            select(User)
-            .where(
-                User.is_active.is_(True),
-                User.role.in_((UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
-            )
-            .order_by(User.display_name.asc(), User.id.asc())
+            select_users_with_any_role(
+                UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER
+            ).order_by(User.display_name.asc(), User.id.asc())
         ).all()
     )
 

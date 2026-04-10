@@ -51,6 +51,14 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "user_role_assignments",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("role", sa.Enum("ADMIN_SUPER", "ADMIN", "MASTER", name="userrole"), nullable=False),
+        sa.UniqueConstraint("user_id", "role", name="uq_user_role_assignments_user_role"),
+    )
+
+    op.create_table(
         "clients",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("name", sa.String(length=200), nullable=False),
@@ -728,6 +736,7 @@ def downgrade() -> None:
     op.drop_table("studio_expense_categories")
     op.drop_table("client_thermo_templates")
     op.drop_table("clients")
+    op.drop_table("user_role_assignments")
     op.drop_table("users")
     op.drop_table("settings")
 

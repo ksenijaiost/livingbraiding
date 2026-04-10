@@ -113,6 +113,25 @@ class User(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
+    role_assignments: Mapped[list["UserRoleAssignment"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="UserRoleAssignment.id",
+    )
+
+
+class UserRoleAssignment(Base):
+    """Назначенные роли (активная роль выбирается в сессии, см. cookie)."""
+
+    __tablename__ = "user_role_assignments"
+    __table_args__ = (UniqueConstraint("user_id", "role", name="uq_user_role_assignments_user_role"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="role_assignments")
+
 
 class Client(Base):
     __tablename__ = "clients"

@@ -41,7 +41,17 @@
       <div><strong>livingbraiding</strong></div>
       <div class="nav">
         {% if current_user %}
-          <span class="muted">{{ current_user.display_name }} ({{ current_user.role.value }})</span>
+          {% if current_user.roles|length > 1 %}
+          <form method="post" action="/session/active-role" class="role-switch" style="display:inline-flex; align-items:center; gap:6px; margin-right:10px;">
+            <label class="muted" style="margin:0; font-size:12px;">Кабинет</label>
+            <select name="role" aria-label="Активная роль" onchange="this.form.submit()" style="width:auto; min-width:9em; padding:6px 8px; font-size:13px;">
+              {% for r in current_user.roles %}
+              <option value="{{ r.value }}" {% if r == current_user.role %}selected{% endif %}>{{ ru_user_role(r) }}</option>
+              {% endfor %}
+            </select>
+          </form>
+          {% endif %}
+          <span class="muted">{{ current_user.display_name }} ({{ ru_user_role(current_user.role) }})</span>
           <a href="/">Главная</a>
           {% if current_user.role.value == "MASTER" %}
             <a href="/master/visit/new">Новый визит</a>

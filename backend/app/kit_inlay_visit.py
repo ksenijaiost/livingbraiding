@@ -64,6 +64,7 @@ from app.thermo_visit import (
     persist_new_thermo_template_if_needed,
     service_requires_thermo_flow,
 )
+from app.user_roles import user_has_role
 
 
 def service_requires_kit_block(service: Service) -> bool:
@@ -255,7 +256,7 @@ def _resolve_visit_master_allocations(
         u = db.get(User, mid)
         if not u or not u.is_active:
             raise ValueError(f"Мастер (ID {mid}) не найден или отключён.")
-        if u.role != UserRole.MASTER:
+        if not user_has_role(db, mid, UserRole.MASTER):
             dn = (u.display_name or u.username or "").strip() or f"ID {mid}"
             raise ValueError(f"«{dn}» не в роли мастера.")
         seen.add(mid)

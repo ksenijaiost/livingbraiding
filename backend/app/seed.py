@@ -29,6 +29,7 @@ from app.db.models import (
     SubcategoryQuestionnaireField,
     User,
     UserRole,
+    UserRoleAssignment,
     MasterLevel,
     Client,
     PayrollPeriod,
@@ -47,6 +48,7 @@ from app.db.models import (
     WorkScope,
 )
 from app.security import hash_password
+from app.user_roles import set_user_roles
 from app.seed_catalog_vsy_golova import ensure_vsy_golova_catalog
 from app.seed_catalog_zakaz import ensure_zakaz_catalog
 from app.seed_catalog_malishki_muzhchiny import ensure_malishki_muzhchiny_catalog
@@ -55,6 +57,24 @@ from app.seed_catalog_narashivanie import ensure_narashivanie_catalog
 from app.seed_catalog_prodazha_materiala import ensure_prodazha_materiala_catalog
 from app.seed_catalog_snjatie_ukhod import ensure_snjatie_ukhod_catalogs
 from app.seed_studio_expenses_catalog import ensure_studio_expense_catalog
+
+
+def _ensure_demo_user_role_assignments(db: Session) -> None:
+    """Идемпотентно: заполняет user_role_assignments для демо-логинов, если таблица ещё пуста для пользователя."""
+    for username, roles in (
+        ("admin", [UserRole.ADMIN_SUPER, UserRole.MASTER]),
+        ("master1", [UserRole.MASTER]),
+        ("master2", [UserRole.MASTER]),
+    ):
+        u = db.scalar(select(User).where(User.username == username))
+        if not u:
+            continue
+        has_any = db.scalar(
+            select(UserRoleAssignment.id).where(UserRoleAssignment.user_id == u.id).limit(1)
+        )
+        if has_any:
+            continue
+        set_user_roles(db, u, roles)
 
 
 def ensure_seed_data(db: Session) -> None:
@@ -117,6 +137,9 @@ def ensure_seed_data(db: Session) -> None:
                 master_level=MasterLevel.MIDDLE,
             )
         )
+
+    db.flush()
+    _ensure_demo_user_role_assignments(db)
 
     _ensure_vsy_golova_catalog_and_kits(db)
 
