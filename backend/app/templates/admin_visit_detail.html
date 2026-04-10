@@ -31,7 +31,6 @@
     </p>
     <p class="muted">
       Свой: {% if visit.client_type.value == 'SELF' %}да{% else %}нет{% endif %}
-      · Прайс: <strong>{{ price_type_ru }}</strong>
     </p>
 
     <h3>Услуга</h3>
@@ -88,6 +87,7 @@
     <h3>Деньги</h3>
     <table>
       <tr><td>Выручка (с клиента)</td><td>{{ "%.0f"|format(visit.amount_from_client) }} ₽</td></tr>
+      <tr><td>Скидка от прайса (история)</td><td>{% if visit.client_discount_percent and visit.client_discount_percent > 0 %}{{ visit.client_discount_percent }}%{% else %}—{% endif %}</td></tr>
       <tr><td>Себестоимость (материалы + комплект)</td><td>{{ "%.0f"|format(visit.cost_total) }} ₽</td></tr>
       <tr><td>Прибыль до распределения</td><td>{{ "%.0f"|format(visit.profit_before_split) }} ₽</td></tr>
       <tr><td>Амортизация</td><td>{{ "%.0f"|format(visit.amortization_amount or 0) }} ₽</td></tr>

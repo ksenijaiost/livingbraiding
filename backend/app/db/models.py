@@ -817,6 +817,8 @@ class Visit(Base):
     materials_cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     amount_from_client: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    # Скидка от прайса, целые %; в расчёт себестоимости не входит, хранится для истории и подсказок.
+    client_discount_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Addons reduce salon/master profit by rule (stored as a separate snapshot field).

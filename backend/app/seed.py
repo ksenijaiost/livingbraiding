@@ -630,6 +630,7 @@ def _ensure_demo_operational_data(db: Session) -> None:
             kudri_price_per_gram_at_time=8.0,
             materials_cost_total=200.0,
             amount_from_client=6000.0,
+            client_discount_percent=0,
             comment="Демо визит",
             addons_total=0.0,
             addons_details_json=None,

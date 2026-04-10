@@ -96,10 +96,10 @@
         <label><input type="checkbox" name="client_is_self" {% if fp.get('client_is_self') == 'on' %}checked{% endif %} />
           Свой клиент</label>
         <p class="muted" style="font-size: 12px; margin: 6px 0 10px;">Если не отмечено — обычный платный визит (не «свой»).</p>
-        <div>
-          <span class="muted" style="margin-right: 10px;">Прайс:</span>
-          <label style="margin-right: 14px;"><input type="radio" name="price_type" value="CLIENT" {% if fp.get('price_type', 'CLIENT') == 'CLIENT' %}checked{% endif %} /> Клиент</label>
-          <label><input type="radio" name="price_type" value="MODEL" {% if fp.get('price_type', 'CLIENT') == 'MODEL' %}checked{% endif %} /> Модель</label>
+        <div style="margin-top: 10px;">
+          <label for="client_discount_percent">Скидка клиенту, % <span class="muted">(целое; на себестоимость не влияет, хранится для истории)</span></label>
+          <input type="number" name="client_discount_percent" id="client_discount_percent" min="0" max="100" step="1" inputmode="numeric"
+            value="{{ fp.get('client_discount_percent', '0') }}" style="max-width: 6rem; display: block; margin-top: 6px;" />
         </div>
       </div>
 
@@ -175,8 +175,9 @@
       </div>
 
       <div class="card" style="margin-top: 14px; background: #f8fafc;">
+        <strong id="amount_from_client_label" style="font-size: 1.05rem; display: block;">Сколько взяли с клиента</strong>
+        <p id="visit_recommended_price_hint" class="muted" style="font-size: 13px; margin: 8px 0 6px; min-height: 1.25em;"></p>
         <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 10px;">
-          <strong id="amount_from_client_label" style="font-size: 1.05rem;">Сколько взяли с клиента</strong>
           <input id="amount_from_client" type="number" name="amount_from_client" min="0" step="1" inputmode="numeric" autocomplete="off"
             value="{{ fp.get('amount_from_client', '') }}" placeholder=""
             style="max-width: 12rem; font-size: 1.05rem;" />
@@ -681,6 +682,11 @@
     if (_cis) _cis.addEventListener('change', syncAmountRequired);
     const _amt = document.getElementById('amount_from_client');
     if (_amt) { _amt.addEventListener('input', syncVisitPreview); _amt.addEventListener('change', syncVisitPreview); }
+    const _disc = document.getElementById('client_discount_percent');
+    if (_disc) {
+      _disc.addEventListener('input', function () { updateRecommendedPriceHint(); });
+      _disc.addEventListener('change', function () { updateRecommendedPriceHint(); });
+    }
     document.querySelectorAll('input[name="addon_sales_amount"], input[name="mix_source"], input[name="mix_complexity"], input[name="amortization_level"]').forEach(function (el) {
       el.addEventListener('change', syncVisitPreview);
       el.addEventListener('input', syncVisitPreview);
@@ -779,6 +785,7 @@
 
     const formPrefill = {{ fp|tojson }};
     const visitMasterLevel = {{ (current_user.master_level.value if current_user.master_level else None) | tojson }};
+    const visitMasterLevelRu = {{ visit_master_level_ru|tojson }};
     const serviceCatalog = {{ service_catalog|tojson }};
     const currentUserId = {{ current_user.id|int }};
     const salonCutPct = {{ salon_cut_pct|float }};
@@ -939,8 +946,58 @@
       wrap.style.display = need ? 'block' : 'none';
     }
 
+    function visitClientDiscountPct() {
+      const el = document.getElementById('client_discount_percent');
+      if (!el) return 0;
+      let n = parseInt(String(el.value || '').trim(), 10);
+      if (isNaN(n) || n < 0) n = 0;
+      if (n > 100) n = 100;
+      return n;
+    }
+
+    function updateRecommendedPriceHint() {
+      const host = document.getElementById('visit_recommended_price_hint');
+      if (!host) return;
+      const svc = getSelectedService();
+      const pct = visitClientDiscountPct();
+      const level = visitMasterLevel && { JUNIOR: 1, MIDDLE: 1, SENIOR: 1 }[visitMasterLevel]
+        ? visitMasterLevel
+        : 'MIDDLE';
+      const byLevel = {
+        JUNIOR: ['price_junior_from', 'price_junior_to'],
+        MIDDLE: ['price_middle_from', 'price_middle_to'],
+        SENIOR: ['price_senior_from', 'price_senior_to'],
+      };
+      const keys = byLevel[level];
+      const lvlRu = visitMasterLevelRu || 'мастер';
+      if (!svc) {
+        host.textContent = '';
+        return;
+      }
+      const lo = svc[keys[0]];
+      const hi = svc[keys[1]];
+      if (lo == null && hi == null) {
+        host.textContent = '';
+        return;
+      }
+      const mul = (100 - pct) / 100.0;
+      const rLo = lo != null ? Math.round(parseFloat(lo) * mul) : null;
+      const rHi = hi != null ? Math.round(parseFloat(hi) * mul) : null;
+      let priceStr = '';
+      if (rLo != null && rHi != null && rLo !== rHi) {
+        priceStr = String(rLo) + ' – ' + String(rHi) + ' ₽';
+      } else if (rLo != null) {
+        priceStr = String(rLo) + ' ₽';
+      } else if (rHi != null) {
+        priceStr = String(rHi) + ' ₽';
+      }
+      let tail = pct > 0 ? ' с учётом скидки' : '';
+      host.textContent = 'Рекомендуемая цена по прайсу (' + lvlRu + '): ' + priceStr + tail;
+    }
+
     function updateServiceDerivedUI() {
       updateKitSectionVisibility();
+      updateRecommendedPriceHint();
       rebuildVisitQuestionnaire();
       syncVisitThermoSection();
       syncVisitPreview();
@@ -1109,28 +1166,11 @@
       const services = (sc && sc.services) ? sc.services : [];
 
       serviceSel.innerHTML = '';
-      function servicePriceHint(s) {
-        const byLevel = {
-          JUNIOR: ['младший мастер', s.price_junior_from, s.price_junior_to],
-          MIDDLE: ['мастер', s.price_middle_from, s.price_middle_to],
-          SENIOR: ['старший мастер', s.price_senior_from, s.price_senior_to],
-        };
-        const level = visitMasterLevel && byLevel[visitMasterLevel] ? visitMasterLevel : 'MIDDLE';
-        const tier = byLevel[level];
-        const label = tier[0];
-        const lo = tier[1];
-        const hi = tier[2];
-        if (lo == null && hi == null) return '';
-        const a = lo != null ? String(lo) : '—';
-        const b = hi != null ? String(hi) : '—';
-        return ` (${label}: ${a}–${b})`;
-      }
       for (const s of services) {
         const opt = document.createElement('option');
         opt.value = s.id;
-        const line = s.name + servicePriceHint(s);
-        opt.textContent = line;
-        opt.title = line;
+        opt.textContent = s.name;
+        opt.title = s.name;
         serviceSel.appendChild(opt);
       }
       updateServiceDerivedUI();

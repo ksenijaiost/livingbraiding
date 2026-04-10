@@ -354,6 +354,7 @@ def upgrade() -> None:
         sa.Column("kudri_price_per_gram_at_time", sa.Float(), nullable=True),
         sa.Column("materials_cost_total", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("amount_from_client", sa.Float(), nullable=False, server_default=sa.text("0")),
+        sa.Column("client_discount_percent", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("comment", sa.Text(), nullable=True),
         sa.Column("addons_total", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("addons_details_json", sa.Text(), nullable=True),

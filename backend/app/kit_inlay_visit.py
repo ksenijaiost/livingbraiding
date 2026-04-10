@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from sqlalchemy import or_, select
 from starlette.datastructures import UploadFile
@@ -265,6 +265,23 @@ def _resolve_visit_master_allocations(
     return out
 
 
+def _parse_visit_client_discount_percent(g: Callable[[str, str], str]) -> int:
+    """Целые 0–100; пусто = 0. g — функция имя→строка как в parse_kit_inlay_form."""
+
+    raw = (g("client_discount_percent", "") or "").replace(",", ".").strip()
+    if not raw:
+        return 0
+    try:
+        v = float(raw)
+    except ValueError:
+        raise ValueError("Скидка клиенту: укажите целое число процентов от 0 до 100.")
+    if v < 0 or v > 100:
+        raise ValueError("Скидка клиенту — от 0 до 100%.")
+    if abs(v - round(v)) > 1e-6:
+        raise ValueError("Скидка клиенту указывается целым числом процентов.")
+    return int(round(v))
+
+
 def parse_kit_inlay_form(
     form: Any, *, single_master_default_id: int | None = None
 ) -> KitInlayFormInput:
@@ -342,10 +359,7 @@ def parse_kit_inlay_form(
     extra_stock_id = g_int("own_extra_stock_kit_id", 0)
 
     ct = VisitClientType.SELF if g_bool("client_is_self") else VisitClientType.RETURNING
-    try:
-        pt = VisitPriceType(g("price_type", "CLIENT"))
-    except ValueError:
-        pt = VisitPriceType.CLIENT
+    disc_pct = _parse_visit_client_discount_percent(g)
 
     pd_raw = g("performed_date", "")
     try:
@@ -373,7 +387,7 @@ def parse_kit_inlay_form(
         draft_instagram=g("draft_instagram"),
         draft_other_contact=g("draft_other_contact"),
         client_type=ct,
-        price_type=pt,
+        client_discount_percent=disc_pct,
         performed_date=performed_date,
         duration_minutes=g_int("duration_h", 0) * 60 + g_int("duration_m", 0),
         amount_from_client=g_float("amount_from_client", 0),
@@ -426,7 +440,7 @@ class KitInlayFormInput:
     draft_instagram: str
     draft_other_contact: str
     client_type: VisitClientType
-    price_type: VisitPriceType
+    client_discount_percent: int
     performed_date: date
     duration_minutes: int
     amount_from_client: float
@@ -675,6 +689,8 @@ def validate_master_visit_step1(db: Session, inp: KitInlayFormInput) -> None:
 
     if inp.client_type != VisitClientType.SELF and inp.amount_from_client <= 0:
         raise ValueError("Укажите сумму, взятую с клиента.")
+    if inp.client_discount_percent < 0 or inp.client_discount_percent > 100:
+        raise ValueError("Скидка клиенту — от 0 до 100%.")
 
     if service_requires_kit_block(service):
         _build_kit_block_from_input(inp, db)
@@ -860,7 +876,8 @@ def save_kit_inlay_visit(
         duration_minutes=max(0, inp.duration_minutes),
         client_id=client.id,
         client_type=inp.client_type,
-        price_type=inp.price_type,
+        price_type=VisitPriceType.CLIENT,
+        client_discount_percent=int(inp.client_discount_percent or 0),
         client_age_group=client.age_group,
         kanekalon_grams=inp.kanekalon_grams,
         kudri_grams=inp.kudri_grams,
