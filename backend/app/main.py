@@ -52,8 +52,10 @@ from app.client_validation import (
 )
 from app.db.models import (
     Client,
+    ClientAuditLog,
     ClientThermoTemplate,
     Kit,
+    KitAuditLog,
     KitAuthorStaff,
     MaterialPriceCurrent,
     MaterialType,
@@ -69,11 +71,13 @@ from app.db.models import (
     VisitKitUsage,
     VisitMaster,
     StudioOrder,
+    StudioOrderAuditLog,
     StudioOrderKitUsage,
     StudioOrderServiceLine,
     StudioOrderStaff,
     WorkRate,
 )
+from app.audit import diff_fields, write_audit_rows
 from app.db.session import get_db
 from app.kit_crud import (
     apply_kit_admin_form,
@@ -321,6 +325,18 @@ def service_catalog_view(
                     .order_by(ServiceSubcategory.name.asc())
                 ).all()
             )
+            if (
+                (subcategory_id is None or subcategory_id <= 0)
+                and len(subcategories) == 1
+            ):
+                selected_subcategory = subcategories[0]
+                services = list(
+                    db.scalars(
+                        select(Service)
+                        .where(Service.subcategory_id == selected_subcategory.id)
+                        .order_by(Service.is_active.desc(), Service.name.asc())
+                    ).all()
+                )
 
     return templates.TemplateResponse(
         "service_catalog_view.html",
@@ -404,6 +420,8 @@ def products_catalog_view(
                     ServiceCategory.name == selected,
                     ServiceCategory.is_active.is_(True),
                     ServiceCategory.include_in_visit.is_(False),
+                    ServiceSubcategory.is_active.is_(True),
+                    Service.is_active.is_(True),
                 )
                 .order_by(
                     ServiceSubcategory.name.asc(),
@@ -633,6 +651,22 @@ async def admin_client_edit_post(
     client = db.get(Client, client_id)
     if client is None:
         raise HTTPException(status_code=404, detail="Клиент не найден")
+    before = SimpleNamespace(**{k: getattr(client, k) for k in (
+        "name",
+        "phone",
+        "telegram",
+        "vk",
+        "instagram",
+        "other_contact",
+        "age_group",
+        "source",
+        "source_other",
+        "comment",
+        "is_confirmed",
+        "birth_day",
+        "birth_month",
+        "birth_year",
+    )})
     form_raw = await request.form()
     form: dict[str, str] = {}
     for k in form_raw.keys():
@@ -701,6 +735,37 @@ async def admin_client_edit_post(
     client.birth_day = birth_day
     client.birth_month = birth_month
     client.birth_year = birth_year
+    client.updated_at = datetime.utcnow()
+    client.updated_by_user_id = current_user.id
+
+    changes = diff_fields(
+        before,
+        client,
+        (
+            "name",
+            "phone",
+            "telegram",
+            "vk",
+            "instagram",
+            "other_contact",
+            "age_group",
+            "source",
+            "source_other",
+            "comment",
+            "is_confirmed",
+            "birth_day",
+            "birth_month",
+            "birth_year",
+        ),
+    )
+    write_audit_rows(
+        db,
+        log_model=ClientAuditLog,
+        entity_field="client_id",
+        entity_id=client.id,
+        changed_by_user_id=current_user.id,
+        changes=changes,
+    )
 
     db.commit()
     return RedirectResponse(url=f"/admin/clients?updated={client.id}", status_code=303)
@@ -719,6 +784,16 @@ def admin_client_detail(
     client = db.get(Client, client_id)
     if client is None:
         raise HTTPException(status_code=404, detail="Клиент не найден")
+
+    audit_rows = list(
+        db.scalars(
+            select(ClientAuditLog)
+            .options(selectinload(ClientAuditLog.changed_by_user))
+            .where(ClientAuditLog.client_id == client_id)
+            .order_by(ClientAuditLog.changed_at.desc(), ClientAuditLog.id.desc())
+            .limit(200)
+        ).all()
+    )
 
     visits_stmt = (
         select(Visit)
@@ -759,6 +834,7 @@ def admin_client_detail(
             request,
             current_user=current_user,
             client=client,
+            audit_rows=audit_rows,
             visit_rows=visit_rows,
             kit_rows=kit_rows,
             thermo_templates=thermo_tpls,
@@ -781,7 +857,18 @@ def admin_client_confirm(
     client = db.get(Client, client_id)
     if client is None:
         raise HTTPException(status_code=404, detail="Клиент не найден")
+    before = SimpleNamespace(is_confirmed=client.is_confirmed)
     client.is_confirmed = True
+    client.updated_at = datetime.utcnow()
+    client.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=ClientAuditLog,
+        entity_field="client_id",
+        entity_id=client.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before, client, ("is_confirmed",)),
+    )
     db.commit()
     return RedirectResponse(url=f"/admin/clients/{client_id}?confirmed=1", status_code=303)
 
@@ -1208,12 +1295,22 @@ def admin_kit_detail(
     )
     if not kit:
         raise HTTPException(status_code=404, detail="Комплект не найден")
+    audit_rows = list(
+        db.scalars(
+            select(KitAuditLog)
+            .options(selectinload(KitAuditLog.changed_by_user))
+            .where(KitAuditLog.kit_id == kit_id)
+            .order_by(KitAuditLog.changed_at.desc(), KitAuditLog.id.desc())
+            .limit(200)
+        ).all()
+    )
     return templates.TemplateResponse(
         "admin_kit_detail.html",
         _ctx(
             request,
             current_user=current_user,
             kit=kit,
+            audit_rows=audit_rows,
             reserve_tooltip=_kit_reservation_tooltip(kit, db),
             staff_users=_staff_users_for_reserve(db),
             msg=msg,
@@ -1285,7 +1382,18 @@ async def admin_kit_discount_post(
             if red == "detail":
                 return RedirectResponse(url=f"/admin/kits/{kit_id}?err={err_q}", status_code=303)
             return RedirectResponse(url="/admin/kits?err=" + err_q, status_code=303)
+        before = SimpleNamespace(discount_percent=kit.discount_percent)
         kit.discount_percent = 0
+        kit.updated_at = datetime.utcnow()
+        kit.updated_by_user_id = current_user.id
+        write_audit_rows(
+            db,
+            log_model=KitAuditLog,
+            entity_field="kit_id",
+            entity_id=kit.id,
+            changed_by_user_id=current_user.id,
+            changes=diff_fields(before, kit, ("discount_percent",)),
+        )
         db.commit()
         if red == "detail":
             return RedirectResponse(url=f"/admin/kits/{kit_id}?msg=saved", status_code=303)
@@ -1300,7 +1408,18 @@ async def admin_kit_discount_post(
         if red == "detail":
             return RedirectResponse(url=f"/admin/kits/{kit_id}?err={err_q}", status_code=303)
         return RedirectResponse(url="/admin/kits?err=" + err_q, status_code=303)
+    before = SimpleNamespace(discount_percent=kit.discount_percent)
     kit.discount_percent = discount
+    kit.updated_at = datetime.utcnow()
+    kit.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=KitAuditLog,
+        entity_field="kit_id",
+        entity_id=kit.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before, kit, ("discount_percent",)),
+    )
     db.commit()
     if red == "detail":
         return RedirectResponse(url=f"/admin/kits/{kit_id}?msg=saved", status_code=303)
@@ -1319,6 +1438,21 @@ async def admin_kit_edit_post(
         raise HTTPException(status_code=404, detail="Комплект не найден")
     form = await request.form()
     try:
+        before = SimpleNamespace(
+            sku=kit.sku,
+            title=kit.title,
+            description=kit.description,
+            notes=kit.notes,
+            blank_type_de=kit.blank_type_de,
+            blank_type_se=kit.blank_type_se,
+            pieces_total=kit.pieces_total,
+            pieces_available=kit.pieces_available,
+            stock_price_total=kit.stock_price_total,
+            cost_total=kit.cost_total,
+            discount_percent=kit.discount_percent,
+            author_external=kit.author_external,
+            author_staff_ids=sorted([l.user_id for l in (kit.author_staff_links or [])]),
+        )
         d = parse_kit_admin_form(form, for_create=False)
         validate_kit_admin_form(d, for_create=False)
         if d.sku != kit.sku:
@@ -1327,6 +1461,52 @@ async def admin_kit_edit_post(
                 raise ValueError("Комплект с таким артикулом уже есть")
         apply_kit_admin_form(kit, d)
         sync_kit_authors(db, kit, form)
+        # Authors changed via relationship; snapshot after sync.
+        after_auth_ids = sorted([l.user_id for l in (kit.author_staff_links or [])])
+        kit.updated_at = datetime.utcnow()
+        kit.updated_by_user_id = current_user.id
+        after = SimpleNamespace(
+            sku=kit.sku,
+            title=kit.title,
+            description=kit.description,
+            notes=kit.notes,
+            blank_type_de=kit.blank_type_de,
+            blank_type_se=kit.blank_type_se,
+            pieces_total=kit.pieces_total,
+            pieces_available=kit.pieces_available,
+            stock_price_total=kit.stock_price_total,
+            cost_total=kit.cost_total,
+            discount_percent=kit.discount_percent,
+            author_external=kit.author_external,
+            author_staff_ids=after_auth_ids,
+        )
+        ch = diff_fields(
+            before,
+            after,
+            (
+                "sku",
+                "title",
+                "description",
+                "notes",
+                "blank_type_de",
+                "blank_type_se",
+                "pieces_total",
+                "pieces_available",
+                "stock_price_total",
+                "cost_total",
+                "discount_percent",
+                "author_external",
+                "author_staff_ids",
+            ),
+        )
+        write_audit_rows(
+            db,
+            log_model=KitAuditLog,
+            entity_field="kit_id",
+            entity_id=kit.id,
+            changed_by_user_id=current_user.id,
+            changes=ch,
+        )
         db.commit()
         return RedirectResponse(url=f"/admin/kits/{kit_id}?msg=saved", status_code=303)
     except ValueError as exc:
@@ -1368,6 +1548,12 @@ async def admin_kit_reserve_post(
     action = str(form.get("action") or "").strip().lower()
 
     if action == "clear":
+        before = SimpleNamespace(
+            reserved_at=kit.reserved_at,
+            reserved_by_user_id=kit.reserved_by_user_id,
+            reserved_for_client_id=kit.reserved_for_client_id,
+            reserved_for_user_id=kit.reserved_for_user_id,
+        )
         if current_user.role == UserRole.MASTER:
             if not kit.is_reserved or kit.reserved_by_user_id != current_user.id:
                 return RedirectResponse(
@@ -1383,6 +1569,25 @@ async def admin_kit_reserve_post(
         kit.reserved_by_user_id = None
         kit.reserved_for_client_id = None
         kit.reserved_for_user_id = None
+        kit.updated_at = datetime.utcnow()
+        kit.updated_by_user_id = current_user.id
+        write_audit_rows(
+            db,
+            log_model=KitAuditLog,
+            entity_field="kit_id",
+            entity_id=kit.id,
+            changed_by_user_id=current_user.id,
+            changes=diff_fields(
+                before,
+                kit,
+                (
+                    "reserved_at",
+                    "reserved_by_user_id",
+                    "reserved_for_client_id",
+                    "reserved_for_user_id",
+                ),
+            ),
+        )
         db.commit()
         return RedirectResponse(url=redirect_base + "?msg=cleared", status_code=303)
 
@@ -1398,6 +1603,12 @@ async def admin_kit_reserve_post(
                 status_code=303,
             )
 
+    before = SimpleNamespace(
+        reserved_at=kit.reserved_at,
+        reserved_by_user_id=kit.reserved_by_user_id,
+        reserved_for_client_id=kit.reserved_for_client_id,
+        reserved_for_user_id=kit.reserved_for_user_id,
+    )
     cid_raw = str(form.get("reserved_for_client_id") or "").strip()
     uid_raw = str(form.get("reserved_for_user_id") or "").strip()
     cid = int(cid_raw) if cid_raw.isdigit() else None
@@ -1427,6 +1638,25 @@ async def admin_kit_reserve_post(
     kit.reserved_by_user_id = current_user.id
     kit.reserved_for_client_id = cid
     kit.reserved_for_user_id = uid
+    kit.updated_at = datetime.utcnow()
+    kit.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=KitAuditLog,
+        entity_field="kit_id",
+        entity_id=kit.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(
+            before,
+            kit,
+            (
+                "reserved_at",
+                "reserved_by_user_id",
+                "reserved_for_client_id",
+                "reserved_for_user_id",
+            ),
+        ),
+    )
     db.commit()
     return RedirectResponse(url=redirect_base + "?msg=reserved", status_code=303)
 
@@ -1471,6 +1701,16 @@ def admin_visit_detail(
     if not visit:
         raise HTTPException(status_code=404, detail="Визит не найден")
 
+    audit_rows = list(
+        db.scalars(
+            select(VisitAuditLog)
+            .options(selectinload(VisitAuditLog.changed_by_user))
+            .where(VisitAuditLog.visit_id == visit_id)
+            .order_by(VisitAuditLog.changed_at.desc(), VisitAuditLog.id.desc())
+            .limit(200)
+        ).all()
+    )
+
     service_displays = [build_service_human_display(vs) for vs in visit.services]
 
     mix_bonus_master_label: str | None = None
@@ -1498,6 +1738,7 @@ def admin_visit_detail(
             request,
             current_user=current_user,
             visit=visit,
+            audit_rows=audit_rows,
             service_displays=service_displays,
             mix_bonus_master_label=mix_bonus_master_label,
             mix_source_ru=ru_mix_source(visit.mix_source),
@@ -1534,6 +1775,16 @@ def admin_studio_order_detail(
     if not order:
         raise HTTPException(status_code=404, detail="Заказ не найден")
 
+    audit_rows = list(
+        db.scalars(
+            select(StudioOrderAuditLog)
+            .options(selectinload(StudioOrderAuditLog.changed_by_user))
+            .where(StudioOrderAuditLog.studio_order_id == order_id)
+            .order_by(StudioOrderAuditLog.changed_at.desc(), StudioOrderAuditLog.id.desc())
+            .limit(200)
+        ).all()
+    )
+
     order_creator_label: str | None = None
     if order.created_by_user_id:
         cu = db.get(User, order.created_by_user_id)
@@ -1546,6 +1797,7 @@ def admin_studio_order_detail(
             request,
             current_user=current_user,
             order=order,
+            audit_rows=audit_rows,
             price_type_ru=ru_price_type(order.price_type),
             mix_source_ru=ru_mix_source(order.mix_source),
             mix_complexity_ru=ru_mix_complexity(getattr(order, "mix_complexity", None)),

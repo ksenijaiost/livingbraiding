@@ -39,6 +39,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.kit_inlay_visit import _materials_cost_and_snapshot
+from app.work_products_compute import compute_work_financials
 from app.visit_edit_policy import edit_window_days, is_in_closed_payroll_period, within_edit_window
 
 templates = Jinja2Templates(directory="app/templates")
@@ -229,20 +230,6 @@ def _rubber_type_items() -> list[tuple[str, str]]:
     ]
 
 
-def _rubber_variant_items() -> list[tuple[str, str]]:
-    return [
-        ("KIDS_SHORT", "Детская короткая"),
-        ("KIDS_LONG", "Детская длинная"),
-        ("SHOULDER_SOLID", "До плеч однотонная"),
-        ("SHOULDER_OMBRE", "До плеч омбре"),
-        ("WAIST_SOLID", "До талии однотон"),
-        ("WAIST_OMBRE", "До талии омбре"),
-        ("BUTT_SOLID", "До попы однотонная"),
-        ("BUTT_OMBRE", "До попы омбре"),
-        ("LOWER", "Ниже"),
-    ]
-
-
 def _rubber_service_name(rubber_type: str) -> str:
     return {
         "TAIL_ELASTIC": "Хвост на резинке (1 крепление)",
@@ -267,7 +254,9 @@ def _rubber_pricing_from_catalog(db: Session, rubber_type: str) -> tuple[float, 
         raise ValueError("Не найден прайс: «Заказ → Хвосты/резинки».")
     svc_name = _rubber_service_name(rubber_type)
     svc = db.scalar(select(Service).where(Service.subcategory_id == sub.id, Service.name == svc_name))
-    if not svc or not svc.is_active:
+    # Подкатегория может быть скрыта из прайса «Товары» (is_active=false), но строки услуг
+    # остаются для внутреннего расчёта ЗП/фонда в «Работа с товарами».
+    if not svc:
         raise ValueError(f"Не найден прайс для «{svc_name}».")
     mp = float(svc.master_pay_amount or 0.0)
     sp = float(svc.studio_pay_amount or 0.0)
@@ -437,7 +426,6 @@ def work_new_get(
             kit_se_items=_kit_se_items(),
             kit_de_items=_kit_de_items(),
             rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
-            rubber_variants=[{"value": v, "label": l} for v, l in _rubber_variant_items()],
             work_price_meta_json=json.dumps(work_price_meta, ensure_ascii=False),
         ),
     )
@@ -524,7 +512,6 @@ async def work_new_post(
         alloc: list[tuple[int, float]]
         kit_staff_ids: list[int] = []
         rubber_type = ""
-        rubber_variant = ""
         rubber_qty = 1
         corr_trim_qty = 0
         corr_wash = False
@@ -595,9 +582,6 @@ async def work_new_post(
             rubber_type = (_g_str(form, "rubber_type", "") or "").strip()
             if rubber_type not in {k for k, _ in _rubber_type_items()}:
                 raise ValueError("Для «Хвосты/резинки» выберите тип.")
-            rubber_variant = (_g_str(form, "rubber_variant", "") or "").strip()
-            if rubber_variant not in {k for k, _ in _rubber_variant_items()}:
-                raise ValueError("Для «Хвосты/резинки» выберите вариант длины/цвета.")
 
             if rubber_type == "TAIL_ELASTIC":
                 rubber_qty = int(_g_float(form, "rubber_attach_qty", 0))
@@ -612,7 +596,6 @@ async def work_new_post(
 
             details["rubber"] = {
                 "type": rubber_type,
-                "variant": rubber_variant,
                 "qty": rubber_qty,
             }
             alloc = [(current_user.id, 1.0)]
@@ -668,123 +651,37 @@ async def work_new_post(
             except ValueError:
                 raise ValueError("Некорректная дата готовности (ожидается YYYY-MM-DD).")
 
-        # Compute profits (MVP for 6.3.3: KIT uses piece rates; other kinds stay 0 for now)
-        staff_master_profit: dict[int, float] = {uid: 0.0 for uid, _ in alloc}
-        if kind == WorkKind.KIT:
-            for item_key, total_qty in kit_totals.items():
-                rate = _kit_rate_for_item(kit_rates, item_key, total_qty)
-                if rate <= 0:
-                    continue
-                for uid in kit_staff_ids:
-                    q = int(kit_by_staff.get(uid, {}).get(item_key, 0))
-                    if q > 0:
-                        staff_master_profit[uid] += rate * q
-            if (
-                mix_source == MixSource.SELF_MIXED
-                and grams_total > 0
-                and mix_complexity is not None
-            ):
-                rate_map = {
-                    MixComplexity.SIMPLE: _wr_float(db, "mix_simple", 1.0),
-                    MixComplexity.MEDIUM: _wr_float(db, "mix_medium", 1.5),
-                    MixComplexity.HARD: _wr_float(db, "mix_hard", 2.0),
-                }
-                mrate = float(rate_map.get(mix_complexity, 0.0))
-                mix_pay = max(0.0, float(grams_total) * mrate)
-                if mix_pay > 0:
-                    if current_user.id in staff_master_profit:
-                        staff_master_profit[current_user.id] += mix_pay
-                    elif kit_staff_ids:
-                        share = mix_pay / float(len(kit_staff_ids))
-                        for uid in kit_staff_ids:
-                            staff_master_profit[uid] += share
-        elif kind == WorkKind.RUBBER:
-            mp, sp, fx, is_per_unit, _ul = _rubber_pricing_from_catalog(db, rubber_type)
-            units = int(rubber_qty) if is_per_unit else 1
-            bonus = 1.0
-            if scope == WorkScope.CUSTOM_ORDER:
-                bonus = max(0.0, _wr_float(db, "custom_order_bonus_multiplier", 1.0))
-                if bonus <= 0:
-                    bonus = 1.0
-            staff_master_profit[current_user.id] = float(mp) * float(units) * bonus
-            # studio_profit for RUBBER is fixed from catalog (not via studio_share)
-            studio_total = float(sp) * float(units) * bonus
-            extra_costs_amount = float(fx) * float(units)
-        elif kind == WorkKind.KIT_CORRECTION:
-            corr_map = _zakaz_subcategory_services_map(db, "Коррекция комплекта")
-            bonus = 1.0
-            if scope == WorkScope.CUSTOM_ORDER:
-                bonus = max(0.0, _wr_float(db, "custom_order_bonus_multiplier", 1.0))
-                if bonus <= 0:
-                    bonus = 1.0
-
-            def _svc_sum(name: str, units: int, *, complexity_mul: float = 1.0) -> tuple[float, float, float]:
-                row = corr_map.get(name) or {}
-                mp = float(row.get("master_pay") or 0.0) * float(units) * float(complexity_mul)
-                sp = float(row.get("studio_pay") or 0.0) * float(units) * float(complexity_mul)
-                fx = float(row.get("fixed_expense") or 0.0) * float(units)
-                return mp, sp, fx
-
-            mp_total = 0.0
-            sp_total = 0.0
-            fx_total = 0.0
-            if corr_trim_qty > 0:
-                mp, sp, fx = _svc_sum("Стрижка (1шт)", corr_trim_qty)
-                mp_total += mp
-                sp_total += sp
-                fx_total += fx
-            if corr_circle:
-                mp, sp, fx = _svc_sum("Одевание на круг", 1)
-                mp_total += mp
-                sp_total += sp
-                fx_total += fx
-            if corr_wash:
-                mp, sp, fx = _svc_sum("Стирка", 1)
-                mp_total += mp
-                sp_total += sp
-                fx_total += fx
-            if corr_steam:
-                mp, sp, fx = _svc_sum("Отпаривание", 1)
-                mp_total += mp
-                sp_total += sp
-                fx_total += fx
-            cm_cd = 1.5 if corr_curl_dread_complexity == "HARD" else 1.0
-            if corr_dread_qty > 0:
-                mp, sp, fx = _svc_sum(
-                    "Коррекция дреда (1шт)", corr_dread_qty, complexity_mul=cm_cd
-                )
-                mp_total += mp
-                sp_total += sp
-                fx_total += fx
-            if corr_curl_qty > 0:
-                mp, sp, fx = _svc_sum(
-                    "Коррекция кудрей (1шт)", corr_curl_qty, complexity_mul=cm_cd
-                )
-                mp_total += mp
-                sp_total += sp
-                fx_total += fx
-
-            staff_master_profit[current_user.id] = mp_total * bonus
-            studio_total = sp_total * bonus
-            extra_costs_amount = fx_total
-        elif kind == WorkKind.MIX:
-            # "work_rates" store ₽/g for SIMPLE/MEDIUM/HARD
-            rate_map = {
-                MixComplexity.SIMPLE: _wr_float(db, "mix_simple", 1.0),
-                MixComplexity.MEDIUM: _wr_float(db, "mix_medium", 1.5),
-                MixComplexity.HARD: _wr_float(db, "mix_hard", 2.0),
-            }
-            rate = float(rate_map.get(mix_complexity or MixComplexity.SIMPLE, 0.0))
-            staff_master_profit[current_user.id] = max(0.0, float(grams_total) * rate)
-
-        master_total = float(sum(staff_master_profit.values()))
-        studio_share = _studio_share_snapshot(db)
-        if kind not in (WorkKind.RUBBER, WorkKind.KIT_CORRECTION):
-            studio_total = 0.0
-            if studio_share > 0 and studio_share < 1 and master_total > 0:
-                studio_total = master_total * (studio_share / (1.0 - studio_share))
-        profit_total = master_total + studio_total
-        cost_total_amount = mat_cost + extra_costs_amount
+        fin = compute_work_financials(
+            db,
+            kind=kind,
+            scope=scope,
+            alloc=alloc,
+            current_user_id=current_user.id,
+            mat_cost=mat_cost,
+            kit_totals=kit_totals,
+            kit_rates=kit_rates,
+            kit_staff_ids=kit_staff_ids,
+            kit_by_staff=kit_by_staff,
+            mix_source=mix_source,
+            mix_complexity=mix_complexity,
+            grams_total=grams_total,
+            rubber_type=rubber_type,
+            rubber_qty=rubber_qty,
+            corr_trim_qty=corr_trim_qty,
+            corr_wash=corr_wash,
+            corr_circle=corr_circle,
+            corr_steam=corr_steam,
+            corr_dread_qty=corr_dread_qty,
+            corr_curl_qty=corr_curl_qty,
+            corr_curl_dread_complexity=corr_curl_dread_complexity,
+        )
+        staff_master_profit = fin.staff_master_profit
+        master_total = fin.master_total
+        studio_total = fin.studio_total
+        profit_total = fin.profit_total
+        extra_costs_amount = fin.extra_costs_amount
+        cost_total_amount = fin.cost_total_amount
+        studio_share = fin.studio_share_snapshot
 
         work = WorkForInventory(
             created_by_user_id=current_user.id,
@@ -906,7 +803,6 @@ async def work_new_post(
                 kit_se_items=_kit_se_items(),
                 kit_de_items=_kit_de_items(),
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
-                rubber_variants=[{"value": v, "label": l} for v, l in _rubber_variant_items()],
                 work_price_meta_json=json.dumps(work_price_meta, ensure_ascii=False),
             ),
             status_code=400,

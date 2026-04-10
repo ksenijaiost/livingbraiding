@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -16,10 +17,12 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
 from app.auth import AuthUser, require_role
+from app.audit import diff_fields, write_audit_rows
 from app.db.models import (
     Client,
     Kit,
     ProductSale,
+    ProductSaleAuditLog,
     ProductSaleKind,
     Service,
     ServiceCategory,
@@ -222,6 +225,15 @@ def product_sale_detail(
         )
     edit_allowed, edit_block_msg = _sale_edit_allowed(db, sale)
     can_edit = current_user.role == UserRole.ADMIN_SUPER
+    audit_rows = list(
+        db.scalars(
+            select(ProductSaleAuditLog)
+            .options(selectinload(ProductSaleAuditLog.changed_by_user))
+            .where(ProductSaleAuditLog.sale_id == sale_id)
+            .order_by(ProductSaleAuditLog.changed_at.desc(), ProductSaleAuditLog.id.desc())
+            .limit(200)
+        ).all()
+    )
     return templates.TemplateResponse(
         "product_sale_detail.html",
         _ctx(
@@ -229,6 +241,7 @@ def product_sale_detail(
             current_user=current_user,
             sale=sale,
             error=None,
+            audit_rows=audit_rows,
             can_edit=can_edit,
             edit_allowed=edit_allowed,
             edit_block_msg=edit_block_msg,
@@ -327,6 +340,22 @@ async def product_sale_edit_save(
     ok, msg = _sale_edit_allowed(db, sale)
     if not ok:
         return RedirectResponse(url=f"/sales/products/{sale_id}?msg=edit_blocked", status_code=303)
+
+    before = SimpleNamespace(**{k: getattr(sale, k) for k in (
+        "client_id",
+        "performed_date",
+        "amount_from_client",
+        "kind",
+        "material_service_id",
+        "material_grams",
+        "material_description",
+        "kit_id",
+        "kit_pieces_sold",
+        "rubber_description",
+        "rubber_price_override",
+        "other_description",
+        "is_voided",
+    )})
 
     form = await request.form()
     material_services = _prodazha_materiala_services(db)
@@ -430,6 +459,33 @@ async def product_sale_edit_save(
             raise ValueError("Для «Другое» укажите описание.")
         sale.other_description = desc
 
+    sale.updated_at = datetime.utcnow()
+    sale.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=ProductSaleAuditLog,
+        entity_field="sale_id",
+        entity_id=sale.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(
+            before,
+            sale,
+            (
+                "client_id",
+                "performed_date",
+                "amount_from_client",
+                "kind",
+                "material_service_id",
+                "material_grams",
+                "material_description",
+                "kit_id",
+                "kit_pieces_sold",
+                "rubber_description",
+                "rubber_price_override",
+                "other_description",
+            ),
+        ),
+    )
     db.commit()
     return RedirectResponse(url=f"/sales/products/{sale_id}?msg=saved", status_code=303)
 
@@ -452,9 +508,20 @@ async def product_sale_void(
     if sale.kind == ProductSaleKind.KIT and sale.kit_id and sale.kit_pieces_sold:
         _apply_kit_delta(db, sale.kit_id, int(sale.kit_pieces_sold))
 
+    before = SimpleNamespace(is_voided=sale.is_voided, voided_at=sale.voided_at, voided_by_user_id=sale.voided_by_user_id)
     sale.is_voided = True
     sale.voided_at = datetime.utcnow()
     sale.voided_by_user_id = current_user.id
+    sale.updated_at = datetime.utcnow()
+    sale.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=ProductSaleAuditLog,
+        entity_field="sale_id",
+        entity_id=sale.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before, sale, ("is_voided", "voided_at", "voided_by_user_id")),
+    )
     db.commit()
     return RedirectResponse(url=f"/sales/products/{sale_id}?msg=voided", status_code=303)
 

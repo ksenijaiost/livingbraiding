@@ -11,7 +11,6 @@
       <div style="display:flex;flex-direction:column;gap:8px;">
         <label><input type="radio" name="order_subcategory" value="KOMPLEKT" required onchange="orderSubChange()" /> Комплект</label>
         <label><input type="radio" name="order_subcategory" value="ZAGOTOVKI" onchange="orderSubChange()" /> Заготовки поштучно</label>
-        <label><input type="radio" name="order_subcategory" value="REZINKI" onchange="orderSubChange()" /> Резинки</label>
         <label><input type="radio" name="order_subcategory" value="KORREKTSIYA" onchange="orderSubChange()" /> Коррекция комплекта</label>
       </div>
 
@@ -169,40 +168,6 @@
         {% endfor %}
       </div>
 
-      <div class="order-sec" data-sub="REZINKI" style="display:none;margin-top:20px;">
-        <h3>Резинки</h3>
-        <p>Услуги:</p>
-        {% if rubber_tail_id %}<label><input type="checkbox" name="rubber_tail" /> Прикрепление хвоста</label><br/>{% endif %}
-        {% if rubber_braid_id %}<label><input type="checkbox" name="rubber_braid" /> Брейд под хвост</label><br/>{% endif %}
-        <div style="margin-top:10px;">
-          <label>Вид резинки (длина и цвет)</label>
-          <select name="rubber_other_service_id">
-            <option value="0">— не выбрано —</option>
-            {% for svc in rubber_others %}
-              <option value="{{ svc.id }}">{{ svc.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="row" style="margin-top:12px;">
-          <div><label>Длина, см *</label><input name="rubber_length_cm" type="text" inputmode="decimal" /></div>
-          <div><label>Заготовок на резинке *</label><input type="number" name="rubber_blanks_on_elastic" min="1" step="1" /></div>
-          <div><label>Вес *</label><input name="rubber_weight_grams" type="text" inputmode="decimal" /></div>
-        </div>
-        <label>Описание</label><textarea name="rubber_description" rows="2"></textarea>
-        <div id="rubber_extra_block" style="display:none;margin-top:14px;" class="card">
-          <strong>Длительность и амортизация</strong> (хвост / брейд)
-          <div class="row" style="margin-top:8px;">
-            <div><label>Часы</label><input type="number" name="rubber_duration_h" min="0" value="0" /></div>
-            <div><label>Минуты</label><input type="number" name="rubber_duration_m" min="0" value="0" /></div>
-          </div>
-          <div style="margin-top:8px;">
-            <label><input type="radio" name="rubber_amortization_level" value="MIN" checked /> Мин. амортизация</label><br/>
-            <label><input type="radio" name="rubber_amortization_level" value="MID" /> Средняя</label><br/>
-            <label><input type="radio" name="rubber_amortization_level" value="MAX" /> Увеличенная</label>
-          </div>
-        </div>
-      </div>
-
       <div class="order-sec" data-sub="KORREKTSIYA" style="display:none;margin-top:20px;">
         <h3>Коррекция комплекта</h3>
         {% for s in zakaz_catalog %}
@@ -354,20 +319,5 @@
       {% endif %}
     {% endfor %}
 
-    function rubberExtraSync() {
-      var t = document.querySelector('input[name="rubber_tail"]');
-      var b = document.querySelector('input[name="rubber_braid"]');
-      var need = (t && t.checked) || (b && b.checked);
-      var el = document.getElementById('rubber_extra_block');
-      if (el) el.style.display = need ? 'block' : 'none';
-    }
-    {% if rubber_tail_id %}
-    var _rt = document.querySelector('input[name="rubber_tail"]');
-    if (_rt) _rt.addEventListener('change', rubberExtraSync);
-    {% endif %}
-    {% if rubber_braid_id %}
-    var _rb = document.querySelector('input[name="rubber_braid"]');
-    if (_rb) _rb.addEventListener('change', rubberExtraSync);
-    {% endif %}
   </script>
 {% endblock %}

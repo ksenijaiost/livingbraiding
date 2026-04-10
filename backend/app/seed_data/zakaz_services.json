@@ -30,24 +30,8 @@
           ]
         },
         {
-          "name": "Резинки",
-          "is_active": false,
-          "services": [
-            { "name": "Прикрепление хвоста", "order_rubber_extra_time_amort": true, "price": { "from": 800 } },
-            { "name": "Брейд под хвост", "order_rubber_extra_time_amort": true, "price": { "from": 1000, "to": 1400 } },
-            { "name": "Детская короткая", "price": { "from": 500, "to": 800 } },
-            { "name": "Детская длинная", "price": { "from": 800, "to": 1300 } },
-            { "name": "До плеч однотонная", "price": { "from": 1600 } },
-            { "name": "До плеч омбре", "price": { "from": 2000 } },
-            { "name": "До талии однотон", "price": { "from": 2000 } },
-            { "name": "До талии омбре", "price": { "from": 2500 } },
-            { "name": "До попы однотонная", "price": { "from": 2500 } },
-            { "name": "До попы омбре", "price": { "from": 3000 } },
-            { "name": "Ниже", "price": { "from": 3000, "to": 4000 } }
-          ]
-        },
-        {
           "name": "Хвосты/резинки",
+          "is_active": false,
           "services": [
             {
               "name": "Хвост на крабе",
@@ -79,6 +63,7 @@
         },
         {
           "name": "Хвосты/резинки - длина/цвет",
+          "is_active": false,
           "services": [
             { "name": "Детская короткая", "price": { "from": 500, "to": 800 } },
             { "name": "Детская длинная", "price": { "from": 800, "to": 1300 } },

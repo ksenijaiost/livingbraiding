@@ -74,6 +74,8 @@ def upgrade() -> None:
         sa.Column("birth_month", sa.Integer(), nullable=True),
         sa.Column("birth_year", sa.Integer(), nullable=True),
         sa.Column("created_by_label", sa.String(length=240), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
     )
 
     op.create_table(
@@ -291,6 +293,8 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("(datetime('now'))"),
         ),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("is_in_stock", sa.Boolean(), nullable=False, server_default=sa.text("1")),
         sa.Column("is_archived", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column("reserved_at", sa.DateTime(), nullable=True),
@@ -314,12 +318,12 @@ def upgrade() -> None:
         "visits",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("created_by_user_id", sa.Integer(), nullable=True),
+        sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
-        sa.Column("updated_by_user_id", sa.Integer(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("is_cancelled", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column("cancelled_at", sa.DateTime(), nullable=True),
-        sa.Column("cancelled_by_user_id", sa.Integer(), nullable=True),
+        sa.Column("cancelled_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("performed_date", sa.DateTime(), nullable=False),
         sa.Column("duration_minutes", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=False),
@@ -412,7 +416,56 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("visit_id", sa.Integer(), sa.ForeignKey("visits.id"), nullable=False),
         sa.Column("changed_at", sa.DateTime(), nullable=False),
-        sa.Column("changed_by_user_id", sa.Integer(), nullable=True),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "client_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "kit_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("kit_id", sa.Integer(), sa.ForeignKey("kits.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "product_sale_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("sale_id", sa.Integer(), sa.ForeignKey("product_sales.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "studio_order_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "studio_order_id",
+            sa.Integer(),
+            sa.ForeignKey("studio_orders.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("field_name", sa.String(length=120), nullable=False),
         sa.Column("old_value", sa.Text(), nullable=True),
         sa.Column("new_value", sa.Text(), nullable=True),
@@ -423,6 +476,8 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("performed_date", sa.DateTime(), nullable=False),
         sa.Column("duration_minutes", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=False),
@@ -476,10 +531,6 @@ def upgrade() -> None:
         sa.Column("salon_profit", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("masters_pool", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("subcategory_key", sa.String(length=24), nullable=False),
-        sa.Column("rubber_length_cm", sa.Float(), nullable=True),
-        sa.Column("rubber_blanks_on_elastic", sa.Integer(), nullable=True),
-        sa.Column("rubber_weight_grams", sa.Float(), nullable=True),
-        sa.Column("rubber_description", sa.Text(), nullable=True),
         sa.Column("korrekciya_blanks_in_kit", sa.Integer(), nullable=True),
         sa.Column("korrekciya_comment", sa.Text(), nullable=True),
     )
@@ -537,6 +588,8 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("performed_date", sa.DateTime(), nullable=False),
         sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=False),
         sa.Column("amount_from_client", sa.Integer(), nullable=False, server_default=sa.text("0")),

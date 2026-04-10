@@ -58,7 +58,6 @@ from app.kit_inlay_visit import (
 ZAKAZ_CATEGORY = "Заказ"
 SUB_KOMPLEKT = "Комплект"
 SUB_ZAGOTOVKI = "Заготовки поштучно"
-SUB_REZINKI = "Резинки"
 SUB_KORREKTSIYA = "Коррекция комплекта"
 
 
@@ -261,34 +260,6 @@ def _service_in_sub(db: Session, service_id: int, sub_name: str) -> Service:
     return s
 
 
-def _rubber_tail_braid_ids(db: Session) -> tuple[int | None, int | None]:
-    sub = db.scalar(
-        select(ServiceSubcategory)
-        .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
-        .where(
-            ServiceCategory.name == ZAKAZ_CATEGORY,
-            ServiceSubcategory.name == SUB_REZINKI,
-        )
-    )
-    if not sub:
-        return None, None
-    tail = db.scalar(
-        select(Service.id).where(
-            Service.subcategory_id == sub.id,
-            Service.name == "Прикрепление хвоста",
-            Service.is_active.is_(True),
-        )
-    )
-    braid = db.scalar(
-        select(Service.id).where(
-            Service.subcategory_id == sub.id,
-            Service.name == "Брейд под хвост",
-            Service.is_active.is_(True),
-        )
-    )
-    return tail, braid
-
-
 def _parse_kit_stock_from_form(form: Any, prefix: str) -> tuple[int | None, bool, int]:
     kid = _g_int(form, f"{prefix}stock_kit_id", 0)
     return (
@@ -484,9 +455,6 @@ def save_studio_order_from_form(
     duration_minutes = 0
     amort_level: AmortizationLevel | None = None
     amort_amount = 0.0
-    rubber_length = rubber_weight = None
-    rubber_blanks = None
-    rubber_desc = None
     kor_blanks = None
     kor_comment = None
 
@@ -584,51 +552,6 @@ def save_studio_order_from_form(
         if not picked_any:
             raise ValueError("Отметьте хотя бы одну услугу (заготовки поштучно).")
 
-    elif sub_key == StudioOrderSubcategoryKey.REZINKI:
-        tail_id, braid_id = _rubber_tail_braid_ids(db)
-        want_tail = _g_bool(form, "rubber_tail")
-        want_braid = _g_bool(form, "rubber_braid")
-        other_id = _g_int(form, "rubber_other_service_id", 0)
-        rubber_length = _g_float(form, "rubber_length_cm", 0) or None
-        rubber_blanks = _g_int(form, "rubber_blanks_on_elastic", 0) or None
-        rubber_weight = _g_float(form, "rubber_weight_grams", 0) or None
-        rubber_desc = _g_str(form, "rubber_description") or None
-        if rubber_length is None or rubber_length <= 0:
-            raise ValueError("Укажите длину (см).")
-        if rubber_blanks is None or rubber_blanks <= 0:
-            raise ValueError("Укажите количество заготовок на резинке (целое число).")
-        if rubber_weight is None or rubber_weight <= 0:
-            raise ValueError("Укажите вес.")
-        ids_line: list[int] = []
-        if want_tail and tail_id:
-            ids_line.append(tail_id)
-        if want_braid and braid_id:
-            ids_line.append(braid_id)
-        ids_set: set[int] = set(ids_line)
-        if other_id > 0:
-            s_other = _service_in_sub(db, other_id, SUB_REZINKI)
-            ids_set.add(s_other.id)
-        ids_line = sorted(ids_set)
-        if not ids_line:
-            raise ValueError("Выберите хотя бы одну услугу резинок (галочки или позиция из списка).")
-        extra_time = want_tail or want_braid
-        if extra_time:
-            duration_minutes = _g_int(form, "rubber_duration_h", 0) * 60 + _g_int(
-                form, "rubber_duration_m", 0
-            )
-            ar = _g_str(form, "rubber_amortization_level", "") or "MIN"
-            try:
-                amort_level = AmortizationLevel(ar)
-            except ValueError:
-                amort_level = AmortizationLevel.MIN
-            amort_amount = {"MIN": 100.0, "MID": 200.0, "MAX": 500.0}[amort_level.value]
-        for sid in ids_line:
-            svc = db.get(Service, sid)
-            if not svc:
-                continue
-            service_lines.append((svc, sort_i, {"rubber_common": True}))
-            sort_i += 1
-
     elif sub_key == StudioOrderSubcategoryKey.KORREKTSIYA:
         k_sub = next((x for x in load_zakaz_catalog(db) if x["name"] == SUB_KORREKTSIYA), None)
         if not k_sub:
@@ -683,10 +606,6 @@ def save_studio_order_from_form(
         salon_profit=salon_profit,
         masters_pool=masters_pool,
         subcategory_key=sub_key,
-        rubber_length_cm=rubber_length,
-        rubber_blanks_on_elastic=rubber_blanks,
-        rubber_weight_grams=rubber_weight,
-        rubber_description=rubber_desc,
         korrekciya_blanks_in_kit=kor_blanks,
         korrekciya_comment=kor_comment,
     )
@@ -734,21 +653,10 @@ def _ctx(request: Request, current_user: AuthUser, **kwargs):
 def _new_order_template_kwargs(db: Session):
     zc = load_zakaz_catalog(db)
     staff = list_staff_for_order_form(db)
-    tail_id, braid_id = _rubber_tail_braid_ids(db)
-    others: list[Service] = []
-    sub = next((x for x in zc if x["name"] == SUB_REZINKI), None)
-    if sub:
-        for svc in sub["services"]:
-            if svc.id == tail_id or svc.id == braid_id:
-                continue
-            others.append(svc)
     return {
         "zakaz_catalog": zc,
         "staff_for_order": staff,
         "staff_for_kit_authors": list_masters_for_kit_author_pick(db),
-        "rubber_tail_id": tail_id,
-        "rubber_braid_id": braid_id,
-        "rubber_others": others,
         "default_date": date.today().isoformat(),
     }
 

@@ -34,14 +34,6 @@
       <p class="muted">—</p>
     {% endif %}
 
-    {% if order.subcategory_key.value == 'REZINKI' %}
-      <h3>Резинки (общие поля)</h3>
-      <p class="muted" style="line-height:1.4;">
-        Длина: {{ order.rubber_length_cm or '—' }} см · Заготовок на резинке: {{ order.rubber_blanks_on_elastic or '—' }}
-        · Вес: {{ order.rubber_weight_grams or '—' }}<br/>
-        Описание: {{ order.rubber_description or '—' }}
-      </p>
-    {% endif %}
     {% if order.subcategory_key.value == 'KORREKTSIYA' %}
       <h3>Коррекция</h3>
       <p class="muted">Заготовок в комплекте: {{ order.korrekciya_blanks_in_kit or '—' }}<br/>{{ order.korrekciya_comment or '' }}</p>
@@ -87,6 +79,34 @@
       </table>
     {% else %}
       <p class="muted">Нет списаний со склада по этому заказу.</p>
+    {% endif %}
+
+    <h3>История изменений</h3>
+    {% if audit_rows %}
+      <table>
+        <thead>
+          <tr>
+            <th>Когда</th>
+            <th>Кто</th>
+            <th>Поле</th>
+            <th>Было</th>
+            <th>Стало</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in audit_rows %}
+            <tr>
+              <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+              <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+              <td><code>{{ a.field_name }}</code></td>
+              <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+              <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">Пока нет изменений.</p>
     {% endif %}
   </div>
 {% endblock %}

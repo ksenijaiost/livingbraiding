@@ -137,6 +137,10 @@ class Client(Base):
     birth_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Snapshot at creation: e.g. "Анна (MASTER)" — set by app from current user display_name + role
     created_by_label: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
 
     thermo_templates: Mapped[list["ClientThermoTemplate"]] = relationship(
         back_populates="client",
@@ -429,6 +433,8 @@ class Kit(Base):
     author_cost_total: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     is_in_stock: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
@@ -441,6 +447,7 @@ class Kit(Base):
     reserved_by_user: Mapped[User | None] = relationship(foreign_keys=[reserved_by_user_id])
     reserved_for_client: Mapped[Client | None] = relationship(foreign_keys=[reserved_for_client_id])
     reserved_for_user: Mapped[User | None] = relationship(foreign_keys=[reserved_for_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
 
     # Автор(ы) комплекта: сотрудники студии и/или отметка «Извне» (заполняется при внесении карточки).
     author_external: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -506,6 +513,8 @@ class ProductSale(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
     amount_from_client: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -536,6 +545,7 @@ class ProductSale(Base):
     other_description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     voided_by_user: Mapped["User | None"] = relationship(foreign_keys=[voided_by_user_id])
     client: Mapped["Client"] = relationship()
     material_service: Mapped["Service | None"] = relationship(foreign_keys=[material_service_id])
@@ -664,7 +674,6 @@ class StudioOrderSubcategoryKey(str, enum.Enum):
 
     KOMPLEKT = "KOMPLEKT"
     ZAGOTOVKI = "ZAGOTOVKI"
-    REZINKI = "REZINKI"
     KORREKTSIYA = "KORREKTSIYA"
 
 
@@ -676,6 +685,8 @@ class StudioOrder(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     duration_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
@@ -716,14 +727,11 @@ class StudioOrder(Base):
         Enum(StudioOrderSubcategoryKey, native_enum=False, length=24),
         nullable=False,
     )
-    rubber_length_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
-    rubber_blanks_on_elastic: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    rubber_weight_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
-    rubber_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     korrekciya_blanks_in_kit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     korrekciya_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     client: Mapped["Client"] = relationship()
     staff_rows: Mapped[list["StudioOrderStaff"]] = relationship(
         back_populates="studio_order", cascade="all, delete-orphan"
@@ -790,13 +798,13 @@ class Visit(Base):
     # must not affect historical visits.
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    created_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    updated_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     is_cancelled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    cancelled_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     duration_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -841,6 +849,9 @@ class Visit(Base):
     masters_pool: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     client: Mapped[Client] = relationship()
+    created_by_user: Mapped["User | None"] = relationship(foreign_keys=[created_by_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    cancelled_by_user: Mapped["User | None"] = relationship(foreign_keys=[cancelled_by_user_id])
     masters: Mapped[list["VisitMaster"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
     services: Mapped[list["VisitService"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
     kit_usages: Mapped[list["VisitKitUsage"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
@@ -852,12 +863,75 @@ class VisitAuditLog(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     visit_id: Mapped[int] = mapped_column(ForeignKey("visits.id"), nullable=False)
     changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    changed_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     field_name: Mapped[str] = mapped_column(String(120), nullable=False)
     old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     visit: Mapped[Visit] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class ClientAuditLog(Base):
+    __tablename__ = "client_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    client: Mapped["Client"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class KitAuditLog(Base):
+    __tablename__ = "kit_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kit_id: Mapped[int] = mapped_column(ForeignKey("kits.id", ondelete="CASCADE"), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    kit: Mapped["Kit"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class ProductSaleAuditLog(Base):
+    __tablename__ = "product_sale_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("product_sales.id", ondelete="CASCADE"), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    sale: Mapped["ProductSale"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class StudioOrderAuditLog(Base):
+    __tablename__ = "studio_order_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    studio_order_id: Mapped[int] = mapped_column(
+        ForeignKey("studio_orders.id", ondelete="CASCADE"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    studio_order: Mapped["StudioOrder"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
 
 
 class VisitMaster(Base):

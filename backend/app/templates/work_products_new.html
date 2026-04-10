@@ -114,15 +114,6 @@
               {% endfor %}
             </select>
           </div>
-          <div>
-            <label>Вариант длины/цвета</label>
-            <select name="rubber_variant">
-              <option value="" {% if not fp.rubber_variant %}selected{% endif %}>— выберите —</option>
-              {% for v in rubber_variants %}
-                <option value="{{ v.value }}" {% if fp.rubber_variant == v.value %}selected{% endif %}>{{ v.label }}</option>
-              {% endfor %}
-            </select>
-          </div>
         </div>
 
         <div class="row" style="margin-top: 10px;">
