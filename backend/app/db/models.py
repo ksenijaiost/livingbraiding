@@ -120,6 +120,8 @@ class Client(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    photo_1: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    photo_2: Mapped[str | None] = mapped_column(String(300), nullable=True)
     telegram: Mapped[str | None] = mapped_column(String(100), nullable=True)
     vk: Mapped[str | None] = mapped_column(String(120), nullable=True)
     instagram: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -408,6 +410,7 @@ class Kit(Base):
     # Карточка склада (шаг 3.3): типы заготовок — можно один или оба.
     blank_type_de: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     blank_type_se: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    photo_1: Mapped[str | None] = mapped_column(String(300), nullable=True)
     weight_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
     length_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     has_decorations: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -819,6 +822,8 @@ class Visit(Base):
     amount_from_client: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     # Скидка от прайса, целые %; в расчёт себестоимости не входит, хранится для истории и подсказок.
     client_discount_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    photo_1: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    photo_2: Mapped[str | None] = mapped_column(String(300), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Addons reduce salon/master profit by rule (stored as a separate snapshot field).
