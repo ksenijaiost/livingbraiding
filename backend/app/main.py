@@ -13,7 +13,7 @@ As the project grows, we can split routes into modules (e.g. `routes/admin.py`,
 """
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
@@ -1688,6 +1688,36 @@ def admin_settings_page(
     )
 
 
+def _payroll_period_day_start(d: date) -> datetime:
+    return datetime.combine(d, time.min)
+
+
+def _payroll_period_day_end(d: date) -> datetime:
+    return datetime.combine(d, time(23, 59, 59, 999999))
+
+
+def _payroll_msg_ru(code: str | None) -> str | None:
+    if not code:
+        return None
+    return {
+        "created": "Открыт новый период.",
+        "closed": "Период закрыт.",
+        "already_closed": "Период уже был закрыт.",
+    }.get(code, code)
+
+
+def _payroll_err_ru(code: str | None) -> str | None:
+    if not code:
+        return None
+    return {
+        "bad_date": "Некорректная дата.",
+        "range": "Дата «По» не может быть раньше даты «С».",
+        "not_found": "Период не найден.",
+        "open_exists": "Сначала закройте текущий открытый период.",
+        "empty_po": "Укажите дату «По», чтобы закрыть период.",
+    }.get(code, code)
+
+
 @app.get("/admin/payroll-periods", response_class=HTMLResponse)
 def admin_payroll_periods_list(
     request: Request,
@@ -1696,48 +1726,50 @@ def admin_payroll_periods_list(
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    periods = list(db.scalars(select(PayrollPeriod).order_by(PayrollPeriod.id.desc())).all())
-    today = date.today()
-    default_from = today.replace(day=1).isoformat()
-    default_to = today.isoformat()
+    periods = list(
+        db.scalars(select(PayrollPeriod).order_by(PayrollPeriod.date_from.asc(), PayrollPeriod.id.asc())).all()
+    )
+    has_open = any(p.closed_at is None for p in periods)
+    can_open_next = not has_open
     return templates.TemplateResponse(
         "admin_payroll_periods.html",
         _ctx(
             request,
             current_user=current_user,
             periods=periods,
-            msg=msg,
-            err=err,
-            default_from=default_from,
-            default_to=default_to,
+            msg=_payroll_msg_ru(msg),
+            err=_payroll_err_ru(err),
+            can_open_next=can_open_next,
         ),
     )
 
 
-@app.post("/admin/payroll-periods/new")
-async def admin_payroll_periods_new(
-    request: Request,
+@app.post("/admin/payroll-periods/open-next")
+def admin_payroll_periods_open_next(
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    form = await request.form()
-    df_raw = str(form.get("date_from") or "").strip()
-    dt_raw = str(form.get("date_to") or "").strip()
-    try:
-        df = datetime.combine(date.fromisoformat(df_raw), datetime.min.time())
-        dt = datetime.combine(date.fromisoformat(dt_raw), datetime.min.time())
-    except ValueError:
-        return RedirectResponse(url="/admin/payroll-periods?err=bad_date", status_code=303)
-    if dt < df:
-        return RedirectResponse(url="/admin/payroll-periods?err=range", status_code=303)
-    db.add(PayrollPeriod(date_from=df, date_to=dt))
+    if db.scalar(select(PayrollPeriod.id).where(PayrollPeriod.closed_at.is_(None)).limit(1)) is not None:
+        return RedirectResponse(url="/admin/payroll-periods?err=open_exists", status_code=303)
+
+    last = db.scalar(
+        select(PayrollPeriod).order_by(PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc()).limit(1)
+    )
+    if last is None:
+        df_d = datetime.utcnow().date()
+    else:
+        df_d = last.date_to.date() + timedelta(days=1)
+
+    day_start = _payroll_period_day_start(df_d)
+    db.add(PayrollPeriod(date_from=day_start, date_to=day_start, closed_at=None))
     db.commit()
     return RedirectResponse(url="/admin/payroll-periods?msg=created", status_code=303)
 
 
 @app.post("/admin/payroll-periods/{period_id}/close")
-def admin_payroll_periods_close(
+async def admin_payroll_periods_close(
     period_id: int,
+    request: Request,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -1746,6 +1778,20 @@ def admin_payroll_periods_close(
         return RedirectResponse(url="/admin/payroll-periods?err=not_found", status_code=303)
     if p.closed_at:
         return RedirectResponse(url="/admin/payroll-periods?msg=already_closed", status_code=303)
+
+    form = await request.form()
+    raw = str(form.get("date_to") or "").strip()
+    if not raw:
+        return RedirectResponse(url="/admin/payroll-periods?err=empty_po", status_code=303)
+    try:
+        d_to = date.fromisoformat(raw)
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-periods?err=bad_date", status_code=303)
+
+    if d_to < p.date_from.date():
+        return RedirectResponse(url="/admin/payroll-periods?err=range", status_code=303)
+
+    p.date_to = _payroll_period_day_end(d_to)
     p.closed_at = datetime.utcnow()
     p.closed_by_name = current_user.display_name
     p.closed_by_role = current_user.role.value

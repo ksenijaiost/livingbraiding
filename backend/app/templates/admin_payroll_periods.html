@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
   <div class="card" style="max-width: 980px;">
-    <h2 style="margin-top: 0;">Периоды ЗП (каркас)</h2>
+    <h2 style="margin-top: 0;">Периоды ЗП</h2>
     <p class="muted" style="margin-top:-6px;">
-      Закрытый период блокирует редактирование денежных полей в записях работ (проводки будут позже).
+      «С» у нового периода ставится автоматически (следующий день после «По» предыдущего). Дату «По» для открытого периода вводите вручную и сохраняйте кнопкой «Закрыть» — пока период не закрыт, дата в базу не записывается.
+      Закрытый период блокирует редактирование денежных полей в записях, попадающих в его интервал.
     </p>
 
     {% if msg %}
@@ -15,25 +16,15 @@
       <div class="error" style="margin-bottom: 12px;">{{ err }}</div>
     {% endif %}
 
-    <div class="card" style="background:#f8fafc; margin-bottom: 16px;">
-      <h3 style="margin-top: 0;">Новый период</h3>
-      <form method="post" action="/admin/payroll-periods/new">
-        <div class="row" style="align-items: flex-end;">
-          <div>
-            <label>Дата начала (UTC)</label>
-            <input name="date_from" placeholder="2026-04-01" value="{{ default_from }}" />
-          </div>
-          <div>
-            <label>Дата конца (UTC)</label>
-            <input name="date_to" placeholder="2026-04-15" value="{{ default_to }}" />
-          </div>
-          <div style="flex:0 0 auto; min-width:auto;">
-            <label style="visibility:hidden;">action</label>
-            <button type="submit">Создать</button>
-          </div>
-        </div>
-      </form>
-    </div>
+    {% if can_open_next %}
+      <div class="card" style="background:#f8fafc; margin-bottom: 16px;">
+        <h3 style="margin-top: 0;">Новый период</h3>
+        <p class="muted" style="margin: 0 0 12px;">Дата начала будет рассчитана автоматически.</p>
+        <form method="post" action="/admin/payroll-periods/open-next" style="margin:0;">
+          <button type="submit">Открыть следующий период</button>
+        </form>
+      </div>
+    {% endif %}
 
     <h3 style="margin-top: 0;">Список периодов</h3>
     {% if periods %}
@@ -53,11 +44,17 @@
             {% for p in periods %}
               <tr>
                 <td>{{ p.id }}</td>
-                <td>{{ p.date_from }}</td>
-                <td>{{ p.date_to }}</td>
+                <td>{{ p.date_from.strftime('%d.%m.%Y') }}</td>
                 <td>
                   {% if p.closed_at %}
-                    {{ p.closed_at }}
+                    {{ p.date_to.strftime('%d.%m.%Y') }}
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if p.closed_at %}
+                    {{ p.closed_at.strftime('%d.%m.%Y %H:%M') }}
                   {% else %}
                     <span class="muted">нет</span>
                   {% endif %}
@@ -71,8 +68,12 @@
                 </td>
                 <td>
                   {% if not p.closed_at %}
-                    <form method="post" action="/admin/payroll-periods/{{ p.id }}/close" style="margin:0;">
-                      <button type="submit" class="secondary">Закрыть</button>
+                    <form method="post" action="/admin/payroll-periods/{{ p.id }}/close" style="margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
+                      <label style="margin:0;display:flex;align-items:center;gap:6px;">
+                        <span class="muted" style="white-space:nowrap;">По</span>
+                        <input type="date" name="date_to" required />
+                      </label>
+                      <button type="submit">Закрыть</button>
                     </form>
                   {% else %}
                     <span class="muted">—</span>
@@ -84,7 +85,7 @@
         </table>
       </div>
     {% else %}
-      <p class="muted">Периоды ещё не созданы.</p>
+      <p class="muted">Периоды ещё не созданы — нажмите «Открыть следующий период».</p>
     {% endif %}
 
     <p style="margin-top: 16px;">
@@ -92,4 +93,3 @@
     </p>
   </div>
 {% endblock %}
-

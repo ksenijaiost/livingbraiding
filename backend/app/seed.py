@@ -586,11 +586,11 @@ def _ensure_demo_operational_data(db: Session) -> None:
                 ),
                 PayrollPeriod(
                     date_from=cur_from,
-                    date_to=cur_to,
+                    date_to=cur_from,
                     closed_at=None,
                     closed_by_name=None,
                     closed_by_role=None,
-                    comment="Демо открытый период",
+                    comment="Демо открытый период (дата «По» задаётся при закрытии)",
                 ),
             ]
         )
