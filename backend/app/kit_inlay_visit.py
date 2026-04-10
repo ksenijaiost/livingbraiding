@@ -130,19 +130,33 @@ def _apply_stock_kit_usage(
     use_entire: bool,
     blanks_used: int,
 ) -> tuple[int, float, float]:
-    """Списание: (pieces_used, cost_amount, studio_fund_amount)."""
+    """Списание: (pieces_used, cost_amount_for_visit, studio_fund_amount).
+
+    cost_amount_for_visit — доля (цена − скидка) по списанным заготовкам (в расход визита/заказа).
+    studio_fund — остаток после вычета себестоимости (себестоимость уже включает ЗП авторов).
+    """
     kit = _validate_stock_selection(db, kit_id=kit_id, use_entire=use_entire, blanks_used=blanks_used)
+    raw_price = kit.stock_price_total
+    if raw_price is None or float(raw_price) <= 0:
+        raise ValueError(
+            "У комплекта не задана цена продажи. Укажите цену в карточке комплекта (администратор), затем снова выберите комплект."
+        )
+    price = float(raw_price)
+    total_pieces = int(kit.pieces_total) if kit.pieces_total else 1
+    if total_pieces <= 0:
+        total_pieces = 1
     avail = kit.pieces_available
     n = avail if use_entire else blanks_used
-    price = kit.stock_price_total or 0.0
-    total_pieces = kit.pieces_total or 1
-    cost = price * (n / total_pieces) if total_pieces else 0.0
-    # Фонд ЗП студии от продажи комплекта (пропорционально списанию):
-    # (цена - себестоимость - ЗП авторов) * k
-    kit_cost = kit.cost_total or 0.0
-    kit_author = kit.author_cost_total or 0.0
-    k = (n / total_pieces) if total_pieces else 0.0
-    studio_fund = max(0.0, (price - kit_cost - kit_author) * k)
+    kit_cost_full = max(0.0, float(kit.cost_total or 0.0))
+    max_disc_margin = max(0.0, price - kit_cost_full)
+    pct = max(0, min(100, int(kit.discount_percent or 0)))
+    discount_full = price * (pct / 100.0)
+    discount_full = min(discount_full, max_disc_margin, price)
+    net_full = max(0.0, price - discount_full)
+    k = float(n) / float(total_pieces)
+    cost = net_full * k
+    cost_portion = kit_cost_full * k
+    studio_fund = max(0.0, cost - cost_portion)
     kit.pieces_available = avail - n
     if kit.pieces_available <= 0:
         kit.is_in_stock = False
@@ -1061,6 +1075,9 @@ def suggest_kits_for_stock(db: Session, q: str, *, limit: int = 30) -> list[dict
     out: list[dict[str, Any]] = []
     for k in rows:
         res_label = kit_reserved_for_visit_label(k)
+        sp = k.stock_price_total
+        has_price = sp is not None and float(sp) > 0
+        dp = int(k.discount_percent or 0)
         out.append(
             {
                 "id": k.id,
@@ -1068,7 +1085,9 @@ def suggest_kits_for_stock(db: Session, q: str, *, limit: int = 30) -> list[dict
                 "title": k.title,
                 "pieces_total": int(k.pieces_total or 0),
                 "pieces_available": k.pieces_available,
-                "stock_price_total": float(k.stock_price_total or 0.0),
+                "stock_price_total": float(sp or 0.0),
+                "discount_percent": dp,
+                "missing_sale_price": not has_price,
                 "is_reserved": bool(k.reserved_at),
                 "reserved_for_label": res_label,
             }

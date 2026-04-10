@@ -605,6 +605,7 @@
         b.className = 'secondary';
         let line = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
         if (k.is_reserved) line += ' · резерв';
+        if (k.missing_sale_price) line = '⚠️ ' + line;
         b.textContent = line;
         b.onclick = function () { onPick(k); };
         li.appendChild(b);
@@ -626,7 +627,8 @@
     }
     function selectMainStockKit(k) {
       document.getElementById('stock_kit_id').value = String(k.id);
-      const label = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+      let label = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+      if (k.missing_sale_price) label = '⚠️ ' + label + ' (нет цены — укажите в админке перед сохранением визита)';
       document.getElementById('selected_stock_kit_box').style.display = 'block';
       document.getElementById('selected_stock_kit_line').innerHTML =
         'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
@@ -637,7 +639,8 @@
     }
     function selectExtraStockKit(k) {
       document.getElementById('own_extra_stock_kit_id').value = String(k.id);
-      const label = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+      let label = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+      if (k.missing_sale_price) label = '⚠️ ' + label + ' (нет цены — укажите в админке перед сохранением визита)';
       document.getElementById('selected_extra_stock_kit_box').style.display = 'block';
       document.getElementById('selected_extra_stock_kit_line').innerHTML =
         'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
@@ -837,7 +840,9 @@
       if (!kit) return { piecesUsed: 0, cost: 0, warn: '' };
       const avail = parseInt(String(kit.pieces_available || 0), 10) || 0;
       const total = parseInt(String(kit.pieces_total || 0), 10) || 0;
-      const price = parseFloat(String(kit.stock_price_total || 0)) || 0;
+      const gross = parseFloat(String(kit.stock_price_total || 0)) || 0;
+      const dPct = Math.max(0, Math.min(100, parseInt(String(kit.discount_percent ?? 0), 10) || 0));
+      const price = gross * (100 - dPct) / 100.0;
       const useEntire = isChecked(useEntireSel);
       const blanks = Math.max(0, intVal(blanksSel));
       const piecesUsed = useEntire ? avail : blanks;

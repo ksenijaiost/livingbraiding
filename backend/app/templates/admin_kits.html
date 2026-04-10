@@ -26,6 +26,8 @@
         <tr>
           <th>Артикул</th>
           <th>Название</th>
+          <th>Цена, ₽</th>
+          <th>Скидка, %</th>
           <th>Остаток</th>
           <th>Резерв</th>
           <th></th>
@@ -34,11 +36,41 @@
       <tbody>
         {% for row in kit_rows %}
           {% set k = row.kit %}
+          {% set missing_price = k.stock_price_total is none or k.stock_price_total <= 0 %}
           {% set own_reserve = k.is_reserved and k.reserved_by_user_id == current_user.id %}
           {% set can_reserve_ui = is_admin_kit or not k.is_reserved or own_reserve %}
           <tr>
-            <td><a href="/admin/kits/{{ k.id }}"><strong>{{ k.sku }}</strong></a></td>
+            <td style="white-space:nowrap;">
+              {% if missing_price %}
+                <span title="Не задана цена продажи — списание в визите/продаже недоступно" style="margin-right:4px;">⚠️</span>
+              {% endif %}
+              <a href="/admin/kits/{{ k.id }}"><strong>{{ k.sku }}</strong></a>
+            </td>
             <td>{{ k.title }}</td>
+            <td class="muted">
+              {% if k.stock_price_total is not none %}
+                {% set dpp = (k.discount_percent or 0)|int %}
+                {% if dpp > 0 %}
+                  {% set netp = (k.stock_price_total * (100 - dpp) / 100)|round(2) %}
+                  <s>{{ k.stock_price_total }}</s><br />{{ netp }}
+                {% else %}
+                  {{ k.stock_price_total }}
+                {% endif %}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td style="white-space:nowrap;">
+              {% if is_admin_kit %}
+                <form method="post" action="/admin/kits/{{ k.id }}/discount" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                  <input type="hidden" name="redirect_to" value="list" />
+                  <input name="discount_percent" type="text" inputmode="numeric" pattern="[0-9]*" value="{{ k.discount_percent }}" style="width:4rem;" />
+                  <button type="submit" class="secondary" style="padding:2px 8px;">Ок</button>
+                </form>
+              {% else %}
+                {{ k.discount_percent }}%
+              {% endif %}
+            </td>
             <td>{{ k.pieces_available }} / {{ k.pieces_total }}</td>
             <td>
               {% if k.is_reserved %}

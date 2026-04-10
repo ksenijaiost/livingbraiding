@@ -522,7 +522,8 @@ def _ensure_vsy_golova_catalog_and_kits(db: Session) -> None:
                 blank_type_de=True,
                 blank_type_se=False,
                 stock_price_total=3500.0,
-                cost_total=None,
+                discount_percent=0,
+                cost_total=2800.0,
                 is_in_stock=True,
                 is_archived=False,
             )
@@ -538,7 +539,8 @@ def _ensure_vsy_golova_catalog_and_kits(db: Session) -> None:
                 blank_type_de=True,
                 blank_type_se=True,
                 stock_price_total=800.0,
-                cost_total=None,
+                discount_percent=0,
+                cost_total=600.0,
                 is_in_stock=True,
                 is_archived=False,
             )

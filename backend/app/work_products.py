@@ -21,6 +21,7 @@ from app.client_validation import format_created_by_label
 from app.db.models import (
     Client,
     Kit,
+    KitAuthorStaff,
     MaterialPriceCurrent,
     MaterialType,
     MixComplexity,
@@ -832,6 +833,7 @@ async def work_new_post(
                 raise ValueError("Для «в наличие» укажите название комплекта.")
             if db.scalar(select(Kit.id).where(Kit.sku == sku)):
                 raise ValueError("Комплект с таким артикулом уже есть — укажите другой.")
+            full_cost = float(cost_total_amount) + float(master_total)
             kit = Kit(
                 sku=sku[:80],
                 title=title[:200],
@@ -849,13 +851,25 @@ async def work_new_post(
                 blanks_kinds_text=None,
                 notes=None,
                 stock_price_total=None,
-                cost_total=cost_total_amount,
-                author_cost_total=master_total,
+                discount_percent=0,
+                cost_total=full_cost,
+                author_cost_total=None,
                 created_at=datetime.utcnow(),
                 is_in_stock=True,
                 is_archived=False,
             )
             db.add(kit)
+            db.flush()
+            seen_uid: set[int] = set()
+            so = 0
+            for uid in kit_staff_ids:
+                if uid <= 0 or uid in seen_uid:
+                    continue
+                seen_uid.add(uid)
+                mu = db.get(User, uid)
+                if mu and mu.is_active and mu.role == UserRole.MASTER:
+                    db.add(KitAuthorStaff(kit_id=kit.id, user_id=uid, sort_order=so))
+                    so += 1
 
         db.commit()
         return RedirectResponse(url="/sales/work?msg=saved", status_code=303)

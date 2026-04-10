@@ -294,7 +294,9 @@
         const li = document.createElement('li');
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'secondary';
-        b.textContent = (k.sku || '') + ' — ' + (k.title || '');
+        let line = (k.sku || '') + ' — ' + (k.title || '');
+        if (k.missing_sale_price) line = '⚠️ ' + line;
+        b.textContent = line;
         b.onclick = function () {
           document.getElementById('komplekt_stock_kit_id').value = String(k.id);
           ul.innerHTML = '';
@@ -314,7 +316,9 @@
         const li = document.createElement('li');
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'secondary';
-        b.textContent = (k.sku || '') + ' — ' + (k.title || '');
+        let line = (k.sku || '') + ' — ' + (k.title || '');
+        if (k.missing_sale_price) line = '⚠️ ' + line;
+        b.textContent = line;
         b.onclick = function () {
           document.getElementById('z_stock_kit_id_' + sid).value = String(k.id);
           ul.innerHTML = '';

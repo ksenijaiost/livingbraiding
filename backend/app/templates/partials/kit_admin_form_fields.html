@@ -81,13 +81,13 @@
     <input type="checkbox" name="{{ field_prefix }}author_external" {% if fp.get('author_external') %}checked{% endif %} />
     Извне <span class="muted">(не сотрудник студии)</span>
   </label>
-  <div style="font-size:13px;margin-bottom:6px;">Сотрудники (можно несколько):</div>
+  <div style="font-size:13px;margin-bottom:6px;">Мастера (можно несколько):</div>
   <div style="display:flex;flex-direction:column;gap:6px;">
     {% for u in staff_for_kit_authors %}
       <label style="display:flex;align-items:center;gap:8px;font-weight:normal;">
         <input type="checkbox" name="{{ field_prefix }}kit_author_on" value="{{ u.id }}"
           {% if u.id in (fp.get('kit_author_ids') or []) %}checked{% endif %} />
-        {{ u.display_name or u.username }} ({{ u.role.value }})
+        {{ u.display_name or u.username }}
       </label>
     {% endfor %}
   </div>
@@ -99,12 +99,12 @@
     <input name="{{ field_prefix }}stock_price_total" type="text" inputmode="decimal" required placeholder="например, 3500" value="{{ fp.get('stock_price_total', '') }}" />
   </div>
   <div>
-    <label>Себестоимость (всего), ₽</label>
-    <input name="{{ field_prefix }}cost_total" type="text" inputmode="decimal" placeholder="необязательно" value="{{ fp.get('cost_total', '') }}" />
+    <label>Скидка (всего), % <span class="muted">(целое; не больше допустимой по марже)</span></label>
+    <input name="{{ field_prefix }}discount_percent" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="0" value="{{ fp.get('discount_percent', '0') }}" />
   </div>
 </div>
 
 <div style="margin-top:8px;">
-  <label>ЗП авторов (всего), ₽ <span class="muted">(для расчёта фонда студии при продаже)</span></label>
-  <input name="{{ field_prefix }}author_cost_total" type="text" inputmode="decimal" placeholder="необязательно" value="{{ fp.get('author_cost_total', '') }}" />
+  <label>Себестоимость (всего), ₽ <span class="muted">*</span> <span class="muted">(затраты + ЗП авторов за весь комплект)</span></label>
+  <input name="{{ field_prefix }}cost_total" type="text" inputmode="decimal" required placeholder="например, 2800" value="{{ fp.get('cost_total', '') }}" />
 </div>

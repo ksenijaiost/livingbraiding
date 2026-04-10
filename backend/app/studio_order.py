@@ -43,6 +43,7 @@ from app.db.models import (
 )
 from app.kit_crud import (
     apply_kit_admin_form,
+    list_masters_for_kit_author_pick,
     parse_kit_admin_form,
     sync_kit_authors,
     validate_kit_admin_form,
@@ -744,7 +745,7 @@ def _new_order_template_kwargs(db: Session):
     return {
         "zakaz_catalog": zc,
         "staff_for_order": staff,
-        "staff_for_kit_authors": staff,
+        "staff_for_kit_authors": list_masters_for_kit_author_pick(db),
         "rubber_tail_id": tail_id,
         "rubber_braid_id": braid_id,
         "rubber_others": others,

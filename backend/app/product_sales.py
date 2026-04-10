@@ -394,6 +394,10 @@ async def product_sale_edit_save(
         kit = db.get(Kit, int(kid_raw))
         if not kit:
             raise ValueError("Комплект не найден.")
+        if kit.stock_price_total is None or float(kit.stock_price_total) <= 0:
+            raise ValueError(
+                "У этого комплекта не задана цена продажи — списание невозможно. Укажите цену в карточке комплекта (администратор)."
+            )
         mode = (_g_str(form, "kit_mode") or "PIECES").strip().upper()
         if mode not in ("PIECES", "ALL"):
             raise ValueError("Некорректный режим продажи комплекта.")
@@ -539,6 +543,10 @@ async def product_sale_new_post(
         kit = db.get(Kit, int(kid_raw))
         if not kit:
             return _fail("Комплект не найден.")
+        if kit.stock_price_total is None or float(kit.stock_price_total) <= 0:
+            return _fail(
+                "У этого комплекта не задана цена продажи — укажите цену в карточке комплекта (администратор)."
+            )
 
         mode = (fp["kit_mode"] or "PIECES").strip().upper()
         if mode not in ("PIECES", "ALL"):

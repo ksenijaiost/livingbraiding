@@ -222,7 +222,8 @@
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'secondary';
-        const label = (k.label || k.name || ('ID ' + k.id));
+        let label = (k.sku && k.title) ? (k.sku + ' — ' + k.title) : (k.label || k.name || ('ID ' + k.id));
+        if (k.missing_sale_price) label = '⚠️ ' + label;
         b.textContent = label;
         b.onclick = function () { selectKit(k.id, label); };
         li.appendChild(b);

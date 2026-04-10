@@ -5,11 +5,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
 
 from app.db.models import Kit, KitAuthorStaff, User, UserRole
+
+
+def list_masters_for_kit_author_pick(db: Session) -> list[User]:
+    """Активные пользователи с ролью MASTER (выбор авторов комплекта)."""
+
+    return list(
+        db.scalars(
+            select(User)
+            .where(User.is_active.is_(True), User.role == UserRole.MASTER)
+            .order_by(User.display_name.asc(), User.id.asc())
+        ).all()
+    )
 
 
 def _g_str(form: Any, name: str, default: str = "") -> str:
@@ -50,6 +62,16 @@ def _g_float_opt(form: Any, name: str) -> float | None:
         return None
 
 
+def _g_float_nonneg(form: Any, name: str, default: float = 0.0) -> float:
+    raw = _g_str(form, name, "")
+    if not raw:
+        return default
+    try:
+        return max(0.0, float(raw.replace(",", ".")))
+    except ValueError:
+        return default
+
+
 @dataclass
 class KitAdminFormData:
     sku: str
@@ -68,7 +90,7 @@ class KitAdminFormData:
     description: str | None
     stock_price_total: float | None
     cost_total: float | None
-    author_cost_total: float | None
+    discount_percent: int
 
 
 def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
@@ -96,8 +118,36 @@ def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
         description=_g_str(form, "description") or None,
         stock_price_total=_g_float_opt(form, "stock_price_total"),
         cost_total=_g_float_opt(form, "cost_total"),
-        author_cost_total=_g_float_opt(form, "author_cost_total"),
+        discount_percent=_g_discount_percent_from_form_field(form, "discount_percent", 0),
     )
+
+
+def max_kit_discount_percent_allowed(stock_price: float, cost_total: float) -> int:
+    """Макс. целые % скидки: итоговая цена не ниже себестоимости (с ЗП)."""
+    price = float(stock_price)
+    cost = float(cost_total)
+    if price <= 0:
+        return 0
+    margin = price - cost
+    if margin <= 0:
+        return 0
+    return int(margin / price * 100 + 1e-9)
+
+
+def _g_discount_percent_from_form_field(form: Any, name: str, default: int = 0) -> int:
+    raw = _g_str(form, name, "")
+    if not raw:
+        return default
+    raw = raw.replace(",", ".").strip()
+    try:
+        v = float(raw)
+    except ValueError:
+        raise ValueError("Скидка: укажите целое число процентов от 0 до 100.")
+    if v < 0 or v > 100:
+        raise ValueError("Скидка — целое число процентов от 0 до 100.")
+    if abs(v - round(v)) > 1e-6:
+        raise ValueError("Скидка указывается целым числом процентов, без десятых.")
+    return int(round(v))
 
 
 def validate_kit_admin_form(d: KitAdminFormData, *, for_create: bool) -> None:
@@ -115,10 +165,24 @@ def validate_kit_admin_form(d: KitAdminFormData, *, for_create: bool) -> None:
         raise ValueError("Укажите цену комплекта на складе (всего), ₽")
     if d.stock_price_total <= 0:
         raise ValueError("Цена на складе должна быть больше 0")
+    if d.cost_total is None or d.cost_total <= 0:
+        raise ValueError(
+            "Укажите себестоимость комплекта (всего), ₽ — сумма затрат и ЗП авторов за весь комплект."
+        )
+    max_pct = max_kit_discount_percent_allowed(d.stock_price_total, d.cost_total)
+    if d.discount_percent > max_pct:
+        raise ValueError(
+            f"Скидка не больше {max_pct}% от цены: итог не ниже себестоимости (с ЗП мастеров)."
+        )
     if len(d.sku) > 80:
         raise ValueError("Артикул слишком длинный")
     if len(d.title) > 200:
         raise ValueError("Название слишком длинное")
+
+
+def parse_discount_percent_from_form(form: Any) -> int:
+    """Поле скидки в % (inline-форма в списке/карточке)."""
+    return _g_discount_percent_from_form_field(form, "discount_percent", 0)
 
 
 def parse_kit_author_user_ids_from_form(form: Any) -> list[int]:
@@ -153,8 +217,8 @@ def sync_kit_authors(db: Session, kit: Kit, form: Any) -> None:
         u = db.get(User, uid)
         if not u or not u.is_active:
             raise ValueError("Выберите авторов только из активных сотрудников.")
-        if u.role not in (UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
-            raise ValueError("Автор комплекта — только сотрудник студии.")
+        if u.role != UserRole.MASTER:
+            raise ValueError("Автор комплекта указывается только среди мастеров.")
     db.execute(delete(KitAuthorStaff).where(KitAuthorStaff.kit_id == kit.id))
     for i, uid in enumerate(uids):
         db.add(KitAuthorStaff(kit_id=kit.id, user_id=uid, sort_order=i))
@@ -180,7 +244,7 @@ def kit_new_error_prefill(form: Any) -> dict[str, Any]:
         "notes": d.notes or "",
         "stock_price_total": _g_str(form, "stock_price_total"),
         "cost_total": _g_str(form, "cost_total"),
-        "author_cost_total": _g_str(form, "author_cost_total"),
+        "discount_percent": _g_str(form, "discount_percent"),
         "author_external": "on" if _g_bool(form, "author_external") else "",
         "kit_author_ids": parse_kit_author_user_ids_from_form(form),
     }
@@ -205,7 +269,7 @@ def kit_edit_error_prefill(form: Any) -> dict[str, Any]:
         "notes": d.notes or "",
         "stock_price_total": _g_str(form, "stock_price_total"),
         "cost_total": _g_str(form, "cost_total"),
-        "author_cost_total": _g_str(form, "author_cost_total"),
+        "discount_percent": _g_str(form, "discount_percent"),
         "author_external": "on" if _g_bool(form, "author_external") else "",
         "kit_author_ids": parse_kit_author_user_ids_from_form(form),
     }
@@ -217,7 +281,7 @@ def kit_to_form_prefill(kit: Kit) -> dict[str, Any]:
     ln = "" if kit.length_cm is None else str(kit.length_cm).replace(",", ".")
     sp = "" if kit.stock_price_total is None else str(kit.stock_price_total).replace(",", ".")
     ct = "" if kit.cost_total is None else str(kit.cost_total).replace(",", ".")
-    ac = "" if kit.author_cost_total is None else str(kit.author_cost_total).replace(",", ".")
+    disc = str(int(kit.discount_percent or 0))
     return {
         "sku": kit.sku,
         "title": kit.title,
@@ -236,7 +300,7 @@ def kit_to_form_prefill(kit: Kit) -> dict[str, Any]:
         "notes": kit.notes or "",
         "stock_price_total": sp,
         "cost_total": ct,
-        "author_cost_total": ac,
+        "discount_percent": disc,
         "author_external": "on" if kit.author_external else "",
         "kit_author_ids": [
             l.user_id
@@ -265,7 +329,8 @@ def apply_kit_admin_form(kit: Kit, d: KitAdminFormData) -> None:
     kit.description = d.description
     kit.stock_price_total = d.stock_price_total
     kit.cost_total = d.cost_total
-    kit.author_cost_total = d.author_cost_total
+    kit.discount_percent = int(d.discount_percent or 0)
+    kit.author_cost_total = None
     if kit.pieces_available <= 0:
         kit.is_in_stock = False
     else:

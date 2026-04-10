@@ -80,6 +80,9 @@ from app.kit_crud import (
     kit_edit_error_prefill,
     kit_new_error_prefill,
     kit_to_form_prefill,
+    list_masters_for_kit_author_pick,
+    max_kit_discount_percent_allowed,
+    parse_discount_percent_from_form,
     parse_kit_admin_form,
     sync_kit_authors,
     validate_kit_admin_form,
@@ -1115,10 +1118,10 @@ def admin_kit_new_get(
             current_user=current_user,
             is_new=True,
             kit=None,
-            fp={"kit_author_ids": []},
+            fp={"kit_author_ids": [], "discount_percent": "0"},
             form_action="/admin/kits/new",
             error=None,
-            staff_for_kit_authors=_staff_users_for_reserve(db),
+            staff_for_kit_authors=list_masters_for_kit_author_pick(db),
         ),
     )
 
@@ -1153,7 +1156,7 @@ async def admin_kit_new_post(
                 fp=kit_new_error_prefill(form),
                 form_action="/admin/kits/new",
                 error=str(exc),
-                staff_for_kit_authors=_staff_users_for_reserve(db),
+                staff_for_kit_authors=list_masters_for_kit_author_pick(db),
             ),
             status_code=400,
         )
@@ -1220,9 +1223,65 @@ def admin_kit_edit_get(
             fp=kit_to_form_prefill(kit),
             form_action=f"/admin/kits/{kit_id}/edit",
             error=None,
-            staff_for_kit_authors=_staff_users_for_reserve(db),
+            staff_for_kit_authors=list_masters_for_kit_author_pick(db),
         ),
     )
+
+
+@app.post("/admin/kits/{kit_id}/discount")
+async def admin_kit_discount_post(
+    kit_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    kit = db.get(Kit, kit_id)
+    if not kit:
+        return RedirectResponse(
+            url="/admin/kits?err=" + quote("Комплект не найден", safe=""),
+            status_code=303,
+        )
+    form = await request.form()
+    try:
+        discount = parse_discount_percent_from_form(form)
+    except ValueError as exc:
+        err_q = quote(str(exc), safe="")
+        red = str(form.get("redirect_to") or "").strip().lower()
+        if red == "detail":
+            return RedirectResponse(url=f"/admin/kits/{kit_id}?err={err_q}", status_code=303)
+        return RedirectResponse(url="/admin/kits?err=" + err_q, status_code=303)
+    price = float(kit.stock_price_total or 0.0)
+    red = str(form.get("redirect_to") or "").strip().lower()
+    err_no_cost = (
+        "Чтобы задать скидку, сначала укажите себестоимость комплекта в карточке (редактирование)."
+    )
+    ct = kit.cost_total
+    if ct is None or float(ct) <= 0:
+        if discount > 0:
+            err_q = quote(err_no_cost, safe="")
+            if red == "detail":
+                return RedirectResponse(url=f"/admin/kits/{kit_id}?err={err_q}", status_code=303)
+            return RedirectResponse(url="/admin/kits?err=" + err_q, status_code=303)
+        kit.discount_percent = 0
+        db.commit()
+        if red == "detail":
+            return RedirectResponse(url=f"/admin/kits/{kit_id}?msg=saved", status_code=303)
+        return RedirectResponse(url="/admin/kits?msg=saved", status_code=303)
+    cost = float(ct)
+    max_pct = max_kit_discount_percent_allowed(price, cost) if price > 0 else 0
+    if price > 0 and discount > max_pct:
+        err_q = quote(
+            f"Скидка в процентах не больше {max_pct}% (по марже «цена − себестоимость» с ЗП мастеров).",
+            safe="",
+        )
+        if red == "detail":
+            return RedirectResponse(url=f"/admin/kits/{kit_id}?err={err_q}", status_code=303)
+        return RedirectResponse(url="/admin/kits?err=" + err_q, status_code=303)
+    kit.discount_percent = discount
+    db.commit()
+    if red == "detail":
+        return RedirectResponse(url=f"/admin/kits/{kit_id}?msg=saved", status_code=303)
+    return RedirectResponse(url="/admin/kits?msg=saved", status_code=303)
 
 
 @app.post("/admin/kits/{kit_id}/edit")
@@ -1259,7 +1318,7 @@ async def admin_kit_edit_post(
                 fp=fp,
                 form_action=f"/admin/kits/{kit_id}/edit",
                 error=str(exc),
-                staff_for_kit_authors=_staff_users_for_reserve(db),
+                staff_for_kit_authors=list_masters_for_kit_author_pick(db),
             ),
             status_code=400,
         )
