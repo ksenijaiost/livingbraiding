@@ -1467,6 +1467,8 @@ def admin_visit_detail(
     duration_h = visit.duration_minutes // 60
     duration_m = visit.duration_minutes % 60
 
+    v_policy = visit_client_change_policy(visit, current_user, db)
+
     return templates.TemplateResponse(
         "admin_visit_detail.html",
         _ctx(
@@ -1484,6 +1486,8 @@ def admin_visit_detail(
             duration_h=duration_h,
             duration_m=duration_m,
             client_err=client_err,
+            visit_edit_blocked=not v_policy.can_change,
+            visit_edit_block_msg=v_policy.message_when_blocked,
         ),
     )
 

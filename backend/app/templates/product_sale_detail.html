@@ -6,7 +6,8 @@
     {% endif %}
 
     {% if sale %}
-      <div class="row" style="align-items:center;justify-content:space-between;gap:12px;">
+      <p><a href="/sales/products">← К списку</a></p>
+      <div class="row" style="align-items:flex-start;justify-content:space-between;gap:12px;">
         <div>
           <h2 style="margin:0;">Продажа #{{ sale.id }}</h2>
           <p class="muted" style="margin:6px 0 0;">
@@ -14,22 +15,15 @@
             {% if sale.is_voided %} · <strong>АННУЛИРОВАНО</strong>{% endif %}
           </p>
         </div>
-        <div class="row" style="gap:8px; justify-content:flex-end;">
-          <a href="/sales/products"><button type="button" class="secondary">К списку</button></a>
-          {% if can_edit %}
-            <a href="/sales/products/{{ sale.id }}/edit">
-              <button type="button" {% if not edit_allowed %}disabled{% endif %}>Редактировать</button>
-            </a>
+        {% if can_edit and edit_allowed %}
+          <div class="row" style="gap:8px;justify-content:flex-end;flex-shrink:0;">
+            <a href="/sales/products/{{ sale.id }}/edit"><button type="button">Редактировать</button></a>
             <form id="void_sale_form" method="post" action="/sales/products/{{ sale.id }}/void" style="display:inline;">
-              <button type="button" class="secondary" {% if not edit_allowed %}disabled{% endif %} onclick="openVoidConfirm()">Аннулировать</button>
+              <button type="button" class="secondary" onclick="openVoidConfirm()">Аннулировать</button>
             </form>
-          {% endif %}
-        </div>
+          </div>
+        {% endif %}
       </div>
-
-      {% if can_edit and not edit_allowed %}
-        <div class="error" style="margin-top:12px;">{{ edit_block_msg }}</div>
-      {% endif %}
 
       <div class="card" style="margin-top:14px;">
         <h3 style="margin-top:0;">Реквизиты</h3>
@@ -90,6 +84,12 @@
           </div>
         {% endif %}
       </div>
+
+      {% if can_edit and not edit_allowed %}
+        <div class="card" style="border-color:#fde68a; background:#fffbeb; margin-top: 12px;">
+          {{ edit_block_msg }}
+        </div>
+      {% endif %}
     {% endif %}
   </div>
 

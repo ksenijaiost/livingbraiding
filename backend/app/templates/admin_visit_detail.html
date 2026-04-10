@@ -113,5 +113,11 @@
     {% else %}
       <p class="muted">{{ kit_usages_note }}</p>
     {% endif %}
+
+    {% if visit_edit_blocked and visit_edit_block_msg %}
+      <div class="card" style="border-color:#fde68a; background:#fffbeb; margin-top: 12px;">
+        {{ visit_edit_block_msg }}
+      </div>
+    {% endif %}
   </div>
 {% endblock %}
