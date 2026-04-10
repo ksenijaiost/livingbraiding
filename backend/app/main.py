@@ -803,9 +803,31 @@ def _client_suggest_items(db: Session, q: str) -> list[dict[str, str | int | boo
     needle = (q or "").strip()
     stmt = select(Client).order_by(Client.name.asc()).limit(30)
     if needle:
+        digits = "".join(ch for ch in needle if ch.isdigit())
+        # Phone search: ignore common formatting symbols, allow searching by last digits.
+        phone_norm = func.replace(
+            func.replace(
+                func.replace(
+                    func.replace(
+                        func.replace(func.replace(func.coalesce(Client.phone, ""), "+", ""), " ", ""),
+                        "-",
+                        "",
+                    ),
+                    "(",
+                    "",
+                ),
+                ")",
+                "",
+            ),
+            ".",
+            "",
+        )
+        conds = [Client.name.ilike(f"%{needle}%")]
+        if digits:
+            conds.append(phone_norm.like(f"%{digits}%"))
         stmt = (
             select(Client)
-            .where(Client.name.ilike(f"%{needle}%"))
+            .where(or_(*conds))
             .order_by(Client.name.asc())
             .limit(30)
         )

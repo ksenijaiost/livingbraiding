@@ -24,8 +24,8 @@
           <input type="hidden" name="existing_client_id" id="existing_client_id" value="{{ fp.get('existing_client_id', '') }}" />
           <div class="row" style="align-items: flex-end;">
             <div style="flex:1;">
-              <label>Поиск клиента по имени</label>
-              <input type="search" id="client_search_q" autocomplete="off" placeholder="Начни вводить имя и подожди или нажми «Найти»" value="" />
+              <label>Поиск клиента по имени или телефону</label>
+              <input type="search" id="client_search_q" autocomplete="off" placeholder="Имя или цифры телефона (например, последние 4), подожди или нажми «Найти»" value="" />
             </div>
             <div>
               <button type="button" class="secondary" onclick="clientSuggest()">Найти</button>
