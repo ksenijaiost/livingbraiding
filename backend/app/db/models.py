@@ -98,6 +98,10 @@ class Setting(Base):
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[str] = mapped_column(String(500), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
 
 
 class User(Base):
@@ -218,6 +222,8 @@ class StudioExpense(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     subcategory_id: Mapped[int] = mapped_column(
         ForeignKey("studio_expense_subcategories.id"),
@@ -231,6 +237,7 @@ class StudioExpense(Base):
     voided_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     voided_by_user: Mapped["User | None"] = relationship(foreign_keys=[voided_by_user_id])
     subcategory: Mapped["StudioExpenseSubcategory"] = relationship()
 
@@ -241,6 +248,8 @@ class ServiceCategory(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     # False: не в форме визита (напр. продажа материала — отдельный поток на этапе 7).
     include_in_visit: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
@@ -248,6 +257,8 @@ class ServiceCategory(Base):
         back_populates="category",
         order_by="CategoryQuestionnaireField.sort_order",
     )
+
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
 
 
 class CategoryQuestionnaireField(Base):
@@ -271,8 +282,11 @@ class CategoryQuestionnaireField(Base):
     min_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     visibility_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     category: Mapped[ServiceCategory] = relationship(back_populates="questionnaire_fields")
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
 
     __table_args__ = (
         UniqueConstraint("category_id", "field_key", name="uq_category_questionnaire_field_key"),
@@ -292,6 +306,8 @@ class ServiceSubcategory(Base):
     show_material_description: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Расширенный блок термозамещения на шаге 2 визита + шаблоны клиента (без общих полей категории).
     show_thermo_visit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     category: Mapped[ServiceCategory] = relationship()
     questionnaire_fields: Mapped[list[SubcategoryQuestionnaireField]] = relationship(
@@ -300,6 +316,8 @@ class ServiceSubcategory(Base):
     )
 
     __table_args__ = (UniqueConstraint("category_id", "name", name="uq_subcategory_per_category"),)
+
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
 
 
 class Service(Base):
@@ -330,8 +348,11 @@ class Service(Base):
     fixed_expense_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_per_unit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     unit_label: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     subcategory: Mapped[ServiceSubcategory] = relationship()
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     questionnaire_fields: Mapped[list[ServiceQuestionnaireField]] = relationship(
         back_populates="service",
         order_by="ServiceQuestionnaireField.sort_order",
@@ -365,8 +386,11 @@ class SubcategoryQuestionnaireField(Base):
     min_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     visibility_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     subcategory: Mapped[ServiceSubcategory] = relationship(back_populates="questionnaire_fields")
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
 
     __table_args__ = (
         UniqueConstraint("subcategory_id", "field_key", name="uq_subcategory_questionnaire_field_key"),
@@ -394,8 +418,11 @@ class ServiceQuestionnaireField(Base):
     min_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     visibility_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     service: Mapped[Service] = relationship(back_populates="questionnaire_fields")
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
 
     __table_args__ = (
         UniqueConstraint("service_id", "field_key", name="uq_service_questionnaire_field_key"),
@@ -594,6 +621,8 @@ class WorkForInventory(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     kind: Mapped[WorkKind] = mapped_column(
         Enum(WorkKind, native_enum=False, length=32),
@@ -630,6 +659,7 @@ class WorkForInventory(Base):
     details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     client: Mapped["Client | None"] = relationship()
     staff_rows: Mapped[list["WorkForInventoryStaff"]] = relationship(
         back_populates="work",
@@ -950,6 +980,176 @@ class StudioOrderAuditLog(Base):
     new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     studio_order: Mapped["StudioOrder"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class StudioExpenseAuditLog(Base):
+    __tablename__ = "studio_expense_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    expense_id: Mapped[int] = mapped_column(
+        ForeignKey("studio_expenses.id", ondelete="CASCADE"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    expense: Mapped["StudioExpense"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class WorkForInventoryAuditLog(Base):
+    __tablename__ = "work_for_inventory_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    work_id: Mapped[int] = mapped_column(
+        ForeignKey("work_for_inventory.id", ondelete="CASCADE"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    work: Mapped["WorkForInventory"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class SettingAuditLog(Base):
+    __tablename__ = "setting_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    setting_key: Mapped[str] = mapped_column(
+        ForeignKey("settings.key", ondelete="CASCADE"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    setting: Mapped["Setting"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class WorkRateAuditLog(Base):
+    __tablename__ = "work_rate_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    work_rate_id: Mapped[int] = mapped_column(
+        ForeignKey("work_rates.id", ondelete="CASCADE"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    work_rate: Mapped["WorkRate"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class ServiceCategoryAuditLog(Base):
+    __tablename__ = "service_category_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    category_id: Mapped[int] = mapped_column(
+        ForeignKey("service_categories.id", ondelete="CASCADE"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    category: Mapped["ServiceCategory"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class ServiceSubcategoryAuditLog(Base):
+    __tablename__ = "service_subcategory_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subcategory_id: Mapped[int] = mapped_column(
+        ForeignKey("service_subcategories.id", ondelete="CASCADE"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    subcategory: Mapped["ServiceSubcategory"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class ServiceAuditLog(Base):
+    __tablename__ = "service_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    service_id: Mapped[int] = mapped_column(
+        ForeignKey("services.id", ondelete="CASCADE"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    service: Mapped["Service"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class CategoryQuestionnaireFieldAuditLog(Base):
+    __tablename__ = "category_questionnaire_field_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    field_id: Mapped[int] = mapped_column(
+        ForeignKey("category_questionnaire_fields.id", ondelete="CASCADE"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    field: Mapped["CategoryQuestionnaireField"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class SubcategoryQuestionnaireFieldAuditLog(Base):
+    __tablename__ = "subcategory_questionnaire_field_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    field_id: Mapped[int] = mapped_column(
+        ForeignKey("subcategory_questionnaire_fields.id", ondelete="CASCADE"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    field: Mapped["SubcategoryQuestionnaireField"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class ServiceQuestionnaireFieldAuditLog(Base):
+    __tablename__ = "service_questionnaire_field_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    field_id: Mapped[int] = mapped_column(
+        ForeignKey("service_questionnaire_fields.id", ondelete="CASCADE"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    field: Mapped["ServiceQuestionnaireField"] = relationship()
     changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
 
 

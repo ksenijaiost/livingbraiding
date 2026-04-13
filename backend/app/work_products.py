@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -28,6 +29,7 @@ from app.db.models import (
     MixSource,
     User,
     UserRole,
+    WorkForInventoryAuditLog,
     WorkForInventory,
     WorkForInventoryStaff,
     WorkKind,
@@ -43,6 +45,7 @@ from app.kit_inlay_visit import _materials_cost_and_snapshot
 from app.work_products_compute import compute_work_financials
 from app.visit_edit_policy import edit_window_days, is_in_closed_payroll_period, within_edit_window
 from app.ru_labels import ru_user_role
+from app.audit import diff_fields, write_audit_rows
 
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_user_role"] = ru_user_role
@@ -876,6 +879,14 @@ def work_detail(
     can_edit = (current_user.role == UserRole.ADMIN_SUPER)
     edit_allowed, edit_block_msg = _work_edit_allowed(db, w) if can_edit else (False, "")
     details = _details_obj(w.details_json)
+    audit_rows = list(
+        db.scalars(
+            select(WorkForInventoryAuditLog)
+            .where(WorkForInventoryAuditLog.work_id == w.id)
+            .order_by(WorkForInventoryAuditLog.changed_at.desc(), WorkForInventoryAuditLog.id.desc())
+            .limit(200)
+        ).all()
+    )
     return templates.TemplateResponse(
         "work_products_detail.html",
         _ctx(
@@ -888,6 +899,7 @@ def work_detail(
             can_edit=can_edit,
             edit_allowed=edit_allowed,
             edit_block_msg=edit_block_msg,
+            audit_rows=audit_rows,
         ),
     )
 
@@ -971,6 +983,18 @@ async def work_edit_save(
         return v
 
     try:
+        before = SimpleNamespace(
+            amount_from_client=w.amount_from_client,
+            comment=w.comment,
+            kanekalon_grams=w.kanekalon_grams,
+            kudri_grams=w.kudri_grams,
+            materials_cost_total=w.materials_cost_total,
+            extra_costs_amount=w.extra_costs_amount,
+            cost_total_amount=w.cost_total_amount,
+            master_profit_amount=w.master_profit_amount,
+            studio_profit_amount=w.studio_profit_amount,
+            profit_total_amount=w.profit_total_amount,
+        )
         # base fields
         w.amount_from_client = _p_int_opt("amount_from_client")
         w.comment = (_g_str(form, "comment", "") or "").strip() or None
@@ -991,6 +1015,31 @@ async def work_edit_save(
             status_code=400,
         )
 
+    w.updated_at = datetime.utcnow()
+    w.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=WorkForInventoryAuditLog,
+        entity_field="work_id",
+        entity_id=w.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(
+            before,
+            w,
+            (
+                "amount_from_client",
+                "comment",
+                "kanekalon_grams",
+                "kudri_grams",
+                "materials_cost_total",
+                "extra_costs_amount",
+                "cost_total_amount",
+                "master_profit_amount",
+                "studio_profit_amount",
+                "profit_total_amount",
+            ),
+        ),
+    )
     db.commit()
     return RedirectResponse(url=f"/sales/work/{work_id}?msg=saved", status_code=303)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlencode
 
@@ -14,10 +15,12 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
 from app.auth import AuthUser, require_role
+from app.audit import diff_fields, write_audit_rows
 from app.db.models import (
     StudioExpense,
     StudioExpenseCategory,
     StudioExpenseSubcategory,
+    StudioExpenseAuditLog,
     UserRole,
 )
 from app.db.session import get_db
@@ -176,6 +179,40 @@ def studio_expenses_list(
     )
 
 
+@router.get("/{expense_id}/audit", response_class=JSONResponse)
+def studio_expense_audit(
+    expense_id: int,
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    row = db.get(StudioExpense, expense_id)
+    if not row:
+        return JSONResponse({"rows": []}, status_code=404)
+    rows = list(
+        db.scalars(
+            select(StudioExpenseAuditLog)
+            .options(selectinload(StudioExpenseAuditLog.changed_by_user))
+            .where(StudioExpenseAuditLog.expense_id == expense_id)
+            .order_by(StudioExpenseAuditLog.changed_at.desc(), StudioExpenseAuditLog.id.desc())
+            .limit(200)
+        ).all()
+    )
+    return JSONResponse(
+        {
+            "rows": [
+                {
+                    "changed_at": r.changed_at.strftime("%d.%m.%Y %H:%M") if r.changed_at else "",
+                    "changed_by": (r.changed_by_user.display_name if r.changed_by_user else None),
+                    "field_name": r.field_name,
+                    "old_value": r.old_value,
+                    "new_value": r.new_value,
+                }
+                for r in rows
+            ]
+        }
+    )
+
+
 @router.post("/new")
 async def studio_expense_new(
     request: Request,
@@ -206,6 +243,8 @@ async def studio_expense_new(
     row = StudioExpense(
         created_by_user_id=current_user.id,
         created_at=datetime.utcnow(),
+        updated_at=None,
+        updated_by_user_id=None,
         date=expense_dt,
         subcategory_id=sub.id,
         amount=float(amt),
@@ -263,10 +302,26 @@ async def studio_expense_save(
 
     comment = _g_str(form, "comment")
 
+    before = SimpleNamespace(
+        date=row.date,
+        subcategory_id=row.subcategory_id,
+        amount=row.amount,
+        comment=row.comment,
+    )
     row.date = expense_dt
     row.subcategory_id = sub.id
     row.amount = float(amt)
     row.comment = comment or ""
+    row.updated_at = datetime.utcnow()
+    row.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=StudioExpenseAuditLog,
+        entity_field="expense_id",
+        entity_id=row.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before, row, ("date", "subcategory_id", "amount", "comment")),
+    )
     db.commit()
 
     params: list[str] = []
@@ -296,8 +351,23 @@ async def studio_expense_void(
     if not ok:
         return RedirectResponse(url="/admin/expenses?msg=void_closed", status_code=303)
 
+    before = SimpleNamespace(
+        is_voided=row.is_voided,
+        voided_at=row.voided_at,
+        voided_by_user_id=row.voided_by_user_id,
+    )
     row.is_voided = True
     row.voided_at = datetime.utcnow()
     row.voided_by_user_id = current_user.id
+    row.updated_at = datetime.utcnow()
+    row.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=StudioExpenseAuditLog,
+        entity_field="expense_id",
+        entity_id=row.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before, row, ("is_voided", "voided_at", "voided_by_user_id")),
+    )
     db.commit()
     return RedirectResponse(url="/admin/expenses?msg=voided", status_code=303)

@@ -103,6 +103,22 @@
           e.preventDefault();
         });
       })();
+
+      // Audit history: reveal/hide extra rows.
+      window.lbToggleAudit = function (rowClass, btn) {
+        try {
+          var rows = document.querySelectorAll('tr.' + rowClass);
+          if (!rows || rows.length === 0) return;
+          var anyHidden = false;
+          for (var i = 0; i < rows.length; i++) {
+            if (rows[i].style.display === 'none') { anyHidden = true; break; }
+          }
+          for (var j = 0; j < rows.length; j++) {
+            rows[j].style.display = anyHidden ? 'table-row' : 'none';
+          }
+          if (btn) btn.textContent = anyHidden ? 'Скрыть историю' : 'Раскрыть историю';
+        } catch (e) {}
+      };
     </script>
   </body>
 </html>

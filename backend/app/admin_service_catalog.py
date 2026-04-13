@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 from urllib.parse import quote
+from datetime import datetime
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -16,7 +18,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, require_role
-from app.db.models import ServiceCategory, ServiceSubcategory, Service, UserRole
+from app.audit import diff_fields, write_audit_rows
+from app.db.models import (
+    Service,
+    ServiceAuditLog,
+    ServiceCategory,
+    ServiceCategoryAuditLog,
+    ServiceSubcategory,
+    ServiceSubcategoryAuditLog,
+    UserRole,
+)
 from app.db.session import get_db
 from app.ru_labels import ru_master_level, ru_user_role
 
@@ -176,6 +187,7 @@ def category_edit_save(
     cat = db.get(ServiceCategory, category_id)
     if cat is None:
         raise HTTPException(status_code=404, detail="Категория не найдена")
+    before = SimpleNamespace(name=cat.name, is_active=cat.is_active, include_in_visit=cat.include_in_visit)
     nm = (name or "").strip()
     if not nm:
         return RedirectResponse(
@@ -185,6 +197,16 @@ def category_edit_save(
     cat.name = nm
     cat.is_active = _is_checked(is_active)
     cat.include_in_visit = _is_checked(include_in_visit)
+    cat.updated_at = datetime.utcnow()
+    cat.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=ServiceCategoryAuditLog,
+        entity_field="category_id",
+        entity_id=cat.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before, cat, ("name", "is_active", "include_in_visit")),
+    )
     try:
         db.commit()
     except IntegrityError:
@@ -330,6 +352,13 @@ def subcategory_edit_save(
     sub = db.get(ServiceSubcategory, subcategory_id)
     if sub is None:
         raise HTTPException(status_code=404, detail="Подкатегория не найдена")
+    before = SimpleNamespace(
+        name=sub.name,
+        is_active=sub.is_active,
+        show_kit_section=sub.show_kit_section,
+        show_material_description=sub.show_material_description,
+        show_thermo_visit=sub.show_thermo_visit,
+    )
     nm = (name or "").strip()
     if not nm:
         return RedirectResponse(
@@ -341,6 +370,26 @@ def subcategory_edit_save(
     sub.show_kit_section = _is_checked(show_kit_section)
     sub.show_material_description = _is_checked(show_material_description)
     sub.show_thermo_visit = _is_checked(show_thermo_visit)
+    sub.updated_at = datetime.utcnow()
+    sub.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=ServiceSubcategoryAuditLog,
+        entity_field="subcategory_id",
+        entity_id=sub.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(
+            before,
+            sub,
+            (
+                "name",
+                "is_active",
+                "show_kit_section",
+                "show_material_description",
+                "show_thermo_visit",
+            ),
+        ),
+    )
     try:
         db.commit()
     except IntegrityError:
@@ -565,6 +614,24 @@ def service_edit_save(
     svc = db.get(Service, service_id)
     if svc is None:
         raise HTTPException(status_code=404, detail="Услуга не найдена")
+    before = SimpleNamespace(
+        name=svc.name,
+        is_active=svc.is_active,
+        price_junior_from=svc.price_junior_from,
+        price_junior_to=svc.price_junior_to,
+        price_middle_from=svc.price_middle_from,
+        price_middle_to=svc.price_middle_to,
+        price_senior_from=svc.price_senior_from,
+        price_senior_to=svc.price_senior_to,
+        master_pay_amount=svc.master_pay_amount,
+        studio_pay_amount=svc.studio_pay_amount,
+        fixed_expense_amount=svc.fixed_expense_amount,
+        is_per_unit=svc.is_per_unit,
+        unit_label=svc.unit_label,
+        kit_section_override=svc.kit_section_override,
+        hide_material_description=svc.hide_material_description,
+        order_rubber_extra_time_amort=svc.order_rubber_extra_time_amort,
+    )
     nm = (name or "").strip()
     if not nm:
         return RedirectResponse(
@@ -600,6 +667,37 @@ def service_edit_save(
     svc.kit_section_override = _parse_kit_section_override(kit_section_override)
     svc.hide_material_description = _is_checked(hide_material_description)
     svc.order_rubber_extra_time_amort = _is_checked(order_rubber_extra_time_amort)
+    svc.updated_at = datetime.utcnow()
+    svc.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=ServiceAuditLog,
+        entity_field="service_id",
+        entity_id=svc.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(
+            before,
+            svc,
+            (
+                "name",
+                "is_active",
+                "price_junior_from",
+                "price_junior_to",
+                "price_middle_from",
+                "price_middle_to",
+                "price_senior_from",
+                "price_senior_to",
+                "master_pay_amount",
+                "studio_pay_amount",
+                "fixed_expense_amount",
+                "is_per_unit",
+                "unit_label",
+                "kit_section_override",
+                "hide_material_description",
+                "order_rubber_extra_time_amort",
+            ),
+        ),
+    )
     try:
         db.commit()
     except IntegrityError:

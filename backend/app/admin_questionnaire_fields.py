@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
+from types import SimpleNamespace
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -13,13 +15,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, require_role
+from app.audit import diff_fields, write_audit_rows
 from app.db.models import (
     CategoryQuestionnaireField,
+    CategoryQuestionnaireFieldAuditLog,
     Service,
+    ServiceAuditLog,
     ServiceCategory,
     ServiceQuestionnaireField,
+    ServiceQuestionnaireFieldAuditLog,
     ServiceSubcategory,
     SubcategoryQuestionnaireField,
+    SubcategoryQuestionnaireFieldAuditLog,
     UserRole,
 )
 from app.db.session import get_db
@@ -541,8 +548,45 @@ def category_field_edit_save(
             status_code=422,
         )
 
+    before = SimpleNamespace(
+        field_type=field_inst.field_type,
+        label=field_inst.label,
+        required=field_inst.required,
+        sort_order=field_inst.sort_order,
+        placeholder=field_inst.placeholder,
+        help_text=field_inst.help_text,
+        options_json=field_inst.options_json,
+        min_value=field_inst.min_value,
+        max_value=field_inst.max_value,
+        visibility_json=field_inst.visibility_json,
+    )
     _ = norm.as_structure_dict()
     _apply_normalized_category(field_inst, norm)
+    field_inst.updated_at = datetime.utcnow()
+    field_inst.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=CategoryQuestionnaireFieldAuditLog,
+        entity_field="field_id",
+        entity_id=field_inst.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(
+            before,
+            field_inst,
+            (
+                "field_type",
+                "label",
+                "required",
+                "sort_order",
+                "placeholder",
+                "help_text",
+                "options_json",
+                "min_value",
+                "max_value",
+                "visibility_json",
+            ),
+        ),
+    )
     try:
         db.commit()
     except IntegrityError:
@@ -909,8 +953,45 @@ def subcategory_field_edit_save(
             status_code=422,
         )
 
+    before = SimpleNamespace(
+        field_type=field.field_type,
+        label=field.label,
+        required=field.required,
+        sort_order=field.sort_order,
+        placeholder=field.placeholder,
+        help_text=field.help_text,
+        options_json=field.options_json,
+        min_value=field.min_value,
+        max_value=field.max_value,
+        visibility_json=field.visibility_json,
+    )
     _ = norm.as_structure_dict()
     _apply_normalized_subcat(field, norm)
+    field.updated_at = datetime.utcnow()
+    field.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=SubcategoryQuestionnaireFieldAuditLog,
+        entity_field="field_id",
+        entity_id=field.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(
+            before,
+            field,
+            (
+                "field_type",
+                "label",
+                "required",
+                "sort_order",
+                "placeholder",
+                "help_text",
+                "options_json",
+                "min_value",
+                "max_value",
+                "visibility_json",
+            ),
+        ),
+    )
     try:
         db.commit()
     except IntegrityError:
@@ -1278,8 +1359,45 @@ def service_field_edit_save(
             status_code=422,
         )
 
+    before = SimpleNamespace(
+        field_type=field_inst.field_type,
+        label=field_inst.label,
+        required=field_inst.required,
+        sort_order=field_inst.sort_order,
+        placeholder=field_inst.placeholder,
+        help_text=field_inst.help_text,
+        options_json=field_inst.options_json,
+        min_value=field_inst.min_value,
+        max_value=field_inst.max_value,
+        visibility_json=field_inst.visibility_json,
+    )
     _ = norm.as_structure_dict()
     _apply_normalized_service(field_inst, norm)
+    field_inst.updated_at = datetime.utcnow()
+    field_inst.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=ServiceQuestionnaireFieldAuditLog,
+        entity_field="field_id",
+        entity_id=field_inst.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(
+            before,
+            field_inst,
+            (
+                "field_type",
+                "label",
+                "required",
+                "sort_order",
+                "placeholder",
+                "help_text",
+                "options_json",
+                "min_value",
+                "max_value",
+                "visibility_json",
+            ),
+        ),
+    )
     try:
         db.commit()
     except IntegrityError:

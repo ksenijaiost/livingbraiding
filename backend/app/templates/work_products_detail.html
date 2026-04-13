@@ -124,6 +124,67 @@
           </div>
         {% endif %}
       {% endif %}
+
+      <div class="card" style="margin-top: 14px;">
+        <h3 style="margin-top:0;">История изменений</h3>
+        {% if current_user and current_user.role.value == "ADMIN_SUPER" %}
+          {% set n = (audit_rows|length if audit_rows else 0) %}
+          {% if n > 0 %}
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 170px;">Когда</th>
+                  <th style="width: 180px;">Кто</th>
+                  <th>Поле</th>
+                  <th>Было</th>
+                  <th>Стало</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if n > 3 %}
+                  {% for a in audit_rows[:2] %}
+                    <tr>
+                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td class="muted">{% if a.changed_by_user %}{{ a.changed_by_user.display_name }}{% else %}—{% endif %}</td>
+                      <td><code>{{ a.field_name }}</code></td>
+                      <td class="muted">{{ a.old_value if a.old_value is not none else "—" }}</td>
+                      <td class="muted">{{ a.new_value if a.new_value is not none else "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                  <tr>
+                    <td colspan="5">
+                      <button type="button" class="secondary" onclick="lbToggleAudit('lb-audit-work', this)">Раскрыть историю</button>
+                    </td>
+                  </tr>
+                  {% for a in audit_rows[2:] %}
+                    <tr class="lb-audit-work" style="display:none;">
+                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td class="muted">{% if a.changed_by_user %}{{ a.changed_by_user.display_name }}{% else %}—{% endif %}</td>
+                      <td><code>{{ a.field_name }}</code></td>
+                      <td class="muted">{{ a.old_value if a.old_value is not none else "—" }}</td>
+                      <td class="muted">{{ a.new_value if a.new_value is not none else "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  {% for a in audit_rows[:3] %}
+                    <tr>
+                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td class="muted">{% if a.changed_by_user %}{{ a.changed_by_user.display_name }}{% else %}—{% endif %}</td>
+                      <td><code>{{ a.field_name }}</code></td>
+                      <td class="muted">{{ a.old_value if a.old_value is not none else "—" }}</td>
+                      <td class="muted">{{ a.new_value if a.new_value is not none else "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                {% endif %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="muted">Пока нет изменений.</p>
+          {% endif %}
+        {% else %}
+          <p class="muted">Доступно только суперадмину.</p>
+        {% endif %}
+      </div>
     {% endif %}
   </div>
 {% endblock %}

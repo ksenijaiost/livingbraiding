@@ -72,6 +72,7 @@ from app.db.models import (
     ServiceCategory,
     ServiceSubcategory,
     Setting,
+    SettingAuditLog,
     User,
     UserRole,
     Visit,
@@ -84,6 +85,7 @@ from app.db.models import (
     StudioOrderServiceLine,
     StudioOrderStaff,
     WorkRate,
+    WorkRateAuditLog,
 )
 from app.audit import diff_fields, write_audit_rows
 from app.db.session import get_db
@@ -2073,12 +2075,25 @@ def admin_settings_save(
     if pct < 0 or pct > 1:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
 
+    now = datetime.utcnow()
+
     row = db.get(Setting, "salon_cut_pct")
+    before_salon = SimpleNamespace(value=(row.value if row else None))
     if not row:
         row = Setting(key="salon_cut_pct", value=str(pct))
         db.add(row)
     else:
         row.value = str(pct)
+    row.updated_at = now
+    row.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=SettingAuditLog,
+        entity_field="setting_key",
+        entity_id=row.key,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before_salon, row, ("value",)),
+    )
 
     try:
         days = int(edit_window_days.strip())
@@ -2087,12 +2102,22 @@ def admin_settings_save(
     if days < 0 or days > 365:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
     drow = db.get(Setting, "edit_window_days")
+    before_days = SimpleNamespace(value=(drow.value if drow else None))
     if not drow:
-        db.add(Setting(key="edit_window_days", value=str(days)))
+        drow = Setting(key="edit_window_days", value=str(days))
+        db.add(drow)
     else:
         drow.value = str(days)
-
-    now = datetime.utcnow()
+    drow.updated_at = now
+    drow.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=SettingAuditLog,
+        entity_field="setting_key",
+        entity_id=drow.key,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before_days, drow, ("value",)),
+    )
     try:
         k100 = float(kanek_per_100g.strip().replace(",", "."))
         ku100 = float(kudri_per_100g.strip().replace(",", "."))
@@ -2111,10 +2136,22 @@ def admin_settings_save(
         mrow.updated_at = now
 
     tz_row = db.get(Setting, "display_timezone")
+    before_tz = SimpleNamespace(value=(tz_row.value if tz_row else None))
     if not tz_row:
-        db.add(Setting(key="display_timezone", value=tz_raw))
+        tz_row = Setting(key="display_timezone", value=tz_raw)
+        db.add(tz_row)
     else:
         tz_row.value = tz_raw
+    tz_row.updated_at = now
+    tz_row.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=SettingAuditLog,
+        entity_field="setting_key",
+        entity_id=tz_row.key,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before_tz, tz_row, ("value",)),
+    )
 
     db.commit()
     return RedirectResponse(url="/admin/settings?saved=1", status_code=303)
@@ -2200,20 +2237,30 @@ async def admin_settings_work_rates_save(
     for k, v in payload.items():
         row = db.scalar(select(WorkRate).where(WorkRate.key == k))
         if not row:
-            db.add(
-                WorkRate(
-                    key=k,
-                    value_json=json.dumps(v, ensure_ascii=False),
-                    is_active=True,
-                    updated_at=now,
-                    updated_by_user_id=current_user.id,
-                )
+            row = WorkRate(
+                key=k,
+                value_json=json.dumps(v, ensure_ascii=False),
+                is_active=True,
+                updated_at=now,
+                updated_by_user_id=current_user.id,
             )
+            db.add(row)
+            db.flush()
+            before = SimpleNamespace(value_json=None, is_active=None)
         else:
+            before = SimpleNamespace(value_json=row.value_json, is_active=row.is_active)
             row.value_json = json.dumps(v, ensure_ascii=False)
             row.is_active = True
             row.updated_at = now
             row.updated_by_user_id = current_user.id
+        write_audit_rows(
+            db,
+            log_model=WorkRateAuditLog,
+            entity_field="work_rate_id",
+            entity_id=row.id,
+            changed_by_user_id=current_user.id,
+            changes=diff_fields(before, row, ("value_json", "is_active")),
+        )
     db.commit()
     return RedirectResponse(url="/admin/settings?saved=1", status_code=303)
 

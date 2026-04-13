@@ -85,39 +85,68 @@
         {% endif %}
       </div>
 
-      <div class="card" style="margin-top:14px;">
-        <h3 style="margin-top:0;">История изменений</h3>
-        {% if audit_rows %}
-          <table>
-            <thead>
-              <tr>
-                <th>Когда</th>
-                <th>Кто</th>
-                <th>Поле</th>
-                <th>Было</th>
-                <th>Стало</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for a in audit_rows %}
-                <tr>
-                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
-                  <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
-                  <td><code>{{ a.field_name }}</code></td>
-                  <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
-                  <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        {% else %}
-          <p class="muted">Пока нет изменений.</p>
-        {% endif %}
-      </div>
-
       {% if can_edit and not edit_allowed %}
         <div class="card" style="border-color:#fde68a; background:#fffbeb; margin-top: 12px;">
           {{ edit_block_msg }}
+        </div>
+      {% endif %}
+
+      {% if current_user and current_user.role.value == "ADMIN_SUPER" %}
+        <div class="card" style="margin-top:14px;">
+          <h3 style="margin-top:0;">История изменений</h3>
+          {% set n = (audit_rows|length if audit_rows else 0) %}
+          {% if n > 0 %}
+            <table>
+              <thead>
+                <tr>
+                  <th>Когда</th>
+                  <th>Кто</th>
+                  <th>Поле</th>
+                  <th>Было</th>
+                  <th>Стало</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if n > 3 %}
+                  {% for a in audit_rows[:2] %}
+                    <tr>
+                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+                      <td><code>{{ a.field_name }}</code></td>
+                      <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+                      <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                  <tr>
+                    <td colspan="5">
+                      <button type="button" class="secondary" onclick="lbToggleAudit('lb-audit-sale', this)">Раскрыть историю</button>
+                    </td>
+                  </tr>
+                  {% for a in audit_rows[2:] %}
+                    <tr class="lb-audit-sale" style="display:none;">
+                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+                      <td><code>{{ a.field_name }}</code></td>
+                      <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+                      <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  {% for a in audit_rows[:3] %}
+                    <tr>
+                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+                      <td><code>{{ a.field_name }}</code></td>
+                      <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+                      <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                {% endif %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="muted">Пока нет изменений.</p>
+          {% endif %}
         </div>
       {% endif %}
     {% endif %}

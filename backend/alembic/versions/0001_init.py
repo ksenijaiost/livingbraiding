@@ -27,6 +27,8 @@ def upgrade() -> None:
         "settings",
         sa.Column("key", sa.String(length=100), primary_key=True),
         sa.Column("value", sa.String(length=500), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
     )
 
     op.create_table(
@@ -124,6 +126,8 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("date", sa.DateTime(), nullable=False),
         sa.Column(
             "subcategory_id",
@@ -143,6 +147,8 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column(
             "include_in_visit",
             sa.Boolean(),
@@ -165,6 +171,8 @@ def upgrade() -> None:
         sa.Column("show_kit_section", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column("show_material_description", sa.Boolean(), nullable=False, server_default=sa.text("1")),
         sa.Column("show_thermo_visit", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.UniqueConstraint("category_id", "name", name="uq_subcategory_per_category"),
     )
 
@@ -193,6 +201,8 @@ def upgrade() -> None:
         sa.Column("fixed_expense_amount", sa.Float(), nullable=True),
         sa.Column("is_per_unit", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column("unit_label", sa.String(length=60), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.UniqueConstraint("subcategory_id", "name", name="uq_service_per_subcategory"),
     )
 
@@ -216,6 +226,8 @@ def upgrade() -> None:
         sa.Column("min_value", sa.Float(), nullable=True),
         sa.Column("max_value", sa.Float(), nullable=True),
         sa.Column("visibility_json", sa.Text(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.UniqueConstraint("category_id", "field_key", name="uq_category_questionnaire_field_key"),
     )
 
@@ -239,6 +251,8 @@ def upgrade() -> None:
         sa.Column("min_value", sa.Float(), nullable=True),
         sa.Column("max_value", sa.Float(), nullable=True),
         sa.Column("visibility_json", sa.Text(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.UniqueConstraint("subcategory_id", "field_key", name="uq_subcategory_questionnaire_field_key"),
     )
 
@@ -262,6 +276,8 @@ def upgrade() -> None:
         sa.Column("min_value", sa.Float(), nullable=True),
         sa.Column("max_value", sa.Float(), nullable=True),
         sa.Column("visibility_json", sa.Text(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.UniqueConstraint("service_id", "field_key", name="uq_service_questionnaire_field_key"),
     )
 
@@ -480,6 +496,166 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "studio_expense_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "expense_id",
+            sa.Integer(),
+            sa.ForeignKey("studio_expenses.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "work_for_inventory_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "work_id",
+            sa.Integer(),
+            sa.ForeignKey("work_for_inventory.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "setting_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "setting_key",
+            sa.String(length=100),
+            sa.ForeignKey("settings.key", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "work_rate_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "work_rate_id",
+            sa.Integer(),
+            sa.ForeignKey("work_rates.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "service_category_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "category_id",
+            sa.Integer(),
+            sa.ForeignKey("service_categories.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "service_subcategory_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "subcategory_id",
+            sa.Integer(),
+            sa.ForeignKey("service_subcategories.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "service_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "service_id",
+            sa.Integer(),
+            sa.ForeignKey("services.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "category_questionnaire_field_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "field_id",
+            sa.Integer(),
+            sa.ForeignKey("category_questionnaire_fields.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "subcategory_questionnaire_field_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "field_id",
+            sa.Integer(),
+            sa.ForeignKey("subcategory_questionnaire_fields.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "service_questionnaire_field_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "field_id",
+            sa.Integer(),
+            sa.ForeignKey("service_questionnaire_fields.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
         "studio_orders",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
@@ -639,6 +815,8 @@ def upgrade() -> None:
         sa.Column("display_number", sa.String(length=40), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("kind", sa.String(length=32), nullable=False),
         sa.Column("scope", sa.String(length=24), nullable=False),
         sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=True),
@@ -708,6 +886,16 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("payroll_periods")
+    op.drop_table("service_questionnaire_field_audit_logs")
+    op.drop_table("subcategory_questionnaire_field_audit_logs")
+    op.drop_table("category_questionnaire_field_audit_logs")
+    op.drop_table("service_audit_logs")
+    op.drop_table("service_subcategory_audit_logs")
+    op.drop_table("service_category_audit_logs")
+    op.drop_table("work_rate_audit_logs")
+    op.drop_table("setting_audit_logs")
+    op.drop_table("work_for_inventory_audit_logs")
+    op.drop_table("studio_expense_audit_logs")
     op.drop_table("work_rates")
     op.drop_table("work_for_inventory_staff")
     op.drop_table("work_for_inventory")
