@@ -64,6 +64,7 @@ from app.thermo_visit import (
     persist_new_thermo_template_if_needed,
     service_requires_thermo_flow,
 )
+from app.payroll_fund import post_visit_accruals
 from app.user_roles import user_has_role
 
 
@@ -940,6 +941,7 @@ def save_kit_inlay_visit(
             label_suffix=f"Термо {performed_dt.date().isoformat()}",
         )
 
+    post_visit_accruals(db, visit, visit.created_by_user_id)
     db.commit()
     db.refresh(visit)
     return visit

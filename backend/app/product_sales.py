@@ -21,6 +21,7 @@ from app.audit import diff_fields, write_audit_rows
 from app.db.models import (
     Client,
     Kit,
+    PayrollFundSourceKind,
     ProductSale,
     ProductSaleAuditLog,
     ProductSaleKind,
@@ -28,6 +29,12 @@ from app.db.models import (
     ServiceCategory,
     ServiceSubcategory,
     UserRole,
+)
+from app.payroll_fund import (
+    compute_product_sale_studio_margin,
+    post_product_sale_studio_accrual,
+    replace_product_sale_studio_accrual,
+    storno_source_accruals,
 )
 from app.db.session import get_db
 from app.visit_edit_policy import edit_window_days, is_in_closed_payroll_period, within_edit_window
@@ -357,6 +364,7 @@ async def product_sale_edit_save(
         "rubber_price_override",
         "other_description",
         "is_voided",
+        "studio_margin_amount",
     )})
 
     form = await request.form()
@@ -461,6 +469,12 @@ async def product_sale_edit_save(
             raise ValueError("Для «Другое» укажите описание.")
         sale.other_description = desc
 
+    if kind == ProductSaleKind.KIT and sale.kit_id:
+        db.refresh(sale, attribute_names=["kit"])
+    elif kind == ProductSaleKind.MATERIAL and sale.material_service_id:
+        db.refresh(sale, attribute_names=["material_service"])
+
+    sale.studio_margin_amount = compute_product_sale_studio_margin(db, sale)
     sale.updated_at = datetime.utcnow()
     sale.updated_by_user_id = current_user.id
     write_audit_rows(
@@ -485,9 +499,11 @@ async def product_sale_edit_save(
                 "rubber_description",
                 "rubber_price_override",
                 "other_description",
+                "studio_margin_amount",
             ),
         ),
     )
+    replace_product_sale_studio_accrual(db, sale, current_user.id)
     db.commit()
     return RedirectResponse(url=f"/sales/products/{sale_id}?msg=saved", status_code=303)
 
@@ -505,6 +521,8 @@ async def product_sale_void(
     ok, _ = _sale_edit_allowed(db, sale)
     if not ok:
         return RedirectResponse(url=f"/sales/products/{sale_id}?msg=void_blocked", status_code=303)
+
+    storno_source_accruals(db, PayrollFundSourceKind.PRODUCT_SALE, sale.id, current_user.id)
 
     # revert stock impact
     if sale.kind == ProductSaleKind.KIT and sale.kit_id and sale.kit_pieces_sold:
@@ -653,6 +671,13 @@ async def product_sale_new_post(
         row.other_description = desc
 
     db.add(row)
+    db.flush()
+    if kind == ProductSaleKind.KIT and row.kit_id:
+        db.refresh(row, attribute_names=["kit"])
+    elif kind == ProductSaleKind.MATERIAL and row.material_service_id:
+        db.refresh(row, attribute_names=["material_service"])
+    row.studio_margin_amount = compute_product_sale_studio_margin(db, row)
+    post_product_sale_studio_accrual(db, row, current_user.id)
     db.commit()
     return RedirectResponse(url="/sales/products?msg=saved", status_code=303)
 

@@ -67,6 +67,8 @@ from app.db.models import (
     KitAuthorStaff,
     MaterialPriceCurrent,
     MaterialType,
+    PayrollFundSide,
+    PayrollFundSourceKind,
     PayrollPeriod,
     Service,
     ServiceCategory,
@@ -83,6 +85,12 @@ from app.db.models import (
     WorkRateAuditLog,
 )
 from app.audit import diff_fields, write_audit_rows
+from app.payroll_fund import (
+    ledger_balances,
+    post_payout,
+    recent_ledger_rows,
+    storno_source_accruals,
+)
 from app.db.session import get_db
 from app.kit_crud import (
     apply_kit_admin_form,
@@ -1847,6 +1855,7 @@ async def admin_visit_cancel(
         changed_by_user_id=current_user.id,
         changes=diff_fields(before, visit, ("is_cancelled", "cancelled_at", "cancelled_by_user_id")),
     )
+    storno_source_accruals(db, PayrollFundSourceKind.VISIT, visit.id, current_user.id)
     db.commit()
     return RedirectResponse(url=f"/admin/visits/{visit_id}?msg=cancelled", status_code=303)
 
@@ -2067,6 +2076,105 @@ async def admin_payroll_periods_close(
     p.closed_by_role = current_user.role.value
     db.commit()
     return RedirectResponse(url="/admin/payroll-periods?msg=closed", status_code=303)
+
+
+def _payroll_fund_msg_ru(code: str | None) -> str | None:
+    return {
+        "paid": "Выплата записана в журнал.",
+    }.get(code or "", code)
+
+
+def _payroll_fund_err_ru(code: str | None) -> str | None:
+    return {
+        "bad_side": "Укажите корректную сторону (мастер или студия).",
+        "bad_amount": "Укажите сумму выплаты больше нуля.",
+        "bad_user": "Выберите мастера для выплаты.",
+    }.get(code or "", code)
+
+
+@app.get("/admin/payroll-fund", response_class=HTMLResponse)
+def admin_payroll_fund_page(
+    request: Request,
+    msg: str | None = None,
+    err: str | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    masters_bal, studio_bal = ledger_balances(db)
+    uids = [m["user_id"] for m in masters_bal]
+    users_by_id: dict[int, User] = {}
+    if uids:
+        for u in db.scalars(select(User).where(User.id.in_(uids))).all():
+            users_by_id[u.id] = u
+    master_rows: list[dict[str, Any]] = []
+    for m in masters_bal:
+        uid = int(m["user_id"])
+        u = users_by_id.get(uid)
+        master_rows.append(
+            {
+                "user_id": uid,
+                "display_name": (u.display_name if u else f"ID {uid}"),
+                "balance": m["balance"],
+            }
+        )
+    ledger_rows = recent_ledger_rows(db)
+    masters_for_payout = list(
+        db.scalars(select_users_with_role(UserRole.MASTER).order_by(User.display_name.asc())).all()
+    )
+    return templates.TemplateResponse(
+        "admin_payroll_fund.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            master_rows=master_rows,
+            studio_balance=studio_bal,
+            ledger_rows=ledger_rows,
+            masters_for_payout=masters_for_payout,
+            msg=_payroll_fund_msg_ru(msg),
+            err=_payroll_fund_err_ru(err),
+        ),
+    )
+
+
+@app.post("/admin/payroll-fund/payout")
+async def admin_payroll_fund_payout(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    side_raw = (str(form.get("side") or "")).strip().upper()
+    try:
+        side = PayrollFundSide(side_raw)
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_side", status_code=303)
+    amount_raw = str(form.get("amount") or "").strip().replace(",", ".")
+    try:
+        amount = float(amount_raw)
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_amount", status_code=303)
+    comment = str(form.get("comment") or "").strip()
+    user_id: int | None = None
+    if side == PayrollFundSide.MASTER:
+        raw_uid = str(form.get("user_id") or "").strip()
+        if not raw_uid.isdigit():
+            return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
+        user_id = int(raw_uid)
+        if db.get(User, user_id) is None:
+            return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
+    try:
+        post_payout(
+            db,
+            side=side,
+            user_id=user_id,
+            amount=amount,
+            created_by_user_id=current_user.id,
+            comment=comment,
+        )
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_amount", status_code=303)
+    db.commit()
+    return RedirectResponse(url="/admin/payroll-fund?msg=paid", status_code=303)
 
 
 @app.post("/admin/settings")

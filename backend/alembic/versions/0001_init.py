@@ -673,6 +673,7 @@ def upgrade() -> None:
         sa.Column("rubber_description", sa.Text(), nullable=True),
         sa.Column("rubber_price_override", sa.Integer(), nullable=True),
         sa.Column("other_description", sa.Text(), nullable=True),
+        sa.Column("studio_margin_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
     )
 
     # ---- Прайс «Товары» (вне визита) ----
@@ -755,6 +756,27 @@ def upgrade() -> None:
         sa.UniqueConstraint("key", name="uq_work_rates_key"),
     )
 
+    # ---- Журнал фондов ЗП ----
+    op.create_table(
+        "payroll_fund_ledger",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("entry_kind", sa.String(length=16), nullable=False),
+        sa.Column("side", sa.String(length=16), nullable=False),
+        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("amount", sa.Float(), nullable=False),
+        sa.Column("source_kind", sa.String(length=20), nullable=False),
+        sa.Column("source_id", sa.Integer(), nullable=True),
+        sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column(
+            "storno_of_id",
+            sa.Integer(),
+            sa.ForeignKey("payroll_fund_ledger.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column("comment", sa.Text(), nullable=True),
+    )
+
     # ---- Payroll периоды (каркас) ----
     op.create_table(
         "payroll_periods",
@@ -770,6 +792,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("payroll_periods")
+    op.drop_table("payroll_fund_ledger")
     op.drop_table("service_questionnaire_field_audit_logs")
     op.drop_table("subcategory_questionnaire_field_audit_logs")
     op.drop_table("category_questionnaire_field_audit_logs")

@@ -15,6 +15,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
+
+from app.payroll_fund import post_work_accruals, replace_work_accruals, storno_source_accruals
 from starlette.datastructures import UploadFile
 
 from app.auth import AuthUser, require_role
@@ -23,6 +25,7 @@ from app.db.models import (
     Client,
     Kit,
     KitAuthorStaff,
+    PayrollFundSourceKind,
     ProductSale,
     MaterialPriceCurrent,
     MaterialType,
@@ -780,6 +783,12 @@ async def work_new_post(
                     db.add(KitAuthorStaff(kit_id=kit.id, user_id=uid, sort_order=so))
                     so += 1
 
+        staff_saved = list(
+            db.scalars(
+                select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == work.id)
+            ).all()
+        )
+        post_work_accruals(db, work.id, staff_saved, current_user.id)
         db.commit()
         return RedirectResponse(url="/sales/work?msg=saved", status_code=303)
     except ValueError as exc:
@@ -955,6 +964,8 @@ async def work_void(
         if _kit_has_any_usage(db, kit.id):
             return RedirectResponse(url=f"/sales/work/{work_id}?msg=void_conflict", status_code=303)
 
+    storno_source_accruals(db, PayrollFundSourceKind.WORK, w.id, current_user.id)
+
     before = SimpleNamespace(
         is_voided=w.is_voided,
         voided_at=getattr(w, "voided_at", None),
@@ -1119,6 +1130,10 @@ async def work_edit_save(
             ),
         ),
     )
+    staff_rows = list(
+        db.scalars(select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == w.id)).all()
+    )
+    replace_work_accruals(db, w.id, staff_rows, current_user.id)
     db.commit()
     return RedirectResponse(url=f"/sales/work/{work_id}?msg=saved", status_code=303)
 

@@ -590,6 +590,9 @@ class ProductSale(Base):
     # OTHER
     other_description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Маржа в фонд студии (снимок для розницы; проводки ЗП по этому полю).
+    studio_margin_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     voided_by_user: Mapped["User | None"] = relationship(foreign_keys=[voided_by_user_id])
@@ -722,6 +725,57 @@ class PayrollPeriod(Base):
     closed_by_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     closed_by_role: Mapped[str | None] = mapped_column(String(50), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PayrollFundEntryKind(str, enum.Enum):
+    ACCRUAL = "ACCRUAL"
+    STORNO = "STORNO"
+    PAYOUT = "PAYOUT"
+
+
+class PayrollFundSide(str, enum.Enum):
+    MASTER = "MASTER"
+    STUDIO = "STUDIO"
+
+
+class PayrollFundSourceKind(str, enum.Enum):
+    VISIT = "VISIT"
+    WORK = "WORK"
+    PRODUCT_SALE = "PRODUCT_SALE"
+    MANUAL = "MANUAL"
+
+
+class PayrollFundLedger(Base):
+    """Журнал фондов ЗП: + начисление, − сторно/выплата (сальдо = сумма amount)."""
+
+    __tablename__ = "payroll_fund_ledger"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    entry_kind: Mapped[PayrollFundEntryKind] = mapped_column(
+        Enum(PayrollFundEntryKind, native_enum=False, length=16),
+        nullable=False,
+    )
+    side: Mapped[PayrollFundSide] = mapped_column(
+        Enum(PayrollFundSide, native_enum=False, length=16),
+        nullable=False,
+    )
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    source_kind: Mapped[PayrollFundSourceKind] = mapped_column(
+        Enum(PayrollFundSourceKind, native_enum=False, length=20),
+        nullable=False,
+    )
+    source_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    storno_of_id: Mapped[int | None] = mapped_column(
+        ForeignKey("payroll_fund_ledger.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_by_user: Mapped["User | None"] = relationship(foreign_keys=[created_by_user_id])
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
 
 
 class Visit(Base):

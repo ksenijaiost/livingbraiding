@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 980px;">
+    <h2 style="margin-top: 0;">Фонды ЗП</h2>
+    <p class="muted" style="margin-top:-6px;">
+      Сальдо по каждому мастеру и фонду студии — сумма всех проводок (начисления положительные, сторно и выплаты отрицательные).
+      Начисления создаются при сохранении визита, работы с товарами и розничной продажи; сторно — при отмене визита, void работы/продажи или правке продажи (пересчёт маржи).
+    </p>
+
+    {% if msg %}
+      <div class="ok" style="margin-bottom: 12px;">{{ msg }}</div>
+    {% endif %}
+    {% if err %}
+      <div class="error" style="margin-bottom: 12px;">{{ err }}</div>
+    {% endif %}
+
+    <div class="row">
+      <div class="card" style="flex:1; min-width:280px;">
+        <h3 style="margin-top:0;">Сальдо мастеров</h3>
+        {% if master_rows %}
+          <table>
+            <thead><tr><th>Мастер</th><th>Сальдо, руб.</th></tr></thead>
+            <tbody>
+              {% for m in master_rows %}
+                <tr>
+                  <td>{{ m.display_name }} <span class="muted">(#{{ m.user_id }})</span></td>
+                  <td>{{ "%.2f"|format(m.balance) }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="muted">Нет начислений мастерам.</p>
+        {% endif %}
+      </div>
+      <div class="card" style="flex:1; min-width:280px;">
+        <h3 style="margin-top:0;">Фонд студии</h3>
+        <p style="font-size:1.25rem; margin:0;"><strong>{{ "%.2f"|format(studio_balance) }} руб.</strong></p>
+        <p class="muted" style="margin-top:8px;">Включает долю с визитов (<code>salon_profit + studio_fund_amount</code>) и маржу с розницы.</p>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+      <h3 style="margin-top:0;">Выплата</h3>
+      <form method="post" action="/admin/payroll-fund/payout" class="row" style="align-items:flex-end;">
+        <div style="flex:1; min-width:200px;">
+          <label for="pf_side">Куда</label>
+          <select name="side" id="pf_side" required>
+            <option value="MASTER">Мастеру</option>
+            <option value="STUDIO">Из фонда студии</option>
+          </select>
+        </div>
+        <div style="flex:1; min-width:200px;" id="pf_master_wrap">
+          <label for="pf_user">Мастер</label>
+          <select name="user_id" id="pf_user">
+            {% for u in masters_for_payout %}
+              <option value="{{ u.id }}">{{ u.display_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="flex:1; min-width:140px;">
+          <label for="pf_amount">Сумма, руб.</label>
+          <input type="text" name="amount" id="pf_amount" required placeholder="0.00" />
+        </div>
+        <div style="flex:2; min-width:220px;">
+          <label for="pf_comment">Комментарий</label>
+          <input type="text" name="comment" id="pf_comment" placeholder="Необязательно" />
+        </div>
+        <div style="flex:0;">
+          <button type="submit">Записать выплату</button>
+        </div>
+      </form>
+      <p class="muted" style="margin:12px 0 0;">Для «Из фонда студии» поле мастера не используется.</p>
+    </div>
+
+    <script>
+      (function () {
+        var side = document.getElementById("pf_side");
+        var wrap = document.getElementById("pf_master_wrap");
+        var sel = document.getElementById("pf_user");
+        function sync() {
+          var st = side && side.value;
+          if (st === "STUDIO") {
+            wrap.style.opacity = "0.45";
+            if (sel) sel.removeAttribute("required");
+          } else {
+            wrap.style.opacity = "1";
+            if (sel) sel.setAttribute("required", "required");
+          }
+        }
+        if (side) side.addEventListener("change", sync);
+        sync();
+      })();
+    </script>
+
+    <h3 style="margin-top: 24px;">Журнал (последние записи)</h3>
+    {% if ledger_rows %}
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Дата</th>
+              <th>Тип</th>
+              <th>Сторона</th>
+              <th>Кому</th>
+              <th>Сумма</th>
+              <th>Источник</th>
+              <th>Кто внёс</th>
+              <th>Комментарий</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in ledger_rows %}
+              <tr>
+                <td>{{ r.id }}</td>
+                <td>{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>
+                  {% if r.entry_kind.value == 'ACCRUAL' %}Начисление
+                  {% elif r.entry_kind.value == 'STORNO' %}Сторно
+                  {% elif r.entry_kind.value == 'PAYOUT' %}Выплата
+                  {% else %}{{ r.entry_kind.value }}{% endif %}
+                </td>
+                <td>{% if r.side.value == 'STUDIO' %}Студия{% else %}Мастер{% endif %}</td>
+                <td>
+                  {% if r.user %}
+                    {{ r.user.display_name }} (#{{ r.user_id }})
+                  {% elif r.side.value == 'STUDIO' %}
+                    —
+                  {% else %}
+                    #{{ r.user_id or '—' }}
+                  {% endif %}
+                </td>
+                <td>{{ "%.2f"|format(r.amount) }}</td>
+                <td>
+                  {% if r.source_kind.value == 'VISIT' %}Визит {{ r.source_id or '' }}
+                  {% elif r.source_kind.value == 'WORK' %}Работа {{ r.source_id or '' }}
+                  {% elif r.source_kind.value == 'PRODUCT_SALE' %}Продажа {{ r.source_id or '' }}
+                  {% else %}Ручная{% endif %}
+                </td>
+                <td>{{ r.created_by_user.display_name if r.created_by_user else '—' }}</td>
+                <td>{{ r.comment or '' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Записей пока нет.</p>
+    {% endif %}
+  </div>
+{% endblock %}
