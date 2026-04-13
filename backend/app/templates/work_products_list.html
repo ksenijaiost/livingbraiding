@@ -34,7 +34,7 @@
           </thead>
           <tbody>
             {% for w in rows %}
-              <tr>
+              <tr{% if w.is_voided %} style="opacity:0.6;text-decoration:line-through;"{% endif %}>
                 <td><a href="/sales/work/{{ w.id }}">{{ w.id }}</a></td>
                 <td>
                   {% if w.created_at %}

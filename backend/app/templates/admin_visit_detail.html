@@ -7,6 +7,24 @@
       Создан: {{ visit.created_at.strftime("%d.%m.%Y %H:%M") }}
       {% if visit_creator_label %}· {{ visit_creator_label }}{% endif %}
     </p>
+    {% if visit.is_cancelled %}
+      <div class="error" style="margin:12px 0;">
+        <strong>ВИЗИТ ОТМЕНЁН</strong>
+        {% if visit.cancelled_at %} · {{ visit.cancelled_at.strftime("%d.%m.%Y %H:%M") }}{% endif %}
+        {% if visit.cancelled_by_user %} ({{ visit.cancelled_by_user.display_name }}){% endif %}
+      </div>
+    {% endif %}
+    {% if msg %}
+      {% if msg == 'cancelled' %}
+        <div class="ok" style="margin:12px 0;">Визит отменён. Складные списания возвращены.</div>
+      {% elif msg == 'already_cancelled' %}
+        <div class="error" style="margin:12px 0;">Визит уже отменён.</div>
+      {% elif msg == 'cancel_closed_period' %}
+        <div class="error" style="margin:12px 0;">Нельзя отменить: визит относится к закрытому периоду ЗП.</div>
+      {% elif msg == 'cancel_conflict' %}
+        <div class="error" style="margin:12px 0;">Нельзя отменить: конфликт при возврате заготовок на склад (проверьте движения по комплекту).</div>
+      {% endif %}
+    {% endif %}
     <p class="muted" style="font-size: 12px; margin-top: 4px;">История изменений доступна только суперадмину.</p>
 
     {% if client_err %}
@@ -112,6 +130,20 @@
       </table>
     {% else %}
       <p class="muted">{{ kit_usages_note }}</p>
+    {% endif %}
+
+    {% if current_user and current_user.role.value == "ADMIN_SUPER" and not visit.is_cancelled %}
+      <div class="card" style="margin-top: 14px; border-color:#fecaca; background:#fff1f2;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <strong>Аннулирование</strong>
+          <form method="post" action="/admin/visits/{{ visit.id }}/cancel" style="margin:0;">
+            <button type="submit" class="secondary">Отменить визит</button>
+          </form>
+        </div>
+        <div class="muted" style="font-size:12px; margin-top:6px;">
+          При отмене визита будут возвращены списанные со склада заготовки (если возможно) и запись попадёт в историю изменений.
+        </div>
+      </div>
     {% endif %}
 
     {% if visit_edit_blocked and visit_edit_block_msg %}

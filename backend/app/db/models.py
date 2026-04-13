@@ -623,6 +623,10 @@ class WorkForInventory(Base):
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    is_voided: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_kit_id: Mapped[int | None] = mapped_column(ForeignKey("kits.id"), nullable=True)
 
     kind: Mapped[WorkKind] = mapped_column(
         Enum(WorkKind, native_enum=False, length=32),
@@ -660,7 +664,9 @@ class WorkForInventory(Base):
 
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    voided_by_user: Mapped["User | None"] = relationship(foreign_keys=[voided_by_user_id])
     client: Mapped["Client | None"] = relationship()
+    created_kit: Mapped["Kit | None"] = relationship(foreign_keys=[created_kit_id])
     staff_rows: Mapped[list["WorkForInventoryStaff"]] = relationship(
         back_populates="work",
         cascade="all, delete-orphan",
@@ -736,6 +742,9 @@ class StudioOrder(Base):
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    is_voided: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     duration_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
@@ -781,6 +790,7 @@ class StudioOrder(Base):
 
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    voided_by_user: Mapped["User | None"] = relationship(foreign_keys=[voided_by_user_id])
     client: Mapped["Client"] = relationship()
     staff_rows: Mapped[list["StudioOrderStaff"]] = relationship(
         back_populates="studio_order", cascade="all, delete-orphan"

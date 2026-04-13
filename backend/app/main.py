@@ -123,6 +123,7 @@ from app.thermo_visit import (
 )
 from app.user_roles import select_users_with_any_role, select_users_with_role, user_has_any_role
 from app.visit_edit_policy import visit_client_change_policy
+from app.visit_edit_policy import is_in_closed_payroll_period
 from app.ui_visit_display import (
     build_service_human_display,
     kit_usages_empty_explanation,
@@ -827,7 +828,7 @@ def admin_client_detail(
 
     visits_stmt = (
         select(Visit)
-        .where(Visit.client_id == client_id)
+        .where(Visit.client_id == client_id, Visit.is_cancelled.is_(False))
         .options(selectinload(Visit.services))
         .order_by(Visit.performed_date.desc())
     )
@@ -843,7 +844,7 @@ def admin_client_detail(
     kit_stmt = (
         select(VisitKitUsage)
         .join(Visit, VisitKitUsage.visit_id == Visit.id)
-        .where(Visit.client_id == client_id)
+        .where(Visit.client_id == client_id, Visit.is_cancelled.is_(False))
         .options(selectinload(VisitKitUsage.kit), selectinload(VisitKitUsage.visit))
         .order_by(Visit.performed_date.desc(), VisitKitUsage.id.asc())
     )
@@ -1714,6 +1715,7 @@ def admin_visit_detail(
     visit_id: int,
     request: Request,
     client_err: str | None = None,
+    msg: str | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
@@ -1778,16 +1780,88 @@ def admin_visit_detail(
             duration_h=duration_h,
             duration_m=duration_m,
             client_err=client_err,
+            msg=msg,
             visit_edit_blocked=not v_policy.can_change,
             visit_edit_block_msg=v_policy.message_when_blocked,
         ),
     )
 
 
+def _visit_cancel_revert_stock(db: Session, visit: Visit) -> tuple[bool, str]:
+    """Revert stock kit usages for a visit. Two-pass: validate then apply."""
+    usages = list(getattr(visit, "kit_usages", []) or [])
+    if not usages:
+        return True, ""
+    kit_rows: list[tuple[Kit, int]] = []
+    for u in usages:
+        kit = getattr(u, "kit", None) or db.get(Kit, u.kit_id)
+        if not kit:
+            return False, "Не найден комплект для отката списания (kit_id)."
+        pieces = int(u.pieces_used or 0)
+        if pieces <= 0:
+            continue
+        new_avail = int(kit.pieces_available + pieces)
+        if int(kit.pieces_total) >= 0 and new_avail > int(kit.pieces_total):
+            return (
+                False,
+                f"Нельзя отменить визит: возврат превысит остаток 'всего' по комплекту {kit.sku}.",
+            )
+        kit_rows.append((kit, pieces))
+    for kit, pieces in kit_rows:
+        kit.pieces_available = int(kit.pieces_available + pieces)
+        if kit.pieces_available > 0:
+            kit.is_in_stock = True
+    return True, ""
+
+
+@app.post("/admin/visits/{visit_id}/cancel")
+async def admin_visit_cancel(
+    visit_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    visit = db.scalar(
+        select(Visit)
+        .options(selectinload(Visit.kit_usages).selectinload(VisitKitUsage.kit))
+        .where(Visit.id == visit_id)
+    )
+    if not visit:
+        raise HTTPException(status_code=404, detail="Визит не найден")
+    if visit.is_cancelled:
+        return RedirectResponse(url=f"/admin/visits/{visit_id}?msg=already_cancelled", status_code=303)
+    if is_in_closed_payroll_period(db, visit.created_at):
+        return RedirectResponse(url=f"/admin/visits/{visit_id}?msg=cancel_closed_period", status_code=303)
+
+    ok, err = _visit_cancel_revert_stock(db, visit)
+    if not ok:
+        return RedirectResponse(url=f"/admin/visits/{visit_id}?msg=cancel_conflict", status_code=303)
+
+    before = SimpleNamespace(
+        is_cancelled=visit.is_cancelled,
+        cancelled_at=visit.cancelled_at,
+        cancelled_by_user_id=visit.cancelled_by_user_id,
+    )
+    visit.is_cancelled = True
+    visit.cancelled_at = datetime.utcnow()
+    visit.cancelled_by_user_id = current_user.id
+    visit.updated_at = datetime.utcnow()
+    visit.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=VisitAuditLog,
+        entity_field="visit_id",
+        entity_id=visit.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before, visit, ("is_cancelled", "cancelled_at", "cancelled_by_user_id")),
+    )
+    db.commit()
+    return RedirectResponse(url=f"/admin/visits/{visit_id}?msg=cancelled", status_code=303)
+
 @app.get("/admin/studio-orders/{order_id}", response_class=HTMLResponse)
 def admin_studio_order_detail(
     order_id: int,
     request: Request,
+    msg: str | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
@@ -1831,8 +1905,80 @@ def admin_studio_order_detail(
             mix_source_ru=ru_mix_source(order.mix_source),
             mix_complexity_ru=ru_mix_complexity(getattr(order, "mix_complexity", None)),
             order_creator_label=order_creator_label,
+            msg=msg,
         ),
     )
+
+
+def _studio_order_void_revert_stock(db: Session, order: StudioOrder) -> tuple[bool, str]:
+    """Revert stock kit usages for a studio order. Two-pass: validate then apply."""
+    usages = list(getattr(order, "kit_usages", []) or [])
+    if not usages:
+        return True, ""
+    kit_rows: list[tuple[Kit, int]] = []
+    for u in usages:
+        kit = getattr(u, "kit", None) or db.get(Kit, u.kit_id)
+        if not kit:
+            return False, "Не найден комплект для отката списания (kit_id)."
+        pieces = int(u.pieces_used or 0)
+        if pieces <= 0:
+            continue
+        new_avail = int(kit.pieces_available + pieces)
+        if int(kit.pieces_total) >= 0 and new_avail > int(kit.pieces_total):
+            return (
+                False,
+                f"Нельзя аннулировать заказ: возврат превысит остаток 'всего' по комплекту {kit.sku}.",
+            )
+        kit_rows.append((kit, pieces))
+    for kit, pieces in kit_rows:
+        kit.pieces_available = int(kit.pieces_available + pieces)
+        if kit.pieces_available > 0:
+            kit.is_in_stock = True
+    return True, ""
+
+
+@app.post("/admin/studio-orders/{order_id}/void")
+async def admin_studio_order_void(
+    order_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    order = db.scalar(
+        select(StudioOrder)
+        .options(selectinload(StudioOrder.kit_usages).selectinload(StudioOrderKitUsage.kit))
+        .where(StudioOrder.id == order_id)
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    if order.is_voided:
+        return RedirectResponse(url=f"/admin/studio-orders/{order_id}?msg=already_voided", status_code=303)
+    if is_in_closed_payroll_period(db, order.created_at):
+        return RedirectResponse(url=f"/admin/studio-orders/{order_id}?msg=void_closed_period", status_code=303)
+
+    ok, _ = _studio_order_void_revert_stock(db, order)
+    if not ok:
+        return RedirectResponse(url=f"/admin/studio-orders/{order_id}?msg=void_conflict", status_code=303)
+
+    before = SimpleNamespace(
+        is_voided=order.is_voided,
+        voided_at=getattr(order, "voided_at", None),
+        voided_by_user_id=getattr(order, "voided_by_user_id", None),
+    )
+    order.is_voided = True
+    order.voided_at = datetime.utcnow()
+    order.voided_by_user_id = current_user.id
+    order.updated_at = datetime.utcnow()
+    order.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=StudioOrderAuditLog,
+        entity_field="studio_order_id",
+        entity_id=order.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before, order, ("is_voided", "voided_at", "voided_by_user_id")),
+    )
+    db.commit()
+    return RedirectResponse(url=f"/admin/studio-orders/{order_id}?msg=voided", status_code=303)
 
 
 @app.post("/admin/visits/{visit_id}/client")

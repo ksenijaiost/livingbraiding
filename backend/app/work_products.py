@@ -23,12 +23,17 @@ from app.db.models import (
     Client,
     Kit,
     KitAuthorStaff,
+    ProductSale,
     MaterialPriceCurrent,
     MaterialType,
     MixComplexity,
     MixSource,
+    StudioOrder,
+    StudioOrderKitUsage,
     User,
     UserRole,
+    Visit,
+    VisitKitUsage,
     WorkForInventoryAuditLog,
     WorkForInventory,
     WorkForInventoryStaff,
@@ -60,6 +65,8 @@ def _ctx(request: Request, current_user: AuthUser, **kwargs):
 
 
 def _work_edit_allowed(db: Session, work: WorkForInventory) -> tuple[bool, str]:
+    if getattr(work, "is_voided", False):
+        return False, "Работа аннулирована — редактирование запрещено."
     if is_in_closed_payroll_period(db, work.created_at):
         return False, "Работа относится к закрытому периоду ЗП — редактирование запрещено."
     days = edit_window_days(db)
@@ -763,6 +770,7 @@ async def work_new_post(
             )
             db.add(kit)
             db.flush()
+            work.created_kit_id = kit.id
             seen_uid: set[int] = set()
             so = 0
             for uid in kit_staff_ids:
@@ -878,6 +886,7 @@ def work_detail(
             )
     can_edit = (current_user.role == UserRole.ADMIN_SUPER)
     edit_allowed, edit_block_msg = _work_edit_allowed(db, w) if can_edit else (False, "")
+    void_msg = request.query_params.get("msg")
     details = _details_obj(w.details_json)
     audit_rows = list(
         db.scalars(
@@ -900,8 +909,86 @@ def work_detail(
             edit_allowed=edit_allowed,
             edit_block_msg=edit_block_msg,
             audit_rows=audit_rows,
+            msg=void_msg,
         ),
     )
+
+
+def _kit_has_any_usage(db: Session, kit_id: int) -> bool:
+    sale_exists = db.scalar(
+        select(ProductSale.id).where(ProductSale.kit_id == kit_id, ProductSale.is_voided.is_(False)).limit(1)
+    )
+    if sale_exists is not None:
+        return True
+    visit_exists = db.scalar(
+        select(VisitKitUsage.id)
+        .join(Visit, VisitKitUsage.visit_id == Visit.id)
+        .where(VisitKitUsage.kit_id == kit_id, Visit.is_cancelled.is_(False))
+        .limit(1)
+    )
+    if visit_exists is not None:
+        return True
+    order_exists = db.scalar(
+        select(StudioOrderKitUsage.id)
+        .join(StudioOrder, StudioOrderKitUsage.studio_order_id == StudioOrder.id)
+        .where(StudioOrderKitUsage.kit_id == kit_id, StudioOrder.is_voided.is_(False))
+        .limit(1)
+    )
+    return order_exists is not None
+
+
+@router.post("/{work_id}/void")
+async def work_void(
+    work_id: int,
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    w = db.get(WorkForInventory, work_id)
+    if not w:
+        return RedirectResponse(url="/sales/work?msg=not_found", status_code=303)
+    if w.is_voided:
+        return RedirectResponse(url=f"/sales/work/{work_id}?msg=already_voided", status_code=303)
+
+    ok, _ = _work_edit_allowed(db, w)
+    if not ok:
+        return RedirectResponse(url=f"/sales/work/{work_id}?msg=void_blocked", status_code=303)
+
+    kit = None
+    if w.created_kit_id:
+        kit = db.get(Kit, int(w.created_kit_id))
+        if not kit:
+            return RedirectResponse(url=f"/sales/work/{work_id}?msg=void_conflict", status_code=303)
+        if int(kit.pieces_available) != int(kit.pieces_total):
+            return RedirectResponse(url=f"/sales/work/{work_id}?msg=void_conflict", status_code=303)
+        if _kit_has_any_usage(db, kit.id):
+            return RedirectResponse(url=f"/sales/work/{work_id}?msg=void_conflict", status_code=303)
+
+    before = SimpleNamespace(
+        is_voided=w.is_voided,
+        voided_at=getattr(w, "voided_at", None),
+        voided_by_user_id=getattr(w, "voided_by_user_id", None),
+    )
+    w.is_voided = True
+    w.voided_at = datetime.utcnow()
+    w.voided_by_user_id = current_user.id
+    w.updated_at = datetime.utcnow()
+    w.updated_by_user_id = current_user.id
+
+    if kit:
+        kit.is_archived = True
+        kit.is_in_stock = False
+        kit.pieces_available = 0
+
+    write_audit_rows(
+        db,
+        log_model=WorkForInventoryAuditLog,
+        entity_field="work_id",
+        entity_id=w.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before, w, ("is_voided", "voided_at", "voided_by_user_id")),
+    )
+    db.commit()
+    return RedirectResponse(url=f"/sales/work/{work_id}?msg=voided", status_code=303)
 
 
 @router.get("/{work_id}/edit", response_class=HTMLResponse)

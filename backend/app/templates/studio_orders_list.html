@@ -28,7 +28,7 @@
         </thead>
         <tbody>
           {% for r in rows %}
-            <tr>
+            <tr{% if r.is_voided %} style="opacity:0.6;text-decoration:line-through;"{% endif %}>
               <td><a href="/admin/studio-orders/{{ r.id }}">{{ r.id }}</a></td>
               <td>{{ r.performed_date.strftime('%d.%m.%Y') if r.performed_date else '—' }}</td>
               <td>{{ r.subcategory_key.value }}</td>
