@@ -79,11 +79,6 @@ from app.db.models import (
     VisitAuditLog,
     VisitKitUsage,
     VisitMaster,
-    StudioOrder,
-    StudioOrderAuditLog,
-    StudioOrderKitUsage,
-    StudioOrderServiceLine,
-    StudioOrderStaff,
     WorkRate,
     WorkRateAuditLog,
 )
@@ -103,7 +98,6 @@ from app.kit_crud import (
 )
 from app import admin_studio_expenses as admin_studio_expenses_routes
 from app import product_sales as product_sales_routes
-from app import studio_order as studio_order_routes
 from app import work_products as work_products_routes
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
@@ -138,7 +132,6 @@ app.include_router(admin_service_catalog_router)
 app.include_router(admin_questionnaire_fields_router)
 app.include_router(admin_studio_expenses_routes.router)
 app.include_router(product_sales_routes.router)
-app.include_router(studio_order_routes.router)
 app.include_router(work_products_routes.router)
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_master_level"] = ru_master_level
@@ -1856,129 +1849,6 @@ async def admin_visit_cancel(
     )
     db.commit()
     return RedirectResponse(url=f"/admin/visits/{visit_id}?msg=cancelled", status_code=303)
-
-@app.get("/admin/studio-orders/{order_id}", response_class=HTMLResponse)
-def admin_studio_order_detail(
-    order_id: int,
-    request: Request,
-    msg: str | None = None,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
-    db: Session = Depends(get_db),
-):
-    order = db.scalar(
-        select(StudioOrder)
-        .options(
-            selectinload(StudioOrder.client),
-            selectinload(StudioOrder.staff_rows).selectinload(StudioOrderStaff.user),
-            selectinload(StudioOrder.service_lines).selectinload(StudioOrderServiceLine.service),
-            selectinload(StudioOrder.kit_usages).selectinload(StudioOrderKitUsage.kit),
-        )
-        .where(StudioOrder.id == order_id)
-    )
-    if not order:
-        raise HTTPException(status_code=404, detail="Заказ не найден")
-
-    audit_rows = list(
-        db.scalars(
-            select(StudioOrderAuditLog)
-            .options(selectinload(StudioOrderAuditLog.changed_by_user))
-            .where(StudioOrderAuditLog.studio_order_id == order_id)
-            .order_by(StudioOrderAuditLog.changed_at.desc(), StudioOrderAuditLog.id.desc())
-            .limit(200)
-        ).all()
-    )
-
-    order_creator_label: str | None = None
-    if order.created_by_user_id:
-        cu = db.get(User, order.created_by_user_id)
-        if cu and (cu.display_name or "").strip():
-            order_creator_label = cu.display_name.strip()
-
-    return templates.TemplateResponse(
-        "admin_studio_order_detail.html",
-        _ctx(
-            request,
-            current_user=current_user,
-            order=order,
-            audit_rows=audit_rows,
-            price_type_ru=ru_price_type(order.price_type),
-            mix_source_ru=ru_mix_source(order.mix_source),
-            mix_complexity_ru=ru_mix_complexity(getattr(order, "mix_complexity", None)),
-            order_creator_label=order_creator_label,
-            msg=msg,
-        ),
-    )
-
-
-def _studio_order_void_revert_stock(db: Session, order: StudioOrder) -> tuple[bool, str]:
-    """Revert stock kit usages for a studio order. Two-pass: validate then apply."""
-    usages = list(getattr(order, "kit_usages", []) or [])
-    if not usages:
-        return True, ""
-    kit_rows: list[tuple[Kit, int]] = []
-    for u in usages:
-        kit = getattr(u, "kit", None) or db.get(Kit, u.kit_id)
-        if not kit:
-            return False, "Не найден комплект для отката списания (kit_id)."
-        pieces = int(u.pieces_used or 0)
-        if pieces <= 0:
-            continue
-        new_avail = int(kit.pieces_available + pieces)
-        if int(kit.pieces_total) >= 0 and new_avail > int(kit.pieces_total):
-            return (
-                False,
-                f"Нельзя аннулировать заказ: возврат превысит остаток 'всего' по комплекту {kit.sku}.",
-            )
-        kit_rows.append((kit, pieces))
-    for kit, pieces in kit_rows:
-        kit.pieces_available = int(kit.pieces_available + pieces)
-        if kit.pieces_available > 0:
-            kit.is_in_stock = True
-    return True, ""
-
-
-@app.post("/admin/studio-orders/{order_id}/void")
-async def admin_studio_order_void(
-    order_id: int,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
-    db: Session = Depends(get_db),
-):
-    order = db.scalar(
-        select(StudioOrder)
-        .options(selectinload(StudioOrder.kit_usages).selectinload(StudioOrderKitUsage.kit))
-        .where(StudioOrder.id == order_id)
-    )
-    if not order:
-        raise HTTPException(status_code=404, detail="Заказ не найден")
-    if order.is_voided:
-        return RedirectResponse(url=f"/admin/studio-orders/{order_id}?msg=already_voided", status_code=303)
-    if is_in_closed_payroll_period(db, order.created_at):
-        return RedirectResponse(url=f"/admin/studio-orders/{order_id}?msg=void_closed_period", status_code=303)
-
-    ok, _ = _studio_order_void_revert_stock(db, order)
-    if not ok:
-        return RedirectResponse(url=f"/admin/studio-orders/{order_id}?msg=void_conflict", status_code=303)
-
-    before = SimpleNamespace(
-        is_voided=order.is_voided,
-        voided_at=getattr(order, "voided_at", None),
-        voided_by_user_id=getattr(order, "voided_by_user_id", None),
-    )
-    order.is_voided = True
-    order.voided_at = datetime.utcnow()
-    order.voided_by_user_id = current_user.id
-    order.updated_at = datetime.utcnow()
-    order.updated_by_user_id = current_user.id
-    write_audit_rows(
-        db,
-        log_model=StudioOrderAuditLog,
-        entity_field="studio_order_id",
-        entity_id=order.id,
-        changed_by_user_id=current_user.id,
-        changes=diff_fields(before, order, ("is_voided", "voided_at", "voided_by_user_id")),
-    )
-    db.commit()
-    return RedirectResponse(url=f"/admin/studio-orders/{order_id}?msg=voided", status_code=303)
 
 
 @app.post("/admin/visits/{visit_id}/client")

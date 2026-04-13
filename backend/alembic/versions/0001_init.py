@@ -1,4 +1,4 @@
-"""Single full schema (dev): clients, visits, заказы (studio_orders), розница материала, комплекты.
+"""Single full schema (dev): clients, visits, розница материала, комплекты.
 
 Revision ID: 0001_init
 Revises:
@@ -480,22 +480,6 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "studio_order_audit_logs",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column(
-            "studio_order_id",
-            sa.Integer(),
-            sa.ForeignKey("studio_orders.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("changed_at", sa.DateTime(), nullable=False),
-        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("field_name", sa.String(length=120), nullable=False),
-        sa.Column("old_value", sa.Text(), nullable=True),
-        sa.Column("new_value", sa.Text(), nullable=True),
-    )
-
-    op.create_table(
         "studio_expense_audit_logs",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column(
@@ -655,113 +639,6 @@ def upgrade() -> None:
         sa.Column("new_value", sa.Text(), nullable=True),
     )
 
-    op.create_table(
-        "studio_orders",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=True),
-        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("is_voided", sa.Boolean(), nullable=False, server_default=sa.text("0")),
-        sa.Column("voided_at", sa.DateTime(), nullable=True),
-        sa.Column("voided_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("performed_date", sa.DateTime(), nullable=False),
-        sa.Column("duration_minutes", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=False),
-        sa.Column(
-            "client_type",
-            sa.Enum("NEW", "RETURNING", "SELF", name="visitclienttype"),
-            nullable=False,
-        ),
-        sa.Column(
-            "price_type",
-            sa.Enum("CLIENT", "MODEL", name="visitpricetype"),
-            nullable=False,
-        ),
-        sa.Column(
-            "client_age_group",
-            sa.Enum("U10", "10_18", "18_30", "30_50", "50P", name="clientagegroup"),
-            nullable=True,
-        ),
-        sa.Column("kanekalon_grams", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("kudri_grams", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column(
-            "mix_source",
-            sa.Enum("NO_MIX", "FROM_STOCK", "SELF_MIXED", name="mixsource"),
-            nullable=True,
-        ),
-        sa.Column(
-            "mix_complexity",
-            sa.Enum("SIMPLE", "MEDIUM", "HARD", name="mixcomplexity"),
-            nullable=True,
-        ),
-        sa.Column("mix_cost_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("mix_bonus_master_id", sa.Integer(), nullable=True),
-        sa.Column("mix_bonus_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("kanekalon_price_per_gram_at_time", sa.Float(), nullable=True),
-        sa.Column("kudri_price_per_gram_at_time", sa.Float(), nullable=True),
-        sa.Column("materials_cost_total", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("amount_from_client", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("comment", sa.Text(), nullable=True),
-        sa.Column("addons_total", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("addons_details_json", sa.Text(), nullable=True),
-        sa.Column(
-            "amortization_level",
-            sa.Enum("MIN", "MID", "MAX", name="amortizationlevel"),
-            nullable=True,
-        ),
-        sa.Column("amortization_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("studio_fund_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("cost_total", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("profit_before_split", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("salon_cut_pct_at_time", sa.Float(), nullable=False, server_default=sa.text("0.3")),
-        sa.Column("salon_profit", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("masters_pool", sa.Float(), nullable=False, server_default=sa.text("0")),
-        sa.Column("subcategory_key", sa.String(length=24), nullable=False),
-        sa.Column("korrekciya_blanks_in_kit", sa.Integer(), nullable=True),
-        sa.Column("korrekciya_comment", sa.Text(), nullable=True),
-    )
-    op.create_table(
-        "studio_order_staff",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column(
-            "studio_order_id",
-            sa.Integer(),
-            sa.ForeignKey("studio_orders.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("percent", sa.Float(), nullable=False),
-        sa.UniqueConstraint("studio_order_id", "user_id", name="uq_studio_order_staff_order_user"),
-    )
-    op.create_table(
-        "studio_order_kit_usages",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column(
-            "studio_order_id",
-            sa.Integer(),
-            sa.ForeignKey("studio_orders.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("kit_id", sa.Integer(), sa.ForeignKey("kits.id"), nullable=False),
-        sa.Column("pieces_used", sa.Integer(), nullable=False),
-        sa.Column("cost_amount", sa.Float(), nullable=False),
-        sa.Column("note", sa.String(length=200), nullable=True),
-    )
-    op.create_table(
-        "studio_order_service_lines",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column(
-            "studio_order_id",
-            sa.Integer(),
-            sa.ForeignKey("studio_orders.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("service_id", sa.Integer(), sa.ForeignKey("services.id"), nullable=False),
-        sa.Column("sort_order", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("details_json", sa.Text(), nullable=True),
-    )
-
     op.execute(
         """
         UPDATE services SET order_rubber_extra_time_amort = 1
@@ -908,10 +785,6 @@ def downgrade() -> None:
     op.drop_table("work_for_inventory")
     op.drop_table("catalog_products")
     op.drop_table("product_sales")
-    op.drop_table("studio_order_service_lines")
-    op.drop_table("studio_order_kit_usages")
-    op.drop_table("studio_order_staff")
-    op.drop_table("studio_orders")
     op.drop_table("visit_audit_logs")
     op.drop_table("visit_kit_usages")
     op.drop_table("visit_services")

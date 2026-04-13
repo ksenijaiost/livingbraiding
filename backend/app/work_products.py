@@ -28,8 +28,6 @@ from app.db.models import (
     MaterialType,
     MixComplexity,
     MixSource,
-    StudioOrder,
-    StudioOrderKitUsage,
     User,
     UserRole,
     Visit,
@@ -928,13 +926,7 @@ def _kit_has_any_usage(db: Session, kit_id: int) -> bool:
     )
     if visit_exists is not None:
         return True
-    order_exists = db.scalar(
-        select(StudioOrderKitUsage.id)
-        .join(StudioOrder, StudioOrderKitUsage.studio_order_id == StudioOrder.id)
-        .where(StudioOrderKitUsage.kit_id == kit_id, StudioOrder.is_voided.is_(False))
-        .limit(1)
-    )
-    return order_exists is not None
+    return False
 
 
 @router.post("/{work_id}/void")
