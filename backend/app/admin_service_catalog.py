@@ -18,10 +18,11 @@ from sqlalchemy.orm import Session
 from app.auth import AuthUser, require_role
 from app.db.models import ServiceCategory, ServiceSubcategory, Service, UserRole
 from app.db.session import get_db
-from app.ru_labels import ru_master_level
+from app.ru_labels import ru_master_level, ru_user_role
 
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_master_level"] = ru_master_level
+templates.env.globals["ru_user_role"] = ru_user_role
 
 router = APIRouter(prefix="/admin/catalog", tags=["admin-catalog"])
 

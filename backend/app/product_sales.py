@@ -31,8 +31,10 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.visit_edit_policy import edit_window_days, is_in_closed_payroll_period, within_edit_window
+from app.ru_labels import ru_user_role
 
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals["ru_user_role"] = ru_user_role
 
 router = APIRouter(prefix="/sales/products", tags=["product-sales"])
 _STAFF = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))

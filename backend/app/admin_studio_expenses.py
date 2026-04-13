@@ -22,8 +22,10 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.visit_edit_policy import is_in_closed_payroll_period
+from app.ru_labels import ru_user_role
 
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals["ru_user_role"] = ru_user_role
 
 router = APIRouter(prefix="/admin/expenses", tags=["admin-studio-expenses"])
 _SUPER = Depends(require_role(UserRole.ADMIN_SUPER))

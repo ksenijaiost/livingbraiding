@@ -24,11 +24,12 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.questionnaire_field_validate import NormalizedQuestionnaireField, validate_questionnaire_field_form
-from app.ru_labels import ru_master_level, ru_questionnaire_field_type
+from app.ru_labels import ru_master_level, ru_questionnaire_field_type, ru_user_role
 
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_master_level"] = ru_master_level
 templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_type
+templates.env.globals["ru_user_role"] = ru_user_role
 
 router = APIRouter(prefix="/admin/catalog", tags=["admin-questionnaire"])
 

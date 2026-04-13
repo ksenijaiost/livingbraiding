@@ -23,6 +23,7 @@ from app.client_validation import (
 )
 from app.db.session import get_db
 from app.user_roles import select_users_with_any_role, user_has_any_role
+from app.ru_labels import ru_user_role
 from app.db.models import (
     AmortizationLevel,
     Client,
@@ -640,6 +641,7 @@ def save_studio_order_from_form(
 
 
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals["ru_user_role"] = ru_user_role
 router = APIRouter(prefix="/sales/order", tags=["studio-order"])
 _STAFF = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 

@@ -42,8 +42,10 @@ from app.user_roles import select_users_with_role, user_has_role
 from app.kit_inlay_visit import _materials_cost_and_snapshot
 from app.work_products_compute import compute_work_financials
 from app.visit_edit_policy import edit_window_days, is_in_closed_payroll_period, within_edit_window
+from app.ru_labels import ru_user_role
 
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals["ru_user_role"] = ru_user_role
 router = APIRouter(prefix="/sales/work", tags=["work-products"])
 _VIEW = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _MASTER = Depends(require_role(UserRole.MASTER))

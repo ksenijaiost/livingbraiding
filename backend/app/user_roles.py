@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Select, and_, delete, exists, or_, select
+from sqlalchemy import Select, delete, select
 from sqlalchemy.orm import Session
 
 from app.db.models import User, UserRole, UserRoleAssignment
@@ -34,11 +34,10 @@ def get_roles_for_user(db: Session, user_id: int) -> list[UserRole]:
             select(UserRoleAssignment.role).where(UserRoleAssignment.user_id == user_id)
         ).all()
     )
-    if rows:
-        order = {UserRole.ADMIN_SUPER: 0, UserRole.ADMIN: 1, UserRole.MASTER: 2}
-        return sorted(set(rows), key=lambda r: order[r])
-    u = db.get(User, user_id)
-    return [u.role] if u else []
+    if not rows:
+        return []
+    order = {UserRole.ADMIN_SUPER: 0, UserRole.ADMIN: 1, UserRole.MASTER: 2}
+    return sorted(set(rows), key=lambda r: order[r])
 
 
 def resolve_active_role(roles: list[UserRole], cookie_value: str | None) -> UserRole:
@@ -61,7 +60,7 @@ def user_has_any_role(db: Session, user_id: int, *roles: UserRole) -> bool:
 
 
 def sync_user_denormalized_role(db: Session, user_id: int) -> None:
-    """Колонка users.role — максимальная из назначенных (для обратной совместимости)."""
+    """Колонка users.role — максимальная из назначенных (удобно для legacy/отображения)."""
     u = db.get(User, user_id)
     if not u:
         return
@@ -88,29 +87,19 @@ def set_user_roles(db: Session, user: User, roles: list[UserRole]) -> None:
 
 
 def select_users_with_role(role: UserRole) -> Select[tuple[User]]:
-    """Запрос User с назначенной ролью role (в т.ч. legacy: только колонка users.role)."""
-    assigned = exists(
-        select(1).where(
-            UserRoleAssignment.user_id == User.id,
-            UserRoleAssignment.role == role,
-        )
+    """Запрос User с назначенной ролью role."""
+    return (
+        select(User)
+        .join(UserRoleAssignment, UserRoleAssignment.user_id == User.id)
+        .where(User.is_active.is_(True), UserRoleAssignment.role == role)
+        .distinct()
     )
-    legacy_only = and_(
-        ~exists(select(1).where(UserRoleAssignment.user_id == User.id)),
-        User.role == role,
-    )
-    return select(User).where(User.is_active.is_(True), or_(assigned, legacy_only)).distinct()
 
 
 def select_users_with_any_role(*roles: UserRole) -> Select[tuple[User]]:
-    assigned = exists(
-        select(1).where(
-            UserRoleAssignment.user_id == User.id,
-            UserRoleAssignment.role.in_(roles),
-        )
+    return (
+        select(User)
+        .join(UserRoleAssignment, UserRoleAssignment.user_id == User.id)
+        .where(User.is_active.is_(True), UserRoleAssignment.role.in_(roles))
+        .distinct()
     )
-    legacy_only = and_(
-        ~exists(select(1).where(UserRoleAssignment.user_id == User.id)),
-        User.role.in_(roles),
-    )
-    return select(User).where(User.is_active.is_(True), or_(assigned, legacy_only)).distinct()
