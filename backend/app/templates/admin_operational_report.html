@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+{% block content %}
+  {% set report_mode = report_mode|default('custom_dates') %}
+  <div class="card" style="max-width: 1100px;">
+    <h2 style="margin-top: 0;">Отчёт за период</h2>
+    <p class="muted" style="margin-top: -6px;">
+      Операционные показатели — по дате создания записи (визит / продажа / работа / расход). Отменённые визиты и аннулированные продажи и работы не учитываются.
+      Блок «журнал ЗП» — по дате проводки; он может отличаться от среза по записям, если проводки создавались или менялись позже.
+    </p>
+
+    <form method="get" action="/admin/reports" id="rep_form" class="card" style="background: #f8f9fb; margin-bottom: 20px;">
+      <input type="hidden" name="report_mode" id="rep_mode_hidden" value="{{ report_mode|default('custom_dates') }}" />
+      <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px;">
+        <span class="muted" style="font-size: 13px;">Способ выбора периода</span>
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500;">
+          <input type="radio" name="report_mode_radio" value="payroll_period" id="rep_mode_period" {% if report_mode == 'payroll_period' %}checked{% endif %} />
+          По закрытому периоду ЗП
+        </label>
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500;">
+          <input type="radio" name="report_mode_radio" value="custom_dates" id="rep_mode_dates" {% if report_mode == 'custom_dates' %}checked{% endif %} />
+          По выбранным датам
+        </label>
+      </div>
+
+      <div id="rep_payroll_period_block" class="row" style="align-items: flex-end;">
+        <div style="flex: 1; min-width: 260px;">
+          <label for="rep_period">Закрытый период</label>
+          <select name="period_id" id="rep_period" style="width: 100%;">
+            <option value="">— не выбран —</option>
+            {% for p in closed_periods %}
+              <option value="{{ p.id }}" {% if selected_period_id == p.id %}selected{% endif %}>
+                {{ p.date_from.strftime('%Y-%m-%d') }} — {{ p.date_to.strftime('%Y-%m-%d') }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="flex: 0;">
+          <button type="submit" id="rep_btn_period">Показать</button>
+        </div>
+      </div>
+
+      <div id="rep_custom_dates_block" class="row" style="align-items: flex-end; display: none;">
+        <div style="flex: 1; min-width: 140px;">
+          <label for="rep_df">С даты</label>
+          <input type="date" name="df" id="rep_df" value="{{ form_df }}" />
+        </div>
+        <div style="flex: 1; min-width: 140px;">
+          <label for="rep_dt">По дату</label>
+          <input type="date" name="dt" id="rep_dt" value="{{ form_dt }}" />
+        </div>
+        <div style="flex: 0;">
+          <button type="submit" id="rep_btn_dates">Показать</button>
+        </div>
+      </div>
+    </form>
+
+    <script>
+      (function () {
+        var hidden = document.getElementById("rep_mode_hidden");
+        var rPeriod = document.getElementById("rep_mode_period");
+        var rDates = document.getElementById("rep_mode_dates");
+        var blockP = document.getElementById("rep_payroll_period_block");
+        var blockD = document.getElementById("rep_custom_dates_block");
+        var sel = document.getElementById("rep_period");
+        var df = document.getElementById("rep_df");
+        var dt = document.getElementById("rep_dt");
+        var btnP = document.getElementById("rep_btn_period");
+        var btnD = document.getElementById("rep_btn_dates");
+
+        function isPeriodMode() {
+          return rPeriod && rPeriod.checked;
+        }
+
+        function sync() {
+          var pm = isPeriodMode();
+          if (hidden) hidden.value = pm ? "payroll_period" : "custom_dates";
+          if (blockP) blockP.style.display = pm ? "" : "none";
+          if (blockD) blockD.style.display = pm ? "none" : "";
+          if (sel) sel.disabled = !pm;
+          if (df) df.disabled = pm;
+          if (dt) dt.disabled = pm;
+          if (btnP) btnP.style.display = pm ? "" : "none";
+          if (btnD) btnD.style.display = pm ? "none" : "";
+        }
+
+        if (rPeriod) rPeriod.addEventListener("change", sync);
+        if (rDates) rDates.addEventListener("change", sync);
+        var form = document.getElementById("rep_form");
+        if (form) {
+          form.addEventListener("submit", function () {
+            if (hidden) hidden.value = isPeriodMode() ? "payroll_period" : "custom_dates";
+          });
+        }
+        sync();
+      })();
+    </script>
+
+    <p class="muted" style="margin-bottom: 16px;"><strong>Период:</strong> {{ period_label }}</p>
+
+    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Выручка</h3>
+    <div class="row" style="margin-bottom: 20px;">
+      <div class="card" style="flex: 1; min-width: 160px; border-left: 4px solid #3b82f6;">
+        <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Всего</div>
+        <div style="font-size: 1.35rem; font-weight: 700;">{{ "%.2f"|format(revenue_total) }} <span class="muted" style="font-size: 0.85rem; font-weight: 500;">руб.</span></div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 140px;">
+        <div class="muted" style="font-size: 12px;">Визиты</div>
+        <div style="font-size: 1.1rem; font-weight: 600;">{{ "%.2f"|format(revenue_visits) }}</div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 140px;">
+        <div class="muted" style="font-size: 12px;">Продажи</div>
+        <div style="font-size: 1.1rem; font-weight: 600;">{{ "%.2f"|format(revenue_sales) }}</div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 140px;">
+        <div class="muted" style="font-size: 12px;">Работы (с суммой от клиента)</div>
+        <div style="font-size: 1.1rem; font-weight: 600;">{{ "%.2f"|format(revenue_works) }}</div>
+      </div>
+    </div>
+
+    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Объёмы и клиенты</h3>
+    <div class="row" style="margin-bottom: 20px;">
+      <div class="card" style="flex: 1; min-width: 200px;">
+        <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Работы</div>
+        <div style="font-size: 1.25rem; font-weight: 700;">Работ всего: {{ works_total }}</div>
+        <div class="muted" style="font-size: 13px; margin-top: 8px; line-height: 1.45;">
+          в наличие — {{ works_in_stock }}, на заказ — {{ works_custom_order }}
+        </div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 200px;">
+        <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Визиты и продажи</div>
+        <div style="font-size: 1.25rem; font-weight: 700;">Услуг всего: {{ visits_plus_sales }}</div>
+        <div class="muted" style="font-size: 13px; margin-top: 8px; line-height: 1.45;">
+          визитов — {{ visits_count }}, продаж — {{ sales_count }}
+        </div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 200px;">
+        <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Уникальные клиенты</div>
+        <div style="font-size: 1.25rem; font-weight: 700;">{{ unique_clients }}</div>
+        <div class="muted" style="font-size: 13px; margin-top: 8px; line-height: 1.45;">по визитам, продажам и работам с клиентом за период</div>
+      </div>
+    </div>
+
+    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Материал</h3>
+    <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
+      Учтены граммы по визитам, работам с товарами и продажам материала (розница). Сумма «граммы × цена за грамм»: для визитов и работ — по полю снимка в записи; для продаж материала снимка цены в БД нет — берётся актуальная цена из справочника на момент отчёта; канекалон/кудри по названию подкатегории услуги, иначе граммы отнесены к канекалону (как в расчёте маржи продажи).
+    </p>
+    <div class="row" style="margin-bottom: 20px;">
+      <div class="card" style="flex: 1; min-width: 220px; border-left: 4px solid #6366f1;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Канекалон</div>
+        <div class="muted" style="font-size: 12px;">Суммарно, г</div>
+        <div style="font-size: 1.2rem; font-weight: 700;">{{ "%.2f"|format(kanekalon_grams_total) }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 10px;">Граммы × цена (снимок / справочник)</div>
+        <div style="font-size: 1.1rem; font-weight: 600;">{{ "%.2f"|format(kanekalon_snapshot_rub) }} руб.</div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 220px; border-left: 4px solid #8b5cf6;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Кудри</div>
+        <div class="muted" style="font-size: 12px;">Суммарно, г</div>
+        <div style="font-size: 1.2rem; font-weight: 700;">{{ "%.2f"|format(kudri_grams_total) }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 10px;">Граммы × цена (снимок / справочник)</div>
+        <div style="font-size: 1.1rem; font-weight: 600;">{{ "%.2f"|format(kudri_snapshot_rub) }} руб.</div>
+      </div>
+    </div>
+
+    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Расходы студии</h3>
+    <div class="card" style="margin-bottom: 20px; border-left: 4px solid #f59e0b; max-width: 320px;">
+      <div class="muted" style="font-size: 12px;">По дате создания расхода (не аннулированные)</div>
+      <div style="font-size: 1.25rem; font-weight: 700;">{{ "%.2f"|format(expenses_total) }} <span class="muted" style="font-size: 0.85rem; font-weight: 500;">руб.</span></div>
+    </div>
+
+    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">В фонды ЗП (по снимкам записей)</h3>
+    <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">Сумма того, что распределяется в фонды: студия и сотрудники по визитам и работам, маржа студии с розницы. По работам доля студии из поля работы; сотрудникам — по строкам сотрудников, как в журнале.</p>
+    <div class="row" style="margin-bottom: 12px;">
+      <div class="card" style="flex: 1; min-width: 220px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Визиты</div>
+        <div style="font-size: 14px; line-height: 1.5;">
+          <div>→ студии <strong>{{ "%.2f"|format(visit_studio_to_fund) }}</strong> руб.</div>
+          <div>→ сотрудникам <strong>{{ "%.2f"|format(visit_masters_to_fund) }}</strong> руб.</div>
+        </div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 220px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Работы</div>
+        <div style="font-size: 14px; line-height: 1.5;">
+          <div>→ студии <strong>{{ "%.2f"|format(work_studio_to_fund) }}</strong> руб.</div>
+          <div>→ сотрудникам <strong>{{ "%.2f"|format(work_masters_to_fund) }}</strong> руб.</div>
+        </div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 220px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Розница</div>
+        <div style="font-size: 14px; line-height: 1.5;">
+          <div>→ фонд студии <strong>{{ "%.2f"|format(retail_studio_to_fund) }}</strong> руб.</div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom: 24px; background: #ecfdf5; border: 1px solid #a7f3d0;">
+      <div class="muted" style="font-size: 12px;">Итого в фонды (операционно)</div>
+      <div style="font-size: 1.4rem; font-weight: 700; color: #065f46;">{{ "%.2f"|format(total_to_funds) }} руб.</div>
+    </div>
+
+    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Доля сотрудников (тот же период записей)</h3>
+    {% if employees %}
+      <div style="overflow-x: auto; margin-bottom: 24px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Сотрудник</th>
+              <th>По визитам</th>
+              <th>По работам</th>
+              <th>Всего</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in employees %}
+              <tr>
+                <td>{{ e.display_name }} <span class="muted">(#{{ e.user_id }})</span></td>
+                <td>{{ "%.2f"|format(e.from_visits) }}</td>
+                <td>{{ "%.2f"|format(e.from_works) }}</td>
+                <td><strong>{{ "%.2f"|format(e.total) }}</strong></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted" style="margin-bottom: 24px;">Нет распределения на сотрудников за период.</p>
+    {% endif %}
+
+    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Журнал ЗП за период (по дате проводки)</h3>
+    <div style="overflow-x: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Показатель</th>
+            <th>Сумма в журнале</th>
+            <th class="muted">Комментарий</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Начисления</td>
+            <td><strong>{{ "%.2f"|format(ledger_accrual) }}</strong></td>
+            <td class="muted">Обычно увеличивают сальдо фондов</td>
+          </tr>
+          <tr>
+            <td>Сторно</td>
+            <td><strong>{{ "%.2f"|format(ledger_storno) }}</strong></td>
+            <td class="muted">Обратные проводки</td>
+          </tr>
+          <tr>
+            <td>Расходы студии</td>
+            <td><strong>{{ "%.2f"|format(ledger_expense) }}</strong></td>
+            <td class="muted">Обычно отрицательные</td>
+          </tr>
+          <tr>
+            <td>Выплаты</td>
+            <td><strong>{{ "%.2f"|format(ledger_payout) }}</strong></td>
+            <td class="muted">Списание из фондов при выплате. В колонке — сумма проводок (обычно отрицательная); модуль совпадает с выплаченными рублями при обычной выплате.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

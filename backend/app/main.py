@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import UploadFile
 from fastapi.templating import Jinja2Templates
@@ -92,6 +92,11 @@ from app.db.models import (
     WorkRateAuditLog,
 )
 from app.audit import diff_fields, write_audit_rows
+from app.operational_report import (
+    build_operational_report,
+    list_closed_payroll_periods,
+    result_to_template_dict,
+)
 from app.payroll_fund import (
     employee_fund_balance,
     employee_payout_total_net,
@@ -2004,6 +2009,77 @@ def _payroll_period_day_start(d: date) -> datetime:
 
 def _payroll_period_day_end(d: date) -> datetime:
     return datetime.combine(d, time(23, 59, 59, 999999))
+
+
+@app.get("/admin/reports", response_class=HTMLResponse)
+def admin_operational_report_page(
+    request: Request,
+    report_mode: str | None = Query(None),
+    period_id: str | None = Query(None),
+    df: str | None = Query(None),
+    dt: str | None = Query(None),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    closed_periods = list_closed_payroll_periods(db)
+    today = date.today()
+    month_start = today.replace(day=1)
+    mode = (report_mode or "custom_dates").strip()
+    if mode not in ("payroll_period", "custom_dates"):
+        mode = "custom_dates"
+
+    selected_period_id: int | None = None
+    d0: date
+    d1: date
+
+    pid: int | None = None
+    if period_id and str(period_id).strip().isdigit():
+        pid = int(str(period_id).strip())
+
+    def _from_form_dates() -> tuple[date, date]:
+        try:
+            d_a = date.fromisoformat(df) if df else month_start
+            d_b = date.fromisoformat(dt) if dt else today
+        except ValueError:
+            d_a, d_b = month_start, today
+        return d_a, d_b
+
+    if mode == "payroll_period":
+        if pid is not None and pid > 0:
+            p = db.get(PayrollPeriod, pid)
+            if p is not None and p.closed_at is not None:
+                selected_period_id = p.id
+                d0 = p.date_from.date()
+                d1 = p.date_to.date()
+            else:
+                selected_period_id = None
+                d0, d1 = _from_form_dates()
+        else:
+            selected_period_id = None
+            d0, d1 = _from_form_dates()
+    else:
+        selected_period_id = None
+        d0, d1 = _from_form_dates()
+
+    if d1 < d0:
+        d0, d1 = d1, d0
+
+    report = build_operational_report(db, d0, d1)
+    report_dict = result_to_template_dict(report)
+    return templates.TemplateResponse(
+        "admin_operational_report.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            title="Отчёт",
+            closed_periods=closed_periods,
+            report_mode=mode,
+            selected_period_id=selected_period_id,
+            form_df=d0.isoformat(),
+            form_dt=d1.isoformat(),
+            **report_dict,
+        ),
+    )
 
 
 def _payroll_msg_ru(code: str | None) -> str | None:
