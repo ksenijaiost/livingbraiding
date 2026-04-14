@@ -465,6 +465,9 @@ def service_new_form(
             form_kit_override="",
             form_hide_material=False,
             form_order_rubber=False,
+            form_retail_kanekalon=False,
+            form_retail_kudri=False,
+            form_retail_mix=False,
         ),
     )
 
@@ -488,6 +491,9 @@ def service_new_save(
     kit_section_override: str | None = Form(None),
     hide_material_description: str | None = Form(None),
     order_rubber_extra_time_amort: str | None = Form(None),
+    retail_material_kanekalon: str | None = Form(None),
+    retail_material_kudri: str | None = Form(None),
+    retail_material_mix: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -527,6 +533,9 @@ def service_new_save(
         kit_section_override=_parse_kit_section_override(kit_section_override),
         hide_material_description=_is_checked(hide_material_description),
         order_rubber_extra_time_amort=_is_checked(order_rubber_extra_time_amort),
+        retail_material_kanekalon=_is_checked(retail_material_kanekalon),
+        retail_material_kudri=_is_checked(retail_material_kudri),
+        retail_material_mix=_is_checked(retail_material_mix),
     )
     db.add(svc)
     try:
@@ -585,6 +594,9 @@ def service_edit_form(
             ),
             form_hide_material=svc.hide_material_description,
             form_order_rubber=svc.order_rubber_extra_time_amort,
+            form_retail_kanekalon=svc.retail_material_kanekalon,
+            form_retail_kudri=svc.retail_material_kudri,
+            form_retail_mix=svc.retail_material_mix,
         ),
     )
 
@@ -608,6 +620,9 @@ def service_edit_save(
     kit_section_override: str | None = Form(None),
     hide_material_description: str | None = Form(None),
     order_rubber_extra_time_amort: str | None = Form(None),
+    retail_material_kanekalon: str | None = Form(None),
+    retail_material_kudri: str | None = Form(None),
+    retail_material_mix: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -631,6 +646,9 @@ def service_edit_save(
         kit_section_override=svc.kit_section_override,
         hide_material_description=svc.hide_material_description,
         order_rubber_extra_time_amort=svc.order_rubber_extra_time_amort,
+        retail_material_kanekalon=svc.retail_material_kanekalon,
+        retail_material_kudri=svc.retail_material_kudri,
+        retail_material_mix=svc.retail_material_mix,
     )
     nm = (name or "").strip()
     if not nm:
@@ -667,6 +685,9 @@ def service_edit_save(
     svc.kit_section_override = _parse_kit_section_override(kit_section_override)
     svc.hide_material_description = _is_checked(hide_material_description)
     svc.order_rubber_extra_time_amort = _is_checked(order_rubber_extra_time_amort)
+    svc.retail_material_kanekalon = _is_checked(retail_material_kanekalon)
+    svc.retail_material_kudri = _is_checked(retail_material_kudri)
+    svc.retail_material_mix = _is_checked(retail_material_mix)
     svc.updated_at = datetime.utcnow()
     svc.updated_by_user_id = current_user.id
     write_audit_rows(
@@ -695,6 +716,9 @@ def service_edit_save(
                 "kit_section_override",
                 "hide_material_description",
                 "order_rubber_extra_time_amort",
+                "retail_material_kanekalon",
+                "retail_material_kudri",
+                "retail_material_mix",
             ),
         ),
     )

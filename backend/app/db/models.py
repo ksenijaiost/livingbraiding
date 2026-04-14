@@ -341,6 +341,11 @@ class Service(Base):
     hide_material_description: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     order_rubber_extra_time_amort: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Розница «Продажа материала»: какие блоки ценообразования показывать (независимые флаги).
+    retail_material_kanekalon: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    retail_material_kudri: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    retail_material_mix: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     # Экономика (для суперадмина): используется для автоподсчёта ЗП/студии/расходов.
     # Если is_per_unit=True — значения ниже считаются "за 1 единицу" (крепление/коса/шт).
     master_pay_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -578,6 +583,18 @@ class ProductSale(Base):
     material_service_id: Mapped[int | None] = mapped_column(ForeignKey("services.id"), nullable=True)
     material_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
     material_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    material_kanekalon_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
+    material_kudri_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
+    material_kanekalon_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    material_kudri_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    material_manual_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    material_mix_source: Mapped[MixSource | None] = mapped_column(Enum(MixSource), nullable=True)
+    material_mix_complexity: Mapped[MixComplexity | None] = mapped_column(Enum(MixComplexity), nullable=True)
+    material_mix_cost_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    material_mix_bonus_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    material_mix_bonus_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    material_mix_standalone_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
+    material_cost_review_pending: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # KIT
     kit_id: Mapped[int | None] = mapped_column(ForeignKey("kits.id"), nullable=True)
@@ -598,6 +615,7 @@ class ProductSale(Base):
     voided_by_user: Mapped["User | None"] = relationship(foreign_keys=[voided_by_user_id])
     client: Mapped["Client"] = relationship()
     material_service: Mapped["Service | None"] = relationship(foreign_keys=[material_service_id])
+    material_mix_bonus_user: Mapped["User | None"] = relationship(foreign_keys=[material_mix_bonus_user_id])
     kit: Mapped["Kit | None"] = relationship(foreign_keys=[kit_id])
 
 

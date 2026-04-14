@@ -57,6 +57,7 @@ from app.seed_catalog_narashivanie import ensure_narashivanie_catalog
 from app.seed_catalog_prodazha_materiala import ensure_prodazha_materiala_catalog
 from app.seed_catalog_snjatie_ukhod import ensure_snjatie_ukhod_catalogs
 from app.payroll_fund import sync_operational_payroll_postings
+from app.product_sale_material import finalize_material_sale_fields
 from app.seed_studio_expenses_catalog import ensure_studio_expense_catalog
 
 
@@ -695,17 +696,33 @@ def _ensure_demo_operational_data(db: Session) -> None:
             .order_by(Service.id.asc())
             .limit(1)
         )
-        db.add(
-            ProductSale(
-                created_by_user_id=admin.id if admin else (m1.id if m1 else 1),
-                performed_date=datetime.utcnow(),
-                client_id=c2.id,
-                amount_from_client=1200,
-                kind=ProductSaleKind.MATERIAL,
-                material_service_id=ms.id if ms else None,
-                material_grams=30.0,
-                material_description="Демо: материал",
-            )
+        demo_creator_id = admin.id if admin else (m1.id if m1 else 1)
+        demo_creator_role = (
+            UserRole.ADMIN_SUPER if admin and admin.role == UserRole.ADMIN_SUPER else UserRole.MASTER
+        )
+        grams_demo = 30.0
+        mat_kwargs: dict = {
+            "material_description": "Демо: материал",
+        }
+        if ms and ms.retail_material_kanekalon:
+            mat_kwargs["material_kanekalon_grams"] = grams_demo
+        elif ms and ms.retail_material_kudri:
+            mat_kwargs["material_kudri_grams"] = grams_demo
+        else:
+            mat_kwargs["material_grams"] = grams_demo
+        ps_mat = ProductSale(
+            created_by_user_id=demo_creator_id,
+            performed_date=datetime.utcnow(),
+            client_id=c2.id,
+            amount_from_client=1200,
+            kind=ProductSaleKind.MATERIAL,
+            material_service_id=ms.id if ms else None,
+            **mat_kwargs,
+        )
+        db.add(ps_mat)
+        db.flush()
+        finalize_material_sale_fields(
+            db, ps_mat, seller_user_id=demo_creator_id, active_role=demo_creator_role
         )
 
         # KIT sale (reduce stock like real flow)

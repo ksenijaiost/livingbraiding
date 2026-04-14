@@ -79,6 +79,21 @@
         <input type="checkbox" name="order_rubber_extra_time_amort" {% if form_order_rubber %}checked{% endif %} />
         Форма «Заказ» (резинки): при выборе этой услуги — длительность работы и амортизация
       </label>
+      {% if category and category.name == 'Продажа материала' %}
+        <p class="muted" style="margin: 16px 0 8px;">Розница материала (поля при продаже товара)</p>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+          <input type="checkbox" name="retail_material_kanekalon" {% if form_retail_kanekalon %}checked{% endif %} />
+          Канекалон (граммы × цена за г канекалона)
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+          <input type="checkbox" name="retail_material_kudri" {% if form_retail_kudri %}checked{% endif %} />
+          Кудри (граммы × цена за г кудрей)
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+          <input type="checkbox" name="retail_material_mix" {% if form_retail_mix %}checked{% endif %} />
+          Смешка (как в визите: из наличия / сама мешала + сложность)
+        </label>
+      {% endif %}
       <p class="muted" style="margin-top:12px;">Дополнительные поля анкеты услуги — отдельный шаг.</p>
       <p style="margin-top: 16px;">
         <button type="submit">Сохранить</button>

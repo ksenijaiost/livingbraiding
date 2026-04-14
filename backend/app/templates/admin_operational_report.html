@@ -123,9 +123,12 @@
       <div class="card" style="flex: 1; min-width: 140px;">
         <div class="muted" style="font-size: 12px;">Продажи</div>
         <div style="font-size: 1.1rem; font-weight: 600;">
-          <a href="/admin/reports/sales?{{ reports_filter_q }}" style="color: inherit; text-decoration: underline;">{{ "%.2f"|format(revenue_sales) }}</a>
+          <a href="/admin/reports/sales?{{ reports_filter_q }}" style="color: inherit; text-decoration: underline;">{{ "%.2f"|format(revenue_sales_verified) }}</a>
           <span class="muted" style="font-size: 0.8rem; font-weight: 500;"> руб.</span>
         </div>
+        {% if revenue_sales_pending_review > 0 %}
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">[!] Непроверенные: {{ "%.2f"|format(revenue_sales_pending_review) }} руб.</div>
+        {% endif %}
       </div>
       <div class="card" style="flex: 1; min-width: 140px;">
         <div class="muted" style="font-size: 12px;">Работы (с суммой от клиента)</div>

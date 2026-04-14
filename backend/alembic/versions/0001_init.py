@@ -6,6 +6,8 @@ Create Date: 2026-03-31
 
 service_categories.include_in_visit — участие категории в форме визита мастера.
 services.order_rubber_extra_time_amort — услуга «Заказ» / резинки (длительность + амортизация).
+services.retail_material_* — флаги розницы материала (канекалон / кудри / смешка).
+product_sales — поля материала: граммы по типам, снимки цен, смешка, ручная себестоимость, material_cost_review_pending.
 
 Порядок значений mixsource в схеме: NO_MIX, FROM_STOCK, SELF_MIXED (без смешки первым).
 
@@ -201,6 +203,24 @@ def upgrade() -> None:
         sa.Column("fixed_expense_amount", sa.Float(), nullable=True),
         sa.Column("is_per_unit", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column("unit_label", sa.String(length=60), nullable=True),
+        sa.Column(
+            "retail_material_kanekalon",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column(
+            "retail_material_kudri",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column(
+            "retail_material_mix",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
         sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.UniqueConstraint("subcategory_id", "name", name="uq_service_per_subcategory"),
@@ -668,6 +688,46 @@ def upgrade() -> None:
         sa.Column("material_service_id", sa.Integer(), sa.ForeignKey("services.id"), nullable=True),
         sa.Column("material_grams", sa.Float(), nullable=True),
         sa.Column("material_description", sa.Text(), nullable=True),
+        sa.Column("material_kanekalon_grams", sa.Float(), nullable=True),
+        sa.Column("material_kudri_grams", sa.Float(), nullable=True),
+        sa.Column("material_kanekalon_price_per_gram_at_time", sa.Float(), nullable=True),
+        sa.Column("material_kudri_price_per_gram_at_time", sa.Float(), nullable=True),
+        sa.Column("material_manual_cost", sa.Float(), nullable=True),
+        sa.Column(
+            "material_mix_source",
+            sa.Enum("NO_MIX", "FROM_STOCK", "SELF_MIXED", name="mixsource"),
+            nullable=True,
+        ),
+        sa.Column(
+            "material_mix_complexity",
+            sa.Enum("SIMPLE", "MEDIUM", "HARD", name="mixcomplexity"),
+            nullable=True,
+        ),
+        sa.Column(
+            "material_mix_cost_amount",
+            sa.Float(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column(
+            "material_mix_bonus_user_id",
+            sa.Integer(),
+            sa.ForeignKey("users.id"),
+            nullable=True,
+        ),
+        sa.Column(
+            "material_mix_bonus_amount",
+            sa.Float(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column("material_mix_standalone_grams", sa.Float(), nullable=True),
+        sa.Column(
+            "material_cost_review_pending",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
         sa.Column("kit_id", sa.Integer(), sa.ForeignKey("kits.id"), nullable=True),
         sa.Column("kit_pieces_sold", sa.Integer(), nullable=True),
         sa.Column("rubber_description", sa.Text(), nullable=True),

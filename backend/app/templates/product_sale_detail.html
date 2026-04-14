@@ -25,6 +25,13 @@
         {% endif %}
       </div>
 
+      {% if sale.material_cost_review_pending %}
+        <div class="card" style="margin-top:12px;background:#fffbeb;border:1px solid #fcd34d;">
+          <strong>[!] Нужна себестоимость</strong>
+          <p class="muted" style="margin:6px 0 0;">Маржа студии с этой продажи не начислена в фонд, пока суперадмин не укажет себестоимость при редактировании.</p>
+        </div>
+      {% endif %}
+
       <div class="card" style="margin-top:14px;">
         <h3 style="margin-top:0;">Реквизиты</h3>
         <p style="margin:6px 0;"><strong>Дата</strong>: {{ sale.performed_date.date().isoformat() }}</p>
@@ -53,7 +60,35 @@
               <span class="muted">не указано</span>
             {% endif %}
           </p>
-          <p style="margin:6px 0;"><strong>Количество</strong>: {{ '%.1f'|format(sale.material_grams or 0) }} г</p>
+          {% if sale.material_service and (sale.material_service.retail_material_kanekalon or sale.material_service.retail_material_kudri) %}
+            {% if sale.material_service.retail_material_kanekalon %}
+              <p style="margin:6px 0;">
+                <strong>Канекалон</strong>: {{ '%.2f'|format(sale.material_kanekalon_grams or 0) }} г
+                {% if sale.material_kanekalon_price_per_gram_at_time is not none %}
+                  <span class="muted">({{ '%.2f'|format(sale.material_kanekalon_price_per_gram_at_time) }} &#8381;/г)</span>
+                {% endif %}
+              </p>
+            {% endif %}
+            {% if sale.material_service.retail_material_kudri %}
+              <p style="margin:6px 0;">
+                <strong>Кудри</strong>: {{ '%.2f'|format(sale.material_kudri_grams or 0) }} г
+                {% if sale.material_kudri_price_per_gram_at_time is not none %}
+                  <span class="muted">({{ '%.2f'|format(sale.material_kudri_price_per_gram_at_time) }} &#8381;/г)</span>
+                {% endif %}
+              </p>
+            {% endif %}
+          {% elif sale.material_grams is not none %}
+            <p style="margin:6px 0;"><strong>Количество</strong>: {{ '%.1f'|format(sale.material_grams or 0) }} г</p>
+          {% endif %}
+          {% if sale.material_manual_cost is not none %}
+            <p style="margin:6px 0;"><strong>Себестоимость</strong>: {{ '%.2f'|format(sale.material_manual_cost) }} &#8381;</p>
+          {% endif %}
+          {% if sale.material_mix_cost_amount and sale.material_mix_cost_amount > 0 %}
+            <p style="margin:6px 0;"><strong>Смешка</strong>: {{ sale.material_mix_source.value if sale.material_mix_source else '—' }}, сложность {{ sale.material_mix_complexity.value if sale.material_mix_complexity else '—' }}, в расчёт {{ '%.2f'|format(sale.material_mix_cost_amount) }} &#8381;</p>
+            {% if sale.material_mix_bonus_amount and sale.material_mix_bonus_amount > 0 and sale.material_mix_bonus_user %}
+              <p style="margin:6px 0;" class="muted">Бонус мастеру {{ sale.material_mix_bonus_user.display_name }}: {{ '%.2f'|format(sale.material_mix_bonus_amount) }} &#8381;</p>
+            {% endif %}
+          {% endif %}
           {% if sale.material_description %}
             <div class="card" style="margin-top:10px;background:#f8fafc;">
               <p class="muted" style="margin:0;white-space:pre-wrap;">{{ sale.material_description }}</p>

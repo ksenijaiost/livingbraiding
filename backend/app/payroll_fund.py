@@ -20,6 +20,8 @@ from app.db.models import (
     ProductSale,
     ProductSaleKind,
     StudioExpense,
+    User,
+    UserRole,
     Visit,
     VisitMaster,
     WorkForInventory,
@@ -239,16 +241,43 @@ def compute_product_sale_studio_margin(db: Session, sale: ProductSale) -> float:
             return money_q2(max(0.0, amt - cost))
         return money_q2(max(0.0, amt))
     if kind == ProductSaleKind.MATERIAL:
-        grams = float(sale.material_grams or 0)
-        cost = 0.0
-        if grams > 0:
-            pk = db.get(MaterialPriceCurrent, MaterialType.KANEKALON)
-            price_g = float(pk.price_per_gram) if pk else 0.0
-            cost = grams * price_g
-        return money_q2(max(0.0, amt - cost))
+        # Маржа материала выставляется в finalize_material_sale_fields (роутер / sync).
+        return money_q2(float(sale.studio_margin_amount or 0))
     if kind in (ProductSaleKind.RUBBER, ProductSaleKind.OTHER):
         return money_q2(max(0.0, amt))
     return money_q2(max(0.0, amt))
+
+
+def _append_product_sale_ledger_rows(
+    db: Session,
+    sale: ProductSale,
+    created_by_user_id: int | None,
+) -> None:
+    margin = money_q2(float(sale.studio_margin_amount or 0))
+    if margin > 0:
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.STUDIO,
+            user_id=None,
+            amount=margin,
+            source_kind=PayrollFundSourceKind.PRODUCT_SALE,
+            source_id=sale.id,
+            created_by_user_id=created_by_user_id,
+        )
+    bonus_uid = sale.material_mix_bonus_user_id
+    bonus_amt = money_q2(float(sale.material_mix_bonus_amount or 0))
+    if bonus_uid and bonus_amt > 0:
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=int(bonus_uid),
+            amount=bonus_amt,
+            source_kind=PayrollFundSourceKind.PRODUCT_SALE,
+            source_id=sale.id,
+            created_by_user_id=created_by_user_id,
+        )
 
 
 def post_product_sale_studio_accrual(
@@ -258,21 +287,9 @@ def post_product_sale_studio_accrual(
 ) -> None:
     if sale.is_voided:
         return
-    margin = money_q2(float(sale.studio_margin_amount or 0))
-    if margin <= 0:
-        return
     if _has_accruals_for_source(db, PayrollFundSourceKind.PRODUCT_SALE, sale.id):
         return
-    append_ledger(
-        db,
-        entry_kind=PayrollFundEntryKind.ACCRUAL,
-        side=PayrollFundSide.STUDIO,
-        user_id=None,
-        amount=margin,
-        source_kind=PayrollFundSourceKind.PRODUCT_SALE,
-        source_id=sale.id,
-        created_by_user_id=created_by_user_id,
-    )
+    _append_product_sale_ledger_rows(db, sale, created_by_user_id)
 
 
 def replace_product_sale_studio_accrual(
@@ -283,19 +300,7 @@ def replace_product_sale_studio_accrual(
     storno_source_accruals(db, PayrollFundSourceKind.PRODUCT_SALE, sale.id, created_by_user_id)
     if sale.is_voided:
         return
-    margin = money_q2(float(sale.studio_margin_amount or 0))
-    if margin <= 0:
-        return
-    append_ledger(
-        db,
-        entry_kind=PayrollFundEntryKind.ACCRUAL,
-        side=PayrollFundSide.STUDIO,
-        user_id=None,
-        amount=margin,
-        source_kind=PayrollFundSourceKind.PRODUCT_SALE,
-        source_id=sale.id,
-        created_by_user_id=created_by_user_id,
-    )
+    _append_product_sale_ledger_rows(db, sale, created_by_user_id)
 
 
 def post_payout(
@@ -447,8 +452,17 @@ def sync_operational_payroll_postings(db: Session) -> None:
         if not _has_accruals_for_source(db, PayrollFundSourceKind.PRODUCT_SALE, sale.id):
             if sale.kind == ProductSaleKind.KIT and sale.kit_id:
                 db.refresh(sale, attribute_names=["kit"])
-            elif sale.kind == ProductSaleKind.MATERIAL and sale.material_service_id:
+            elif sale.kind == ProductSaleKind.MATERIAL:
                 db.refresh(sale, attribute_names=["material_service"])
+                from app.product_sale_material import finalize_material_sale_fields
+
+                creator = db.get(User, sale.created_by_user_id)
+                finalize_material_sale_fields(
+                    db,
+                    sale,
+                    seller_user_id=int(sale.created_by_user_id),
+                    active_role=creator.role if creator else UserRole.MASTER,
+                )
             sale.studio_margin_amount = compute_product_sale_studio_margin(db, sale)
             post_product_sale_studio_accrual(db, sale, sale.created_by_user_id)
 

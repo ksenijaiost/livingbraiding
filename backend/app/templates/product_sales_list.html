@@ -26,6 +26,7 @@
             <th>Тип</th>
             <th>Сумма с клиента</th>
             <th>Товар (детали)</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -74,6 +75,7 @@
                   {{ r.other_description }}
                 {% endif %}
               </td>
+              <td>{% if r.material_cost_review_pending %}<span title="Нужна себестоимость">[!]</span>{% endif %}</td>
             </tr>
           {% endfor %}
         </tbody>

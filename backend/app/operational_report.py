@@ -105,6 +105,8 @@ class OperationalReportResult:
 
     revenue_visits: float
     revenue_sales: float
+    revenue_sales_verified: float
+    revenue_sales_pending_review: float
     revenue_works: float
     revenue_total: float
 
@@ -220,6 +222,15 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
 
     revenue_visits = money_q2(sum(float(v.amount_from_client or 0) for v in visits))
     revenue_sales = money_q2(sum(float(s.amount_from_client or 0) for s in sales))
+    pending_sales = money_q2(
+        sum(
+            float(s.amount_from_client or 0)
+            for s in sales
+            if s.kind == ProductSaleKind.MATERIAL and s.material_cost_review_pending
+        )
+    )
+    revenue_sales_verified = money_q2(revenue_sales - pending_sales)
+    revenue_sales_pending_review = pending_sales
     rev_w = 0.0
     for w in works:
         if w.amount_from_client is not None:
@@ -282,6 +293,23 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
     for s in sales:
         if s.kind != ProductSaleKind.MATERIAL:
             continue
+        svc = s.material_service
+        if svc and (svc.retail_material_kanekalon or svc.retail_material_kudri):
+            if svc.retail_material_kanekalon:
+                gk = float(s.material_kanekalon_grams or 0)
+                if gk > 0:
+                    k_g_total = money_q2(k_g_total + gk)
+                    k_rub_total = money_q2(
+                        k_rub_total + _grams_times_price(gk, s.material_kanekalon_price_per_gram_at_time)
+                    )
+            if svc.retail_material_kudri:
+                gku = float(s.material_kudri_grams or 0)
+                if gku > 0:
+                    u_g_total = money_q2(u_g_total + gku)
+                    u_rub_total = money_q2(
+                        u_rub_total + _grams_times_price(gku, s.material_kudri_price_per_gram_at_time)
+                    )
+            continue
         g = float(s.material_grams or 0)
         if g <= 0:
             continue
@@ -293,7 +321,6 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
             u_g_total = money_q2(u_g_total + g)
             u_rub_total = money_q2(u_rub_total + _grams_times_price(g, catalog_u))
         else:
-            # Подкатегория не «канек»/«кудри» — как в расчёте маржи розницы по умолчанию считаем канекалоном.
             k_g_total = money_q2(k_g_total + g)
             k_rub_total = money_q2(k_rub_total + _grams_times_price(g, catalog_k))
 
@@ -388,6 +415,8 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
         period_label=label,
         revenue_visits=revenue_visits,
         revenue_sales=revenue_sales,
+        revenue_sales_verified=revenue_sales_verified,
+        revenue_sales_pending_review=revenue_sales_pending_review,
         revenue_works=revenue_works,
         revenue_total=revenue_total,
         visits_count=visits_count,
@@ -427,6 +456,8 @@ def result_to_template_dict(r: OperationalReportResult) -> dict[str, Any]:
         "date_to": r.date_to,
         "revenue_visits": r.revenue_visits,
         "revenue_sales": r.revenue_sales,
+        "revenue_sales_verified": r.revenue_sales_verified,
+        "revenue_sales_pending_review": r.revenue_sales_pending_review,
         "revenue_works": r.revenue_works,
         "revenue_total": r.revenue_total,
         "visits_count": r.visits_count,
@@ -515,7 +546,9 @@ def report_to_csv(r: OperationalReportResult) -> str:
     wr.writerow(["Показатель", "Значение"])
     wr.writerow(["Выручка всего", f"{r.revenue_total:.2f}"])
     wr.writerow(["Выручка визиты", f"{r.revenue_visits:.2f}"])
-    wr.writerow(["Выручка продажи", f"{r.revenue_sales:.2f}"])
+    wr.writerow(["Выручка продажи всего", f"{r.revenue_sales:.2f}"])
+    wr.writerow(["Выручка продажи без проверки себестоимости", f"{r.revenue_sales_verified:.2f}"])
+    wr.writerow(["Выручка продажи непроверенные", f"{r.revenue_sales_pending_review:.2f}"])
     wr.writerow(["Выручка работы", f"{r.revenue_works:.2f}"])
     wr.writerow(["Визитов", str(r.visits_count)])
     wr.writerow(["Продаж", str(r.sales_count)])

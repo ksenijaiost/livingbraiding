@@ -76,12 +76,7 @@
               </select>
             </div>
           </div>
-          <div class="row" style="margin-top: 10px;">
-            <div>
-              <label>Количество, г *</label>
-              <input type="text" name="material_grams" inputmode="decimal" placeholder="например 12.5" value="{{ fp.get('material_grams', '') }}" />
-            </div>
-          </div>
+          {% include "_product_sale_material_fields.html" %}
           <div style="margin-top: 10px;">
             <label>Описание материала</label>
             <textarea name="material_description" rows="3" maxlength="2000" placeholder="Цвет материала, название, описание">{{ fp.get('material_description', '') }}</textarea>

@@ -1,0 +1,99 @@
+{# material sale fields: fp, material_services_meta_json, current_user #}
+<div id="material_legacy_grams" class="row" style="margin-top: 10px;">
+  <div>
+    <label>Количество, г <span class="muted">(если услуга не выбрана)</span></label>
+    <input type="text" name="material_grams" inputmode="decimal" placeholder="например 12.5" value="{{ fp.get('material_grams', '') }}" />
+  </div>
+</div>
+
+<div id="material_k_row" style="margin-top: 10px; display: none;">
+  <label>Канекалон, г *</label>
+  <input type="text" name="material_kanekalon_grams" inputmode="decimal" value="{{ fp.get('material_kanekalon_grams', '') }}" />
+</div>
+<div id="material_ku_row" style="margin-top: 10px; display: none;">
+  <label>Кудри, г *</label>
+  <input type="text" name="material_kudri_grams" inputmode="decimal" value="{{ fp.get('material_kudri_grams', '') }}" />
+</div>
+<div id="material_manual_row" style="margin-top: 10px; display: none;">
+  <label>Себестоимость, &#8381; <span class="muted">(необязательно; без неё маржа студии не идёт в фонд, пока суперадмин не допишет)</span></label>
+  <input type="text" name="material_manual_cost" inputmode="decimal" value="{{ fp.get('material_manual_cost', '') }}" />
+</div>
+<div id="material_mix_standalone_row" style="margin-top: 10px; display: none;">
+  <label>Граммы для смешки * <span class="muted">(если нет полей канекалон/кудри)</span></label>
+  <input type="text" name="material_mix_standalone_grams" inputmode="decimal" value="{{ fp.get('material_mix_standalone_grams', '') }}" />
+</div>
+<div id="material_mix_block" style="margin-top: 12px; display: none; border-left: 3px solid #94a3b8; padding-left: 10px;">
+  <div class="muted" style="margin-bottom: 8px;">Смешка</div>
+  {% if current_user.role.value == 'MASTER' %}
+    <div style="margin-bottom: 8px;">
+      <label style="display:block;margin:4px 0;"><input type="radio" name="material_mix_source" value="FROM_STOCK" {% if fp.get('material_mix_source') == 'FROM_STOCK' %}checked{% endif %} /> Из наличия</label>
+      <label style="display:block;margin:4px 0;"><input type="radio" name="material_mix_source" value="SELF_MIXED" {% if fp.get('material_mix_source') == 'SELF_MIXED' %}checked{% endif %} /> Сама мешала</label>
+    </div>
+  {% else %}
+    <p class="muted" style="margin: 0 0 8px;">Для администратора учитывается только вариант «из наличия».</p>
+    <input type="hidden" name="material_mix_source" value="FROM_STOCK" />
+  {% endif %}
+  <div>
+    <label>Сложность *</label>
+    <select name="material_mix_complexity">
+      <option value="">—</option>
+      <option value="SIMPLE" {% if fp.get('material_mix_complexity') == 'SIMPLE' %}selected{% endif %}>Простая (1 &#8381;/г)</option>
+      <option value="MEDIUM" {% if fp.get('material_mix_complexity') == 'MEDIUM' %}selected{% endif %}>Средняя (1,5 &#8381;/г)</option>
+      <option value="HARD" {% if fp.get('material_mix_complexity') == 'HARD' %}selected{% endif %}>Сложная (2 &#8381;/г)</option>
+    </select>
+  </div>
+</div>
+<p id="material_hint_review" class="muted" style="margin-top: 10px; display: none;">
+  Без себестоимости маржа студии с этой продажи не начисляется, пока суперадмин не заполнит поле при редактировании.
+</p>
+
+<script type="application/json" id="material_services_meta_json">{{ material_services_meta_json | safe }}</script>
+<script>
+  (function () {
+    var meta = {};
+    try {
+      var el = document.getElementById('material_services_meta_json');
+      if (el && el.textContent) meta = JSON.parse(el.textContent);
+    } catch (e) {}
+    function sel() {
+      var s = document.querySelector('select[name="material_service_id"]');
+      return s ? String(s.value || '') : '';
+    }
+    function flags() {
+      var id = sel();
+      return meta[id] || { k: false, ku: false, m: false };
+    }
+    function syncMaterialRows() {
+      var f = flags();
+      var leg = document.getElementById('material_legacy_grams');
+      var kr = document.getElementById('material_k_row');
+      var kur = document.getElementById('material_ku_row');
+      var man = document.getElementById('material_manual_row');
+      var st = document.getElementById('material_mix_standalone_row');
+      var mix = document.getElementById('material_mix_block');
+      var hint = document.getElementById('material_hint_review');
+      var sid = sel();
+      if (!sid) {
+        leg.style.display = '';
+        kr.style.display = 'none';
+        kur.style.display = 'none';
+        man.style.display = 'none';
+        st.style.display = 'none';
+        mix.style.display = 'none';
+        hint.style.display = 'none';
+        return;
+      }
+      leg.style.display = 'none';
+      kr.style.display = f.k ? 'block' : 'none';
+      kur.style.display = f.ku ? 'block' : 'none';
+      var needMan = !f.k && !f.ku && !f.m;
+      man.style.display = needMan ? 'block' : 'none';
+      hint.style.display = needMan ? 'block' : 'none';
+      st.style.display = (f.m && !f.k && !f.ku) ? 'block' : 'none';
+      mix.style.display = f.m ? 'block' : 'none';
+    }
+    var ms = document.querySelector('select[name="material_service_id"]');
+    if (ms) ms.addEventListener('change', syncMaterialRows);
+    syncMaterialRows();
+  })();
+</script>

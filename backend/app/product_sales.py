@@ -5,9 +5,11 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -21,6 +23,8 @@ from app.audit import diff_fields, write_audit_rows
 from app.db.models import (
     Client,
     Kit,
+    MixComplexity,
+    MixSource,
     PayrollFundSourceKind,
     ProductSale,
     ProductSaleAuditLog,
@@ -29,6 +33,10 @@ from app.db.models import (
     ServiceCategory,
     ServiceSubcategory,
     UserRole,
+)
+from app.product_sale_material import (
+    finalize_material_sale_fields,
+    material_retail_has_pricing_path,
 )
 from app.payroll_fund import (
     compute_product_sale_studio_margin,
@@ -133,6 +141,97 @@ def _g_float(form: Any, name: str, default: float = 0.0) -> float:
         return default
 
 
+def _g_optional_float(form: Any, name: str) -> float | None:
+    s = _g_str(form, name, "")
+    if not s:
+        return None
+    try:
+        return float(s.replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _apply_material_from_form(
+    db: Session,
+    sale: ProductSale,
+    form: Any,
+    allowed_material_ids: set[int],
+    current_user: AuthUser,
+) -> None:
+    sid_raw = _g_str(form, "material_service_id")
+    service_id = int(sid_raw) if sid_raw.isdigit() else None
+    if service_id and service_id not in allowed_material_ids:
+        raise ValueError("Недопустимая услуга «Продажа материала».")
+    sale.material_service_id = service_id
+    sale.material_description = (_g_str(form, "material_description") or "").strip() or None
+
+    sale.material_kanekalon_grams = None
+    sale.material_kudri_grams = None
+    sale.material_manual_cost = None
+    sale.material_mix_standalone_grams = None
+    sale.material_mix_source = None
+    sale.material_mix_complexity = None
+    sale.material_grams = None
+
+    svc = db.get(Service, service_id) if service_id else None
+    if svc is None:
+        grams = _g_float(form, "material_grams", 0.0)
+        if grams <= 0:
+            raise ValueError("Для «Материал» укажите количество грамм больше 0.")
+        sale.material_grams = float(grams)
+        return
+
+    if svc.retail_material_kanekalon or svc.retail_material_kudri:
+        gk = _g_float(form, "material_kanekalon_grams", 0.0) if svc.retail_material_kanekalon else 0.0
+        gku = _g_float(form, "material_kudri_grams", 0.0) if svc.retail_material_kudri else 0.0
+        if gk + gku <= 0:
+            raise ValueError("Укажите граммы материала (канекалон и/или кудри).")
+        if svc.retail_material_kanekalon:
+            sale.material_kanekalon_grams = float(gk)
+        if svc.retail_material_kudri:
+            sale.material_kudri_grams = float(gku)
+
+    sale.material_manual_cost = _g_optional_float(form, "material_manual_cost")
+
+    if svc.retail_material_mix:
+        if not (svc.retail_material_kanekalon or svc.retail_material_kudri):
+            sg = _g_float(form, "material_mix_standalone_grams", 0.0)
+            if sg <= 0:
+                raise ValueError("Укажите граммы для смешки.")
+            sale.material_mix_standalone_grams = float(sg)
+        ms = (_g_str(form, "material_mix_source") or "").strip().upper()
+        if current_user.role == UserRole.MASTER:
+            if ms not in ("FROM_STOCK", "SELF_MIXED"):
+                raise ValueError("Укажите источник смешки: из наличия или сама мешала.")
+            sale.material_mix_source = (
+                MixSource.FROM_STOCK if ms == "FROM_STOCK" else MixSource.SELF_MIXED
+            )
+        else:
+            sale.material_mix_source = MixSource.FROM_STOCK
+        mc = (_g_str(form, "material_mix_complexity") or "").strip().upper()
+        if mc == "SIMPLE":
+            sale.material_mix_complexity = MixComplexity.SIMPLE
+        elif mc == "MEDIUM":
+            sale.material_mix_complexity = MixComplexity.MEDIUM
+        elif mc == "HARD":
+            sale.material_mix_complexity = MixComplexity.HARD
+        else:
+            sale.material_mix_complexity = None
+        if sale.material_mix_complexity is None:
+            raise ValueError("Укажите сложность смешки.")
+
+
+def _material_services_meta_json(services: list[Service]) -> str:
+    d: dict[str, dict[str, bool]] = {}
+    for s in services:
+        d[str(s.id)] = {
+            "k": bool(s.retail_material_kanekalon),
+            "ku": bool(s.retail_material_kudri),
+            "m": bool(s.retail_material_mix),
+        }
+    return json.dumps(d, ensure_ascii=False)
+
+
 def _render_new(
     request: Request,
     current_user: AuthUser,
@@ -158,6 +257,7 @@ def _render_new(
             selected_client=selected_client,
             default_date=default_date,
             material_services=material_services,
+            material_services_meta_json=_material_services_meta_json(material_services),
         ),
         status_code=400 if error else 200,
     )
@@ -214,6 +314,7 @@ def product_sale_detail(
             selectinload(ProductSale.created_by_user),
             selectinload(ProductSale.voided_by_user),
             selectinload(ProductSale.material_service).selectinload(Service.subcategory),
+            selectinload(ProductSale.material_mix_bonus_user),
             selectinload(ProductSale.kit),
         )
     )
@@ -287,11 +388,13 @@ def product_sale_edit_form(
                 selected_client=None,
                 default_date=date.today().isoformat(),
                 material_services=_prodazha_materiala_services(db),
+                material_services_meta_json="{}",
             ),
             status_code=404,
         )
     ok, msg = _sale_edit_allowed(db, sale)
     if not ok:
+        ms403 = _prodazha_materiala_services(db)
         return templates.TemplateResponse(
             "product_sale_edit.html",
             _ctx(
@@ -302,10 +405,13 @@ def product_sale_edit_form(
                 fp={},
                 selected_client=sale.client,
                 default_date=sale.performed_date.date().isoformat(),
-                material_services=_prodazha_materiala_services(db),
+                material_services=ms403,
+                material_services_meta_json=_material_services_meta_json(ms403),
             ),
             status_code=403,
         )
+    ms = _prodazha_materiala_services(db)
+    err_qp = request.query_params.get("err")
     fp = {
         "existing_client_id": str(sale.client_id),
         "performed_date": sale.performed_date.date().isoformat(),
@@ -314,6 +420,20 @@ def product_sale_edit_form(
         "material_service_id": str(sale.material_service_id or ""),
         "material_grams": "" if sale.material_grams is None else str(sale.material_grams),
         "material_description": sale.material_description or "",
+        "material_kanekalon_grams": ""
+        if sale.material_kanekalon_grams is None
+        else str(sale.material_kanekalon_grams),
+        "material_kudri_grams": "" if sale.material_kudri_grams is None else str(sale.material_kudri_grams),
+        "material_manual_cost": ""
+        if sale.material_manual_cost is None
+        else str(sale.material_manual_cost),
+        "material_mix_standalone_grams": ""
+        if sale.material_mix_standalone_grams is None
+        else str(sale.material_mix_standalone_grams),
+        "material_mix_source": sale.material_mix_source.value if sale.material_mix_source else "",
+        "material_mix_complexity": sale.material_mix_complexity.value
+        if sale.material_mix_complexity
+        else "",
         "kit_id": str(sale.kit_id or ""),
         "kit_mode": "PIECES",
         "kit_pieces_sold": "" if sale.kit_pieces_sold is None else str(sale.kit_pieces_sold),
@@ -327,11 +447,12 @@ def product_sale_edit_form(
             request,
             current_user=current_user,
             sale=sale,
-            error=None,
+            error=err_qp,
             fp=fp,
             selected_client=sale.client,
             default_date=sale.performed_date.date().isoformat(),
-            material_services=_prodazha_materiala_services(db),
+            material_services=ms,
+            material_services_meta_json=_material_services_meta_json(ms),
         ),
     )
 
@@ -358,6 +479,16 @@ async def product_sale_edit_save(
         "material_service_id",
         "material_grams",
         "material_description",
+        "material_kanekalon_grams",
+        "material_kudri_grams",
+        "material_manual_cost",
+        "material_mix_source",
+        "material_mix_complexity",
+        "material_mix_cost_amount",
+        "material_mix_bonus_user_id",
+        "material_mix_bonus_amount",
+        "material_mix_standalone_grams",
+        "material_cost_review_pending",
         "kit_id",
         "kit_pieces_sold",
         "rubber_description",
@@ -408,6 +539,18 @@ async def product_sale_edit_save(
     sale.material_service_id = None
     sale.material_grams = None
     sale.material_description = None
+    sale.material_kanekalon_grams = None
+    sale.material_kudri_grams = None
+    sale.material_kanekalon_price_per_gram_at_time = None
+    sale.material_kudri_price_per_gram_at_time = None
+    sale.material_manual_cost = None
+    sale.material_mix_source = None
+    sale.material_mix_complexity = None
+    sale.material_mix_cost_amount = 0.0
+    sale.material_mix_bonus_user_id = None
+    sale.material_mix_bonus_amount = 0.0
+    sale.material_mix_standalone_grams = None
+    sale.material_cost_review_pending = False
     sale.kit_id = None
     sale.kit_pieces_sold = None
     sale.rubber_description = None
@@ -415,16 +558,13 @@ async def product_sale_edit_save(
     sale.other_description = None
 
     if kind == ProductSaleKind.MATERIAL:
-        sid_raw = _g_str(form, "material_service_id")
-        service_id = int(sid_raw) if sid_raw.isdigit() else None
-        if service_id and service_id not in allowed_material_ids:
-            raise ValueError("Недопустимая услуга «Продажа материала».")
-        grams = _g_float(form, "material_grams", 0.0)
-        if grams <= 0:
-            raise ValueError("Для «Материал» укажите количество грамм больше 0.")
-        sale.material_service_id = service_id
-        sale.material_grams = float(grams)
-        sale.material_description = (_g_str(form, "material_description") or "").strip() or None
+        try:
+            _apply_material_from_form(db, sale, form, allowed_material_ids, current_user)
+        except ValueError as e:
+            return RedirectResponse(
+                url=f"/sales/products/{sale_id}/edit?err={quote(str(e))}",
+                status_code=303,
+            )
 
     elif kind == ProductSaleKind.KIT:
         kid_raw = _g_str(form, "kit_id")
@@ -471,10 +611,24 @@ async def product_sale_edit_save(
 
     if kind == ProductSaleKind.KIT and sale.kit_id:
         db.refresh(sale, attribute_names=["kit"])
-    elif kind == ProductSaleKind.MATERIAL and sale.material_service_id:
+    elif kind == ProductSaleKind.MATERIAL:
         db.refresh(sale, attribute_names=["material_service"])
-
-    sale.studio_margin_amount = compute_product_sale_studio_margin(db, sale)
+    try:
+        if kind == ProductSaleKind.MATERIAL:
+            finalize_material_sale_fields(
+                db,
+                sale,
+                seller_user_id=current_user.id,
+                active_role=current_user.role,
+            )
+        else:
+            sale.studio_margin_amount = compute_product_sale_studio_margin(db, sale)
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(
+            url=f"/sales/products/{sale_id}/edit?err={quote(str(e))}",
+            status_code=303,
+        )
     sale.updated_at = datetime.utcnow()
     sale.updated_by_user_id = current_user.id
     write_audit_rows(
@@ -494,6 +648,16 @@ async def product_sale_edit_save(
                 "material_service_id",
                 "material_grams",
                 "material_description",
+                "material_kanekalon_grams",
+                "material_kudri_grams",
+                "material_manual_cost",
+                "material_mix_source",
+                "material_mix_complexity",
+                "material_mix_cost_amount",
+                "material_mix_bonus_user_id",
+                "material_mix_bonus_amount",
+                "material_mix_standalone_grams",
+                "material_cost_review_pending",
                 "kit_id",
                 "kit_pieces_sold",
                 "rubber_description",
@@ -564,6 +728,12 @@ async def product_sale_new_post(
         "material_service_id": _g_str(form, "material_service_id"),
         "material_grams": _g_str(form, "material_grams"),
         "material_description": _g_str(form, "material_description"),
+        "material_kanekalon_grams": _g_str(form, "material_kanekalon_grams"),
+        "material_kudri_grams": _g_str(form, "material_kudri_grams"),
+        "material_manual_cost": _g_str(form, "material_manual_cost"),
+        "material_mix_standalone_grams": _g_str(form, "material_mix_standalone_grams"),
+        "material_mix_source": _g_str(form, "material_mix_source"),
+        "material_mix_complexity": _g_str(form, "material_mix_complexity"),
         # kit
         "kit_id": _g_str(form, "kit_id"),
         "kit_mode": _g_str(form, "kit_mode") or "PIECES",
@@ -610,18 +780,10 @@ async def product_sale_new_post(
     )
 
     if kind == ProductSaleKind.MATERIAL:
-        sid_raw = (fp["material_service_id"] or "").strip()
-        service_id = int(sid_raw) if sid_raw.isdigit() else None
-        if service_id and service_id not in allowed_material_ids:
-            return _fail("Выберите услугу из списка «Продажа материала» или оставьте «не указано».")
-
-        grams = _g_float(form, "material_grams", 0.0)
-        if grams <= 0:
-            return _fail("Для «Материал» укажите количество грамм больше 0.")
-
-        row.material_service_id = service_id
-        row.material_grams = grams
-        row.material_description = (fp["material_description"] or "").strip() or None
+        try:
+            _apply_material_from_form(db, row, form, allowed_material_ids, current_user)
+        except ValueError as e:
+            return _fail(str(e))
 
     elif kind == ProductSaleKind.KIT:
         kid_raw = (fp["kit_id"] or "").strip()
@@ -674,9 +836,21 @@ async def product_sale_new_post(
     db.flush()
     if kind == ProductSaleKind.KIT and row.kit_id:
         db.refresh(row, attribute_names=["kit"])
-    elif kind == ProductSaleKind.MATERIAL and row.material_service_id:
+    elif kind == ProductSaleKind.MATERIAL:
         db.refresh(row, attribute_names=["material_service"])
-    row.studio_margin_amount = compute_product_sale_studio_margin(db, row)
+    try:
+        if kind == ProductSaleKind.MATERIAL:
+            finalize_material_sale_fields(
+                db,
+                row,
+                seller_user_id=current_user.id,
+                active_role=current_user.role,
+            )
+        else:
+            row.studio_margin_amount = compute_product_sale_studio_margin(db, row)
+    except ValueError as e:
+        db.rollback()
+        return _fail(str(e))
     post_product_sale_studio_accrual(db, row, current_user.id)
     db.commit()
     return RedirectResponse(url="/sales/products?msg=saved", status_code=303)
