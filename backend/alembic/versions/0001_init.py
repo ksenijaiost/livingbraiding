@@ -775,6 +775,7 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column("comment", sa.Text(), nullable=True),
+        sa.Column("payout_payment_kind", sa.String(length=20), nullable=True),
     )
 
     # ---- Payroll периоды (каркас) ----

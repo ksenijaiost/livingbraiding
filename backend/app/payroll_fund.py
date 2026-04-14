@@ -14,6 +14,7 @@ from app.db.models import (
     MaterialType,
     PayrollFundEntryKind,
     PayrollFundLedger,
+    PayrollFundPayoutPaymentKind,
     PayrollFundSide,
     PayrollFundSourceKind,
     ProductSale,
@@ -44,11 +45,18 @@ def append_ledger(
     created_by_user_id: int | None,
     storno_of_id: int | None = None,
     comment: str | None = None,
+    payout_payment_kind: PayrollFundPayoutPaymentKind | None = None,
 ) -> PayrollFundLedger:
     if side == PayrollFundSide.MASTER and user_id is None:
         raise ValueError("MASTER требует user_id")
-    if side == PayrollFundSide.STUDIO and user_id is not None:
-        raise ValueError("STUDIO: user_id должен быть NULL")
+    if side == PayrollFundSide.STUDIO:
+        if entry_kind == PayrollFundEntryKind.PAYOUT:
+            if user_id is None:
+                raise ValueError("Выплата из фонда студии: нужен user_id получателя")
+        elif user_id is not None:
+            raise ValueError("STUDIO: user_id должен быть NULL")
+    if payout_payment_kind is not None and entry_kind != PayrollFundEntryKind.PAYOUT:
+        raise ValueError("payout_payment_kind только для PAYOUT")
     row = PayrollFundLedger(
         created_at=datetime.utcnow(),
         entry_kind=entry_kind,
@@ -60,6 +68,7 @@ def append_ledger(
         created_by_user_id=created_by_user_id,
         storno_of_id=storno_of_id,
         comment=comment,
+        payout_payment_kind=payout_payment_kind,
     )
     db.add(row)
     return row
@@ -297,11 +306,15 @@ def post_payout(
     amount: float,
     created_by_user_id: int,
     comment: str | None,
+    payout_payment_kind: PayrollFundPayoutPaymentKind = PayrollFundPayoutPaymentKind.UNSPECIFIED,
 ) -> None:
-    """Выплата: уменьшает обязательство (отрицательная сумма в журнале)."""
+    """Выплата из фонда: положительная сумма уменьшает сальдо фонда (отрицательная запись в журнале).
+
+    Отрицательная сумма вводимая в форме даёт положительную проводку (возврат в фонд).
+    """
     pay = money_q2(amount)
-    if pay <= 0:
-        raise ValueError("Сумма выплаты должна быть больше 0")
+    if pay == 0:
+        raise ValueError("Сумма не может быть нулевой")
     append_ledger(
         db,
         entry_kind=PayrollFundEntryKind.PAYOUT,
@@ -312,6 +325,7 @@ def post_payout(
         source_id=None,
         created_by_user_id=created_by_user_id,
         comment=(comment or "").strip() or None,
+        payout_payment_kind=payout_payment_kind,
     )
 
 

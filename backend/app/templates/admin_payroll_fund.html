@@ -3,7 +3,7 @@
   <div class="card" style="max-width: 980px;">
     <h2 style="margin-top: 0;">Фонды ЗП</h2>
     <p class="muted" style="margin-top:-6px;">
-      Сальдо по каждому мастеру и фонду студии — сумма всех проводок (начисления положительные, сторно и выплаты отрицательные).
+      Сальдо по каждому сотруднику (фонд сотрудника) и фонду студии — сумма всех проводок (начисления положительные, сторно и выплаты отрицательные).
       Начисления создаются при сохранении визита, работы с товарами и розничной продажи; сторно — при отмене визита, void работы/продажи или правке продажи (пересчёт маржи).
     </p>
 
@@ -16,10 +16,10 @@
 
     <div class="row">
       <div class="card" style="flex:1; min-width:280px;">
-        <h3 style="margin-top:0;">Сальдо мастеров</h3>
+        <h3 style="margin-top:0;">Сальдо сотрудников</h3>
         {% if master_rows %}
           <table>
-            <thead><tr><th>Мастер</th><th>Сальдо, руб.</th></tr></thead>
+            <thead><tr><th>Сотрудник</th><th>Сальдо, руб.</th></tr></thead>
             <tbody>
               {% for m in master_rows %}
                 <tr>
@@ -30,7 +30,7 @@
             </tbody>
           </table>
         {% else %}
-          <p class="muted">Нет начислений мастерам.</p>
+          <p class="muted">Нет начислений по фондам сотрудников.</p>
         {% endif %}
       </div>
       <div class="card" style="flex:1; min-width:280px;">
@@ -42,56 +42,113 @@
 
     <div class="card" style="margin-top: 16px;">
       <h3 style="margin-top:0;">Выплата</h3>
-      <form method="post" action="/admin/payroll-fund/payout" class="row" style="align-items:flex-end;">
-        <div style="flex:1; min-width:200px;">
-          <label for="pf_side">Куда</label>
-          <select name="side" id="pf_side" required>
-            <option value="MASTER">Мастеру</option>
-            <option value="STUDIO">Из фонда студии</option>
-          </select>
-        </div>
-        <div style="flex:1; min-width:200px;" id="pf_master_wrap">
-          <label for="pf_user">Мастер</label>
-          <select name="user_id" id="pf_user">
-            {% for u in masters_for_payout %}
-              <option value="{{ u.id }}">{{ u.display_name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div style="flex:1; min-width:140px;">
-          <label for="pf_amount">Сумма, руб.</label>
-          <input type="text" name="amount" id="pf_amount" required placeholder="0.00" />
-        </div>
-        <div style="flex:2; min-width:220px;">
-          <label for="pf_comment">Комментарий</label>
-          <input type="text" name="comment" id="pf_comment" placeholder="Необязательно" />
-        </div>
-        <div style="flex:0;">
-          <button type="submit">Записать выплату</button>
+      {% if not payout_user_options %}
+        <p class="muted">Нет активных сотрудников с ролями мастер/админ — добавьте пользователя, чтобы записывать выплаты.</p>
+      {% endif %}
+      <script type="application/json" id="pf-fund-balances-data">{{ payout_fund_balances_json|safe }}</script>
+      <form method="post" action="/admin/payroll-fund/payout"{% if not payout_user_options %} aria-disabled="true"{% endif %}>
+        <div class="pf-payout-grid" style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 32px; align-items:start;">
+          <div>
+            <div class="muted" style="margin-bottom:6px;">Фонд-источник</div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="radio" name="side" value="MASTER" checked />
+                <span>Фонд сотрудника</span>
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="radio" name="side" value="STUDIO" />
+                <span>Фонд студии</span>
+              </label>
+            </div>
+          </div>
+          <div>
+            <label for="pf_user">Кому</label>
+            <select name="user_id" id="pf_user" required {% if not payout_user_options %}disabled{% endif %} style="width:100%; max-width:100%; box-sizing:border-box;">
+              {% for row in payout_user_options %}
+                <option value="{{ row.user.id }}">{{ row.user.display_name }} ({{ row.roles_ru }})</option>
+              {% endfor %}
+            </select>
+            <p class="muted" style="margin:6px 0 0;">Сотрудник, которому относится выплата: из его фонда или получатель из фонда студии.</p>
+          </div>
+          <div>
+            <div class="muted" style="margin-bottom:6px;">Тип оплаты</div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="radio" name="payment_kind" value="UNSPECIFIED" checked />
+                <span>Не указан</span>
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="radio" name="payment_kind" value="NON_CASH" />
+                <span>Безналичные</span>
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="radio" name="payment_kind" value="CASH" />
+                <span>Наличные</span>
+              </label>
+            </div>
+          </div>
+          <div>
+            <div id="pf_fund_balance_hint" class="muted" style="margin-bottom:6px; min-height:1.35em;">Остаток фонда: —</div>
+            <label for="pf_amount">Сумма, руб.</label>
+            <input type="text" name="amount" id="pf_amount" required placeholder="0.00" style="width:100%; max-width:100%; box-sizing:border-box;" />
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <label for="pf_comment">Комментарий</label>
+            <input type="text" name="comment" id="pf_comment" placeholder="Необязательно" style="width:100%; max-width:100%; box-sizing:border-box;" />
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <button type="submit" {% if not payout_user_options %}disabled{% endif %}>Записать выплату</button>
+          </div>
         </div>
       </form>
-      <p class="muted" style="margin:12px 0 0;">Для «Из фонда студии» поле мастера не используется.</p>
-    </div>
-
-    <script>
-      (function () {
-        var side = document.getElementById("pf_side");
-        var wrap = document.getElementById("pf_master_wrap");
-        var sel = document.getElementById("pf_user");
-        function sync() {
-          var st = side && side.value;
-          if (st === "STUDIO") {
-            wrap.style.opacity = "0.45";
-            if (sel) sel.removeAttribute("required");
-          } else {
-            wrap.style.opacity = "1";
-            if (sel) sel.setAttribute("required", "required");
-          }
+      <style>
+        @media (max-width: 640px) {
+          .pf-payout-grid { grid-template-columns: 1fr !important; }
         }
-        if (side) side.addEventListener("change", sync);
-        sync();
-      })();
-    </script>
+      </style>
+      <script>
+        (function () {
+          var elData = document.getElementById("pf-fund-balances-data");
+          var hint = document.getElementById("pf_fund_balance_hint");
+          var sel = document.getElementById("pf_user");
+          var data = { studio: 0, employees: {} };
+          try {
+            if (elData && elData.textContent) data = JSON.parse(elData.textContent);
+          } catch (e) {}
+          function fmt(n) {
+            var x = Number(n);
+            if (!isFinite(x)) x = 0;
+            return x.toFixed(2);
+          }
+          function currentSide() {
+            var r = document.querySelector('input[name="side"]:checked');
+            return r ? r.value : "MASTER";
+          }
+          function syncHint() {
+            if (!hint) return;
+            var side = currentSide();
+            var v;
+            var label;
+            if (side === "STUDIO") {
+              v = data.studio;
+              label = "Остаток фонда студии";
+            } else {
+              var uid = sel && sel.value ? String(sel.value) : "";
+              v = (data.employees && uid) ? data.employees[uid] : 0;
+              if (v === undefined || v === null) v = 0;
+              label = "Остаток фонда сотрудника";
+            }
+            hint.textContent = label + ": " + fmt(v) + " руб.";
+          }
+          document.querySelectorAll('input[name="side"]').forEach(function (inp) {
+            inp.addEventListener("change", syncHint);
+          });
+          if (sel) sel.addEventListener("change", syncHint);
+          syncHint();
+        })();
+      </script>
+      <p class="muted" style="margin:12px 0 0;">Положительная сумма списывает фонд; отрицательная записывает возврат в фонд. Проводки не редактируются — при ошибке добавьте новую запись.</p>
+    </div>
 
     <h3 style="margin-top: 24px;">Журнал (последние записи)</h3>
     {% if ledger_rows %}
@@ -102,8 +159,9 @@
               <th>ID</th>
               <th>Дата</th>
               <th>Тип</th>
-              <th>Сторона</th>
+              <th>Фонд</th>
               <th>Кому</th>
+              <th>Оплата</th>
               <th>Сумма</th>
               <th>Источник</th>
               <th>Кто внёс</th>
@@ -122,7 +180,7 @@
                   {% elif r.entry_kind.value == 'EXPENSE' %}Расход студии
                   {% else %}{{ r.entry_kind.value }}{% endif %}
                 </td>
-                <td>{% if r.side.value == 'STUDIO' %}Студия{% else %}Мастер{% endif %}</td>
+                <td>{% if r.side.value == 'STUDIO' %}Фонд студии{% else %}Фонд сотрудника{% endif %}</td>
                 <td>
                   {% if r.user %}
                     {{ r.user.display_name }} (#{{ r.user_id }})
@@ -131,6 +189,14 @@
                   {% else %}
                     #{{ r.user_id or '—' }}
                   {% endif %}
+                </td>
+                <td>
+                  {% if r.entry_kind.value == 'PAYOUT' and r.payout_payment_kind %}
+                    {% if r.payout_payment_kind.value == 'UNSPECIFIED' %}Не указан
+                    {% elif r.payout_payment_kind.value == 'NON_CASH' %}Безналичные
+                    {% elif r.payout_payment_kind.value == 'CASH' %}Наличные
+                    {% else %}{{ r.payout_payment_kind.value }}{% endif %}
+                  {% else %}—{% endif %}
                 </td>
                 <td>{{ "%.2f"|format(r.amount) }}</td>
                 <td>

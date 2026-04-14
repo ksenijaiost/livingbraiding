@@ -36,7 +36,13 @@ from app.auth import (
     logout_response,
     require_role,
 )
-from app.ru_labels import format_price_integer_rub, ru_master_level, ru_questionnaire_field_type, ru_user_role
+from app.ru_labels import (
+    format_price_integer_rub,
+    ru_master_level,
+    ru_questionnaire_field_type,
+    ru_user_role,
+    ru_user_roles_payout_suffix,
+)
 from app.display_time import (
     ALLOWED_TIMEZONES,
     ALLOWED_TIMEZONE_IDS,
@@ -67,6 +73,7 @@ from app.db.models import (
     KitAuthorStaff,
     MaterialPriceCurrent,
     MaterialType,
+    PayrollFundPayoutPaymentKind,
     PayrollFundSide,
     PayrollFundSourceKind,
     PayrollPeriod,
@@ -123,7 +130,12 @@ from app.thermo_visit import (
     collect_thermo_prefill_from_form,
     list_client_thermo_templates_for_visit,
 )
-from app.user_roles import select_users_with_any_role, select_users_with_role, user_has_any_role
+from app.user_roles import (
+    get_roles_for_user,
+    select_users_with_any_role,
+    select_users_with_role,
+    user_has_any_role,
+)
 from app.visit_edit_policy import visit_client_change_policy
 from app.visit_edit_policy import is_in_closed_payroll_period
 from app.ui_visit_display import (
@@ -2086,9 +2098,10 @@ def _payroll_fund_msg_ru(code: str | None) -> str | None:
 
 def _payroll_fund_err_ru(code: str | None) -> str | None:
     return {
-        "bad_side": "Укажите корректную сторону (мастер или студия).",
-        "bad_amount": "Укажите сумму выплаты больше нуля.",
-        "bad_user": "Выберите мастера для выплаты.",
+        "bad_side": "Укажите корректный фонд-источник.",
+        "bad_amount": "Укажите ненулевую сумму (для возврата в фонд можно ввести отрицательное число).",
+        "bad_user": "Выберите сотрудника.",
+        "bad_payment": "Укажите тип оплаты.",
     }.get(code or "", code)
 
 
@@ -2118,8 +2131,30 @@ def admin_payroll_fund_page(
             }
         )
     ledger_rows = recent_ledger_rows(db)
-    masters_for_payout = list(
-        db.scalars(select_users_with_role(UserRole.MASTER).order_by(User.display_name.asc())).all()
+    payout_users = list(
+        db.scalars(
+            select_users_with_any_role(
+                UserRole.MASTER,
+                UserRole.ADMIN,
+                UserRole.ADMIN_SUPER,
+            ).order_by(User.display_name.asc())
+        ).all()
+    )
+    payout_user_options: list[dict[str, Any]] = []
+    for u in payout_users:
+        payout_user_options.append(
+            {
+                "user": u,
+                "roles_ru": ru_user_roles_payout_suffix(get_roles_for_user(db, u.id)),
+            }
+        )
+    bal_by_uid = {int(m["user_id"]): float(m["balance"]) for m in master_rows}
+    payout_employee_balances = {
+        str(o["user"].id): round(float(bal_by_uid.get(o["user"].id, 0.0)), 2) for o in payout_user_options
+    }
+    payout_fund_balances_json = json.dumps(
+        {"studio": round(float(studio_bal), 2), "employees": payout_employee_balances},
+        ensure_ascii=False,
     )
     return templates.TemplateResponse(
         "admin_payroll_fund.html",
@@ -2129,7 +2164,8 @@ def admin_payroll_fund_page(
             master_rows=master_rows,
             studio_balance=studio_bal,
             ledger_rows=ledger_rows,
-            masters_for_payout=masters_for_payout,
+            payout_user_options=payout_user_options,
+            payout_fund_balances_json=payout_fund_balances_json,
             msg=_payroll_fund_msg_ru(msg),
             err=_payroll_fund_err_ru(err),
         ),
@@ -2154,14 +2190,19 @@ async def admin_payroll_fund_payout(
     except ValueError:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_amount", status_code=303)
     comment = str(form.get("comment") or "").strip()
-    user_id: int | None = None
-    if side == PayrollFundSide.MASTER:
-        raw_uid = str(form.get("user_id") or "").strip()
-        if not raw_uid.isdigit():
-            return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
-        user_id = int(raw_uid)
-        if db.get(User, user_id) is None:
-            return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
+    raw_uid = str(form.get("user_id") or "").strip()
+    if not raw_uid.isdigit():
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
+    user_id = int(raw_uid)
+    if db.get(User, user_id) is None:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
+    if not user_has_any_role(db, user_id, UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
+    pay_raw = (str(form.get("payment_kind") or "")).strip().upper()
+    try:
+        payment_kind = PayrollFundPayoutPaymentKind(pay_raw)
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_payment", status_code=303)
     try:
         post_payout(
             db,
@@ -2170,6 +2211,7 @@ async def admin_payroll_fund_payout(
             amount=amount,
             created_by_user_id=current_user.id,
             comment=comment,
+            payout_payment_kind=payment_kind,
         )
     except ValueError:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_amount", status_code=303)

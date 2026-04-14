@@ -747,8 +747,20 @@ class PayrollFundSourceKind(str, enum.Enum):
     MANUAL = "MANUAL"
 
 
+class PayrollFundPayoutPaymentKind(str, enum.Enum):
+    """Способ фактической выплаты (только для проводок PAYOUT)."""
+
+    UNSPECIFIED = "UNSPECIFIED"
+    NON_CASH = "NON_CASH"
+    CASH = "CASH"
+
+
 class PayrollFundLedger(Base):
-    """Журнал фондов ЗП: + начисление, − сторно/выплата (сальдо = сумма amount)."""
+    """Журнал фондов ЗП: + начисление, − сторно/выплата (сальдо = сумма amount).
+
+    Для PAYOUT: при side=MASTER user_id — сотрудник, с чьего фонда списание; при side=STUDIO —
+    сотрудник-получатель (фонд студии уменьшается на сумму выплаты ему).
+    """
 
     __tablename__ = "payroll_fund_ledger"
 
@@ -775,6 +787,10 @@ class PayrollFundLedger(Base):
         nullable=True,
     )
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payout_payment_kind: Mapped[PayrollFundPayoutPaymentKind | None] = mapped_column(
+        Enum(PayrollFundPayoutPaymentKind, native_enum=False, length=20),
+        nullable=True,
+    )
 
     created_by_user: Mapped["User | None"] = relationship(foreign_keys=[created_by_user_id])
     user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
