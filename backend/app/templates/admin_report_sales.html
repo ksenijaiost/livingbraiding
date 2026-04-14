@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 1100px;">
+    <p class="muted" style="margin: 0 0 8px;"><a href="/admin/reports?{{ reports_nav_q }}">← К отчёту</a></p>
+    <h2 style="margin-top: 0;">Продажи за период</h2>
+    <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}, не аннулированные, по дате создания записи.</p>
+    {% if rows %}
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Создана</th>
+              <th>Тип</th>
+              <th>Клиент</th>
+              <th>Сумма</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in rows %}
+              <tr>
+                <td>{{ s.id }}</td>
+                <td>{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>
+                  {% if s.kind == ProductSaleKind.MATERIAL %}Материал
+                  {% elif s.kind == ProductSaleKind.KIT %}Комплект
+                  {% elif s.kind == ProductSaleKind.RUBBER %}Резинка
+                  {% elif s.kind == ProductSaleKind.OTHER %}Другое
+                  {% else %}{{ s.kind.value }}{% endif %}
+                </td>
+                <td>{% if s.client %}{{ s.client.display_name }}{% else %}—{% endif %}</td>
+                <td>{{ "%.2f"|format(s.amount_from_client) }}</td>
+                <td><a href="/sales/products/{{ s.id }}">Открыть</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Нет продаж за период.</p>
+    {% endif %}
+  </div>
+{% endblock %}

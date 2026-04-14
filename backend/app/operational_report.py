@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -25,6 +27,56 @@ from app.db.models import (
     WorkScope,
 )
 from app.payroll_fund import money_q2
+
+
+def resolve_report_dates(
+    db: Session,
+    *,
+    report_mode: str | None,
+    period_id_raw: str | None,
+    df_raw: str | None,
+    dt_raw: str | None,
+    month_start: date,
+    today: date,
+) -> tuple[date, date, int | None, str]:
+    """Границы отчёта и режим (как на странице /admin/reports)."""
+    mode = (report_mode or "custom_dates").strip()
+    if mode not in ("payroll_period", "custom_dates"):
+        mode = "custom_dates"
+
+    selected_period_id: int | None = None
+    pid: int | None = None
+    if period_id_raw and str(period_id_raw).strip().isdigit():
+        pid = int(str(period_id_raw).strip())
+
+    def _from_form_dates() -> tuple[date, date]:
+        try:
+            d_a = date.fromisoformat(df_raw) if df_raw else month_start
+            d_b = date.fromisoformat(dt_raw) if dt_raw else today
+        except ValueError:
+            d_a, d_b = month_start, today
+        return d_a, d_b
+
+    if mode == "payroll_period":
+        if pid is not None and pid > 0:
+            p = db.get(PayrollPeriod, pid)
+            if p is not None and p.closed_at is not None:
+                selected_period_id = p.id
+                d0 = p.date_from.date()
+                d1 = p.date_to.date()
+            else:
+                selected_period_id = None
+                d0, d1 = _from_form_dates()
+        else:
+            selected_period_id = None
+            d0, d1 = _from_form_dates()
+    else:
+        selected_period_id = None
+        d0, d1 = _from_form_dates()
+
+    if d1 < d0:
+        d0, d1 = d1, d0
+    return d0, d1, selected_period_id, mode
 
 
 def period_bounds(d0: date, d1: date) -> tuple[datetime, datetime]:
@@ -82,6 +134,9 @@ class OperationalReportResult:
     ledger_storno: float
     ledger_expense: float
     ledger_payout: float
+    ledger_net_accruals: float
+    ledger_net_all: float
+    reconciliation_delta: float
 
     employees: list[EmployeeFundSlice] = field(default_factory=list)
 
@@ -317,6 +372,15 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
     ledger_storno = _ledger_sum(PayrollFundEntryKind.STORNO)
     ledger_expense = _ledger_sum(PayrollFundEntryKind.EXPENSE)
     ledger_payout = _ledger_sum(PayrollFundEntryKind.PAYOUT)
+    ledger_net_accruals = money_q2(ledger_accrual + ledger_storno)
+    reconciliation_delta = money_q2(total_to_funds - ledger_net_accruals)
+    ledger_all_raw = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.created_at >= start,
+            PayrollFundLedger.created_at < end_excl,
+        )
+    )
+    ledger_net_all = money_q2(float(ledger_all_raw or 0))
 
     return OperationalReportResult(
         date_from=d0,
@@ -348,6 +412,9 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
         ledger_storno=ledger_storno,
         ledger_expense=ledger_expense,
         ledger_payout=ledger_payout,
+        ledger_net_accruals=ledger_net_accruals,
+        ledger_net_all=ledger_net_all,
+        reconciliation_delta=reconciliation_delta,
         employees=employees,
     )
 
@@ -385,4 +452,90 @@ def result_to_template_dict(r: OperationalReportResult) -> dict[str, Any]:
         "ledger_storno": r.ledger_storno,
         "ledger_expense": r.ledger_expense,
         "ledger_payout": r.ledger_payout,
+        "ledger_net_accruals": r.ledger_net_accruals,
+        "ledger_net_all": r.ledger_net_all,
+        "reconciliation_delta": r.reconciliation_delta,
     }
+
+
+def list_report_visits(db: Session, d0: date, d1: date) -> list[Visit]:
+    start, end_excl = period_bounds(d0, d1)
+    return list(
+        db.scalars(
+            select(Visit)
+            .options(selectinload(Visit.client))
+            .where(
+                Visit.created_at >= start,
+                Visit.created_at < end_excl,
+                Visit.is_cancelled.is_(False),
+            )
+            .order_by(Visit.created_at.desc(), Visit.id.desc())
+        ).all()
+    )
+
+
+def list_report_sales(db: Session, d0: date, d1: date) -> list[ProductSale]:
+    start, end_excl = period_bounds(d0, d1)
+    return list(
+        db.scalars(
+            select(ProductSale)
+            .options(selectinload(ProductSale.client))
+            .where(
+                ProductSale.created_at >= start,
+                ProductSale.created_at < end_excl,
+                ProductSale.is_voided.is_(False),
+            )
+            .order_by(ProductSale.created_at.desc(), ProductSale.id.desc())
+        ).all()
+    )
+
+
+def list_report_works(db: Session, d0: date, d1: date) -> list[WorkForInventory]:
+    start, end_excl = period_bounds(d0, d1)
+    return list(
+        db.scalars(
+            select(WorkForInventory)
+            .options(selectinload(WorkForInventory.client))
+            .where(
+                WorkForInventory.created_at >= start,
+                WorkForInventory.created_at < end_excl,
+                WorkForInventory.is_voided.is_(False),
+            )
+            .order_by(WorkForInventory.created_at.desc(), WorkForInventory.id.desc())
+        ).all()
+    )
+
+
+def report_to_csv(r: OperationalReportResult) -> str:
+    """CSV с разделителем «;» и UTF-8 BOM для Excel."""
+    buf = io.StringIO()
+    wr = csv.writer(buf, delimiter=";")
+    wr.writerow(["Период", r.period_label])
+    wr.writerow([])
+    wr.writerow(["Показатель", "Значение"])
+    wr.writerow(["Выручка всего", f"{r.revenue_total:.2f}"])
+    wr.writerow(["Выручка визиты", f"{r.revenue_visits:.2f}"])
+    wr.writerow(["Выручка продажи", f"{r.revenue_sales:.2f}"])
+    wr.writerow(["Выручка работы", f"{r.revenue_works:.2f}"])
+    wr.writerow(["Визитов", str(r.visits_count)])
+    wr.writerow(["Продаж", str(r.sales_count)])
+    wr.writerow(["Работ всего", str(r.works_total)])
+    wr.writerow(["Уникальных клиентов", str(r.unique_clients)])
+    wr.writerow(["Расходы студии", f"{r.expenses_total:.2f}"])
+    wr.writerow(["Канекалон г", f"{r.kanekalon_grams_total:.2f}"])
+    wr.writerow(["Канекалон руб снимок", f"{r.kanekalon_snapshot_rub:.2f}"])
+    wr.writerow(["Кудри г", f"{r.kudri_grams_total:.2f}"])
+    wr.writerow(["Кудри руб снимок", f"{r.kudri_snapshot_rub:.2f}"])
+    wr.writerow(["В фонды операционно", f"{r.total_to_funds:.2f}"])
+    wr.writerow(["Журнал начисления", f"{r.ledger_accrual:.2f}"])
+    wr.writerow(["Журнал сторно", f"{r.ledger_storno:.2f}"])
+    wr.writerow(["Журнал нетто начисл+сторно", f"{r.ledger_net_accruals:.2f}"])
+    wr.writerow(["Дельта операц минус нетто начисл", f"{r.reconciliation_delta:.2f}"])
+    wr.writerow(["Журнал расходы", f"{r.ledger_expense:.2f}"])
+    wr.writerow(["Журнал выплаты", f"{r.ledger_payout:.2f}"])
+    wr.writerow(["Журнал нетто все проводки", f"{r.ledger_net_all:.2f}"])
+    wr.writerow([])
+    wr.writerow(["Сотрудник", "По визитам", "По работам", "Всего"])
+    for e in r.employees:
+        wr.writerow([e.display_name, f"{e.from_visits:.2f}", f"{e.from_works:.2f}", f"{e.total:.2f}"])
+    return buf.getvalue()

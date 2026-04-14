@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>Отчёт {{ period_label }}</title>
+    <style>
+      body { font-family: system-ui, sans-serif; font-size: 13px; margin: 24px; color: #111; }
+      h1 { font-size: 1.25rem; margin: 0 0 8px; }
+      .muted { color: #6b7280; font-size: 12px; margin-bottom: 20px; }
+      table { border-collapse: collapse; width: 100%; max-width: 720px; margin-top: 12px; }
+      th, td { border: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; }
+      th { background: #f3f4f6; }
+      .section { margin-top: 20px; }
+      @media print {
+        .no-print { display: none; }
+        body { margin: 12px; }
+      }
+    </style>
+  </head>
+  <body>
+    <p class="no-print"><a href="javascript:window.print()">Печать / PDF</a> · <a href="/admin/reports">Закрыть</a></p>
+    <h1>Операционный отчёт</h1>
+    <div class="muted">Период: {{ period_label }}. Сохранение в PDF: печать из браузера (Ctrl+P) → «Сохранить как PDF».</div>
+
+    <div class="section">
+      <strong>Выручка</strong>
+      <table>
+        <tr><td>Всего</td><td>{{ "%.2f"|format(revenue_total) }} руб.</td></tr>
+        <tr><td>Визиты</td><td>{{ "%.2f"|format(revenue_visits) }} руб.</td></tr>
+        <tr><td>Продажи</td><td>{{ "%.2f"|format(revenue_sales) }} руб.</td></tr>
+        <tr><td>Работы</td><td>{{ "%.2f"|format(revenue_works) }} руб.</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <strong>Объёмы</strong>
+      <table>
+        <tr><td>Визитов</td><td>{{ visits_count }}</td></tr>
+        <tr><td>Продаж</td><td>{{ sales_count }}</td></tr>
+        <tr><td>Работ</td><td>{{ works_total }}</td></tr>
+        <tr><td>Уникальных клиентов</td><td>{{ unique_clients }}</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <strong>Расходы студии</strong>
+      <p>{{ "%.2f"|format(expenses_total) }} руб.</p>
+    </div>
+
+    <div class="section">
+      <strong>В фонды (операционно)</strong>
+      <p>{{ "%.2f"|format(total_to_funds) }} руб.</p>
+      <table>
+        <tr><td>Нетто начисления + сторно в журнале</td><td>{{ "%.2f"|format(ledger_net_accruals) }} руб.</td></tr>
+        <tr><td>Дельта (операционно − нетто начисления)</td><td>{{ "%.2f"|format(reconciliation_delta) }} руб.</td></tr>
+        <tr><td>Нетто все проводки журнала</td><td>{{ "%.2f"|format(ledger_net_all) }} руб.</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <strong>Журнал ЗП (по дате проводки)</strong>
+      <table>
+        <tr><td>Начисления</td><td>{{ "%.2f"|format(ledger_accrual) }}</td></tr>
+        <tr><td>Сторно</td><td>{{ "%.2f"|format(ledger_storno) }}</td></tr>
+        <tr><td>Расходы студии</td><td>{{ "%.2f"|format(ledger_expense) }}</td></tr>
+        <tr><td>Выплаты</td><td>{{ "%.2f"|format(ledger_payout) }}</td></tr>
+      </table>
+    </div>
+  </body>
+</html>

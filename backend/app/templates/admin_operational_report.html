@@ -95,25 +95,44 @@
       })();
     </script>
 
-    <p class="muted" style="margin-bottom: 16px;"><strong>Период:</strong> {{ period_label }}</p>
+    <p class="muted" style="margin-bottom: 8px;"><strong>Период:</strong> {{ period_label }}</p>
+    <p style="margin: 0 0 16px; font-size: 14px;">
+      <a href="{{ export_csv_url }}">Скачать CSV (Excel)</a>
+      <span class="muted"> · </span>
+      <a href="{{ export_print_url }}" target="_blank" rel="noopener">Версия для печати / PDF</a>
+    </p>
 
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Выручка</h3>
     <div class="row" style="margin-bottom: 20px;">
       <div class="card" style="flex: 1; min-width: 160px; border-left: 4px solid #3b82f6;">
         <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Всего</div>
         <div style="font-size: 1.35rem; font-weight: 700;">{{ "%.2f"|format(revenue_total) }} <span class="muted" style="font-size: 0.85rem; font-weight: 500;">руб.</span></div>
+        <div class="muted" style="font-size: 11px; margin-top: 6px; line-height: 1.4;">
+          <a href="/admin/reports/visits?{{ reports_filter_q }}">визиты</a> ·
+          <a href="/admin/reports/sales?{{ reports_filter_q }}">продажи</a> ·
+          <a href="/admin/reports/works?{{ reports_filter_q }}">работы</a>
+        </div>
       </div>
       <div class="card" style="flex: 1; min-width: 140px;">
         <div class="muted" style="font-size: 12px;">Визиты</div>
-        <div style="font-size: 1.1rem; font-weight: 600;">{{ "%.2f"|format(revenue_visits) }}</div>
+        <div style="font-size: 1.1rem; font-weight: 600;">
+          <a href="/admin/reports/visits?{{ reports_filter_q }}" style="color: inherit; text-decoration: underline;">{{ "%.2f"|format(revenue_visits) }}</a>
+          <span class="muted" style="font-size: 0.8rem; font-weight: 500;"> руб.</span>
+        </div>
       </div>
       <div class="card" style="flex: 1; min-width: 140px;">
         <div class="muted" style="font-size: 12px;">Продажи</div>
-        <div style="font-size: 1.1rem; font-weight: 600;">{{ "%.2f"|format(revenue_sales) }}</div>
+        <div style="font-size: 1.1rem; font-weight: 600;">
+          <a href="/admin/reports/sales?{{ reports_filter_q }}" style="color: inherit; text-decoration: underline;">{{ "%.2f"|format(revenue_sales) }}</a>
+          <span class="muted" style="font-size: 0.8rem; font-weight: 500;"> руб.</span>
+        </div>
       </div>
       <div class="card" style="flex: 1; min-width: 140px;">
         <div class="muted" style="font-size: 12px;">Работы (с суммой от клиента)</div>
-        <div style="font-size: 1.1rem; font-weight: 600;">{{ "%.2f"|format(revenue_works) }}</div>
+        <div style="font-size: 1.1rem; font-weight: 600;">
+          <a href="/admin/reports/works?{{ reports_filter_q }}" style="color: inherit; text-decoration: underline;">{{ "%.2f"|format(revenue_works) }}</a>
+          <span class="muted" style="font-size: 0.8rem; font-weight: 500;"> руб.</span>
+        </div>
       </div>
     </div>
 
@@ -121,16 +140,23 @@
     <div class="row" style="margin-bottom: 20px;">
       <div class="card" style="flex: 1; min-width: 200px;">
         <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Работы</div>
-        <div style="font-size: 1.25rem; font-weight: 700;">Работ всего: {{ works_total }}</div>
+        <div style="font-size: 1.25rem; font-weight: 700;">
+          Работ всего:
+          <a href="/admin/reports/works?{{ reports_filter_q }}" style="color: inherit; text-decoration: underline;">{{ works_total }}</a>
+        </div>
         <div class="muted" style="font-size: 13px; margin-top: 8px; line-height: 1.45;">
-          в наличие — {{ works_in_stock }}, на заказ — {{ works_custom_order }}
+          в наличие — <a href="/admin/reports/works?{{ reports_filter_q }}" style="color: inherit;">{{ works_in_stock }}</a>,
+          на заказ — <a href="/admin/reports/works?{{ reports_filter_q }}" style="color: inherit;">{{ works_custom_order }}</a>
         </div>
       </div>
       <div class="card" style="flex: 1; min-width: 200px;">
         <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Визиты и продажи</div>
         <div style="font-size: 1.25rem; font-weight: 700;">Услуг всего: {{ visits_plus_sales }}</div>
         <div class="muted" style="font-size: 13px; margin-top: 8px; line-height: 1.45;">
-          визитов — {{ visits_count }}, продаж — {{ sales_count }}
+          визитов —
+          <a href="/admin/reports/visits?{{ reports_filter_q }}" style="color: inherit;">{{ visits_count }}</a>,
+          продаж —
+          <a href="/admin/reports/sales?{{ reports_filter_q }}" style="color: inherit;">{{ sales_count }}</a>
         </div>
       </div>
       <div class="card" style="flex: 1; min-width: 200px;">
@@ -194,6 +220,27 @@
     <div class="card" style="margin-bottom: 24px; background: #ecfdf5; border: 1px solid #a7f3d0;">
       <div class="muted" style="font-size: 12px;">Итого в фонды (операционно)</div>
       <div style="font-size: 1.4rem; font-weight: 700; color: #065f46;">{{ "%.2f"|format(total_to_funds) }} руб.</div>
+    </div>
+
+    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Сверка: операционные фонды и журнал</h3>
+    <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
+      <strong>Дельта</strong> — разница между суммой «в фонды» по снимкам записей и нетто начислений плюс сторно в журнале за тот же календарный интервал (по дате проводки).
+      Нулевая дельта обычно означает согласованность; расхождение возможно при поздних правках, ручных проводках или если проводки относятся к другому срезу дат.
+      Строка «нетто все проводки» — сумма всех типов проводок журнала в интервале (включая расходы и выплаты), для общей картины.
+    </p>
+    <div class="row" style="margin-bottom: 24px;">
+      <div class="card" style="flex: 1; min-width: 200px; border-left: 4px solid #0ea5e9;">
+        <div class="muted" style="font-size: 12px;">Дельта (операционно − нетто начисл.+сторно)</div>
+        <div style="font-size: 1.35rem; font-weight: 700;">{{ "%.2f"|format(reconciliation_delta) }} руб.</div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 200px;">
+        <div class="muted" style="font-size: 12px;">Нетто начисления + сторно в журнале</div>
+        <div style="font-size: 1.2rem; font-weight: 600;">{{ "%.2f"|format(ledger_net_accruals) }} руб.</div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 200px;">
+        <div class="muted" style="font-size: 12px;">Нетто все проводки журнала</div>
+        <div style="font-size: 1.2rem; font-weight: 600;">{{ "%.2f"|format(ledger_net_all) }} руб.</div>
+      </div>
     </div>
 
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Доля сотрудников (тот же период записей)</h3>

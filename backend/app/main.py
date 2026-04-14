@@ -16,10 +16,10 @@ import json
 from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.datastructures import UploadFile
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, or_, select
@@ -77,6 +77,7 @@ from app.db.models import (
     PayrollFundSide,
     PayrollFundSourceKind,
     PayrollPeriod,
+    ProductSaleKind,
     Service,
     ServiceCategory,
     ServiceSubcategory,
@@ -95,6 +96,11 @@ from app.audit import diff_fields, write_audit_rows
 from app.operational_report import (
     build_operational_report,
     list_closed_payroll_periods,
+    list_report_sales,
+    list_report_visits,
+    list_report_works,
+    report_to_csv,
+    resolve_report_dates,
     result_to_template_dict,
 )
 from app.payroll_fund import (
@@ -2011,6 +2017,22 @@ def _payroll_period_day_end(d: date) -> datetime:
     return datetime.combine(d, time(23, 59, 59, 999999))
 
 
+def _admin_report_export_params(
+    mode: str,
+    d0: date,
+    d1: date,
+    selected_period_id: int | None,
+) -> dict[str, str]:
+    p: dict[str, str] = {
+        "report_mode": mode,
+        "df": d0.isoformat(),
+        "dt": d1.isoformat(),
+    }
+    if selected_period_id is not None:
+        p["period_id"] = str(selected_period_id)
+    return p
+
+
 @app.get("/admin/reports", response_class=HTMLResponse)
 def admin_operational_report_page(
     request: Request,
@@ -2024,48 +2046,22 @@ def admin_operational_report_page(
     closed_periods = list_closed_payroll_periods(db)
     today = date.today()
     month_start = today.replace(day=1)
-    mode = (report_mode or "custom_dates").strip()
-    if mode not in ("payroll_period", "custom_dates"):
-        mode = "custom_dates"
-
-    selected_period_id: int | None = None
-    d0: date
-    d1: date
-
-    pid: int | None = None
-    if period_id and str(period_id).strip().isdigit():
-        pid = int(str(period_id).strip())
-
-    def _from_form_dates() -> tuple[date, date]:
-        try:
-            d_a = date.fromisoformat(df) if df else month_start
-            d_b = date.fromisoformat(dt) if dt else today
-        except ValueError:
-            d_a, d_b = month_start, today
-        return d_a, d_b
-
-    if mode == "payroll_period":
-        if pid is not None and pid > 0:
-            p = db.get(PayrollPeriod, pid)
-            if p is not None and p.closed_at is not None:
-                selected_period_id = p.id
-                d0 = p.date_from.date()
-                d1 = p.date_to.date()
-            else:
-                selected_period_id = None
-                d0, d1 = _from_form_dates()
-        else:
-            selected_period_id = None
-            d0, d1 = _from_form_dates()
-    else:
-        selected_period_id = None
-        d0, d1 = _from_form_dates()
-
-    if d1 < d0:
-        d0, d1 = d1, d0
+    d0, d1, selected_period_id, mode = resolve_report_dates(
+        db,
+        report_mode=report_mode,
+        period_id_raw=period_id,
+        df_raw=df,
+        dt_raw=dt,
+        month_start=month_start,
+        today=today,
+    )
 
     report = build_operational_report(db, d0, d1)
     report_dict = result_to_template_dict(report)
+    exp_base = _admin_report_export_params(mode, d0, d1, selected_period_id)
+    export_csv_url = "/admin/reports/export?" + urlencode({**exp_base, "format": "csv"})
+    export_print_url = "/admin/reports/export?" + urlencode({**exp_base, "format": "print"})
+    reports_filter_q = urlencode(exp_base)
     return templates.TemplateResponse(
         "admin_operational_report.html",
         _ctx(
@@ -2077,7 +2073,173 @@ def admin_operational_report_page(
             selected_period_id=selected_period_id,
             form_df=d0.isoformat(),
             form_dt=d1.isoformat(),
+            export_csv_url=export_csv_url,
+            export_print_url=export_print_url,
+            reports_filter_q=reports_filter_q,
             **report_dict,
+        ),
+    )
+
+
+@app.get("/admin/reports/export")
+def admin_operational_report_export(
+    request: Request,
+    export_format: str = Query("csv", alias="format"),
+    report_mode: str | None = Query(None),
+    period_id: str | None = Query(None),
+    df: str | None = Query(None),
+    dt: str | None = Query(None),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    today = date.today()
+    month_start = today.replace(day=1)
+    d0, d1, _, _mode = resolve_report_dates(
+        db,
+        report_mode=report_mode,
+        period_id_raw=period_id,
+        df_raw=df,
+        dt_raw=dt,
+        month_start=month_start,
+        today=today,
+    )
+    report = build_operational_report(db, d0, d1)
+    fmt = (export_format or "csv").strip().lower()
+    if fmt == "csv":
+        body = report_to_csv(report).encode("utf-8-sig")
+        fn = f"report_{d0.isoformat()}_{d1.isoformat()}.csv"
+        return Response(
+            content=body,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{fn}"'},
+        )
+    if fmt == "print":
+        return templates.TemplateResponse(
+            "admin_report_print.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                title="Отчёт — печать",
+                **result_to_template_dict(report),
+            ),
+        )
+    return RedirectResponse(url="/admin/reports", status_code=303)
+
+
+def _report_detail_dates(
+    df: str | None,
+    dt: str | None,
+    month_start: date,
+    today: date,
+) -> tuple[date, date]:
+    try:
+        d0 = date.fromisoformat(df) if df else month_start
+        d1 = date.fromisoformat(dt) if dt else today
+    except ValueError:
+        d0, d1 = month_start, today
+    if d1 < d0:
+        d0, d1 = d1, d0
+    return d0, d1
+
+
+def _reports_nav_query(
+    report_mode: str | None,
+    period_id: str | None,
+    d0: date,
+    d1: date,
+) -> str:
+    p: dict[str, str] = {"df": d0.isoformat(), "dt": d1.isoformat()}
+    if report_mode and report_mode.strip():
+        p["report_mode"] = report_mode.strip()
+    if period_id is not None and str(period_id).strip() != "":
+        p["period_id"] = str(period_id).strip()
+    return urlencode(p)
+
+
+@app.get("/admin/reports/visits", response_class=HTMLResponse)
+def admin_report_visits_list(
+    request: Request,
+    report_mode: str | None = Query(None),
+    period_id: str | None = Query(None),
+    df: str | None = Query(None),
+    dt: str | None = Query(None),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    today = date.today()
+    month_start = today.replace(day=1)
+    d0, d1 = _report_detail_dates(df, dt, month_start, today)
+    rows = list_report_visits(db, d0, d1)
+    reports_nav_q = _reports_nav_query(report_mode, period_id, d0, d1)
+    return templates.TemplateResponse(
+        "admin_report_visits.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            title="Визиты за период",
+            rows=rows,
+            date_from=d0,
+            date_to=d1,
+            reports_nav_q=reports_nav_q,
+        ),
+    )
+
+
+@app.get("/admin/reports/sales", response_class=HTMLResponse)
+def admin_report_sales_list(
+    request: Request,
+    report_mode: str | None = Query(None),
+    period_id: str | None = Query(None),
+    df: str | None = Query(None),
+    dt: str | None = Query(None),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    today = date.today()
+    month_start = today.replace(day=1)
+    d0, d1 = _report_detail_dates(df, dt, month_start, today)
+    rows = list_report_sales(db, d0, d1)
+    reports_nav_q = _reports_nav_query(report_mode, period_id, d0, d1)
+    return templates.TemplateResponse(
+        "admin_report_sales.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            title="Продажи за период",
+            rows=rows,
+            date_from=d0,
+            date_to=d1,
+            reports_nav_q=reports_nav_q,
+            ProductSaleKind=ProductSaleKind,
+        ),
+    )
+
+
+@app.get("/admin/reports/works", response_class=HTMLResponse)
+def admin_report_works_list(
+    request: Request,
+    report_mode: str | None = Query(None),
+    period_id: str | None = Query(None),
+    df: str | None = Query(None),
+    dt: str | None = Query(None),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    today = date.today()
+    month_start = today.replace(day=1)
+    d0, d1 = _report_detail_dates(df, dt, month_start, today)
+    rows = list_report_works(db, d0, d1)
+    reports_nav_q = _reports_nav_query(report_mode, period_id, d0, d1)
+    return templates.TemplateResponse(
+        "admin_report_works.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            title="Работы за период",
+            rows=rows,
+            date_from=d0,
+            date_to=d1,
+            reports_nav_q=reports_nav_q,
         ),
     )
 
