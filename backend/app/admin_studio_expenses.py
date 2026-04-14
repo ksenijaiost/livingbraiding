@@ -24,6 +24,7 @@ from app.db.models import (
     UserRole,
 )
 from app.db.session import get_db
+from app.payroll_fund import replace_studio_expense_ledger, studio_fund_balance
 from app.visit_edit_policy import is_in_closed_payroll_period
 from app.ru_labels import ru_user_role
 
@@ -175,6 +176,7 @@ def studio_expenses_list(
             msg=msg,
             today_iso=date.today().isoformat(),
             filter_query=filter_query,
+            studio_fund_balance=studio_fund_balance(db),
         ),
     )
 
@@ -251,6 +253,8 @@ async def studio_expense_new(
         comment=comment or "",
     )
     db.add(row)
+    db.flush()
+    replace_studio_expense_ledger(db, row, current_user.id)
     db.commit()
 
     params: list[str] = ["msg=saved"]
@@ -322,6 +326,7 @@ async def studio_expense_save(
         changed_by_user_id=current_user.id,
         changes=diff_fields(before, row, ("date", "subcategory_id", "amount", "comment")),
     )
+    replace_studio_expense_ledger(db, row, current_user.id)
     db.commit()
 
     params: list[str] = []
@@ -369,5 +374,6 @@ async def studio_expense_void(
         changed_by_user_id=current_user.id,
         changes=diff_fields(before, row, ("is_voided", "voided_at", "voided_by_user_id")),
     )
+    replace_studio_expense_ledger(db, row, current_user.id)
     db.commit()
     return RedirectResponse(url="/admin/expenses?msg=voided", status_code=303)

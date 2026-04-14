@@ -731,6 +731,7 @@ class PayrollFundEntryKind(str, enum.Enum):
     ACCRUAL = "ACCRUAL"
     STORNO = "STORNO"
     PAYOUT = "PAYOUT"
+    EXPENSE = "EXPENSE"
 
 
 class PayrollFundSide(str, enum.Enum):
@@ -742,6 +743,7 @@ class PayrollFundSourceKind(str, enum.Enum):
     VISIT = "VISIT"
     WORK = "WORK"
     PRODUCT_SALE = "PRODUCT_SALE"
+    STUDIO_EXPENSE = "STUDIO_EXPENSE"
     MANUAL = "MANUAL"
 
 
@@ -753,7 +755,7 @@ class PayrollFundLedger(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     entry_kind: Mapped[PayrollFundEntryKind] = mapped_column(
-        Enum(PayrollFundEntryKind, native_enum=False, length=16),
+        Enum(PayrollFundEntryKind, native_enum=False, length=20),
         nullable=False,
     )
     side: Mapped[PayrollFundSide] = mapped_column(
@@ -763,7 +765,7 @@ class PayrollFundLedger(Base):
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     source_kind: Mapped[PayrollFundSourceKind] = mapped_column(
-        Enum(PayrollFundSourceKind, native_enum=False, length=20),
+        Enum(PayrollFundSourceKind, native_enum=False, length=24),
         nullable=False,
     )
     source_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

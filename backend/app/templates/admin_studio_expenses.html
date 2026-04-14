@@ -141,7 +141,13 @@
   </style>
   <div class="card">
     <h2 style="margin-top:0;">Расходы студии</h2>
-    <p class="muted">Только суперадмин. Редактирование и аннулирование запрещены, если дата расхода попадает в закрытый период ЗП.</p>
+    <p class="muted">Только суперадмин. Редактирование и аннулирование запрещены, если дата расхода попадает в закрытый период ЗП. Расходы списываются с фонда студии проводками в журнале ЗП (как и начисления).</p>
+
+    <div class="card" style="margin-bottom:14px;background:#f0fdf4;border:1px solid #86efac;">
+      <h3 style="margin-top:0;">Остаток фонда студии</h3>
+      <p style="font-size:1.35rem;margin:0;"><strong>{{ "%.2f"|format(studio_fund_balance) }} руб.</strong></p>
+      <p class="muted" style="margin:8px 0 0;">Сумма всех проводок по стороне «Студия» в <a href="/admin/payroll-fund">журнале фондов ЗП</a> (начисления, розница, выплаты, расходы и сторно).</p>
+    </div>
 
     {% if msg == 'saved' %}
       <div class="ok" style="margin-bottom:12px;">Запись добавлена.</div>

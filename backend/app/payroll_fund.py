@@ -18,10 +18,14 @@ from app.db.models import (
     PayrollFundSourceKind,
     ProductSale,
     ProductSaleKind,
+    StudioExpense,
     Visit,
     VisitMaster,
+    WorkForInventory,
     WorkForInventoryStaff,
 )
+
+_REVERSIBLE_ENTRY_KINDS = (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.EXPENSE)
 
 
 def money_q2(x: float) -> float:
@@ -82,13 +86,14 @@ def storno_source_accruals(
     source_id: int,
     created_by_user_id: int | None,
 ) -> None:
+    """Сторно всех исходных проводок источника (начисления и расходы), ещё не покрытых сторно."""
     accruals = list(
         db.scalars(
             select(PayrollFundLedger)
             .where(
                 PayrollFundLedger.source_kind == source_kind,
                 PayrollFundLedger.source_id == source_id,
-                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+                PayrollFundLedger.entry_kind.in_(_REVERSIBLE_ENTRY_KINDS),
             )
             .order_by(PayrollFundLedger.id.asc())
         ).all()
@@ -332,6 +337,96 @@ def ledger_balances(db: Session) -> tuple[list[dict], float]:
                 masters.append({"user_id": int(uid), "balance": t})
     masters.sort(key=lambda x: x["user_id"])
     return masters, studio_total
+
+
+def studio_fund_balance(db: Session) -> float:
+    """Остаток фонда студии (все проводки со стороны STUDIO)."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.side == PayrollFundSide.STUDIO
+        )
+    )
+    return money_q2(float(v or 0))
+
+
+def replace_studio_expense_ledger(
+    db: Session,
+    expense: StudioExpense,
+    created_by_user_id: int | None,
+) -> None:
+    storno_source_accruals(
+        db, PayrollFundSourceKind.STUDIO_EXPENSE, expense.id, created_by_user_id
+    )
+    if expense.is_voided:
+        return
+    amt = money_q2(float(expense.amount or 0))
+    if amt <= 0:
+        return
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.EXPENSE,
+        side=PayrollFundSide.STUDIO,
+        user_id=None,
+        amount=-amt,
+        source_kind=PayrollFundSourceKind.STUDIO_EXPENSE,
+        source_id=expense.id,
+        created_by_user_id=created_by_user_id,
+        comment=None,
+    )
+
+
+def has_unreversed_studio_expense_posting(db: Session, expense_id: int) -> bool:
+    """True, если по расходу есть проводка EXPENSE, ещё не закрытая сторно."""
+    rows = list(
+        db.scalars(
+            select(PayrollFundLedger)
+            .where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.STUDIO_EXPENSE,
+                PayrollFundLedger.source_id == expense_id,
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.EXPENSE,
+            )
+            .order_by(PayrollFundLedger.id.asc())
+        ).all()
+    )
+    for r in rows:
+        rev = db.scalar(
+            select(PayrollFundLedger.id)
+            .where(PayrollFundLedger.storno_of_id == r.id)
+            .limit(1)
+        )
+        if rev is None:
+            return True
+    return False
+
+
+def sync_operational_payroll_postings(db: Session) -> None:
+    """
+    Идемпотентно создаёт недостающие проводки по операционным сущностям (сиды, восстановление БД).
+    Не дублирует уже учтённые визиты/продажи/работы; расходы — только если нет активной EXPENSE-проводки.
+    """
+    for visit in db.scalars(select(Visit).where(Visit.is_cancelled.is_(False))).all():
+        post_visit_accruals(db, visit, visit.created_by_user_id)
+
+    for sale in db.scalars(select(ProductSale).where(ProductSale.is_voided.is_(False))).all():
+        if not _has_accruals_for_source(db, PayrollFundSourceKind.PRODUCT_SALE, sale.id):
+            if sale.kind == ProductSaleKind.KIT and sale.kit_id:
+                db.refresh(sale, attribute_names=["kit"])
+            elif sale.kind == ProductSaleKind.MATERIAL and sale.material_service_id:
+                db.refresh(sale, attribute_names=["material_service"])
+            sale.studio_margin_amount = compute_product_sale_studio_margin(db, sale)
+            post_product_sale_studio_accrual(db, sale, sale.created_by_user_id)
+
+    for work in db.scalars(select(WorkForInventory).where(WorkForInventory.is_voided.is_(False))).all():
+        staff = list(
+            db.scalars(
+                select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == work.id)
+            ).all()
+        )
+        post_work_accruals(db, work.id, staff, work.created_by_user_id)
+
+    for exp in db.scalars(select(StudioExpense).where(StudioExpense.is_voided.is_(False))).all():
+        if not has_unreversed_studio_expense_posting(db, exp.id):
+            replace_studio_expense_ledger(db, exp, exp.created_by_user_id)
 
 
 def recent_ledger_rows(db: Session, limit: int = 150) -> list[PayrollFundLedger]:

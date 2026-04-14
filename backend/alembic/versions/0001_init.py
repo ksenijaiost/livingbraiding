@@ -761,11 +761,11 @@ def upgrade() -> None:
         "payroll_fund_ledger",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("entry_kind", sa.String(length=16), nullable=False),
+        sa.Column("entry_kind", sa.String(length=20), nullable=False),
         sa.Column("side", sa.String(length=16), nullable=False),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("amount", sa.Float(), nullable=False),
-        sa.Column("source_kind", sa.String(length=20), nullable=False),
+        sa.Column("source_kind", sa.String(length=24), nullable=False),
         sa.Column("source_id", sa.Integer(), nullable=True),
         sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column(

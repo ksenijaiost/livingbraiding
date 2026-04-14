@@ -119,6 +119,7 @@
                   {% if r.entry_kind.value == 'ACCRUAL' %}Начисление
                   {% elif r.entry_kind.value == 'STORNO' %}Сторно
                   {% elif r.entry_kind.value == 'PAYOUT' %}Выплата
+                  {% elif r.entry_kind.value == 'EXPENSE' %}Расход студии
                   {% else %}{{ r.entry_kind.value }}{% endif %}
                 </td>
                 <td>{% if r.side.value == 'STUDIO' %}Студия{% else %}Мастер{% endif %}</td>
@@ -136,6 +137,7 @@
                   {% if r.source_kind.value == 'VISIT' %}Визит {{ r.source_id or '' }}
                   {% elif r.source_kind.value == 'WORK' %}Работа {{ r.source_id or '' }}
                   {% elif r.source_kind.value == 'PRODUCT_SALE' %}Продажа {{ r.source_id or '' }}
+                  {% elif r.source_kind.value == 'STUDIO_EXPENSE' %}Расход {{ r.source_id or '' }}
                   {% else %}Ручная{% endif %}
                 </td>
                 <td>{{ r.created_by_user.display_name if r.created_by_user else '—' }}</td>

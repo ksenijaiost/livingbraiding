@@ -56,6 +56,7 @@ from app.seed_catalog_miniatyura import ensure_miniatyura_catalog
 from app.seed_catalog_narashivanie import ensure_narashivanie_catalog
 from app.seed_catalog_prodazha_materiala import ensure_prodazha_materiala_catalog
 from app.seed_catalog_snjatie_ukhod import ensure_snjatie_ukhod_catalogs
+from app.payroll_fund import sync_operational_payroll_postings
 from app.seed_studio_expenses_catalog import ensure_studio_expense_catalog
 
 
@@ -775,4 +776,7 @@ def _ensure_demo_operational_data(db: Session) -> None:
                     comment="Демо расход",
                 )
             )
+
+    db.flush()
+    sync_operational_payroll_postings(db)
 
