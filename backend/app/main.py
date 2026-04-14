@@ -257,8 +257,8 @@ def session_set_active_role(
         raise HTTPException(status_code=400, detail="Некорректная роль")
     if new_role not in current_user.roles:
         raise HTTPException(status_code=403, detail="Эта роль не назначена пользователю")
-    loc = request.headers.get("referer") or "/"
-    resp = RedirectResponse(url=loc, status_code=303)
+    # Всегда на главную: прежний URL может быть только для другой роли (403).
+    resp = RedirectResponse(url="/", status_code=303)
     issue_session_cookie(resp, current_user.id, new_role)
     return resp
 
