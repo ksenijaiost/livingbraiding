@@ -363,6 +363,28 @@ def studio_fund_balance(db: Session) -> float:
     return money_q2(float(v or 0))
 
 
+def employee_fund_balance(db: Session, user_id: int) -> float:
+    """Сальдо личного фонда сотрудника (сторона MASTER, все проводки)."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.side == PayrollFundSide.MASTER,
+            PayrollFundLedger.user_id == user_id,
+        )
+    )
+    return money_q2(float(v or 0))
+
+
+def employee_payout_total_net(db: Session, user_id: int) -> float:
+    """Нетто выплат сотруднику: минус сумма amount по PAYOUT с user_id этого сотрудника."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.entry_kind == PayrollFundEntryKind.PAYOUT,
+            PayrollFundLedger.user_id == user_id,
+        )
+    )
+    return money_q2(-float(v or 0))
+
+
 def replace_studio_expense_ledger(
     db: Session,
     expense: StudioExpense,

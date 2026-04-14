@@ -4,6 +4,31 @@
     <h2 style="margin-top: 0;">Главная</h2>
     <p class="muted">MVP каркас. Дальше добавим анкету визита мастера и полноценную админку.</p>
 
+    {% if payroll_home %}
+      <div class="card" style="margin-bottom: 20px; background: #f8f9fb;">
+        <h3 style="margin-top: 0;">Фонд ЗП</h3>
+        <div class="row" style="flex-wrap: wrap; gap: 16px;">
+          <div style="flex: 1; min-width: 200px;">
+            <p class="muted" style="margin: 0 0 4px;">Остаток личного фонда</p>
+            <p style="font-size: 1.2rem; margin: 0;"><strong>{{ "%.2f"|format(payroll_home.personal_balance) }} руб.</strong></p>
+          </div>
+          <div style="flex: 1; min-width: 200px;">
+            <p class="muted" style="margin: 0 0 4px;">Выплачено вам (по журналу)</p>
+            <p style="font-size: 1.2rem; margin: 0;"><strong>{{ "%.2f"|format(payroll_home.paid_net) }} руб.</strong></p>
+          </div>
+          {% if payroll_home.show_studio %}
+            <div style="flex: 1; min-width: 200px;">
+              <p class="muted" style="margin: 0 0 4px;">Остаток фонда студии</p>
+              <p style="font-size: 1.2rem; margin: 0;"><strong>{{ "%.2f"|format(payroll_home.studio_balance) }} руб.</strong></p>
+            </div>
+          {% endif %}
+        </div>
+        <p class="muted" style="margin: 12px 0 0; font-size: 0.9rem;">
+          Личный фонд — все начисления и списания по вашей стороне «сотрудник». «Выплачено» — нетто по проводкам выплат, где вы указаны получателем (в том числе из фонда студии).
+        </p>
+      </div>
+    {% endif %}
+
     {% if current_user.role.value == "MASTER" %}
       <div class="row">
         <div class="card">
@@ -58,4 +83,3 @@
     {% endif %}
   </div>
 {% endblock %}
-

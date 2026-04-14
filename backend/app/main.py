@@ -93,10 +93,13 @@ from app.db.models import (
 )
 from app.audit import diff_fields, write_audit_rows
 from app.payroll_fund import (
+    employee_fund_balance,
+    employee_payout_total_net,
     ledger_balances,
     post_payout,
     recent_ledger_rows,
     storno_source_accruals,
+    studio_fund_balance,
 )
 from app.db.session import get_db
 from app.kit_crud import (
@@ -255,8 +258,24 @@ def logout_action():
 
 
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request, current_user=Depends(get_current_user)):
-    return templates.TemplateResponse("home.html", _ctx(request, current_user=current_user))
+def home(
+    request: Request,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    payroll_home: dict[str, Any] | None = None
+    if current_user.role in (UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
+        show_studio = UserRole.ADMIN_SUPER in current_user.roles
+        payroll_home = {
+            "personal_balance": employee_fund_balance(db, current_user.id),
+            "paid_net": employee_payout_total_net(db, current_user.id),
+            "show_studio": show_studio,
+            "studio_balance": studio_fund_balance(db) if show_studio else None,
+        }
+    return templates.TemplateResponse(
+        "home.html",
+        _ctx(request, current_user=current_user, payroll_home=payroll_home),
+    )
 
 
 @app.get("/service-catalog", response_class=HTMLResponse)
