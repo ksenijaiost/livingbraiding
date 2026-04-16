@@ -104,15 +104,15 @@
 
       <div id="rubber_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
         <h3 style="margin-top:0;">Хвосты/резинки</h3>
-        <div class="row">
-          <div>
-            <label>Тип</label>
-            <select name="rubber_type" id="rubber_type_sel">
-              <option value="" {% if not fp.rubber_type %}selected{% endif %}>— выберите —</option>
-              {% for t in rubber_types %}
-                <option value="{{ t.value }}" {% if fp.rubber_type == t.value %}selected{% endif %}>{{ t.label }}</option>
-              {% endfor %}
-            </select>
+        <div>
+          <label>Тип</label>
+          <div style="margin-top: 6px;">
+            {% for t in rubber_types %}
+              <label style="display:block; margin-bottom: 6px;">
+                <input type="radio" name="rubber_type" value="{{ t.value }}" {% if fp.rubber_type == t.value %}checked{% endif %} />
+                {{ t.label }}
+              </label>
+            {% endfor %}
           </div>
         </div>
 
@@ -282,7 +282,7 @@
       if (kind.value === 'RUBBER') syncRubberTypeFields();
     }
     function syncRubberTypeFields() {
-      var sel = document.getElementById('rubber_type_sel');
+      var sel = document.querySelector('input[name="rubber_type"]:checked');
       var a = document.getElementById('rubber_attach_qty_block');
       var b = document.getElementById('rubber_braids_qty_block');
       if (!sel || !a || !b) return;
@@ -443,7 +443,7 @@
       }
 
       if (k === 'RUBBER') {
-        var t = document.getElementById('rubber_type_sel');
+        var t = document.querySelector('input[name="rubber_type"]:checked');
         var typeVal = t ? t.value : '';
         var map = (meta && meta.rubber) ? meta.rubber : {};
         var nameByType = { TAIL_ELASTIC: 'Хвост на резинке (1 крепление)', TAIL_CRAB: 'Хвост на крабе', TAIL_NET: 'Хвост на сетке', BRAIDS_ELASTIC: 'Косы на резинке (1 коса)' };
@@ -539,7 +539,7 @@
 
       var line = '';
       if (kind.value === 'RUBBER') {
-        var t = document.getElementById('rubber_type_sel');
+        var t = document.querySelector('input[name="rubber_type"]:checked');
         var typeVal = t ? t.value : '';
         var map = (meta && meta.rubber) ? meta.rubber : {};
         var nameByType = { TAIL_ELASTIC: 'Хвост на резинке (1 крепление)', TAIL_CRAB: 'Хвост на крабе', TAIL_NET: 'Хвост на сетке', BRAIDS_ELASTIC: 'Косы на резинке (1 коса)' };
@@ -698,8 +698,9 @@
     });
     var kindSel = document.querySelector('select[name="kind"]');
     if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); syncCorrectionBlock(); syncMixUI(); syncPriceHint(); syncWorkPreview(); });
-    var rubberTypeSel = document.getElementById('rubber_type_sel');
-    if (rubberTypeSel) rubberTypeSel.addEventListener('change', function () { syncRubberTypeFields(); syncPriceHint(); syncWorkPreview(); });
+    document.querySelectorAll('input[name="rubber_type"]').forEach(function(el){
+      el.addEventListener('change', function () { syncRubberTypeFields(); syncPriceHint(); syncWorkPreview(); });
+    });
     var corrWash = document.getElementById('corr_wash');
     if (corrWash) corrWash.addEventListener('change', function () { syncCorrectionRules(); syncPriceHint(); syncWorkPreview(); });
     var corrCircle = document.getElementById('corr_circle');

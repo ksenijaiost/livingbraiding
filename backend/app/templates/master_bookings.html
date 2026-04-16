@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top:0;">Мои записи</h2>
+    <p class="muted" style="margin-top:-6px;">Показываются только активные брони, где вы указаны мастером.</p>
+
+    {% if not rows %}
+      <p class="muted">Активных броней нет.</p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Бронь</th>
+            <th>Дата</th>
+            <th>Клиент</th>
+            <th>Услуга/заказ</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            {% set b = row.booking %}
+            <tr>
+              <td><a href="/admin/bookings/{{ b.id }}">#{{ b.id }}</a></td>
+              <td>{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</td>
+              <td><a href="/admin/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
+              <td>{{ row.label }}</td>
+              <td style="white-space:nowrap;">
+                <a href="/admin/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+{% endblock %}
+

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <h2 style="margin-top:0;">Брони</h2>
+      <a href="/admin/bookings/new"><button type="button" class="secondary">Новая бронь</button></a>
+    </div>
+
+    <form method="get" action="/admin/bookings" class="row" style="margin: 12px 0;">
+      <div>
+        <label>Показывать</label>
+        <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+          <label><input type="radio" name="show" value="active" {% if show_mode != 'all' %}checked{% endif %} /> Только активные</label>
+          <label><input type="radio" name="show" value="all" {% if show_mode == 'all' %}checked{% endif %} /> Все брони</label>
+        </div>
+      </div>
+      <div style="align-self:end;">
+        <button type="submit">Применить</button>
+      </div>
+    </form>
+
+    {% if not rows %}
+      <p class="muted">Пока нет броней.</p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Дата</th>
+            <th>Клиент</th>
+            <th>Тип</th>
+            <th>Статус</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in rows %}
+            <tr>
+              <td><a href="/admin/bookings/{{ b.id }}">#{{ b.id }}</a></td>
+              <td>{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</td>
+              <td><a href="/admin/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
+              <td>{{ "Визит" if b.kind.value == "VISIT" else "Продажа" }}</td>
+              <td>
+                {% if b.status.value == "ACTIVE" %}<strong>активна</strong>{% endif %}
+                {% if b.status.value == "DONE" %}✅ выполнена{% endif %}
+                {% if b.status.value == "CANCELLED" %}❌ отменена{% endif %}
+              </td>
+              <td style="white-space:nowrap;">
+                <a href="/admin/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
+                <a href="/admin/bookings/{{ b.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+                {% if b.status.value == "ACTIVE" %}
+                  <form method="post" action="/admin/bookings/{{ b.id }}/cancel" style="display:inline; margin:0;" onsubmit="var r = prompt('Причина отмены'); if(!r) return false; this.querySelector('input[name=reason]').value = r; return confirm('Отменить бронь?');">
+                    <input type="hidden" name="reason" value="" />
+                    <button type="submit" class="secondary">Отменить</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+{% endblock %}
+

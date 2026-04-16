@@ -36,6 +36,7 @@
           <th>Имя</th>
           <th>Контакт</th>
           <th>Посещений</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -44,12 +45,20 @@
             <td><a href="/admin/clients/{{ row.id }}">{{ row.id }}</a></td>
             <td>
               <a href="/admin/clients/{{ row.id }}">{{ row.name }}</a>
+              {% if row.has_active_booking %}
+                <span title="Есть активная бронь">📝</span>
+              {% endif %}
               {% if not row.is_confirmed %}
                 <span class="muted" title="Ждёт подтверждения администратора">· черновик</span>
               {% endif %}
             </td>
             <td>{{ row.contact_preview or "—" }}</td>
             <td>{{ row.visits_count }}</td>
+            <td style="white-space:nowrap;">
+              {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
+                <a href="/admin/bookings/new?client_id={{ row.id }}"><button type="button" class="secondary">Бронь</button></a>
+              {% endif %}
+            </td>
           </tr>
         {% endfor %}
       </tbody>

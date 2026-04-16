@@ -11,11 +11,18 @@ This runs on app startup to keep local development frictionless:
 In production you may want to disable this or make it explicit via a CLI task.
 """
 
-from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+import json
 from datetime import datetime, timedelta
 
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
+
 from app.db.models import (
+    Booking,
+    BookingKind,
+    BookingStaff,
+    BookingStaffKind,
+    BookingStatus,
     CategoryQuestionnaireField,
     Kit,
     MaterialPriceCurrent,
@@ -776,6 +783,91 @@ def _ensure_demo_operational_data(db: Session) -> None:
                 share=1.0,
                 master_profit_amount=45.0,
                 details_json=None,
+            )
+        )
+
+    # ---- Bookings ----
+    if not db.scalar(select(Booking).limit(1)):
+        creator_id = admin.id if admin else (m1.id if m1 else 1)
+        # 1) Sale: KIT on ORDER → multiple masters
+        kit_order_master_ids = sorted(
+            set(
+                [
+                    int(m1.id if m1 else 1),
+                    int(m2.id if m2 else (m1.id if m1 else 1)),
+                ]
+            )
+        )
+        b1 = Booking(
+            created_by_user_id=creator_id,
+            client_id=c1.id,
+            planned_date=(datetime.utcnow() + timedelta(days=3)).replace(
+                second=0, microsecond=0
+            ),
+            kind=BookingKind.PRODUCT_SALE,
+            status=BookingStatus.ACTIVE,
+            quoted_price_text="8000–10000",
+            deposit_amount=1000,
+            comment="Демо бронь: комплект на заказ",
+            planned_service_id=None,
+            planned_product_kind="KIT",
+            details_json=json.dumps(
+                {
+                    "product_kind": "KIT",
+                    "sale_kit_mode": "ORDER",
+                    "sale_order_blanks_qty": "10",
+                    "sale_order_blanks_desc": "DE/SE, омбре, материал по запросу",
+                    "sale_kit_order_master_ids": ",".join([str(x) for x in kit_order_master_ids]),
+                },
+                ensure_ascii=False,
+            ),
+        )
+        db.add(b1)
+        db.flush()
+        db.add_all(
+            [
+                BookingStaff(
+                    booking_id=b1.id,
+                    user_id=uid,
+                    kind=BookingStaffKind.SALE_KIT_ORDER,
+                )
+                for uid in kit_order_master_ids
+            ]
+        )
+
+        # 2) Sale: RUBBER on ORDER → single master
+        b2 = Booking(
+            created_by_user_id=creator_id,
+            client_id=c2.id,
+            planned_date=(datetime.utcnow() + timedelta(days=5)).replace(
+                second=0, microsecond=0
+            ),
+            kind=BookingKind.PRODUCT_SALE,
+            status=BookingStatus.ACTIVE,
+            quoted_price_text="1500",
+            deposit_amount=None,
+            comment="Демо бронь: хвост/резинка на заказ",
+            planned_service_id=None,
+            planned_product_kind="RUBBER",
+            details_json=json.dumps(
+                {
+                    "product_kind": "RUBBER",
+                    "sale_rubber_mode": "ORDER",
+                    "sale_rubber_order_master_id": str(m1.id if m1 else 1),
+                    "sale_rubber_type": "TAIL_ELASTIC",
+                    "sale_rubber_attach_qty": "2",
+                    "sale_rubber_desc": "Цвет чёрный, длина 50см",
+                },
+                ensure_ascii=False,
+            ),
+        )
+        db.add(b2)
+        db.flush()
+        db.add(
+            BookingStaff(
+                booking_id=b2.id,
+                user_id=m1.id if m1 else 1,
+                kind=BookingStaffKind.SALE_RUBBER_ORDER,
             )
         )
 

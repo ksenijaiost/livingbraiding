@@ -549,6 +549,129 @@ class CatalogProduct(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
+class BookingKind(str, enum.Enum):
+    VISIT = "VISIT"
+    PRODUCT_SALE = "PRODUCT_SALE"
+
+
+class BookingStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    DONE = "DONE"
+    CANCELLED = "CANCELLED"
+
+
+class Booking(Base):
+    """Бронь для будущего визита/продажи (заполняется админом)."""
+
+    __tablename__ = "bookings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    planned_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    kind: Mapped[BookingKind] = mapped_column(
+        Enum(BookingKind, native_enum=False, length=20),
+        nullable=False,
+    )
+    status: Mapped[BookingStatus] = mapped_column(
+        Enum(BookingStatus, native_enum=False, length=16),
+        nullable=False,
+        default=BookingStatus.ACTIVE,
+    )
+
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    cancelled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    quoted_price_text: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    deposit_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # VISIT planning
+    planned_service_id: Mapped[int | None] = mapped_column(ForeignKey("services.id"), nullable=True)
+
+    # PRODUCT_SALE planning: строковое значение из ProductSaleKind (валидируем в обработчиках формы).
+    planned_product_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    cancelled_by_user: Mapped["User | None"] = relationship(foreign_keys=[cancelled_by_user_id])
+    client: Mapped["Client"] = relationship()
+    planned_service: Mapped["Service | None"] = relationship(foreign_keys=[planned_service_id])
+    masters: Mapped[list["BookingMaster"]] = relationship(
+        back_populates="booking",
+        cascade="all, delete-orphan",
+    )
+
+
+class BookingMaster(Base):
+    """Мастера, которых планируют на бронь визита (без долей)."""
+
+    __tablename__ = "booking_masters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False)
+    master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    booking: Mapped["Booking"] = relationship(back_populates="masters")
+    master: Mapped["User"] = relationship()
+
+    __table_args__ = (UniqueConstraint("booking_id", "master_id", name="uq_booking_master"),)
+
+
+class BookingStaffKind(str, enum.Enum):
+    """Назначенные мастера для броней (не только визит)."""
+
+    SALE_KIT_ORDER = "SALE_KIT_ORDER"  # комплект на заказ (может быть несколько)
+    SALE_RUBBER_ORDER = "SALE_RUBBER_ORDER"  # хвост/резинка на заказ (ровно один)
+
+
+class BookingStaff(Base):
+    """Сотрудники, назначенные на бронь (используется для отображения в «Мои записи»)."""
+
+    __tablename__ = "booking_staff"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    booking_id: Mapped[int] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    kind: Mapped[BookingStaffKind] = mapped_column(
+        Enum(BookingStaffKind, native_enum=False, length=24),
+        nullable=False,
+    )
+
+    booking: Mapped["Booking"] = relationship()
+    user: Mapped["User"] = relationship()
+
+    __table_args__ = (UniqueConstraint("booking_id", "user_id", "kind", name="uq_booking_staff"),)
+
+
+class BookingAuditLog(Base):
+    __tablename__ = "booking_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    booking_id: Mapped[int] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    booking: Mapped["Booking"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
 class ProductSaleKind(str, enum.Enum):
     MATERIAL = "MATERIAL"
     KIT = "KIT"
@@ -569,6 +692,7 @@ class ProductSale(Base):
     performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
     amount_from_client: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True)
 
     is_voided: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -614,6 +738,7 @@ class ProductSale(Base):
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     voided_by_user: Mapped["User | None"] = relationship(foreign_keys=[voided_by_user_id])
     client: Mapped["Client"] = relationship()
+    booking: Mapped["Booking | None"] = relationship(foreign_keys=[booking_id])
     material_service: Mapped["Service | None"] = relationship(foreign_keys=[material_service_id])
     material_mix_bonus_user: Mapped["User | None"] = relationship(foreign_keys=[material_mix_bonus_user_id])
     kit: Mapped["Kit | None"] = relationship(foreign_keys=[kit_id])
@@ -658,6 +783,7 @@ class WorkForInventory(Base):
         nullable=False,
     )
 
+    booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True)
     client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
     amount_from_client: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ready_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -686,6 +812,7 @@ class WorkForInventory(Base):
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     voided_by_user: Mapped["User | None"] = relationship(foreign_keys=[voided_by_user_id])
+    booking: Mapped["Booking | None"] = relationship(foreign_keys=[booking_id])
     client: Mapped["Client | None"] = relationship()
     created_kit: Mapped["Kit | None"] = relationship(foreign_keys=[created_kit_id])
     staff_rows: Mapped[list["WorkForInventoryStaff"]] = relationship(
@@ -832,6 +959,7 @@ class Visit(Base):
     performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     duration_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
     client_type: Mapped[VisitClientType] = mapped_column(Enum(VisitClientType), nullable=False)
     price_type: Mapped[VisitPriceType] = mapped_column(Enum(VisitPriceType), nullable=False)
@@ -872,6 +1000,7 @@ class Visit(Base):
     masters_pool: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     client: Mapped[Client] = relationship()
+    booking: Mapped["Booking | None"] = relationship(foreign_keys=[booking_id])
     created_by_user: Mapped["User | None"] = relationship(foreign_keys=[created_by_user_id])
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     cancelled_by_user: Mapped["User | None"] = relationship(foreign_keys=[cancelled_by_user_id])

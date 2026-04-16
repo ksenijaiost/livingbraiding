@@ -226,6 +226,72 @@ def upgrade() -> None:
         sa.UniqueConstraint("subcategory_id", "name", name="uq_service_per_subcategory"),
     )
 
+    # ---- Бронь (для админа): будущий визит/продажа ----
+    op.create_table(
+        "bookings",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=False),
+        sa.Column("planned_date", sa.DateTime(), nullable=False),
+        sa.Column("kind", sa.String(length=20), nullable=False),
+        sa.Column("status", sa.String(length=16), nullable=False, server_default=sa.text("'ACTIVE'")),
+        sa.Column("cancelled_at", sa.DateTime(), nullable=True),
+        sa.Column("cancelled_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("cancelled_reason", sa.Text(), nullable=True),
+        sa.Column("quoted_price_text", sa.String(length=120), nullable=True),
+        sa.Column("deposit_amount", sa.Integer(), nullable=True),
+        sa.Column("comment", sa.Text(), nullable=True),
+        sa.Column("planned_service_id", sa.Integer(), sa.ForeignKey("services.id"), nullable=True),
+        sa.Column("planned_product_kind", sa.String(length=16), nullable=True),
+        sa.Column("details_json", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
+        "booking_masters",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "booking_id",
+            sa.Integer(),
+            sa.ForeignKey("bookings.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("master_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.UniqueConstraint("booking_id", "master_id", name="uq_booking_master"),
+    )
+
+    op.create_table(
+        "booking_staff",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "booking_id",
+            sa.Integer(),
+            sa.ForeignKey("bookings.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("kind", sa.String(length=24), nullable=False),
+        sa.UniqueConstraint("booking_id", "user_id", "kind", name="uq_booking_staff"),
+    )
+
+    op.create_table(
+        "booking_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "booking_id",
+            sa.Integer(),
+            sa.ForeignKey("bookings.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
     op.create_table(
         "category_questionnaire_fields",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -370,6 +436,7 @@ def upgrade() -> None:
         sa.Column("cancelled_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("performed_date", sa.DateTime(), nullable=False),
         sa.Column("duration_minutes", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("booking_id", sa.Integer(), sa.ForeignKey("bookings.id"), nullable=True),
         sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=False),
         sa.Column(
             "client_type",
@@ -677,6 +744,7 @@ def upgrade() -> None:
         sa.Column("performed_date", sa.DateTime(), nullable=False),
         sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=False),
         sa.Column("amount_from_client", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("booking_id", sa.Integer(), sa.ForeignKey("bookings.id"), nullable=True),
         sa.Column("is_voided", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column("voided_at", sa.DateTime(), nullable=True),
         sa.Column("voided_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
@@ -764,6 +832,7 @@ def upgrade() -> None:
         sa.Column("created_kit_id", sa.Integer(), sa.ForeignKey("kits.id"), nullable=True),
         sa.Column("kind", sa.String(length=32), nullable=False),
         sa.Column("scope", sa.String(length=24), nullable=False),
+        sa.Column("booking_id", sa.Integer(), sa.ForeignKey("bookings.id"), nullable=True),
         sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=True),
         sa.Column("amount_from_client", sa.Integer(), nullable=True),
         sa.Column("ready_date", sa.DateTime(), nullable=True),
@@ -869,6 +938,10 @@ def downgrade() -> None:
     op.drop_table("work_for_inventory")
     op.drop_table("catalog_products")
     op.drop_table("product_sales")
+    op.drop_table("booking_audit_logs")
+    op.drop_table("booking_staff")
+    op.drop_table("booking_masters")
+    op.drop_table("bookings")
     op.drop_table("visit_audit_logs")
     op.drop_table("visit_kit_usages")
     op.drop_table("visit_services")

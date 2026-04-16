@@ -7,7 +7,7 @@ We intentionally avoid historical recalculation and keep audit logs append-only.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Iterable, Type
 
 from sqlalchemy.orm import Session
@@ -23,6 +23,10 @@ class FieldChange:
 def _to_audit_str(v: Any) -> str | None:
     if v is None:
         return None
+    if isinstance(v, datetime):
+        return v.strftime("%d.%m.%Y %H:%M")
+    if isinstance(v, date):
+        return v.strftime("%d.%m.%Y")
     if isinstance(v, (str, int, float, bool)):
         return str(v)
     return str(v)

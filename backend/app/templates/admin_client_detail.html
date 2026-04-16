@@ -30,6 +30,7 @@
       </div>
       {% if show_admin_actions %}
         <div class="client-detail-actions">
+          <a href="/admin/bookings/new?client_id={{ client.id }}"><button type="button" class="secondary">Бронь</button></a>
           <a href="/admin/clients/{{ client.id }}/edit"><button type="button">Изменить</button></a>
           {% if not client.is_confirmed %}
             <form method="post" action="/admin/clients/{{ client.id }}/confirm" style="margin:0;">
@@ -54,6 +55,51 @@
       <tr><th>Комментарий</th><td>{{ client.comment or "—" }}</td></tr>
       <tr><th>Подтверждён</th><td>{% if client.is_confirmed %}Да{% else %}Нет (черновик){% endif %}</td></tr>
     </table>
+
+    <h3 class="section-title">Активная бронь</h3>
+    {% if not active_bookings %}
+      <p class="muted">Активных броней нет.</p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Бронь</th>
+            <th>Дата</th>
+            <th>Тип</th>
+            <th>Мастера</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in active_bookings %}
+            <tr>
+              <td><a href="/admin/bookings/{{ b.id }}">#{{ b.id }}</a></td>
+              <td>{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</td>
+              <td>{% if b.kind.value == "VISIT" %}Визит{% else %}Продажа{% endif %}</td>
+              <td>
+                {% if b.kind.value == "VISIT" and b.masters %}
+                  {% for bm in b.masters %}
+                    {{ bm.master.display_name if bm.master else ("#" ~ bm.master_id) }}{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                {% else %}
+                  <span class="muted">—</span>
+                {% endif %}
+              </td>
+              <td style="white-space:nowrap;">
+                <a href="/admin/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
+                {% if show_admin_actions %}
+                  <a href="/admin/bookings/{{ b.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+                  <form method="post" action="/admin/bookings/{{ b.id }}/cancel" style="display:inline; margin:0;" onsubmit="var r = prompt('Причина отмены'); if(!r) return false; this.querySelector('input[name=reason]').value = r; return confirm('Отменить бронь?');">
+                    <input type="hidden" name="reason" value="" />
+                    <button type="submit" class="secondary">Отменить</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
 
     <h3 class="section-title">Визиты</h3>
     {% if not visit_rows %}
@@ -188,6 +234,40 @@
       {% else %}
         <p class="muted">Пока нет изменений.</p>
       {% endif %}
+    {% endif %}
+
+    <h3 class="section-title">Не активная бронь</h3>
+    {% if not inactive_bookings %}
+      <p class="muted">Пока нет выполненных или отменённых броней.</p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Бронь</th>
+            <th>Дата</th>
+            <th>Статус</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in inactive_bookings %}
+            <tr>
+              <td><a href="/admin/bookings/{{ b.id }}">#{{ b.id }}</a></td>
+              <td>{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</td>
+              <td>
+                {% if b.status.value == "DONE" %}✅ выполнена{% endif %}
+                {% if b.status.value == "CANCELLED" %}❌ отменена{% endif %}
+              </td>
+              <td style="white-space:nowrap;">
+                <a href="/admin/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p style="margin: 10px 0 0;">
+        <a href="/admin/bookings?show=all"><button type="button" class="secondary">Развернуть список</button></a>
+      </p>
     {% endif %}
   </div>
 {% endblock %}

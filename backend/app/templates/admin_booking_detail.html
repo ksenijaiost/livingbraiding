@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 980px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 12px; flex-wrap: wrap;">
+      <div>
+        <p class="muted" style="margin-top:0;">
+          <a href="/admin/clients/{{ booking.client.id }}">← К клиенту</a>
+        </p>
+        <h2 style="margin:0;">Бронь #{{ booking.id }}</h2>
+      </div>
+
+      {% if current_user and (current_user.role in ["ADMIN", "ADMIN_SUPER"]) %}
+        <div style="display:flex; gap: 10px; flex-wrap: wrap; justify-content:flex-end;">
+          <form method="get" action="/admin/bookings/{{ booking.id }}/edit" style="margin:0;">
+            <button type="submit">Изменить</button>
+          </form>
+          {% if booking.status.value == "ACTIVE" %}
+            <form method="post" action="/admin/bookings/{{ booking.id }}/cancel" style="margin:0;"
+                  onsubmit="const r = prompt('Причина отмены брони:'); if(!r){ return false; } this.reason.value = r; return true;">
+              <input type="hidden" name="reason" value="" />
+              <button class="secondary" type="submit">Отменить</button>
+            </form>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+
+    {% if request.query_params.get('err') == 'reason' %}
+      <p style="background:#fee2e2;border:1px solid #fecaca;color:#991b1b;padding:10px 12px;border-radius:8px;">
+        Укажите причину отмены.
+      </p>
+    {% endif %}
+
+    <div class="card" style="background:#f8fafc;">
+      <p style="margin:6px 0;"><strong>Клиент</strong>: <a href="/admin/clients/{{ booking.client.id }}">{{ booking.client.name }}</a></p>
+      <p style="margin:6px 0;"><strong>Дата и время</strong>: {{ format_naive_utc_datetime(booking.planned_date, display_tz) }} ({{ timezone_label(display_tz) }})</p>
+      <p style="margin:6px 0;"><strong>Тип</strong>: {{ kind_label }}</p>
+      <p style="margin:6px 0;"><strong>Статус</strong>: {{ status_label }}</p>
+      <p style="margin:6px 0;"><strong>Кто создал</strong>: {{ booking.created_by_user.display_name if booking.created_by_user else "—" }}</p>
+      {% if booking.status.value == "CANCELLED" and booking.cancelled_reason %}
+        <p style="margin:6px 0;"><strong>Причина отмены</strong>: {{ booking.cancelled_reason }}</p>
+      {% endif %}
+    </div>
+
+    <h3 style="margin-top: 18px;">Связанные записи</h3>
+    <ul style="margin: 8px 0 0;">
+      <li>
+        <strong>Визит</strong>:
+        {% if linked_visit_id %}<a href="/admin/visits/{{ linked_visit_id }}">№{{ linked_visit_id }}</a>{% else %}<span class="muted">—</span>{% endif %}
+      </li>
+      <li>
+        <strong>Продажа</strong>:
+        {% if linked_sale_id %}<a href="/sales/products/{{ linked_sale_id }}">№{{ linked_sale_id }}</a>{% else %}<span class="muted">—</span>{% endif %}
+      </li>
+      <li>
+        <strong>Работа с товарами</strong>:
+        {% if linked_work_id %}<a href="/sales/work/{{ linked_work_id }}">№{{ linked_work_id }}</a>{% else %}<span class="muted">—</span>{% endif %}
+      </li>
+    </ul>
+
+    {% if booking.kind.value == "VISIT" %}
+      <h3 style="margin-top: 18px;">Параметры визита</h3>
+      <p style="margin:6px 0;"><strong>Услуга</strong>:
+        {% if booking.planned_service %}
+          {{ booking.planned_service.subcategory.name }} — {{ booking.planned_service.name }}
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </p>
+      <p style="margin:6px 0;"><strong>Мастера</strong>:
+        {% if booking.masters %}
+          {% for bm in booking.masters %}
+            {{ bm.master.display_name if bm.master else ("#" ~ bm.master_id) }}{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </p>
+    {% else %}
+      <h3 style="margin-top: 18px;">Параметры продажи</h3>
+      <p style="margin:6px 0;"><strong>Тип продажи</strong>: {{ product_kind_label }}</p>
+      {% if sale_kit_order_users and (sale_kit_order_users|length > 0) %}
+        <p style="margin:6px 0;"><strong>Назначенные мастера (заказ комплекта)</strong>: {{ sale_kit_order_users|join(", ") }}</p>
+      {% endif %}
+      {% if sale_rubber_order_users and (sale_rubber_order_users|length > 0) %}
+        <p style="margin:6px 0;"><strong>Назначенный мастер (заказ хвоста/резинки)</strong>: {{ sale_rubber_order_users|join(", ") }}</p>
+      {% endif %}
+    {% endif %}
+
+    <h3 style="margin-top: 18px;">Условия</h3>
+    <p style="margin:6px 0;"><strong>Озвученная сумма</strong>: {{ booking.quoted_price_text or "—" }}</p>
+    <p style="margin:6px 0;"><strong>Предоплата</strong>: {% if booking.deposit_amount is not none %}{{ booking.deposit_amount }} &#8381;{% else %}—{% endif %}</p>
+    {% if booking.comment %}
+      <div class="card" style="margin-top:10px;background:#f8fafc;">
+        <p class="muted" style="margin:0;white-space:pre-wrap;">{{ booking.comment }}</p>
+      </div>
+    {% endif %}
+
+    <h3 style="margin-top: 18px;">Аудит</h3>
+    {% if not audit_rows %}
+      <p class="muted">Пока нет изменений.</p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Когда</th>
+            <th>Кто</th>
+            <th>Поле</th>
+            <th>Было</th>
+            <th>Стало</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in audit_rows %}
+            <tr>
+              <td>{{ format_naive_utc_datetime(r.changed_at, display_tz, "%Y-%m-%d %H:%M") if r.changed_at else "—" }}</td>
+              <td>{{ r.changed_by_user.display_name if r.changed_by_user else "—" }}</td>
+              <td>{{ r.field_name }}</td>
+              <td class="muted" style="max-width:420px;vertical-align:top;">
+                {% if r.field_name == "details_json" %}
+                  <pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.35;background:#f8fafc;padding:8px;border-radius:6px;border:1px solid #e2e8f0;">{{ r.old_value | pretty_json }}</pre>
+                {% else %}
+                  {{ r.old_value or "—" }}
+                {% endif %}
+              </td>
+              <td style="max-width:420px;vertical-align:top;">
+                {% if r.field_name == "details_json" %}
+                  <pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.35;background:#f8fafc;padding:8px;border-radius:6px;border:1px solid #e2e8f0;">{{ r.new_value | pretty_json }}</pre>
+                {% else %}
+                  {{ r.new_value or "—" }}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+{% endblock %}
+
