@@ -23,6 +23,7 @@ from app.db.models import (
     BookingStaff,
     BookingStaffKind,
     BookingStatus,
+    CatalogProduct,
     CategoryQuestionnaireField,
     Kit,
     MaterialPriceCurrent,
@@ -534,6 +535,184 @@ def _deactivate_legacy_inlay_4h_service(db: Session) -> None:
         svc.is_active = False
 
 
+def _upsert_catalog_product(
+    db: Session,
+    *,
+    category_name: str,
+    subcategory_name: str,
+    name: str,
+    price: float | None,
+    meta: dict | None,
+    sort_order: int,
+) -> None:
+    row = db.scalar(
+        select(CatalogProduct).where(
+            CatalogProduct.category_name == category_name,
+            CatalogProduct.subcategory_name == subcategory_name,
+            CatalogProduct.name == name,
+        )
+    )
+    meta_json = json.dumps(meta, ensure_ascii=False) if meta else None
+    if row is None:
+        db.add(
+            CatalogProduct(
+                category_name=category_name,
+                subcategory_name=subcategory_name,
+                name=name,
+                price=price,
+                meta_json=meta_json,
+                sort_order=sort_order,
+                is_active=True,
+            )
+        )
+        return
+    row.is_active = True
+    row.price = price
+    row.meta_json = meta_json
+    row.sort_order = sort_order
+
+
+def _ensure_zakaz_products_catalog(db: Session) -> None:
+    """
+    Прайс «Заказ» в catalog_products.
+
+    Источник финансовых полей (master_pay/studio_pay/fixed_expense) берём из service-catalog «Заказ»,
+    чтобы не дублировать логику и не потерять старые коэффициенты. Клиентскую цену (price) задаём здесь.
+    """
+    # Map from service name -> {master_pay, studio_pay, fixed_expense, is_per_unit, unit_label}
+    fin_map: dict[tuple[str, str], dict] = {}
+    cat = db.scalar(select(ServiceCategory).where(ServiceCategory.name == "Заказ"))
+    if cat:
+        subs = list(db.scalars(select(ServiceSubcategory).where(ServiceSubcategory.category_id == cat.id)).all())
+        for sub in subs:
+            svcs = list(db.scalars(select(Service).where(Service.subcategory_id == sub.id)).all())
+            for s in svcs:
+                fin_map[(sub.name, s.name)] = {
+                    "master_pay": float(s.master_pay_amount or 0.0),
+                    "studio_pay": float(s.studio_pay_amount or 0.0),
+                    "fixed_expense": float(s.fixed_expense_amount or 0.0),
+                    "is_per_unit": bool(getattr(s, "is_per_unit", False)),
+                    "unit_label": (getattr(s, "unit_label", None) or None),
+                }
+
+    # ---- Blanks (used for kit price) ----
+    # Важно: этот список должен покрывать ВСЕ ключи из формы KIT в work_products.py.
+    # Если пользователь ввёл количество по ключу, а цены здесь нет, создание комплекта падает.
+    #
+    # Notes:
+    # - B/U rows stay in catalog but marked as ignore_in_calc.
+    # - trim / tip addon are excluded from client price but держим их в прайсе как тех. позиции.
+    blanks = [
+        ("SE_BRAID_LONG", "SE коса", 85.0),
+        ("SE_BRAID_SHORT", "SE коса короткая", 75.0),
+        ("SE_BRAID_FREE_TIP", "SE ажурная коса", 150.0),
+        ("SE_TIP_ADDON", "SE доплёт кончиков", 0.0),
+        ("SE_TRIM_SHORT", "SE стрижка короткой косы", 0.0),
+        ("SE_TRIM_LONG", "SE стрижка длинной косы", 0.0),
+        (None, "SE коса Б/У", 50.0),
+        (None, "SE дред", 200.0),
+
+        # В форме сейчас есть отдельные short/long ключи, а в прайсе пользователя одна цена.
+        # Поэтому short/long маппим на одну и ту же клиентскую цену, пока не появится отдельная.
+        ("DE_BRAID_SHORT", "DE коса короткая", 150.0),
+        ("DE_BRAID_LONG", "DE коса", 150.0),
+        ("DE_BRAID_NEW_FMT", "DE ажурная коса", 200.0),
+        ("DE_CURL", "DE термокудря", 200.0),
+        ("DE_DREAD_FREE_TIP", "DE дредокудря", 90.0),
+        ("DE_DREAD_SHORT", "DE дред короткий", 200.0),
+        ("DE_DREAD_LONG", "DE дред", 200.0),
+        ("DE_TRIM", "DE стрижка", 0.0),
+        (None, "DE дред Б/У", 150.0),
+
+        # max позиции пока без ключей в форме; добавляем для прайса/будущего калькулятора
+        (None, "DE дред max", 250.0),
+        (None, "DE кудря max", 250.0),
+        (None, "Микрокосы 4х", 250.0),
+        (None, "Микрокоса 6х", 300.0),
+    ]
+    so = 0
+    for kit_key, name, price in blanks:
+        meta = {"kit_key": kit_key, "ignore_in_calc": (kit_key is None)}
+        _upsert_catalog_product(
+            db,
+            category_name="Заказ",
+            subcategory_name="Заготовки поштучно",
+            name=name,
+            price=price,
+            meta=meta,
+            sort_order=so,
+        )
+        so += 1
+
+    # ---- Correction ----
+    corr_prices_overrides = {
+        "Стрижка (1шт)": 5.0,
+        "Одевание на круг": 100.0,
+        "Стирка": 400.0,
+        "Отпаривание": 200.0,
+        # почасовая будет позже
+    }
+    if cat:
+        corr_sub = db.scalar(
+            select(ServiceSubcategory).where(
+                ServiceSubcategory.category_id == cat.id, ServiceSubcategory.name == "Коррекция комплекта"
+            )
+        )
+    else:
+        corr_sub = None
+    corr_rows = (
+        list(db.scalars(select(Service).where(Service.subcategory_id == corr_sub.id)).all())
+        if corr_sub is not None
+        else []
+    )
+    # Сохраняем/переносим все строки коррекции, чтобы выплаты не обнулились.
+    # Для известных позиций применяем новые цены.
+    so = 0
+    for s in corr_rows:
+        svc_name = s.name
+        meta = fin_map.get(("Коррекция комплекта", svc_name), None) or {}
+        price = (
+            float(corr_prices_overrides[svc_name])
+            if svc_name in corr_prices_overrides
+            else (float(s.price_middle_from) if s.price_middle_from is not None else None)
+        )
+        _upsert_catalog_product(
+            db,
+            category_name="Заказ",
+            subcategory_name="Коррекция комплекта",
+            name=svc_name,
+            price=price,
+            meta=meta,
+            sort_order=so,
+        )
+        so += 1
+
+    # ---- Rubber / tails ----
+    # Copy existing service-catalog rows as-is (price may be adjusted later in UI).
+    if cat:
+        rows = list(
+            db.scalars(
+                select(Service)
+                .join(ServiceSubcategory, Service.subcategory_id == ServiceSubcategory.id)
+                .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
+                .where(ServiceSubcategory.name == "Хвосты/резинки", ServiceCategory.name == "Заказ")
+            ).all()
+        )
+        so = 0
+        for s in rows:
+            meta = fin_map.get(("Хвосты/резинки", s.name), None) or {}
+            price = float(s.price_middle_from) if s.price_middle_from is not None else None
+            _upsert_catalog_product(
+                db,
+                category_name="Заказ",
+                subcategory_name="Хвосты/резинки",
+                name=s.name,
+                price=price,
+                meta=meta,
+                sort_order=so,
+            )
+            so += 1
+
 def _ensure_vsy_golova_catalog_and_kits(db: Session) -> None:
     """Каталоги из JSON + анкета вплетения + демо-комплекты."""
     ensure_vsy_golova_catalog(db)
@@ -546,6 +725,8 @@ def _ensure_vsy_golova_catalog_and_kits(db: Session) -> None:
     _deactivate_legacy_inlay_4h_service(db)
 
     _ensure_visit_questionnaire_layout(db)
+
+    _ensure_zakaz_products_catalog(db)
 
     if not db.scalar(select(Kit).where(Kit.sku == "DEMO-001")):
         db.add(

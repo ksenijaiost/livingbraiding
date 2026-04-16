@@ -407,8 +407,11 @@ def upgrade() -> None:
         sa.Column("blanks_kinds_text", sa.Text(), nullable=True),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("stock_price_total", sa.Float(), nullable=True),
+        sa.Column("composition_json", sa.Text(), nullable=True),
+        sa.Column("stock_price_snapshot_text", sa.Text(), nullable=True),
         sa.Column("discount_percent", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("cost_total", sa.Float(), nullable=True),
+        sa.Column("cost_snapshot_text", sa.Text(), nullable=True),
         sa.Column("author_cost_total", sa.Float(), nullable=True),
         sa.Column(
             "created_at",

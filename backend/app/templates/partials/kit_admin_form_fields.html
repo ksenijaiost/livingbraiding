@@ -97,6 +97,22 @@
   <div>
     <label>Цена комплекта на складе (всего), ₽ <span class="muted">*</span></label>
     <input name="{{ field_prefix }}stock_price_total" type="text" inputmode="decimal" required placeholder="например, 3500" value="{{ fp.get('stock_price_total', '') }}" />
+    {% if kit and kit.stock_price_snapshot_text %}
+      <details style="margin-top:6px;">
+        <summary class="muted" style="cursor:pointer;">Рассчитано по составу</summary>
+        <pre style="margin:8px 0 0; white-space:pre-wrap; font:inherit;">{{ kit.stock_price_snapshot_text }}</pre>
+      </details>
+    {% elif computed_stock_price_total is not none %}
+      <div class="muted" style="font-size:12px; margin-top:6px;">
+        Рассчитано по составу: <strong>{{ computed_stock_price_total|round(2) }} ₽</strong>
+        <span class="muted">(можно вручную переопределить в поле выше)</span>
+      </div>
+    {% elif computed_stock_price_missing_keys %}
+      <div class="muted" style="font-size:12px; margin-top:6px;">
+        Не получилось рассчитать по составу: нет цен для ключей
+        <strong>{{ computed_stock_price_missing_keys|join(', ') }}</strong>.
+      </div>
+    {% endif %}
   </div>
   <div>
     <label>Скидка (всего), % <span class="muted">(целое; не больше допустимой по марже)</span></label>
@@ -107,4 +123,10 @@
 <div style="margin-top:8px;">
   <label>Себестоимость (всего), ₽ <span class="muted">*</span> <span class="muted">(затраты + ЗП авторов за весь комплект)</span></label>
   <input name="{{ field_prefix }}cost_total" type="text" inputmode="decimal" required placeholder="например, 2800" value="{{ fp.get('cost_total', '') }}" />
+  {% if kit and kit.cost_snapshot_text %}
+    <details style="margin-top:6px;">
+      <summary class="muted" style="cursor:pointer;">Показать состав себестоимости</summary>
+      <pre style="margin:8px 0 0; white-space:pre-wrap; font:inherit;">{{ kit.cost_snapshot_text }}</pre>
+    </details>
+  {% endif %}
 </div>

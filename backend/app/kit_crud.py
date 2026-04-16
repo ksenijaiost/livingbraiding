@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,7 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
 
-from app.db.models import Kit, KitAuthorStaff, User, UserRole
+from app.db.models import CatalogProduct, Kit, KitAuthorStaff, User, UserRole
 from app.user_roles import select_users_with_role, user_has_role
 
 
@@ -133,6 +134,85 @@ def max_kit_discount_percent_allowed(stock_price: float, cost_total: float) -> i
     if margin <= 0:
         return 0
     return int(margin / price * 100 + 1e-9)
+
+
+def calc_kit_stock_price_total_from_composition(
+    db: Session, kit: Kit
+) -> tuple[float | None, list[str]]:
+    """
+    Рассчитать «цену на складе (всего)» по составу комплекта (composition_json)
+    и прайсу `catalog_products` (категория «Заказ» → «Заготовки поштучно»).
+
+    Возвращает: (price_total_or_none, missing_keys).
+    """
+    if not getattr(kit, "composition_json", None):
+        return None, []
+    try:
+        payload = json.loads(str(kit.composition_json))
+    except Exception:
+        return None, ["<composition_json invalid>"]
+
+    totals: dict[str, int] = {}
+    if isinstance(payload, dict):
+        for k, v in payload.items():
+            try:
+                totals[str(k)] = int(v)
+            except Exception:
+                continue
+    elif isinstance(payload, list):
+        for it in payload:
+            if not isinstance(it, dict):
+                continue
+            k = str(it.get("key") or "").strip()
+            if not k:
+                continue
+            try:
+                q = int(it.get("qty") or 0)
+            except Exception:
+                q = 0
+            if q > 0:
+                totals[k] = totals.get(k, 0) + q
+    else:
+        return None, ["<composition_json invalid>"]
+
+    rows = list(
+        db.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.category_name == "Заказ",
+                CatalogProduct.subcategory_name == "Заготовки поштучно",
+                CatalogProduct.is_active.is_(True),
+            )
+        ).all()
+    )
+    price_map: dict[str, float] = {}
+    for r in rows:
+        try:
+            meta = json.loads(r.meta_json or "{}")
+        except Exception:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        k = (meta.get("kit_key") or "").strip()
+        if not k or r.price is None:
+            continue
+        price_map[k] = float(r.price)
+
+    excluded_keys = {"SE_TIP_ADDON", "SE_TRIM_SHORT", "SE_TRIM_LONG", "DE_TRIM"}
+    missing: list[str] = []
+    total = 0.0
+    for k, q in totals.items():
+        q = int(q)
+        if q <= 0 or k in excluded_keys:
+            continue
+        p = price_map.get(k)
+        if p is None:
+            missing.append(k)
+            continue
+        total += float(p) * float(q)
+    if missing:
+        return None, sorted(set(missing))
+    # В Kit сейчас нет отдельного поля extra_costs_amount; показываем сумму только по заготовкам.
+    return float(total), []
 
 
 def _g_discount_percent_from_form_field(form: Any, name: str, default: int = 0) -> int:

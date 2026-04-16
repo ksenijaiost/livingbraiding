@@ -496,10 +496,16 @@ class Kit(Base):
 
     # Из наличия: вычитаемая из прибыли визита цена (пропорционально списанным заготовкам).
     stock_price_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Снимок состава комплекта (для расчёта цены по прайсу «Заказ»): list[{key, qty}] или dict key->qty.
+    composition_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Текстовый снимок расчёта цены комплекта (построчно: вид, кол-во, цена за шт, сумма, доп. расходы).
+    stock_price_snapshot_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Скидка с цены комплекта, целые проценты 0–100; рубли = цена × (процент/100) при списании.
     discount_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Себестоимость всего комплекта: затраты + ЗП авторов (едино поле; author_cost_total не используем в расчётах).
     cost_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Текстовый снимок расчёта себестоимости (ЗП по видам, материал, смешка, доп. расходы).
+    cost_snapshot_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Устарело: не участвует в формуле фонда студии (себестоимость включает ЗП авторов).
     author_cost_total: Mapped[float | None] = mapped_column(Float, nullable=True)
 

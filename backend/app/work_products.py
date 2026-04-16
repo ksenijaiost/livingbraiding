@@ -25,6 +25,8 @@ from app.db.models import (
     Client,
     Kit,
     KitAuthorStaff,
+    CatalogProduct,
+    KitReserve,
     PayrollFundSourceKind,
     ProductSale,
     MaterialPriceCurrent,
@@ -39,9 +41,6 @@ from app.db.models import (
     WorkForInventory,
     WorkForInventoryStaff,
     WorkKind,
-    Service,
-    ServiceCategory,
-    ServiceSubcategory,
     WorkRate,
     WorkScope,
 )
@@ -261,26 +260,31 @@ def _rubber_service_name(rubber_type: str) -> str:
 def _rubber_pricing_from_catalog(db: Session, rubber_type: str) -> tuple[float, float, float, bool, str | None]:
     """
     Возвращает: (master_pay, studio_pay, fixed_expense, is_per_unit, unit_label).
-    Берём из каталога услуг: категория «Заказ» → подкатегория «Хвосты/резинки».
+    Берём из прайса товаров (catalog_products): категория «Заказ» → подкатегория «Хвосты/резинки».
     """
-    cat = db.scalar(select(ServiceCategory).where(ServiceCategory.name == "Заказ"))
-    if not cat:
-        raise ValueError("Не найден прайс: категория «Заказ».")
-    sub = db.scalar(
-        select(ServiceSubcategory).where(ServiceSubcategory.category_id == cat.id, ServiceSubcategory.name == "Хвосты/резинки")
-    )
-    if not sub:
-        raise ValueError("Не найден прайс: «Заказ → Хвосты/резинки».")
     svc_name = _rubber_service_name(rubber_type)
-    svc = db.scalar(select(Service).where(Service.subcategory_id == sub.id, Service.name == svc_name))
-    # Подкатегория может быть скрыта из прайса «Товары» (is_active=false), но строки услуг
-    # остаются для внутреннего расчёта ЗП/фонда в «Работа с товарами».
-    if not svc:
+    row = db.scalar(
+        select(CatalogProduct).where(
+            CatalogProduct.category_name == "Заказ",
+            CatalogProduct.subcategory_name == "Хвосты/резинки",
+            CatalogProduct.name == svc_name,
+            CatalogProduct.is_active.is_(True),
+        )
+    )
+    if not row:
         raise ValueError(f"Не найден прайс для «{svc_name}».")
-    mp = float(svc.master_pay_amount or 0.0)
-    sp = float(svc.studio_pay_amount or 0.0)
-    fx = float(svc.fixed_expense_amount or 0.0)
-    return mp, sp, fx, bool(svc.is_per_unit), (svc.unit_label or None)
+    try:
+        meta = json.loads(row.meta_json or "{}")
+    except Exception:
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    mp = float(meta.get("master_pay") or 0.0)
+    sp = float(meta.get("studio_pay") or 0.0)
+    fx = float(meta.get("fixed_expense") or 0.0)
+    is_per_unit = bool(meta.get("is_per_unit") or False)
+    unit_label = meta.get("unit_label") or None
+    return mp, sp, fx, is_per_unit, (str(unit_label) if unit_label else None)
 
 
 def _zakaz_subcategory_services_map(
@@ -288,28 +292,31 @@ def _zakaz_subcategory_services_map(
 ) -> dict[str, dict[str, float | bool | None]]:
     """
     Возвращает map по имени услуги в подкатегории:
-    { name: {client_from, client_to, master_pay, studio_pay, fixed_expense, is_per_unit} }
+    { name: {client_price, master_pay, studio_pay, fixed_expense, is_per_unit} }
     """
-    cat = db.scalar(select(ServiceCategory).where(ServiceCategory.name == "Заказ"))
-    if not cat:
-        return {}
-    sub = db.scalar(
-        select(ServiceSubcategory).where(
-            ServiceSubcategory.category_id == cat.id, ServiceSubcategory.name == subcategory_name
-        )
+    rows = list(
+        db.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.category_name == "Заказ",
+                CatalogProduct.subcategory_name == subcategory_name,
+                CatalogProduct.is_active.is_(True),
+            )
+        ).all()
     )
-    if not sub:
-        return {}
-    rows = list(db.scalars(select(Service).where(Service.subcategory_id == sub.id, Service.is_active.is_(True))).all())
     out: dict[str, dict[str, float | bool | None]] = {}
-    for s in rows:
-        out[s.name] = {
-            "client_from": float(s.price_middle_from) if s.price_middle_from is not None else None,
-            "client_to": float(s.price_middle_to) if s.price_middle_to is not None else None,
-            "master_pay": float(s.master_pay_amount) if s.master_pay_amount is not None else None,
-            "studio_pay": float(s.studio_pay_amount) if s.studio_pay_amount is not None else None,
-            "fixed_expense": float(s.fixed_expense_amount) if s.fixed_expense_amount is not None else None,
-            "is_per_unit": bool(s.is_per_unit),
+    for r in rows:
+        try:
+            meta = json.loads(r.meta_json or "{}")
+        except Exception:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        out[r.name] = {
+            "client_price": float(r.price) if r.price is not None else None,
+            "master_pay": float(meta.get("master_pay")) if meta.get("master_pay") is not None else None,
+            "studio_pay": float(meta.get("studio_pay")) if meta.get("studio_pay") is not None else None,
+            "fixed_expense": float(meta.get("fixed_expense")) if meta.get("fixed_expense") is not None else None,
+            "is_per_unit": bool(meta.get("is_per_unit") or False),
         }
     return out
 
@@ -410,6 +417,194 @@ def _kit_rate_for_item(rates: dict[str, dict[str, Any]], item_key: str, qty_tota
                 return th_rate
             return base
     return 0.0
+
+
+def _kit_price_map_from_catalog(db: Session) -> dict[str, float]:
+    rows = list(
+        db.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.category_name == "Заказ",
+                CatalogProduct.subcategory_name == "Заготовки поштучно",
+                CatalogProduct.is_active.is_(True),
+            )
+        ).all()
+    )
+    out: dict[str, float] = {}
+    for r in rows:
+        try:
+            meta = json.loads(r.meta_json or "{}")
+        except Exception:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        k = (meta.get("kit_key") or "").strip()
+        if not k:
+            continue
+        if r.price is None:
+            continue
+        out[k] = float(r.price)
+    return out
+
+
+def _kit_catalog_rows_by_key(db: Session) -> dict[str, dict[str, Any]]:
+    rows = list(
+        db.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.category_name == "Заказ",
+                CatalogProduct.subcategory_name == "Заготовки поштучно",
+                CatalogProduct.is_active.is_(True),
+            )
+        ).all()
+    )
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        try:
+            meta = json.loads(r.meta_json or "{}")
+        except Exception:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        k = (meta.get("kit_key") or "").strip()
+        if not k:
+            continue
+        out[k] = {
+            "name": r.name,
+            "price": (float(r.price) if r.price is not None else None),
+        }
+    return out
+
+
+def _kit_item_labels_map() -> dict[str, str]:
+    return {k: lbl for k, lbl in (_kit_se_items() + _kit_de_items())}
+
+
+def _fmt_money(v: float) -> str:
+    return f"{float(v):.2f} ₽"
+
+
+def _kit_composition_json(kit_totals: dict[str, int]) -> str | None:
+    items = [{"key": k, "qty": int(q)} for k, q in kit_totals.items() if int(q) > 0]
+    return json.dumps(items, ensure_ascii=False) if items else None
+
+
+def _kit_client_stock_price_total(db: Session, *, kit_totals: dict[str, int], extra_costs_amount: float) -> float:
+    price_map = _kit_price_map_from_catalog(db)
+    excluded_keys = {"SE_TIP_ADDON", "SE_TRIM_SHORT", "SE_TRIM_LONG", "DE_TRIM"}
+    missing: list[str] = []
+    total = 0.0
+    for k, q in kit_totals.items():
+        q = int(q)
+        if q <= 0:
+            continue
+        if k in excluded_keys:
+            continue
+        p = price_map.get(k)
+        if p is None:
+            missing.append(k)
+            continue
+        total += float(p) * float(q)
+    if missing:
+        miss = ", ".join(sorted(set(missing)))
+        raise ValueError(f"Не найдены цены в прайсе «Заказ → Заготовки поштучно» для: {miss}.")
+    return float(total) + float(max(0.0, extra_costs_amount))
+
+
+def _kit_stock_price_snapshot_text(
+    db: Session, *, kit_totals: dict[str, int], extra_costs_amount: float
+) -> str:
+    catalog = _kit_catalog_rows_by_key(db)
+    labels = _kit_item_labels_map()
+    excluded_keys = {"SE_TIP_ADDON", "SE_TRIM_SHORT", "SE_TRIM_LONG", "DE_TRIM"}
+    missing: list[str] = []
+    lines = ["Расчёт цены комплекта:"]
+    total = 0.0
+    for key in sorted(kit_totals.keys()):
+        qty = int(kit_totals.get(key, 0) or 0)
+        if qty <= 0:
+            continue
+        if key in excluded_keys:
+            continue
+        row = catalog.get(key)
+        price = None if row is None else row.get("price")
+        if price is None:
+            missing.append(key)
+            continue
+        line_total = float(price) * float(qty)
+        total += line_total
+        title = str((row or {}).get("name") or labels.get(key) or key)
+        lines.append(f"{title} — {qty} шт × {_fmt_money(float(price))} = {_fmt_money(line_total)}")
+    if extra_costs_amount > 0:
+        total += float(extra_costs_amount)
+        lines.append(f"Доп. расходы — {_fmt_money(float(extra_costs_amount))}")
+    lines.append(f"Итого — {_fmt_money(total)}")
+    if missing:
+        lines.append("")
+        lines.append("Нет цен для ключей: " + ", ".join(sorted(set(missing))))
+    return "\n".join(lines)
+
+
+def _kit_cost_snapshot_text(
+    db: Session,
+    *,
+    kit_totals: dict[str, int],
+    kit_rates: dict[str, dict[str, Any]],
+    mat_cost: float,
+    kanek: float,
+    kudri: float,
+    k_snap: float,
+    ku_snap: float,
+    mix_source: MixSource | None,
+    mix_complexity: MixComplexity | None,
+    grams_total: float,
+    extra_costs_amount: float,
+) -> str:
+    labels = _kit_item_labels_map()
+    lines = ["Расчёт себестоимости:"]
+    total = 0.0
+
+    wage_total = 0.0
+    for key in sorted(kit_totals.keys()):
+        qty = int(kit_totals.get(key, 0) or 0)
+        if qty <= 0:
+            continue
+        rate = _kit_rate_for_item(kit_rates, key, qty)
+        if rate <= 0:
+            continue
+        row_total = float(rate) * float(qty)
+        wage_total += row_total
+        lines.append(f"{labels.get(key) or key} — {qty} шт — ЗП {_fmt_money(row_total)}")
+
+    if mix_source == MixSource.SELF_MIXED and grams_total > 0 and mix_complexity is not None:
+        mix_rate = {
+            MixComplexity.SIMPLE: _wr_float(db, "mix_simple", 1.0),
+            MixComplexity.MEDIUM: _wr_float(db, "mix_medium", 1.5),
+            MixComplexity.HARD: _wr_float(db, "mix_hard", 2.0),
+        }.get(mix_complexity, 0.0)
+        mix_pay = float(grams_total) * float(mix_rate)
+        if mix_pay > 0:
+            wage_total += mix_pay
+            lines.append(
+                f"Смешка ({_ru_mix_complexity(mix_complexity.value)}) — {grams_total:.0f} г × {_fmt_money(float(mix_rate)).replace(' ₽', ' ₽/г')} = {_fmt_money(mix_pay)}"
+            )
+
+    if wage_total > 0:
+        total += wage_total
+
+    if kanek > 0:
+        lines.append(
+            f"Материал: канекалон — {kanek:.0f} г × {_fmt_money(float(k_snap)).replace(' ₽', ' ₽/г')} = {_fmt_money(float(kanek) * float(k_snap))}"
+        )
+    if kudri > 0:
+        lines.append(
+            f"Материал: кудри — {kudri:.0f} г × {_fmt_money(float(ku_snap)).replace(' ₽', ' ₽/г')} = {_fmt_money(float(kudri) * float(ku_snap))}"
+        )
+    if mat_cost > 0:
+        total += float(mat_cost)
+    if extra_costs_amount > 0:
+        total += float(extra_costs_amount)
+        lines.append(f"Доп. расходы — {_fmt_money(float(extra_costs_amount))}")
+    lines.append(f"Итого — {_fmt_money(total)}")
+    return "\n".join(lines)
 
 
 @router.get("/new", response_class=HTMLResponse)
@@ -746,17 +941,52 @@ async def work_new_post(
                 )
             )
 
-        # Create Kit in stock for IN_STOCK + KIT
-        if kind == WorkKind.KIT and scope == WorkScope.IN_STOCK:
+        # Create Kit for KIT work:
+        # - IN_STOCK: обычная складская карточка
+        # - CUSTOM_ORDER: создаём складскую карточку и сразу полностью резервируем за клиентом
+        if kind == WorkKind.KIT and scope in (WorkScope.IN_STOCK, WorkScope.CUSTOM_ORDER):
             sku = (_g_str(form, "kit_sku", "") or "").strip()
             title = (_g_str(form, "kit_title", "") or "").strip()
-            if not sku:
-                raise ValueError("Для «в наличие» укажите артикул комплекта.")
-            if not title:
-                raise ValueError("Для «в наличие» укажите название комплекта.")
-            if db.scalar(select(Kit.id).where(Kit.sku == sku)):
-                raise ValueError("Комплект с таким артикулом уже есть — укажите другой.")
+            if scope == WorkScope.IN_STOCK:
+                if not sku:
+                    raise ValueError("Для «в наличие» укажите артикул комплекта.")
+                if not title:
+                    raise ValueError("Для «в наличие» укажите название комплекта.")
+                if db.scalar(select(Kit.id).where(Kit.sku == sku)):
+                    raise ValueError("Комплект с таким артикулом уже есть — укажите другой.")
+            else:
+                # На заказ: артикул/название можно не вводить вручную.
+                if not sku:
+                    sku = f"ORDER-{work.id}"
+                if not title:
+                    cl = db.get(Client, client_id) if client_id else None
+                    title = f"Заказ — комплект (клиент {cl.full_name if cl else client_id})"
+                # Если внезапно пересекается (крайне редко), дополним временем.
+                if db.scalar(select(Kit.id).where(Kit.sku == sku)):
+                    sku = f"{sku}-{int(datetime.utcnow().timestamp())}"
+
             full_cost = float(cost_total_amount) + float(master_total)
+            comp_json = _kit_composition_json(kit_totals)
+            stock_price_total = _kit_client_stock_price_total(
+                db, kit_totals=kit_totals, extra_costs_amount=float(extra_costs_amount)
+            )
+            stock_price_snapshot_text = _kit_stock_price_snapshot_text(
+                db, kit_totals=kit_totals, extra_costs_amount=float(extra_costs_amount)
+            )
+            cost_snapshot_text = _kit_cost_snapshot_text(
+                db,
+                kit_totals=kit_totals,
+                kit_rates=kit_rates,
+                mat_cost=float(mat_cost),
+                kanek=float(kanek),
+                kudri=float(kudri),
+                k_snap=float(k_snap),
+                ku_snap=float(ku_snap),
+                mix_source=mix_source,
+                mix_complexity=mix_complexity,
+                grams_total=float(grams_total),
+                extra_costs_amount=float(extra_costs_amount),
+            )
             kit = Kit(
                 sku=sku[:80],
                 title=title[:200],
@@ -773,9 +1003,12 @@ async def work_new_post(
                 color_text=None,
                 blanks_kinds_text=None,
                 notes=None,
-                stock_price_total=None,
+                stock_price_total=float(stock_price_total),
+                composition_json=comp_json,
+                stock_price_snapshot_text=stock_price_snapshot_text,
                 discount_percent=0,
                 cost_total=full_cost,
+                cost_snapshot_text=cost_snapshot_text,
                 author_cost_total=None,
                 created_at=datetime.utcnow(),
                 is_in_stock=True,
@@ -794,6 +1027,18 @@ async def work_new_post(
                 if mu and mu.is_active and user_has_role(db, uid, UserRole.MASTER):
                     db.add(KitAuthorStaff(kit_id=kit.id, user_id=uid, sort_order=so))
                     so += 1
+
+            if scope == WorkScope.CUSTOM_ORDER and client_id:
+                db.add(
+                    KitReserve(
+                        kit_id=kit.id,
+                        pieces_reserved=int(kit.pieces_total),
+                        reserved_at=datetime.utcnow(),
+                        reserved_by_user_id=int(current_user.id),
+                        reserved_for_client_id=int(client_id),
+                        reserved_for_user_id=None,
+                    )
+                )
 
         staff_saved = list(
             db.scalars(

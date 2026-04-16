@@ -127,7 +127,23 @@
       <dd style="margin:0; white-space:pre-wrap;">{{ kit.notes or '—' }}</dd>
 
       <dt class="muted">Цена на складе (всего)</dt>
-      <dd style="margin:0;">{% if kit.stock_price_total is not none %}{{ kit.stock_price_total }} ₽{% else %}—{% endif %}</dd>
+      <dd style="margin:0;">
+        {% if kit.stock_price_total is not none %}{{ kit.stock_price_total }} ₽{% else %}—{% endif %}
+        {% if kit.stock_price_snapshot_text %}
+          <details style="margin-top:6px;">
+            <summary class="muted" style="cursor:pointer;">Рассчитано по составу</summary>
+            <pre style="margin:8px 0 0; white-space:pre-wrap; font:inherit;">{{ kit.stock_price_snapshot_text }}</pre>
+          </details>
+        {% elif computed_stock_price_total is not none %}
+          <div class="muted" style="font-size:12px;margin-top:4px;">
+            Рассчитано по составу: <strong>{{ computed_stock_price_total|round(2) }} ₽</strong>
+          </div>
+        {% elif computed_stock_price_missing_keys %}
+          <div class="muted" style="font-size:12px;margin-top:4px;">
+            Нет цен для ключей: <strong>{{ computed_stock_price_missing_keys|join(', ') }}</strong>
+          </div>
+        {% endif %}
+      </dd>
 
       <dt class="muted">Скидка (всего), %</dt>
       <dd style="margin:0;">
@@ -155,7 +171,15 @@
       {% endif %}
 
       <dt class="muted">Себестоимость (всего)</dt>
-      <dd style="margin:0;">{% if kit.cost_total is not none %}{{ kit.cost_total }} ₽{% else %}—{% endif %}</dd>
+      <dd style="margin:0;">
+        {% if kit.cost_total is not none %}{{ kit.cost_total }} ₽{% else %}—{% endif %}
+        {% if kit.cost_snapshot_text %}
+          <details style="margin-top:6px;">
+            <summary class="muted" style="cursor:pointer;">Показать состав себестоимости</summary>
+            <pre style="margin:8px 0 0; white-space:pre-wrap; font:inherit;">{{ kit.cost_snapshot_text }}</pre>
+          </details>
+        {% endif %}
+      </dd>
 
       {% if kit.is_reserved %}
         <dt class="muted">Резервы</dt>

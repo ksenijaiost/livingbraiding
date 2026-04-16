@@ -147,6 +147,7 @@ from app.kit_crud import (
     parse_kit_admin_form,
     sync_kit_authors,
     validate_kit_admin_form,
+    calc_kit_stock_price_total_from_composition,
 )
 from app.work_products import _rubber_type_items
 from app import admin_studio_expenses as admin_studio_expenses_routes
@@ -3344,6 +3345,8 @@ def admin_kit_new_get(
             form_action="/admin/kits/new",
             error=None,
             staff_for_kit_authors=list_masters_for_kit_author_pick(db),
+            computed_stock_price_total=None,
+            computed_stock_price_missing_keys=[],
         ),
     )
 
@@ -3379,6 +3382,8 @@ async def admin_kit_new_post(
                 form_action="/admin/kits/new",
                 error=str(exc),
                 staff_for_kit_authors=list_masters_for_kit_author_pick(db),
+                computed_stock_price_total=None,
+                computed_stock_price_missing_keys=[],
             ),
             status_code=400,
         )
@@ -3417,12 +3422,15 @@ def admin_kit_detail(
         ).all()
     )
     display_tz = get_display_timezone(db)
+    computed_price, computed_missing = calc_kit_stock_price_total_from_composition(db, kit)
     return templates.TemplateResponse(
         "admin_kit_detail.html",
         _ctx(
             request,
             current_user=current_user,
             kit=kit,
+            computed_stock_price_total=computed_price,
+            computed_stock_price_missing_keys=computed_missing,
             audit_rows=audit_rows,
             reserve_tooltip=_kit_reservation_tooltip(kit, db),
             staff_users=_staff_users_for_reserve(db),
@@ -3452,6 +3460,7 @@ def admin_kit_edit_get(
     )
     if not kit:
         raise HTTPException(status_code=404, detail="Комплект не найден")
+    computed_price, computed_missing = calc_kit_stock_price_total_from_composition(db, kit)
     return templates.TemplateResponse(
         "admin_kit_form.html",
         _ctx(
@@ -3463,6 +3472,8 @@ def admin_kit_edit_get(
             form_action=f"/admin/kits/{kit_id}/edit",
             error=None,
             staff_for_kit_authors=list_masters_for_kit_author_pick(db),
+            computed_stock_price_total=computed_price,
+            computed_stock_price_missing_keys=computed_missing,
         ),
     )
 
@@ -3630,6 +3641,7 @@ async def admin_kit_edit_post(
         return RedirectResponse(url=f"/admin/kits/{kit_id}?msg=saved", status_code=303)
     except ValueError as exc:
         fp = kit_edit_error_prefill(form)
+        computed_price, computed_missing = calc_kit_stock_price_total_from_composition(db, kit)
         return templates.TemplateResponse(
             "admin_kit_form.html",
             _ctx(
@@ -3641,6 +3653,8 @@ async def admin_kit_edit_post(
                 form_action=f"/admin/kits/{kit_id}/edit",
                 error=str(exc),
                 staff_for_kit_authors=list_masters_for_kit_author_pick(db),
+                computed_stock_price_total=computed_price,
+                computed_stock_price_missing_keys=computed_missing,
             ),
             status_code=400,
         )
