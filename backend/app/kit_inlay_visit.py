@@ -96,6 +96,7 @@ from app.thermo_visit import (
 )
 from app.payroll_fund import post_visit_accruals
 from app.user_roles import user_has_role
+from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
 
 
 def service_requires_kit_block(service: Service) -> bool:
@@ -901,6 +902,7 @@ def save_kit_inlay_visit(
             raise ValueError("Клиент не найден.")
 
     performed_dt = datetime.combine(inp.performed_date, datetime.min.time())
+    ensure_event_date_in_open_payroll_period(db, performed_dt)
 
     visit = Visit(
         created_by_user_id=master_id,

@@ -64,6 +64,11 @@
 
       <div class="row">
         <div>
+          <label>Дата работы (событие)</label>
+          <input type="date" name="performed_date" required value="{{ fp.performed_date or default_date }}" />
+          <p class="muted" style="font-size:12px;margin:4px 0 0;">Эта дата влияет на календарь и период ЗП.</p>
+        </div>
+        <div>
           <label>Дата готовности (для истории)</label>
           <input name="ready_date" value="{{ fp.ready_date or default_date }}" placeholder="YYYY-MM-DD" />
         </div>

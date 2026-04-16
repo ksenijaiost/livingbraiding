@@ -846,6 +846,7 @@ def upgrade() -> None:
         sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
         sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("performed_date", sa.DateTime(), nullable=True),
         sa.Column("is_voided", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column("voided_at", sa.DateTime(), nullable=True),
         sa.Column("voided_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),

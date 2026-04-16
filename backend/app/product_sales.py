@@ -45,7 +45,12 @@ from app.payroll_fund import (
     storno_source_accruals,
 )
 from app.db.session import get_db
-from app.visit_edit_policy import edit_window_days, is_in_closed_payroll_period, within_edit_window
+from app.visit_edit_policy import (
+    edit_window_days,
+    ensure_event_date_in_open_payroll_period,
+    is_in_closed_payroll_period,
+    within_edit_window,
+)
 from app.ru_labels import ru_user_role
 
 templates = Jinja2Templates(directory="app/templates")
@@ -514,6 +519,10 @@ async def product_sale_edit_save(
         performed = datetime.combine(date.fromisoformat(pd_raw), datetime.min.time())
     except ValueError:
         return _render_new(request, current_user, db, error="Некорректная дата.", fp={})
+    try:
+        ensure_event_date_in_open_payroll_period(db, performed)
+    except ValueError as e:
+        return _render_new(request, current_user, db, error=str(e), fp={})
 
     amount_from_client = _g_int(form, "amount_from_client", 0)
     if amount_from_client < 0:
@@ -760,6 +769,10 @@ async def product_sale_new_post(
         performed = datetime.combine(date.fromisoformat(pd_raw), datetime.min.time())
     except ValueError:
         return _fail("Некорректная дата.")
+    try:
+        ensure_event_date_in_open_payroll_period(db, performed)
+    except ValueError as e:
+        return _fail(str(e))
 
     amount_from_client = _g_int(form, "amount_from_client", 0)
     if amount_from_client < 0:

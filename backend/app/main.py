@@ -13,8 +13,10 @@ As the project grows, we can split routes into modules (e.g. `routes/admin.py`,
 """
 
 import json
+import calendar
 import re
 from datetime import date, datetime, time, timedelta
+from collections import defaultdict
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -24,7 +26,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.datastructures import UploadFile
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import case, exists, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.admin_questionnaire_fields import router as admin_questionnaire_fields_router
@@ -84,6 +86,7 @@ from app.db.models import (
     KitReserve,
     MaterialPriceCurrent,
     MaterialType,
+    PayrollFundLedger,
     PayrollFundPayoutPaymentKind,
     PayrollFundSide,
     PayrollFundSourceKind,
@@ -95,6 +98,7 @@ from app.db.models import (
     ServiceSubcategory,
     Setting,
     SettingAuditLog,
+    StudioExpense,
     MasterLevel,
     User,
     UserAuditLog,
@@ -296,7 +300,7 @@ def login_action(
     db: Session = Depends(get_db),
 ):
     """Cookie-based login. On success, redirects to `/`."""
-    user = authenticate(db, username=username.strip(), password=password)
+    user = authenticate(db, login=username.strip(), password=password)
     if not user:
         return templates.TemplateResponse(
             "login.html",
@@ -336,21 +340,333 @@ def logout_action():
 @app.get("/", response_class=HTMLResponse)
 def home(
     request: Request,
+    m: str | None = None,
     current_user: AuthUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     payroll_home: dict[str, Any] | None = None
+    calendar_ctx: dict[str, Any] | None = None
+    sections_ctx: dict[str, Any] | None = None
+
+    display_tz = get_display_timezone(db)
+    tz = ZoneInfo(display_tz)
+
+    def _parse_month_ym(ym: str | None) -> tuple[int, int] | None:
+        if ym is None:
+            return None
+        s = str(ym).strip()
+        if not re.fullmatch(r"\d{4}-\d{2}", s):
+            return None
+        try:
+            d = date.fromisoformat(f"{s}-01")
+        except ValueError:
+            return None
+        return d.year, d.month
+
+    # Month to render: default = current month in display timezone.
+    now_local = datetime.utcnow().replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
+    parsed = _parse_month_ym(m)
+    year = parsed[0] if parsed else now_local.year
+    month = parsed[1] if parsed else now_local.month
+    month_local_start = datetime(year, month, 1, 0, 0, 0, tzinfo=tz)
+    if month == 12:
+        next_month_local_start = datetime(year + 1, 1, 1, 0, 0, 0, tzinfo=tz)
+    else:
+        next_month_local_start = datetime(year, month + 1, 1, 0, 0, 0, tzinfo=tz)
+    month_start_utc = month_local_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    month_end_utc = next_month_local_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+    def _utc_naive_to_local_date(dt_utc_naive: datetime) -> date:
+        return dt_utc_naive.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz).date()
+
     if current_user.role in (UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
         show_studio = UserRole.ADMIN_SUPER in current_user.roles
+
+        # Payroll summary for current user.
         payroll_home = {
-            "personal_balance": employee_fund_balance(db, current_user.id),
-            "paid_net": employee_payout_total_net(db, current_user.id),
+            "personal_balance": _money0(employee_fund_balance(db, current_user.id)),
+            "paid_net": _money0(employee_payout_total_net(db, current_user.id)),
             "show_studio": show_studio,
-            "studio_balance": studio_fund_balance(db) if show_studio else None,
+            "studio_balance": _money0(studio_fund_balance(db)) if show_studio else None,
+            "display_tz": display_tz,
+        }
+
+        # Calendar aggregates (by local day).
+        visits_by_day: dict[date, int] = defaultdict(int)
+        bookings_by_day: dict[date, int] = defaultdict(int)
+        works_by_day: dict[date, int] = defaultdict(int)
+        payroll_sum_by_day: dict[date, float] = defaultdict(float)
+
+        # Visits
+        v_stmt = (
+            select(Visit.id, Visit.performed_date)
+            .where(
+                Visit.is_cancelled.is_(False),
+                Visit.performed_date >= month_start_utc,
+                Visit.performed_date < month_end_utc,
+            )
+        )
+        if current_user.role == UserRole.MASTER:
+            v_stmt = v_stmt.where(
+                Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == current_user.id))
+            )
+        visit_rows = list(db.execute(v_stmt).all())
+        visit_ids = [int(vid) for vid, _ in visit_rows if vid is not None]
+        for _, dt0 in visit_rows:
+            if isinstance(dt0, datetime):
+                visits_by_day[_utc_naive_to_local_date(dt0)] += 1
+
+        # Works (work_for_inventory)
+        w_stmt = (
+            select(WorkForInventory.id, WorkForInventory.performed_date, WorkForInventory.created_at)
+            .where(
+                WorkForInventory.is_voided.is_(False),
+                or_(
+                    and_(
+                        WorkForInventory.performed_date.is_not(None),
+                        WorkForInventory.performed_date >= month_start_utc,
+                        WorkForInventory.performed_date < month_end_utc,
+                    ),
+                    and_(
+                        WorkForInventory.performed_date.is_(None),
+                        WorkForInventory.created_at >= month_start_utc,
+                        WorkForInventory.created_at < month_end_utc,
+                    ),
+                ),
+            )
+        )
+        if current_user.role == UserRole.MASTER:
+            w_stmt = w_stmt.where(
+                or_(
+                    WorkForInventory.created_by_user_id == current_user.id,
+                    WorkForInventory.id.in_(
+                        select(WorkForInventoryStaff.work_id).where(
+                            WorkForInventoryStaff.user_id == current_user.id
+                        )
+                    ),
+                )
+            )
+        work_rows = list(db.execute(w_stmt).all())
+        work_ids = [int(wid) for wid, _, _ in work_rows if wid is not None]
+        for _, perf_dt, created_dt in work_rows:
+            dt0 = perf_dt if isinstance(perf_dt, datetime) else created_dt
+            if isinstance(dt0, datetime):
+                works_by_day[_utc_naive_to_local_date(dt0)] += 1
+
+        # Bookings (active)
+        b_stmt = (
+            select(Booking.planned_date)
+            .where(
+                Booking.status == BookingStatus.ACTIVE,
+                Booking.planned_date >= month_start_utc,
+                Booking.planned_date < month_end_utc,
+            )
+        )
+        if current_user.role == UserRole.MASTER:
+            b_stmt = b_stmt.where(
+                or_(
+                    Booking.id.in_(
+                        select(BookingMaster.booking_id).where(BookingMaster.master_id == current_user.id)
+                    ),
+                    Booking.id.in_(
+                        select(BookingStaff.booking_id).where(BookingStaff.user_id == current_user.id)
+                    ),
+                )
+            )
+        for (dt0,) in db.execute(b_stmt).all():
+            if isinstance(dt0, datetime):
+                bookings_by_day[_utc_naive_to_local_date(dt0)] += 1
+
+        # Payroll (group by event date for VISIT/WORK/PRODUCT_SALE; fallback to created_at for other sources)
+        # VISIT
+        if visit_ids:
+            v_pay = list(
+                db.execute(
+                    select(Visit.id, Visit.performed_date, func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
+                    .join(PayrollFundLedger, PayrollFundLedger.source_id == Visit.id)
+                    .where(
+                        PayrollFundLedger.side == PayrollFundSide.MASTER,
+                        PayrollFundLedger.user_id == current_user.id,
+                        PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                        Visit.id.in_(visit_ids),
+                    )
+                    .group_by(Visit.id, Visit.performed_date)
+                ).all()
+            )
+            for _, dt0, amt in v_pay:
+                if isinstance(dt0, datetime):
+                    payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(amt or 0.0)
+
+        # WORK (event date = performed_date, fallback = created_at)
+        if work_ids:
+            w_pay = list(
+                db.execute(
+                    select(
+                        WorkForInventory.id,
+                        func.coalesce(WorkForInventory.performed_date, WorkForInventory.created_at),
+                        func.coalesce(func.sum(PayrollFundLedger.amount), 0.0),
+                    )
+                    .join(PayrollFundLedger, PayrollFundLedger.source_id == WorkForInventory.id)
+                    .where(
+                        PayrollFundLedger.side == PayrollFundSide.MASTER,
+                        PayrollFundLedger.user_id == current_user.id,
+                        PayrollFundLedger.source_kind == PayrollFundSourceKind.WORK,
+                        WorkForInventory.id.in_(work_ids),
+                    )
+                    .group_by(WorkForInventory.id, func.coalesce(WorkForInventory.performed_date, WorkForInventory.created_at))
+                ).all()
+            )
+            for _, dt0, amt in w_pay:
+                if isinstance(dt0, datetime):
+                    payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(amt or 0.0)
+
+        # PRODUCT_SALE
+        s_pay = list(
+            db.execute(
+                select(
+                    ProductSale.id,
+                    ProductSale.performed_date,
+                    func.coalesce(func.sum(PayrollFundLedger.amount), 0.0),
+                )
+                .join(PayrollFundLedger, PayrollFundLedger.source_id == ProductSale.id)
+                .where(
+                    PayrollFundLedger.side == PayrollFundSide.MASTER,
+                    PayrollFundLedger.user_id == current_user.id,
+                    PayrollFundLedger.source_kind == PayrollFundSourceKind.PRODUCT_SALE,
+                    ProductSale.performed_date >= month_start_utc,
+                    ProductSale.performed_date < month_end_utc,
+                    ProductSale.is_voided.is_(False),
+                )
+                .group_by(ProductSale.id, ProductSale.performed_date)
+            ).all()
+        )
+        for _, dt0, amt in s_pay:
+            if isinstance(dt0, datetime):
+                payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(amt or 0.0)
+
+        # Other ledger rows (manual payouts/adjustments) — by created_at date.
+        other_stmt = (
+            select(PayrollFundLedger.created_at, PayrollFundLedger.amount)
+            .where(
+                PayrollFundLedger.side == PayrollFundSide.MASTER,
+                PayrollFundLedger.user_id == current_user.id,
+                PayrollFundLedger.created_at >= month_start_utc,
+                PayrollFundLedger.created_at < month_end_utc,
+                PayrollFundLedger.source_kind.notin_(
+                    (
+                        PayrollFundSourceKind.VISIT,
+                        PayrollFundSourceKind.WORK,
+                        PayrollFundSourceKind.PRODUCT_SALE,
+                    )
+                ),
+            )
+        )
+        for dt0, amt in db.execute(other_stmt).all():
+            if isinstance(dt0, datetime):
+                payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(amt or 0.0)
+
+        # Current payroll period and period expenses (superadmin only)
+        period_ctx: dict[str, Any] | None = None
+        if show_studio:
+            today = now_local.date()
+            p = db.scalar(
+                select(PayrollPeriod)
+                .where(PayrollPeriod.date_from <= datetime.combine(today, time.max), PayrollPeriod.date_to >= datetime.combine(today, time.min))
+                .order_by(
+                    case((PayrollPeriod.closed_at.is_(None), 0), else_=1),
+                    PayrollPeriod.date_from.desc(),
+                    PayrollPeriod.id.desc(),
+                )
+                .limit(1)
+            )
+            if p is None:
+                p = db.scalar(
+                    select(PayrollPeriod).order_by(PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc()).limit(1)
+                )
+            if p is not None:
+                # For open period, show/compute up to today (not to date_to which may be a placeholder).
+                period_end = p.date_to
+                if p.closed_at is None:
+                    period_end = _payroll_period_day_end(today)
+                expenses_sum = (
+                    db.scalar(
+                        select(func.coalesce(func.sum(StudioExpense.amount), 0.0)).where(
+                            StudioExpense.is_voided.is_(False),
+                            StudioExpense.date >= p.date_from,
+                            StudioExpense.date <= period_end,
+                        )
+                    )
+                    or 0.0
+                )
+                period_ctx = {
+                    "id": p.id,
+                    "date_from": p.date_from,
+                    "date_to": period_end,
+                    "expenses_sum": _money0(expenses_sum),
+                }
+        payroll_home["period"] = period_ctx
+
+        # Build calendar grid (weeks of local dates).
+        cal = calendar.Calendar(firstweekday=0)  # Mon
+        weeks = []
+        for week in cal.monthdatescalendar(year, month):
+            w = []
+            for d0 in week:
+                w.append(
+                    {
+                        "date": d0,
+                        "iso": d0.isoformat(),
+                        "in_month": (d0.month == month),
+                        "visits": int(visits_by_day.get(d0, 0)),
+                        "bookings": int(bookings_by_day.get(d0, 0)),
+                        "works": int(works_by_day.get(d0, 0)),
+                        "payroll_sum": float(payroll_sum_by_day.get(d0, 0.0)),
+                        "is_today": (d0 == now_local.date()),
+                    }
+                )
+            weeks.append(w)
+
+        prev_month = (month_local_start - timedelta(days=1)).date().replace(day=1)
+        next_month = next_month_local_start.date().replace(day=1)
+        months_ru = (
+            "январь",
+            "февраль",
+            "март",
+            "апрель",
+            "май",
+            "июнь",
+            "июль",
+            "август",
+            "сентябрь",
+            "октябрь",
+            "ноябрь",
+            "декабрь",
+        )
+        calendar_ctx = {
+            "display_tz": display_tz,
+            "year": year,
+            "month": month,
+            "label": f"{months_ru[month - 1].capitalize()} {year}",
+            "ym": f"{year:04d}-{month:02d}",
+            "prev_ym": f"{prev_month.year:04d}-{prev_month.month:02d}",
+            "next_ym": f"{next_month.year:04d}-{next_month.month:02d}",
+            "weeks": weeks,
+        }
+
+        # Sections buttons on home (same grouping as header).
+        sections_ctx = {
+            "is_master": current_user.role == UserRole.MASTER,
+            "is_admin_super": current_user.role == UserRole.ADMIN_SUPER,
         }
     return templates.TemplateResponse(
         "home.html",
-        _ctx(request, current_user=current_user, payroll_home=payroll_home),
+        _ctx(
+            request,
+            current_user=current_user,
+            payroll_home=payroll_home,
+            calendar_ctx=calendar_ctx,
+            sections_ctx=sections_ctx,
+        ),
     )
 
 
@@ -1236,6 +1552,255 @@ def master_kits_suggest(
     db: Session = Depends(get_db),
 ):
     return JSONResponse({"kits": suggest_kits_for_stock(db, q)})
+
+
+def _money0(x: float | None) -> float:
+    if x is None:
+        return 0.0
+    v = float(x)
+    return 0.0 if abs(v) < 0.0005 else v
+
+
+def _day_bounds_utc(d: date) -> tuple[datetime, datetime]:
+    start = datetime.combine(d, time.min)
+    end_excl = start + timedelta(days=1)
+    return start, end_excl
+
+
+def _sum_ledger(
+    db: Session,
+    *,
+    side: PayrollFundSide,
+    source_kind: PayrollFundSourceKind,
+    source_ids: list[int],
+    user_id: int | None = None,
+) -> dict[int, float]:
+    if not source_ids:
+        return {}
+    stmt = (
+        select(PayrollFundLedger.source_id, func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
+        .where(
+            PayrollFundLedger.side == side,
+            PayrollFundLedger.source_kind == source_kind,
+            PayrollFundLedger.source_id.in_(source_ids),
+        )
+        .group_by(PayrollFundLedger.source_id)
+    )
+    if user_id is not None:
+        stmt = stmt.where(PayrollFundLedger.user_id == user_id)
+    rows = list(db.execute(stmt).all())
+    out: dict[int, float] = {}
+    for sid, amt in rows:
+        if sid is None:
+            continue
+        out[int(sid)] = _money0(float(amt or 0.0))
+    return out
+
+
+@app.get("/api/calendar/day")
+def api_calendar_day(
+    d: str,
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
+    db: Session = Depends(get_db),
+):
+    try:
+        day = date.fromisoformat((d or "").strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Некорректная дата")
+
+    day_start, day_end = _day_bounds_utc(day)
+
+    is_master = current_user.role == UserRole.MASTER
+    is_super = current_user.role == UserRole.ADMIN_SUPER
+
+    # ---- Bookings ----
+    b_stmt = (
+        select(Booking)
+        .options(selectinload(Booking.client))
+        .where(Booking.planned_date >= day_start, Booking.planned_date < day_end)
+        .order_by(Booking.planned_date.asc(), Booking.id.asc())
+    )
+    if is_master:
+        b_stmt = b_stmt.where(
+            or_(
+                Booking.id.in_(
+                    select(BookingMaster.booking_id).where(
+                        BookingMaster.master_id == current_user.id
+                    )
+                ),
+                Booking.id.in_(
+                    select(BookingStaff.booking_id).where(
+                        BookingStaff.user_id == current_user.id
+                    )
+                ),
+            )
+        )
+    bookings = list(db.scalars(b_stmt).all())
+    booking_ids = [int(b.id) for b in bookings if b.id is not None]
+    booking_payout = {}  # no payroll for bookings yet
+    booking_studio = {}
+
+    booking_items = []
+    for b in bookings:
+        booking_items.append(
+            {
+                "id": int(b.id),
+                "client": (b.client.name if b.client else "—"),
+                "kind": _booking_kind_label(b.kind.value),
+                "status": _booking_status_label(b.status.value),
+                "time": format_naive_utc_datetime(b.planned_date, get_display_timezone(db)),
+                "url": f"/admin/bookings/{int(b.id)}",
+                "payout_sum": 0.0,
+                "studio_sum": 0.0,
+            }
+        )
+
+    # ---- Visits ----
+    v_stmt = (
+        select(Visit)
+        .options(selectinload(Visit.client), selectinload(Visit.services))
+        .where(
+            Visit.is_cancelled.is_(False),
+            Visit.performed_date >= day_start,
+            Visit.performed_date < day_end,
+        )
+        .order_by(Visit.performed_date.asc(), Visit.id.asc())
+    )
+    if is_master:
+        v_stmt = v_stmt.where(
+            or_(
+                Visit.id.in_(
+                    select(VisitMaster.visit_id).where(
+                        VisitMaster.master_id == current_user.id
+                    )
+                ),
+                Visit.mix_bonus_master_id == current_user.id,
+            )
+        )
+    visits = list(db.scalars(v_stmt).all())
+    visit_ids = [int(v.id) for v in visits if v.id is not None]
+    visit_payout = _sum_ledger(
+        db,
+        side=PayrollFundSide.MASTER,
+        source_kind=PayrollFundSourceKind.VISIT,
+        source_ids=visit_ids,
+        user_id=current_user.id if is_master else None,
+    )
+    visit_studio = (
+        _sum_ledger(
+            db,
+            side=PayrollFundSide.STUDIO,
+            source_kind=PayrollFundSourceKind.VISIT,
+            source_ids=visit_ids,
+            user_id=None,
+        )
+        if is_super
+        else {}
+    )
+
+    visit_items = []
+    for v in visits:
+        svc = None
+        try:
+            svc = (sorted(list(v.services or []), key=lambda x: int(x.id or 0))[:1] or [None])[0]
+        except Exception:
+            svc = None
+        svc_name = (svc.service_name if svc else "—") if svc is not None else "—"
+        vid = int(v.id)
+        visit_items.append(
+            {
+                "id": vid,
+                "client": (v.client.name if v.client else "—"),
+                "label": svc_name,
+                "url": f"/admin/visits/{vid}",
+                "payout_sum": float(visit_payout.get(vid, 0.0)),
+                "studio_sum": float(visit_studio.get(vid, 0.0)),
+            }
+        )
+
+    # ---- Works ----
+    w_day = func.coalesce(WorkForInventory.performed_date, WorkForInventory.created_at)
+    w_stmt = (
+        select(WorkForInventory)
+        .options(selectinload(WorkForInventory.client))
+        .where(
+            WorkForInventory.is_voided.is_(False),
+            w_day >= day_start,
+            w_day < day_end,
+        )
+        .order_by(w_day.asc(), WorkForInventory.id.asc())
+    )
+    if is_master:
+        w_stmt = w_stmt.where(
+            or_(
+                WorkForInventory.created_by_user_id == current_user.id,
+                WorkForInventory.id.in_(
+                    select(WorkForInventoryStaff.work_id).where(
+                        WorkForInventoryStaff.user_id == current_user.id
+                    )
+                ),
+            )
+        )
+    works = list(db.scalars(w_stmt).all())
+    work_ids = [int(w.id) for w in works if w.id is not None]
+    work_payout = _sum_ledger(
+        db,
+        side=PayrollFundSide.MASTER,
+        source_kind=PayrollFundSourceKind.WORK,
+        source_ids=work_ids,
+        user_id=current_user.id if is_master else None,
+    )
+    work_studio = (
+        _sum_ledger(
+            db,
+            side=PayrollFundSide.STUDIO,
+            source_kind=PayrollFundSourceKind.WORK,
+            source_ids=work_ids,
+            user_id=None,
+        )
+        if is_super
+        else {}
+    )
+
+    work_items = []
+    for w in works:
+        wid = int(w.id)
+        work_items.append(
+            {
+                "id": wid,
+                "client": (w.client.name if w.client else "—"),
+                "label": _work_activity_label(w).replace("Работа: ", ""),
+                "url": f"/sales/work/{wid}",
+                "payout_sum": float(work_payout.get(wid, 0.0)),
+                "studio_sum": float(work_studio.get(wid, 0.0)),
+            }
+        )
+
+    resp = {
+        "date": day.isoformat(),
+        "bookings": {
+            "count": len(booking_items),
+            "payout_sum": 0.0,
+            "studio_sum": 0.0,
+            "items": booking_items,
+        },
+        "visits": {
+            "count": len(visit_items),
+            "payout_sum": _money0(sum(i["payout_sum"] for i in visit_items)),
+            "studio_sum": _money0(sum(i["studio_sum"] for i in visit_items)) if is_super else 0.0,
+            "items": visit_items,
+        },
+        "works": {
+            "count": len(work_items),
+            "payout_sum": _money0(sum(i["payout_sum"] for i in work_items)),
+            "studio_sum": _money0(sum(i["studio_sum"] for i in work_items)) if is_super else 0.0,
+            "items": work_items,
+        },
+        "is_super": is_super,
+    }
+    return JSONResponse(resp)
 
 
 @app.get("/admin/clients/suggest")

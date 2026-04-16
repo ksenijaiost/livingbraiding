@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -42,6 +42,39 @@ def is_in_closed_payroll_period(db: Session, created_at: datetime) -> bool:
         )
     )
     return p is not None
+
+
+def ensure_event_date_in_open_payroll_period(db: Session, event_at: datetime) -> None:
+    """
+    Запрещаем создание/перенос денежных событий в закрытый период ЗП.
+
+    Правило:
+    - если дата попадает в закрытый период → ошибка
+    - иначе должна быть в текущем открытом периоде (от date_from до конца текущего дня UTC)
+    """
+    closed = db.scalar(
+        select(PayrollPeriod.id).where(
+            PayrollPeriod.closed_at.is_not(None),
+            PayrollPeriod.date_from <= event_at,
+            PayrollPeriod.date_to >= event_at,
+        )
+    )
+    if closed is not None:
+        raise ValueError("Дата попадает в закрытый период ЗП, создание невозможно.")
+
+    open_p = db.scalar(
+        select(PayrollPeriod)
+        .where(PayrollPeriod.closed_at.is_(None))
+        .order_by(PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc())
+        .limit(1)
+    )
+    if open_p is None:
+        # В MVP без периода лучше не блокировать совсем, но по требованиям — ошибка.
+        raise ValueError("Нет открытого периода ЗП. Суперадмин должен открыть текущий период.")
+
+    open_end = datetime.combine(datetime.utcnow().date(), time.max)
+    if event_at < open_p.date_from or event_at > open_end:
+        raise ValueError("Дата попадает в закрытый период ЗП, создание невозможно.")
 
 
 @dataclass(frozen=True)

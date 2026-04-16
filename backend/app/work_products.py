@@ -49,7 +49,12 @@ from app.db.session import get_db
 from app.user_roles import select_users_with_role, user_has_role
 from app.kit_inlay_visit import _materials_cost_and_snapshot
 from app.work_products_compute import compute_work_financials
-from app.visit_edit_policy import edit_window_days, is_in_closed_payroll_period, within_edit_window
+from app.visit_edit_policy import (
+    edit_window_days,
+    ensure_event_date_in_open_payroll_period,
+    is_in_closed_payroll_period,
+    within_edit_window,
+)
 from app.ru_labels import ru_user_role
 from app.audit import diff_fields, write_audit_rows
 
@@ -454,6 +459,12 @@ async def work_new_post(
     form = await request.form()
     fp = {k: _g_str(form, k) for k in form.keys() if isinstance(k, str)}
     try:
+        pd_raw = (_g_str(form, "performed_date", "") or "").strip()
+        try:
+            performed_dt = datetime.combine(date.fromisoformat(pd_raw), datetime.min.time())
+        except ValueError:
+            raise ValueError("Некорректная дата работы.")
+        ensure_event_date_in_open_payroll_period(db, performed_dt)
         scope_raw = (_g_str(form, "scope", "") or "").strip()
         try:
             scope = WorkScope(scope_raw)
@@ -699,6 +710,7 @@ async def work_new_post(
 
         work = WorkForInventory(
             created_by_user_id=current_user.id,
+            performed_date=performed_dt,
             kind=kind,
             scope=scope,
             client_id=client_id,

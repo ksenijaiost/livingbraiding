@@ -804,6 +804,8 @@ class WorkForInventory(Base):
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # Дата события (для календаря/периодов). Для старых записей может быть NULL → используем created_at.
+    performed_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_voided: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     voided_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
