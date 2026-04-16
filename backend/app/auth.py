@@ -13,7 +13,7 @@ from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, Request, Response, status
 from itsdangerous import BadSignature, URLSafeSerializer
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import MasterLevel, User, UserRole
@@ -66,11 +66,27 @@ def logout_response() -> Response:
     return resp
 
 
-def authenticate(db: Session, username: str, password: str) -> Optional[User]:
-    """Return a User if credentials are valid, otherwise None."""
-    user = db.scalar(
-        select(User).where(User.username == username, User.is_active.is_(True))
-    )
+def canonical_staff_phone(raw: str | None) -> str | None:
+    """Нормализация номера для хранения и входа: только цифры, минимум 10."""
+    if raw is None or not str(raw).strip():
+        return None
+    digits = "".join(c for c in str(raw).strip() if c.isdigit())
+    if len(digits) < 10:
+        return None
+    return digits[:30]
+
+
+def authenticate(db: Session, login: str, password: str) -> Optional[User]:
+    """Вход по логину (латиница) или по телефону (цифры, как в карточке сотрудника)."""
+    raw = (login or "").strip()
+    if not raw:
+        return None
+    login_lower = raw.lower()
+    phone_key = canonical_staff_phone(raw)
+    conds = [User.username == login_lower]
+    if phone_key:
+        conds.append(User.phone == phone_key)
+    user = db.scalar(select(User).where(User.is_active.is_(True), or_(*conds)))
     if not user:
         return None
     if not verify_password(password, user.password_hash):

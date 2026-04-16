@@ -7,20 +7,21 @@
     {% endif %}
     <form method="post" action="/login">
       <div style="margin-bottom: 12px;">
-        <label>Логин</label>
+        <label>Логин или телефон</label>
         <input name="username" autocomplete="username" required />
+        <p class="muted" style="font-size:12px;margin:4px 0 0;">Телефон — как в карточке сотрудника (достаточно цифр, можно с +7 и пробелами).</p>
       </div>
       <div style="margin-bottom: 12px;">
         <label>Пароль</label>
         <input name="password" type="password" autocomplete="current-password" required />
       </div>
-      <div class="row" style="align-items:center;">
+      <div class="row" style="align-items:center; flex-wrap:wrap;">
         <button type="submit">Войти</button>
-        <div class="muted" style="text-align:right;">
-          Dev: admin/admin, master1/master1
-        </div>
+        <a href="/login/forgot" style="margin-left:auto;"><span class="muted" style="font-size:13px;">Забыли пароль?</span></a>
       </div>
+      <p class="muted" style="margin-top:14px;font-size:12px;margin-bottom:0;">
+        Dev: admin/admin, master1/master1
+      </p>
     </form>
   </div>
 {% endblock %}
-

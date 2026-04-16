@@ -50,8 +50,10 @@ def upgrade() -> None:
             sa.Enum("JUNIOR", "MIDDLE", "SENIOR", name="masterlevel"),
             nullable=True,
         ),
+        sa.Column("phone", sa.String(length=30), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.UniqueConstraint("username", name="uq_users_username"),
+        sa.UniqueConstraint("phone", name="uq_users_phone"),
     )
 
     op.create_table(
@@ -60,6 +62,17 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("role", sa.Enum("ADMIN_SUPER", "ADMIN", "MASTER", name="userrole"), nullable=False),
         sa.UniqueConstraint("user_id", "role", name="uq_user_role_assignments_user_role"),
+    )
+
+    op.create_table(
+        "user_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
     )
 
     op.create_table(
@@ -969,6 +982,7 @@ def downgrade() -> None:
     op.drop_table("studio_expense_categories")
     op.drop_table("client_thermo_templates")
     op.drop_table("clients")
+    op.drop_table("user_audit_logs")
     op.drop_table("user_role_assignments")
     op.drop_table("users")
     op.drop_table("settings")

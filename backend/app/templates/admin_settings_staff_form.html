@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 720px;">
+    <p><a href="/admin/settings/staff">← Сотрудники</a></p>
+    <h2 style="margin-top:0;">{% if is_new %}Новый сотрудник{% else %}Сотрудник: {{ user.username }}{% endif %}</h2>
+
+    {% if error %}
+      <div class="error" style="margin-bottom:12px;">{{ error }}</div>
+    {% endif %}
+
+    {% if is_new %}
+      <form method="post" action="/admin/settings/staff/new">
+        <div style="margin-bottom:12px;">
+          <label>Логин (латиница, цифры, _)</label>
+          <input name="username" required autocomplete="username" maxlength="50" pattern="[a-z0-9_]{2,50}" title="2–50 символов: a-z, 0-9, _" />
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>Телефон для входа (необязательно)</label>
+          <input name="phone" type="tel" autocomplete="tel" placeholder="+7 … или 10–15 цифр" maxlength="40" />
+          <p class="muted" style="font-size:12px;margin:4px 0 0;">Сохраняются только цифры, не меньше 10. Вход на странице «Вход» — логин <strong>или</strong> этот номер.</p>
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>Отображаемое имя</label>
+          <input name="display_name" required maxlength="120" />
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>Пароль (не короче 6 символов)</label>
+          <input name="password" type="password" required autocomplete="new-password" minlength="6" />
+        </div>
+        <div style="margin-bottom:12px;">
+          <div style="font-weight:600;margin-bottom:6px;">Роли</div>
+          <label style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+            <input type="checkbox" name="role_admin_super" value="1" />
+            <span>{{ ru_user_role(UserRole.ADMIN_SUPER) }}</span>
+          </label>
+          <label style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+            <input type="checkbox" name="role_admin" value="1" />
+            <span>{{ ru_user_role(UserRole.ADMIN) }}</span>
+          </label>
+          <label style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+            <input type="checkbox" name="role_master" value="1" />
+            <span>{{ ru_user_role(UserRole.MASTER) }}</span>
+          </label>
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>Уровень мастера (если отмечена роль мастера)</label>
+          <select name="master_level">
+            {% for lv in master_levels %}
+              <option value="{{ lv.value }}">{{ ru_master_level(lv) }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit">Создать</button>
+        <a href="/admin/settings/staff" style="margin-left:8px;"><button type="button" class="secondary">Отмена</button></a>
+      </form>
+    {% else %}
+      <form method="post" action="/admin/settings/staff/{{ user.id }}/edit">
+        <div style="margin-bottom:12px;">
+          <label>Логин</label>
+          <input value="{{ user.username }}" disabled style="background:#f3f4f6;" />
+          <p class="muted" style="font-size:12px;margin:4px 0 0;">Логин не меняется.</p>
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>Телефон для входа</label>
+          <input name="phone" type="tel" autocomplete="tel" value="{{ user.phone or '' }}" placeholder="+7 …" maxlength="40" />
+          <p class="muted" style="font-size:12px;margin:4px 0 0;">Очистите поле, чтобы убрать вход по номеру. Не менее 10 цифр, если заполняете.</p>
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>Отображаемое имя</label>
+          <input name="display_name" required maxlength="120" value="{{ user.display_name }}" />
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>Новый пароль (оставьте пустым, чтобы не менять)</label>
+          <input name="new_password" type="password" autocomplete="new-password" minlength="6" />
+        </div>
+        <div style="margin-bottom:12px;">
+          <div style="font-weight:600;margin-bottom:6px;">Роли</div>
+          <label style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+            <input type="checkbox" name="role_admin_super" value="1" {% if UserRole.ADMIN_SUPER in roles %}checked{% endif %} />
+            <span>{{ ru_user_role(UserRole.ADMIN_SUPER) }}</span>
+          </label>
+          <label style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+            <input type="checkbox" name="role_admin" value="1" {% if UserRole.ADMIN in roles %}checked{% endif %} />
+            <span>{{ ru_user_role(UserRole.ADMIN) }}</span>
+          </label>
+          <label style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+            <input type="checkbox" name="role_master" value="1" {% if UserRole.MASTER in roles %}checked{% endif %} />
+            <span>{{ ru_user_role(UserRole.MASTER) }}</span>
+          </label>
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>Уровень мастера (если отмечена роль мастера)</label>
+          <select name="master_level">
+            {% for lv in master_levels %}
+              <option value="{{ lv.value }}" {% if user.master_level and user.master_level == lv %}selected{% elif not user.master_level and UserRole.MASTER in roles and lv.value == 'JUNIOR' %}selected{% endif %}>{{ ru_master_level(lv) }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="margin-bottom:16px;">
+          {% if user.id == current_user.id %}
+            <input type="hidden" name="is_active" value="1" />
+            <p class="muted" style="margin:0;">Свою учётную запись нельзя отключить здесь.</p>
+          {% else %}
+            <label style="display:flex;gap:8px;align-items:center;">
+              <input type="checkbox" name="is_active" value="1" {% if user.is_active %}checked{% endif %} />
+              <span>Учётная запись активна (может войти)</span>
+            </label>
+          {% endif %}
+        </div>
+        <button type="submit">Сохранить</button>
+        <a href="/admin/settings/staff" style="margin-left:8px;"><button type="button" class="secondary">Отмена</button></a>
+      </form>
+
+      {% if audit_rows %}
+        <hr style="border:0;border-top:1px solid #e5e7eb;margin:28px 0 16px;" />
+        <h3 style="margin:0 0 8px;font-size:1.05rem;">История изменений</h3>
+        <p class="muted" style="margin-top:0;font-size:13px;">Кто и что менял в карточке (роли, телефон, активность, пароль — без раскрытия секрета).</p>
+        <div style="overflow-x:auto;">
+          <table style="font-size:13px;">
+            <thead>
+              <tr>
+                <th>Когда (UTC)</th>
+                <th>Кто</th>
+                <th>Поле</th>
+                <th>Было</th>
+                <th>Стало</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for a in audit_rows %}
+                <tr>
+                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                  <td>{{ a.changed_by_user.display_name if a.changed_by_user else "—" }}</td>
+                  <td><code>{{ a.field_name }}</code></td>
+                  <td style="white-space:pre-wrap;max-width:12rem;">{{ a.old_value or "—" }}</td>
+                  <td style="white-space:pre-wrap;max-width:12rem;">{{ a.new_value or "—" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endblock %}

@@ -106,6 +106,7 @@ class Setting(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("phone", name="uq_users_phone"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
@@ -114,6 +115,8 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     master_level: Mapped[MasterLevel | None] = mapped_column(Enum(MasterLevel), nullable=True)
+    # Нормализованный номер (только цифры, ≥10), для входа вместо логина; уникален среди непустых.
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -135,6 +138,23 @@ class UserRoleAssignment(Base):
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="role_assignments")
+
+
+class UserAuditLog(Base):
+    """История изменений карточки сотрудника (суперадмин)."""
+
+    __tablename__ = "user_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
 
 
 class Client(Base):

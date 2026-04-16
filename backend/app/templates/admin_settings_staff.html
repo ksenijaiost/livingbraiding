@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 920px;">
+    <p><a href="/admin/settings">← Настройки</a></p>
+    <h2 style="margin-top:0;">Сотрудники</h2>
+    <p class="muted">Роли, телефон для входа (вместо логина), отключение учётки. Суперадмин не может остаться один без замены.</p>
+
+    {% if msg == "created" %}
+      <div class="card" style="border-color:#bbf7d0; background:#f0fdf4; margin-bottom:12px;">Сотрудник создан.</div>
+    {% elif msg == "saved" %}
+      <div class="card" style="border-color:#bbf7d0; background:#f0fdf4; margin-bottom:12px;">Сохранено.</div>
+    {% endif %}
+    {% if err %}
+      <div class="error" style="margin-bottom:12px;">{{ err }}</div>
+    {% endif %}
+
+    <p style="margin-bottom:12px;">
+      <a href="/admin/settings/staff/new"><button type="button">Новый сотрудник</button></a>
+    </p>
+
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Логин</th>
+            <th>Телефон</th>
+            <th>Имя</th>
+            <th>Роли</th>
+            <th>Уровень мастера</th>
+            <th>Статус</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            {% set u = row.user %}
+            <tr{% if not u.is_active %} style="opacity:0.65;"{% endif %}>
+              <td><code>{{ u.username }}</code></td>
+              <td class="muted">{% if u.phone %}{{ u.phone }}{% else %}—{% endif %}</td>
+              <td>{{ u.display_name }}</td>
+              <td>
+                {% for r in row.roles %}
+                  <span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;border-radius:6px;background:#eef2ff;font-size:12px;">{{ ru_user_role(r) }}</span>
+                {% endfor %}
+              </td>
+              <td class="muted">
+                {% if u.master_level %}{{ ru_master_level(u.master_level) }}{% else %}—{% endif %}
+              </td>
+              <td>{% if u.is_active %}<span class="muted">активен</span>{% else %}<strong>отключён</strong>{% endif %}</td>
+              <td style="white-space:nowrap;">
+                <a href="/admin/settings/staff/{{ u.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

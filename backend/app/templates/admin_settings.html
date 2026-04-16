@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
   <div class="card" style="max-width: 860px;">
-    <h2 style="margin-top: 0;">Настройки</h2>
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:8px;">
+      <h2 style="margin:0;">Настройки</h2>
+      <a href="/admin/settings/staff"><button type="button">Открыть список сотрудников</button></a>
+    </div>
     <p class="muted">Процент салона и цены материалов влияют только на <strong>новые</strong> визиты (в визите хранится снимок). Часовой пояс влияет на отображение времени в интерфейсе (например, дата резерва комплекта); в базе по-прежнему хранится UTC. Лимит резервов — максимум строк резерва на один складской комплект (частичные резервы).</p>
 
     {% if saved %}
