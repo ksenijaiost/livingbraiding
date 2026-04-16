@@ -56,6 +56,7 @@ from app.visit_edit_policy import (
 )
 from app.ru_labels import ru_user_role
 from app.audit import diff_fields, write_audit_rows
+from app.zakaz_blanks import kit_form_blank_defs
 
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_user_role"] = ru_user_role
@@ -179,7 +180,7 @@ def _kit_table_state_json(
             "seItems": [{"key": k, "label": lbl} for k, lbl in _kit_se_items()],
             "deItems": [{"key": k, "label": lbl} for k, lbl in _kit_de_items()],
             "prefill": kit_qty_prefill,
-            "kitRates": _kit_rates_defaults(),
+            "kitWorkPayByKey": _kit_work_pay_map_from_catalog(db),
             "excludeFromInventoryPieceCount": sorted(KIT_INVENTORY_PIECE_EXCLUDE_KEYS),
             "materialPricePerGram": {"kanekalon": kpg, "kudri": kudpg},
         },
@@ -356,67 +357,40 @@ def _kind_label(k: WorkKind) -> str:
 
 
 def _kit_se_items() -> list[tuple[str, str]]:
-    return [
-        ("SE_BRAID_SHORT", "SE: коса короткая"),
-        ("SE_BRAID_LONG", "SE: коса длинная"),
-        ("SE_BRAID_FREE_TIP", "SE: коса свободный кончик"),
-        ("SE_TIP_ADDON", "SE: доплёт кончиков"),
-        ("SE_TRIM_SHORT", "SE: стрижка короткой косы"),
-        ("SE_TRIM_LONG", "SE: стрижка длинной косы"),
-    ]
+    return [(row.key or "", row.display_name) for row in kit_form_blank_defs("SE") if row.key]
 
 
 def _kit_de_items() -> list[tuple[str, str]]:
-    return [
-        ("DE_BRAID_SHORT", "DE: коса короткая"),
-        ("DE_BRAID_LONG", "DE: коса длинная"),
-        ("DE_BRAID_NEW_FMT", "DE: коса новый формат"),
-        ("DE_CURL", "DE: кудря"),
-        ("DE_DREAD_FREE_TIP", "DE: дред свободный кончик"),
-        ("DE_DREAD_SHORT", "DE: дред короткий"),
-        ("DE_DREAD_LONG", "DE: дред длинный"),
-        ("DE_TRIM", "DE: стрижка"),
-    ]
+    return [(row.key or "", row.display_name) for row in kit_form_blank_defs("DE") if row.key]
 
 
-def _kit_rates_defaults() -> dict[str, dict[str, Any]]:
-    """
-    Ставки ЗП за 1 шт по видам (по умолчанию). Пороговые цены — только для конкретного вида.
-    Значения можно переопределить позже через work_rates (следующий шаг расширит настройки).
-    """
-    return {
-        "SE": {
-            "SE_BRAID_SHORT": {"base": 12.5, "threshold_qty": 140, "threshold_rate": 11.0},
-            "SE_BRAID_LONG": {"base": 15.0, "threshold_qty": 120, "threshold_rate": 13.5},
-            "SE_BRAID_FREE_TIP": {"base": 11.0},
-            "SE_TIP_ADDON": {"base": 5.0},
-            "SE_TRIM_SHORT": {"base": 2.0},
-            "SE_TRIM_LONG": {"base": 2.5},
-        },
-        "DE": {
-            "DE_BRAID_SHORT": {"base": 25.0},
-            "DE_BRAID_LONG": {"base": 30.0},
-            "DE_BRAID_NEW_FMT": {"base": 35.0},
-            "DE_CURL": {"base": 25.0},
-            "DE_DREAD_FREE_TIP": {"base": 35.0},
-            "DE_DREAD_SHORT": {"base": 40.0},
-            "DE_DREAD_LONG": {"base": 50.0},
-            "DE_TRIM": {"base": 5.0},
-        },
-    }
+def _kit_work_pay_map_from_catalog(db: Session) -> dict[str, float]:
+    rows = list(
+        db.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.category_name == "Заказ",
+                CatalogProduct.subcategory_name == "Заготовки поштучно",
+                CatalogProduct.is_active.is_(True),
+            )
+        ).all()
+    )
+    out: dict[str, float] = {}
+    for r in rows:
+        try:
+            meta = json.loads(r.meta_json or "{}")
+        except Exception:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        k = str(meta.get("kit_key") or "").strip()
+        if not k:
+            continue
+        out[k] = float(meta.get("master_pay") or 0.0)
+    return out
 
 
-def _kit_rate_for_item(rates: dict[str, dict[str, Any]], item_key: str, qty_total: int) -> float:
-    for group in ("SE", "DE"):
-        if item_key in rates.get(group, {}):
-            cfg = rates[group][item_key]
-            base = float(cfg.get("base") or 0.0)
-            th_qty = int(cfg.get("threshold_qty") or 0)
-            th_rate = float(cfg.get("threshold_rate") or 0.0)
-            if th_qty > 0 and qty_total >= th_qty and th_rate > 0:
-                return th_rate
-            return base
-    return 0.0
+def _kit_work_pay_for_item(db: Session, item_key: str) -> float:
+    return float(_kit_work_pay_map_from_catalog(db).get(item_key) or 0.0)
 
 
 def _kit_price_map_from_catalog(db: Session) -> dict[str, float]:
@@ -547,7 +521,6 @@ def _kit_cost_snapshot_text(
     db: Session,
     *,
     kit_totals: dict[str, int],
-    kit_rates: dict[str, dict[str, Any]],
     mat_cost: float,
     kanek: float,
     kudri: float,
@@ -567,7 +540,7 @@ def _kit_cost_snapshot_text(
         qty = int(kit_totals.get(key, 0) or 0)
         if qty <= 0:
             continue
-        rate = _kit_rate_for_item(kit_rates, key, qty)
+        rate = _kit_work_pay_for_item(db, key)
         if rate <= 0:
             continue
         row_total = float(rate) * float(qty)
@@ -741,7 +714,6 @@ async def work_new_post(
         corr_curl_qty = 0
         corr_curl_dread_complexity: str | None = None
         # KIT: parse blanks + compute master/studio profit
-        kit_rates = _kit_rates_defaults()
         kit_totals: dict[str, int] = {}
         kit_by_staff: dict[int, dict[str, int]] = {}
         kit_pieces_total = 0
@@ -879,7 +851,6 @@ async def work_new_post(
             current_user_id=current_user.id,
             mat_cost=mat_cost,
             kit_totals=kit_totals,
-            kit_rates=kit_rates,
             kit_staff_ids=kit_staff_ids,
             kit_by_staff=kit_by_staff,
             mix_source=mix_source,
@@ -976,7 +947,6 @@ async def work_new_post(
             cost_snapshot_text = _kit_cost_snapshot_text(
                 db,
                 kit_totals=kit_totals,
-                kit_rates=kit_rates,
                 mat_cost=float(mat_cost),
                 kanek=float(kanek),
                 kudri=float(kudri),

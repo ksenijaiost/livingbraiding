@@ -38,6 +38,7 @@ templates.env.globals["ru_user_role"] = ru_user_role
 router = APIRouter(prefix="/admin/catalog", tags=["admin-catalog"])
 
 _SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
+_PRODUCT_CATALOG_ONLY_CATEGORIES = {"Заказ", "Продажа материала"}
 
 
 def _ctx(request: Request, current_user: AuthUser, **kwargs):
@@ -96,7 +97,11 @@ def catalog_index(
         .group_by(ServiceCategory.id)
         .order_by(ServiceCategory.id)
     ).all()
-    cat_rows = [{"category": c, "sub_count": int(n)} for c, n in raw]
+    cat_rows = [
+        {"category": c, "sub_count": int(n)}
+        for c, n in raw
+        if (c.name or "").strip() not in _PRODUCT_CATALOG_ONLY_CATEGORIES
+    ]
     return templates.TemplateResponse(
         "admin_catalog_index.html",
         _ctx(request, current_user, cat_rows=cat_rows, err=err),
@@ -229,6 +234,8 @@ def subcategory_list(
     cat = db.get(ServiceCategory, category_id)
     if cat is None:
         raise HTTPException(status_code=404, detail="Категория не найдена")
+    if (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
+        return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
     subs = (
         db.scalars(
             select(ServiceSubcategory)
@@ -254,6 +261,8 @@ def subcategory_new_form(
     cat = db.get(ServiceCategory, category_id)
     if cat is None:
         raise HTTPException(status_code=404, detail="Категория не найдена")
+    if (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
+        return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
     return templates.TemplateResponse(
         "admin_catalog_subcategory_form.html",
         _ctx(
@@ -286,6 +295,8 @@ def subcategory_new_save(
     cat = db.get(ServiceCategory, category_id)
     if cat is None:
         raise HTTPException(status_code=404, detail="Категория не найдена")
+    if (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
+        return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
     nm = (name or "").strip()
     if not nm:
         q = quote(str(category_id))
@@ -320,6 +331,8 @@ def subcategory_edit_form(
     if sub is None:
         raise HTTPException(status_code=404, detail="Подкатегория не найдена")
     cat = db.get(ServiceCategory, sub.category_id)
+    if cat and (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
+        return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
     return templates.TemplateResponse(
         "admin_catalog_subcategory_form.html",
         _ctx(
@@ -360,6 +373,9 @@ def subcategory_edit_save(
         show_thermo_visit=sub.show_thermo_visit,
     )
     nm = (name or "").strip()
+    cat = db.get(ServiceCategory, sub.category_id)
+    if cat and (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
+        return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
     if not nm:
         return RedirectResponse(
             url=f"/admin/catalog/subcategories/{subcategory_id}/edit?err=empty",
@@ -416,6 +432,8 @@ def service_list(
     if sub is None:
         raise HTTPException(status_code=404, detail="Подкатегория не найдена")
     cat = db.get(ServiceCategory, sub.category_id)
+    if cat and (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
+        return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
     services = (
         db.scalars(
             select(Service).where(Service.subcategory_id == subcategory_id).order_by(Service.id)
@@ -439,6 +457,8 @@ def service_new_form(
     if sub is None:
         raise HTTPException(status_code=404, detail="Подкатегория не найдена")
     cat = db.get(ServiceCategory, sub.category_id)
+    if cat and (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
+        return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
     return templates.TemplateResponse(
         "admin_catalog_service_form.html",
         _ctx(
@@ -500,6 +520,9 @@ def service_new_save(
     sub = db.get(ServiceSubcategory, subcategory_id)
     if sub is None:
         raise HTTPException(status_code=404, detail="Подкатегория не найдена")
+    cat = db.get(ServiceCategory, sub.category_id)
+    if cat and (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
+        return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
     nm = (name or "").strip()
     if not nm:
         q = quote(str(subcategory_id))
@@ -564,6 +587,8 @@ def service_edit_form(
         raise HTTPException(status_code=404, detail="Услуга не найдена")
     sub = db.get(ServiceSubcategory, svc.subcategory_id)
     cat = db.get(ServiceCategory, sub.category_id) if sub else None
+    if cat and (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
+        return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
     return templates.TemplateResponse(
         "admin_catalog_service_form.html",
         _ctx(
@@ -629,6 +654,10 @@ def service_edit_save(
     svc = db.get(Service, service_id)
     if svc is None:
         raise HTTPException(status_code=404, detail="Услуга не найдена")
+    sub = db.get(ServiceSubcategory, svc.subcategory_id)
+    cat = db.get(ServiceCategory, sub.category_id) if sub else None
+    if cat and (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
+        return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
     before = SimpleNamespace(
         name=svc.name,
         is_active=svc.is_active,

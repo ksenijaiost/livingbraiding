@@ -30,7 +30,6 @@ def compute_work_financials(
     mat_cost: float,
     # kit
     kit_totals: dict[str, int],
-    kit_rates: dict[str, Any],
     kit_staff_ids: list[int],
     kit_by_staff: dict[int, dict[str, int]],
     # mix
@@ -51,7 +50,7 @@ def compute_work_financials(
 ) -> WorkFinancials:
     # Local imports to avoid circular deps with work_products.py
     from app.work_products import (  # noqa: WPS433
-        _kit_rate_for_item,
+        _kit_work_pay_for_item,
         _rubber_pricing_from_catalog,
         _studio_share_snapshot,
         _wr_float,
@@ -65,7 +64,7 @@ def compute_work_financials(
 
     if kind == WorkKind.KIT:
         for item_key, total_qty in kit_totals.items():
-            rate = _kit_rate_for_item(kit_rates, item_key, total_qty)
+            rate = _kit_work_pay_for_item(db, item_key)
             if rate <= 0:
                 continue
             for uid in kit_staff_ids:

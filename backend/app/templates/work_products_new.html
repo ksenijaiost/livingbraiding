@@ -384,20 +384,9 @@
       if (k === 'KIT') {
         var exMap = {};
         (st.excludeFromInventoryPieceCount || []).forEach(function (x) { exMap[x] = true; });
-        var rates = st.kitRates || {};
+        var rates = st.kitWorkPayByKey || {};
         function kitRateForItem(itemKey, qtyTotal) {
-          var groups = ['SE', 'DE'];
-          for (var gi = 0; gi < groups.length; gi++) {
-            var g = rates[groups[gi]];
-            if (!g || !g[itemKey]) continue;
-            var cfg = g[itemKey];
-            var base = parseFloat(cfg.base) || 0;
-            var thQty = parseInt(cfg.threshold_qty, 10) || 0;
-            var thRate = parseFloat(cfg.threshold_rate) || 0;
-            if (thQty > 0 && qtyTotal >= thQty && thRate > 0) return thRate;
-            return base;
-          }
-          return 0;
+          return parseFloat(rates[itemKey]) || 0;
         }
 
         var totals = {};

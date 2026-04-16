@@ -67,6 +67,7 @@ from app.seed_catalog_snjatie_ukhod import ensure_snjatie_ukhod_catalogs
 from app.payroll_fund import sync_operational_payroll_postings
 from app.product_sale_material import finalize_material_sale_fields
 from app.seed_studio_expenses_catalog import ensure_studio_expense_catalog
+from app.zakaz_blanks import zakaz_blank_defs
 
 
 def _ensure_demo_user_role_assignments(db: Session) -> None:
@@ -595,50 +596,21 @@ def _ensure_zakaz_products_catalog(db: Session) -> None:
                     "unit_label": (getattr(s, "unit_label", None) or None),
                 }
 
-    # ---- Blanks (used for kit price) ----
-    # Важно: этот список должен покрывать ВСЕ ключи из формы KIT в work_products.py.
-    # Если пользователь ввёл количество по ключу, а цены здесь нет, создание комплекта падает.
-    #
-    # Notes:
-    # - B/U rows stay in catalog but marked as ignore_in_calc.
-    # - trim / tip addon are excluded from client price but держим их в прайсе как тех. позиции.
-    blanks = [
-        ("SE_BRAID_LONG", "SE коса", 85.0),
-        ("SE_BRAID_SHORT", "SE коса короткая", 75.0),
-        ("SE_BRAID_FREE_TIP", "SE ажурная коса", 150.0),
-        ("SE_TIP_ADDON", "SE доплёт кончиков", 0.0),
-        ("SE_TRIM_SHORT", "SE стрижка короткой косы", 0.0),
-        ("SE_TRIM_LONG", "SE стрижка длинной косы", 0.0),
-        (None, "SE коса Б/У", 50.0),
-        (None, "SE дред", 200.0),
-
-        # В форме сейчас есть отдельные short/long ключи, а в прайсе пользователя одна цена.
-        # Поэтому short/long маппим на одну и ту же клиентскую цену, пока не появится отдельная.
-        ("DE_BRAID_SHORT", "DE коса короткая", 150.0),
-        ("DE_BRAID_LONG", "DE коса", 150.0),
-        ("DE_BRAID_NEW_FMT", "DE ажурная коса", 200.0),
-        ("DE_CURL", "DE термокудря", 200.0),
-        ("DE_DREAD_FREE_TIP", "DE дредокудря", 90.0),
-        ("DE_DREAD_SHORT", "DE дред короткий", 200.0),
-        ("DE_DREAD_LONG", "DE дред", 200.0),
-        ("DE_TRIM", "DE стрижка", 0.0),
-        (None, "DE дред Б/У", 150.0),
-
-        # max позиции пока без ключей в форме; добавляем для прайса/будущего калькулятора
-        (None, "DE дред max", 250.0),
-        (None, "DE кудря max", 250.0),
-        (None, "Микрокосы 4х", 250.0),
-        (None, "Микрокоса 6х", 300.0),
-    ]
+    # ---- Blanks (used for kit price + master pay) ----
     so = 0
-    for kit_key, name, price in blanks:
-        meta = {"kit_key": kit_key, "ignore_in_calc": (kit_key is None)}
+    for row in zakaz_blank_defs():
+        meta = {
+            "kit_key": row.key,
+            "ignore_in_calc": bool(row.ignore_in_client_calc or row.key is None),
+            "master_pay": float(row.work_pay),
+            "is_used_in_kit_form": bool(row.include_in_kit_form),
+        }
         _upsert_catalog_product(
             db,
             category_name="Заказ",
             subcategory_name="Заготовки поштучно",
-            name=name,
-            price=price,
+            name=row.display_name,
+            price=float(row.price),
             meta=meta,
             sort_order=so,
         )
@@ -713,6 +685,39 @@ def _ensure_zakaz_products_catalog(db: Session) -> None:
             )
             so += 1
 
+
+def _ensure_prodazha_materiala_products_catalog(db: Session) -> None:
+    cat = db.scalar(select(ServiceCategory).where(ServiceCategory.name == "Продажа материала"))
+    if not cat:
+        return
+    subs = list(
+        db.scalars(
+            select(ServiceSubcategory)
+            .where(ServiceSubcategory.category_id == cat.id, ServiceSubcategory.is_active.is_(True))
+            .order_by(ServiceSubcategory.id.asc())
+        ).all()
+    )
+    so = 0
+    for sub in subs:
+        rows = list(
+            db.scalars(
+                select(Service)
+                .where(Service.subcategory_id == sub.id, Service.is_active.is_(True))
+                .order_by(Service.id.asc())
+            ).all()
+        )
+        for s in rows:
+            _upsert_catalog_product(
+                db,
+                category_name="Продажа материала",
+                subcategory_name=sub.name,
+                name=s.name,
+                price=float(s.price_middle_from) if s.price_middle_from is not None else None,
+                meta={"master_pay": None, "fixed_expense": None},
+                sort_order=so,
+            )
+            so += 1
+
 def _ensure_vsy_golova_catalog_and_kits(db: Session) -> None:
     """Каталоги из JSON + анкета вплетения + демо-комплекты."""
     ensure_vsy_golova_catalog(db)
@@ -727,6 +732,7 @@ def _ensure_vsy_golova_catalog_and_kits(db: Session) -> None:
     _ensure_visit_questionnaire_layout(db)
 
     _ensure_zakaz_products_catalog(db)
+    _ensure_prodazha_materiala_products_catalog(db)
 
     if not db.scalar(select(Kit).where(Kit.sku == "DEMO-001")):
         db.add(
