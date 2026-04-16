@@ -373,7 +373,7 @@ def service_catalog_view(
     if subcategory_id is not None and subcategory_id <= 0:
         subcategory_id = None
 
-    # Только категории из формы визита; «Продажа материала», «Заказ» и т.п. — в прайсе «Товары» (/price/products).
+    # Только категории из формы визита; «Продажа материала», «Заказ» и т.п. — в прайсе «Товары» (/products-catalog).
     categories = list(
         db.scalars(
             select(ServiceCategory)
@@ -526,7 +526,7 @@ def _format_product_catalog_price(s: Service) -> str | None:
     return None
 
 
-@app.get("/price/products", response_class=HTMLResponse)
+@app.get("/products-catalog", response_class=HTMLResponse)
 def products_catalog_view(
     request: Request,
     category: str | None = None,
@@ -589,6 +589,15 @@ def products_catalog_view(
             rows=rows,
         ),
     )
+
+
+@app.get("/price/products")
+def products_catalog_view_legacy(category: str | None = None):
+    """Legacy URL: keep old path and redirect to the new one."""
+    url = "/products-catalog"
+    if category and str(category).strip():
+        url = f"/products-catalog?{urlencode({'category': str(category).strip()})}"
+    return RedirectResponse(url=url, status_code=302)
 
 
 @app.get("/admin/clients", response_class=HTMLResponse)

@@ -54,8 +54,39 @@
       }
       table { width:100%; border-collapse: collapse; }
       th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 14px; }
-      .nav a { margin-right: 12px; text-decoration: none; opacity: 0.95; }
+      .nav { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; }
+      .nav a { text-decoration: none; opacity: 0.95; }
       .nav a:hover { text-decoration: underline; }
+      .nav .sep { width: 1px; height: 18px; background: rgba(255,255,255,0.22); display:inline-block; margin: 0 2px; }
+      .nav-desktop { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; }
+      .nav-mobile { display:none; align-items:center; gap:10px; justify-content:flex-end; }
+      .nav-dd { position: relative; display:inline-flex; align-items:center; }
+      .nav-dd > summary { list-style: none; cursor: pointer; user-select:none; opacity: 0.95; }
+      .nav-dd > summary::-webkit-details-marker { display:none; }
+      .nav-dd[open] > summary { text-decoration: underline; }
+      .nav-dd .dd { position:absolute; right:0; top: calc(100% + 8px); background:#111827; border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 8px; min-width: 220px; box-shadow: 0 10px 25px rgba(0,0,0,0.35); z-index: 50; }
+      .nav-dd .dd a { display:block; padding: 8px 10px; border-radius: 8px; text-decoration:none; }
+      .nav-dd .dd a:hover { background: rgba(255,255,255,0.10); text-decoration:none; }
+      .nav-dd .dd .dd-title { font-size: 12px; opacity: 0.7; padding: 6px 10px 4px; }
+      .hamburger { background: transparent; border: 1px solid rgba(255,255,255,0.22); color:#fff; padding: 8px 10px; border-radius: 10px; cursor:pointer; }
+      .hamburger:hover { background: rgba(255,255,255,0.10); }
+      .mobile-drawer-backdrop { display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 80; }
+      .mobile-drawer { display:none; position: fixed; top: 0; right: 0; height: 100%; width: min(92vw, 380px); background: #111827; color: #fff; z-index: 90; padding: 14px; overflow-y: auto; box-shadow: -10px 0 30px rgba(0,0,0,0.35); }
+      .mobile-drawer a { color: #fff; text-decoration:none; }
+      .mobile-drawer a:hover { text-decoration: underline; }
+      .mobile-drawer .md-head { display:flex; align-items:center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+      .mobile-drawer .md-close { background: transparent; border: 1px solid rgba(255,255,255,0.22); color:#fff; padding: 8px 10px; border-radius: 10px; cursor:pointer; }
+      .mobile-drawer .md-close:hover { background: rgba(255,255,255,0.10); }
+      .mobile-drawer details { border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; padding: 8px 10px; margin: 10px 0; background: rgba(255,255,255,0.04); }
+      .mobile-drawer summary { cursor:pointer; list-style:none; }
+      .mobile-drawer summary::-webkit-details-marker { display:none; }
+      .mobile-drawer .md-link { display:block; padding: 8px 6px; border-radius: 10px; }
+      .mobile-drawer .md-link:hover { background: rgba(255,255,255,0.08); text-decoration:none; }
+      .mobile-drawer .md-muted { opacity: 0.75; font-size: 12px; }
+      @media (max-width: 820px) {
+        .nav-desktop { display:none; }
+        .nav-mobile { display:flex; }
+      }
       .error { background: #fee2e2; border: 1px solid #fecaca; color: #991b1b; padding: 10px 12px; border-radius: 8px; }
       .ok { background: #f0fdf4; border: 1px solid #86efac; color: #166534; padding: 10px 12px; border-radius: 8px; }
     </style>
@@ -66,48 +97,130 @@
       <div class="nav">
         {% if current_user %}
           {% if current_user.roles|length > 1 %}
-          <form method="post" action="/session/active-role" class="role-switch" style="display:inline-flex; align-items:center; gap:6px; margin-right:10px;">
-            <label class="muted" style="margin:0; font-size:12px;">Кабинет</label>
-            <select name="role" aria-label="Активная роль" onchange="this.form.submit()" style="width:auto; min-width:9em; padding:6px 8px; font-size:13px;">
-              {% for r in current_user.roles %}
-              <option value="{{ r.value }}" {% if r == current_user.role %}selected{% endif %}>{{ ru_user_role(r) }}</option>
-              {% endfor %}
-            </select>
-          </form>
+            <form method="post" action="/session/active-role" class="role-switch" style="display:inline-flex; align-items:center; gap:6px;">
+              <label class="muted" style="margin:0; font-size:12px;">Кабинет</label>
+              <select name="role" aria-label="Активная роль" onchange="this.form.submit()" style="width:auto; min-width:9em; padding:6px 8px; font-size:13px;">
+                {% for r in current_user.roles %}
+                <option value="{{ r.value }}" {% if r == current_user.role %}selected{% endif %}>{{ ru_user_role(r) }}</option>
+                {% endfor %}
+              </select>
+            </form>
           {% endif %}
+
           <span class="muted">{{ current_user.display_name }} ({{ ru_user_role(current_user.role) }})</span>
-          <a href="/">Главная</a>
-          {% if current_user.role.value == "MASTER" %}
-            <a href="/master/visit/new">Новый визит</a>
-            <a href="/sales/products">Продажа товаров</a>
-            <a href="/sales/work">Работа с товарами</a>
-            <a href="/price">Прайс</a>
-            <a href="/admin/clients">Клиенты</a>
-            <a href="/admin/visits">Визиты</a>
-            <a href="/admin/kits">Комплекты</a>
-          {% endif %}
-          {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
-            <a href="/sales/products">Продажа товаров</a>
-            <a href="/sales/work">Работа с товарами</a>
-            <a href="/price">Прайс</a>
-            <a href="/admin/clients">Клиенты</a>
-            <a href="/admin/visits">Визиты</a>
-            <a href="/admin/kits">Комплекты</a>
+          <span class="sep" aria-hidden="true"></span>
+
+          <!-- Desktop: sections (A) -->
+          <div class="nav-desktop" aria-label="Навигация">
+            <a href="/">Главная</a>
+
+            <details class="nav-dd">
+              <summary>Записи</summary>
+              <div class="dd">
+                {% if current_user.role.value == "MASTER" %}
+                  <a href="/master/bookings">Мои записи</a>
+                  <a href="/master/visit/new">Новый визит</a>
+                {% endif %}
+                <a href="/admin/visits">Визиты</a>
+                <a href="/admin/bookings">Брони</a>
+                <a href="/service-catalog">Прайс — услуги</a>
+              </div>
+            </details>
+
+            <details class="nav-dd">
+              <summary>Товары</summary>
+              <div class="dd">
+                <a href="/sales/products">Продажа товаров</a>
+                <a href="/sales/work">Работа с товарами</a>
+                <a href="/products-catalog">Прайс — товары</a>
+              </div>
+            </details>
+
+            <details class="nav-dd">
+              <summary>Склад</summary>
+              <div class="dd">
+                <a href="/admin/kits">Комплекты</a>
+              </div>
+            </details>
+
             {% if current_user.role.value == "ADMIN_SUPER" %}
-              <a href="/admin/catalog">Управление прайсом</a>
-              <a href="/admin/expenses">Расходы</a>
-              <a href="/admin/payroll-periods">Периоды ЗП</a>
-              <a href="/admin/payroll-fund">Фонды ЗП</a>
-              <a href="/admin/reports">Отчёты</a>
-              <a href="/admin/settings">Настройки</a>
+              <details class="nav-dd">
+                <summary>Управление</summary>
+                <div class="dd">
+                  <a href="/admin/expenses">Расходы</a>
+                  <a href="/admin/payroll-fund">Фонды ЗП</a>
+                  <a href="/admin/payroll-periods">Периоды ЗП</a>
+                  <a href="/admin/reports">Отчёты</a>
+                  <a href="/admin/catalog">Управление прайсом</a>
+                  <a href="/admin/settings">Настройки</a>
+                </div>
+              </details>
             {% endif %}
-          {% endif %}
-          <a href="/logout">Выйти</a>
+
+            <a href="/logout">Выйти</a>
+          </div>
+
+          <!-- Mobile: "Главная" + ☰ (B) -->
+          <div class="nav-mobile" aria-label="Навигация (мобильная)">
+            <a href="/">Главная</a>
+            <button type="button" class="hamburger" aria-label="Открыть меню" aria-controls="lbMobileDrawer" aria-expanded="false" onclick="window.lbToggleMobileNav(true)">☰</button>
+          </div>
         {% else %}
           <a href="/login">Вход</a>
         {% endif %}
       </div>
     </header>
+    {% if current_user %}
+      <div class="mobile-drawer-backdrop" id="lbMobileBackdrop" onclick="window.lbToggleMobileNav(false)"></div>
+      <aside class="mobile-drawer" id="lbMobileDrawer" aria-label="Меню">
+        <div class="md-head">
+          <div>
+            <div><strong>Меню</strong></div>
+            <div class="md-muted">{{ current_user.display_name }} ({{ ru_user_role(current_user.role) }})</div>
+          </div>
+          <button type="button" class="md-close" aria-label="Закрыть меню" onclick="window.lbToggleMobileNav(false)">✕</button>
+        </div>
+
+        <a class="md-link" href="/" onclick="window.lbToggleMobileNav(false)"><strong>Главная</strong></a>
+
+        <details>
+          <summary><strong>Записи</strong></summary>
+          {% if current_user.role.value == "MASTER" %}
+            <a class="md-link" href="/master/bookings" onclick="window.lbToggleMobileNav(false)">Мои записи</a>
+            <a class="md-link" href="/master/visit/new" onclick="window.lbToggleMobileNav(false)">Новый визит</a>
+          {% endif %}
+          <a class="md-link" href="/admin/visits" onclick="window.lbToggleMobileNav(false)">Визиты</a>
+          <a class="md-link" href="/admin/bookings" onclick="window.lbToggleMobileNav(false)">Брони</a>
+          <a class="md-link" href="/service-catalog" onclick="window.lbToggleMobileNav(false)">Прайс — услуги</a>
+        </details>
+
+        <details>
+          <summary><strong>Товары</strong></summary>
+          <a class="md-link" href="/sales/products" onclick="window.lbToggleMobileNav(false)">Продажа товаров</a>
+          <a class="md-link" href="/sales/work" onclick="window.lbToggleMobileNav(false)">Работа с товарами</a>
+          <a class="md-link" href="/products-catalog" onclick="window.lbToggleMobileNav(false)">Прайс — товары</a>
+        </details>
+
+        <details>
+          <summary><strong>Склад</strong></summary>
+          <a class="md-link" href="/admin/kits" onclick="window.lbToggleMobileNav(false)">Комплекты</a>
+        </details>
+
+        {% if current_user.role.value == "ADMIN_SUPER" %}
+          <details>
+            <summary><strong>Управление</strong></summary>
+            <a class="md-link" href="/admin/expenses" onclick="window.lbToggleMobileNav(false)">Расходы</a>
+            <a class="md-link" href="/admin/payroll-fund" onclick="window.lbToggleMobileNav(false)">Фонды ЗП</a>
+            <a class="md-link" href="/admin/payroll-periods" onclick="window.lbToggleMobileNav(false)">Периоды ЗП</a>
+            <a class="md-link" href="/admin/reports" onclick="window.lbToggleMobileNav(false)">Отчёты</a>
+            <a class="md-link" href="/admin/catalog" onclick="window.lbToggleMobileNav(false)">Управление прайсом</a>
+            <a class="md-link" href="/admin/settings" onclick="window.lbToggleMobileNav(false)">Настройки</a>
+          </details>
+        {% endif %}
+
+        <a class="md-link" href="/logout">Выйти</a>
+      </aside>
+    {% endif %}
     <div class="container">
       {% block content %}{% endblock %}
     </div>
@@ -130,6 +243,39 @@
         });
       })();
 
+      // Header dropdowns: keep only one open at a time.
+      (function () {
+        function closeOthers(opened) {
+          try {
+            var all = document.querySelectorAll('details.nav-dd');
+            for (var i = 0; i < all.length; i++) {
+              var d = all[i];
+              if (opened && d === opened) continue;
+              d.removeAttribute('open');
+            }
+          } catch (e) {}
+        }
+        document.addEventListener('toggle', function (e) {
+          var t = e && e.target;
+          if (!t) return;
+          if (t.tagName !== 'DETAILS') return;
+          if (!t.classList || !t.classList.contains('nav-dd')) return;
+          if (t.open) closeOthers(t);
+        }, true);
+        document.addEventListener('click', function (e) {
+          try {
+            var open = document.querySelector('details.nav-dd[open]');
+            if (!open) return;
+            if (open.contains(e.target)) return;
+            closeOthers(null);
+          } catch (e2) {}
+        });
+        document.addEventListener('keydown', function (e) {
+          if (!e || e.key !== 'Escape') return;
+          closeOthers(null);
+        });
+      })();
+
       // Audit history: reveal/hide extra rows.
       window.lbToggleAudit = function (rowClass, btn) {
         try {
@@ -145,6 +291,53 @@
           if (btn) btn.textContent = anyHidden ? 'Скрыть историю' : 'Раскрыть историю';
         } catch (e) {}
       };
+
+      // Mobile nav drawer.
+      window.lbToggleMobileNav = function (open) {
+        try {
+          var drawer = document.getElementById('lbMobileDrawer');
+          var backdrop = document.getElementById('lbMobileBackdrop');
+          var btn = document.querySelector('button.hamburger[aria-controls="lbMobileDrawer"]');
+          if (!drawer || !backdrop) return;
+          var isOpen = !!open;
+          drawer.style.display = isOpen ? 'block' : 'none';
+          backdrop.style.display = isOpen ? 'block' : 'none';
+          if (btn) btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+          if (isOpen) {
+            document.body.style.overflow = 'hidden';
+          } else {
+            document.body.style.overflow = '';
+          }
+        } catch (e) {}
+      };
+      document.addEventListener('keydown', function (e) {
+        if (!e || e.key !== 'Escape') return;
+        try { window.lbToggleMobileNav(false); } catch (e2) {}
+      });
+
+      // Mobile nav drawer sections: keep only one open at a time.
+      (function () {
+        function closeOthers(opened) {
+          try {
+            var drawer = document.getElementById('lbMobileDrawer');
+            if (!drawer) return;
+            var all = drawer.querySelectorAll('details');
+            for (var i = 0; i < all.length; i++) {
+              var d = all[i];
+              if (opened && d === opened) continue;
+              d.removeAttribute('open');
+            }
+          } catch (e) {}
+        }
+        document.addEventListener('toggle', function (e) {
+          var t = e && e.target;
+          if (!t) return;
+          if (t.tagName !== 'DETAILS') return;
+          var drawer = document.getElementById('lbMobileDrawer');
+          if (!drawer || !drawer.contains(t)) return;
+          if (t.open) closeOthers(t);
+        }, true);
+      })();
     </script>
   </body>
 </html>

@@ -7,13 +7,13 @@
     </p>
 
     <div style="margin-bottom: 12px;">
-      <a href="/price"><button class="secondary" type="button">← Прайс</button></a>
+      <a href="/"><button class="secondary" type="button">← Главная</button></a>
     </div>
 
     {% if categories %}
       <div style="display:flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
         {% for c in categories %}
-          <a href="/price/products?category={{ c|urlencode }}">
+          <a href="/products-catalog?category={{ c|urlencode }}">
             <button type="button" class="{% if c == selected_category %}{% else %}secondary{% endif %}">
               {{ c }}
             </button>
