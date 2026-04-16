@@ -28,6 +28,30 @@
       label { display:block; font-size: 13px; color: #374151; margin-bottom: 6px; }
       button { font-family: inherit; font-size: 14px; background: #111827; color: #fff; padding: 10px 14px; border: 0; border-radius: 8px; cursor: pointer; }
       button.secondary { background: #e5e7eb; color: #111827; }
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+        filter: grayscale(0.35);
+      }
+      button.secondary:disabled {
+        background: #f3f4f6;
+        color: #9ca3af;
+        border: 1px dashed #d1d5db;
+        opacity: 1;
+        filter: none;
+      }
+      /* Выглядит как недоступная, но остаётся кликабельной (подсказка через title / alert). */
+      button.secondary.kit-btn-disabled {
+        background: #f3f4f6;
+        color: #9ca3af;
+        border: 1px dashed #d1d5db;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+      button.secondary.kit-btn-disabled:focus {
+        outline: 2px solid #d1d5db;
+        outline-offset: 1px;
+      }
       table { width:100%; border-collapse: collapse; }
       th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 14px; }
       .nav a { margin-right: 12px; text-decoration: none; opacity: 0.95; }

@@ -489,15 +489,6 @@ class Kit(Base):
     is_in_stock: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Резерв (MVP: одна метка, без истории). Заполняется при «зарезервировать», очищается при «снять».
-    reserved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    reserved_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-    reserved_for_client_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("clients.id"), nullable=True)
-    reserved_for_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-
-    reserved_by_user: Mapped[User | None] = relationship(foreign_keys=[reserved_by_user_id])
-    reserved_for_client: Mapped[Client | None] = relationship(foreign_keys=[reserved_for_client_id])
-    reserved_for_user: Mapped[User | None] = relationship(foreign_keys=[reserved_for_user_id])
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
 
     # Автор(ы) комплекта: сотрудники студии и/или отметка «Извне» (заполняется при внесении карточки).
@@ -507,10 +498,34 @@ class Kit(Base):
         cascade="all, delete-orphan",
         order_by="KitAuthorStaff.sort_order",
     )
+    reserves: Mapped[list["KitReserve"]] = relationship(
+        back_populates="kit",
+        cascade="all, delete-orphan",
+        order_by="KitReserve.id",
+    )
 
     @property
     def is_reserved(self) -> bool:
-        return self.reserved_at is not None
+        return bool(self.reserves)
+
+
+class KitReserve(Base):
+    """Резерв заготовок по комплекту: несколько строк на один kit (лимит — настройка)."""
+
+    __tablename__ = "kit_reserves"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kit_id: Mapped[int] = mapped_column(Integer, ForeignKey("kits.id", ondelete="CASCADE"), nullable=False)
+    pieces_reserved: Mapped[int] = mapped_column(Integer, nullable=False)
+    reserved_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    reserved_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    reserved_for_client_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("clients.id"), nullable=True)
+    reserved_for_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+
+    kit: Mapped["Kit"] = relationship(back_populates="reserves")
+    reserved_by_user: Mapped["User"] = relationship(foreign_keys=[reserved_by_user_id])
+    reserved_for_client: Mapped["Client | None"] = relationship(foreign_keys=[reserved_for_client_id])
+    reserved_for_user: Mapped["User | None"] = relationship(foreign_keys=[reserved_for_user_id])
 
 
 class KitAuthorStaff(Base):

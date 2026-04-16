@@ -100,6 +100,10 @@ def ensure_seed_data(db: Session) -> None:
     if not tz:
         db.add(Setting(key="display_timezone", value="Asia/Novosibirsk"))
 
+    kit_mx = db.get(Setting, "kit_max_reserves_per_kit")
+    if not kit_mx:
+        db.add(Setting(key="kit_max_reserves_per_kit", value="3"))
+
     # Default material prices: ₽ за 100 г → ₽/г (админ может поменять в настройках)
     defaults = {
         MaterialType.KANEKALON: 4.0,  # 400 ₽ / 100 г

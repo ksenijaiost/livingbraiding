@@ -12,13 +12,14 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Callable, Literal
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from starlette.datastructures import UploadFile
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
     Client,
     Kit,
+    KitReserve,
     MaterialPriceCurrent,
     MaterialType,
     AmortizationLevel,
@@ -39,6 +40,35 @@ from app.db.models import (
     VisitService,
 )
 from app.client_validation import client_has_any_contact, strip_or_none
+
+
+def get_kit_max_reserves_per_kit(db: Session) -> int:
+    row = db.get(Setting, "kit_max_reserves_per_kit")
+    raw = (row.value if row else "3").strip()
+    try:
+        n = int(raw)
+        return max(1, min(20, n))
+    except ValueError:
+        return 3
+
+
+def kit_reserve_slots_used(db: Session, kit_id: int) -> int:
+    return int(
+        db.scalar(select(func.count()).select_from(KitReserve).where(KitReserve.kit_id == kit_id)) or 0
+    )
+
+
+def _kit_reserve_target_short(reserve: KitReserve) -> str:
+    parts: list[str] = []
+    if reserve.reserved_for_client:
+        n = (reserve.reserved_for_client.name or "").strip() or "—"
+        parts.append(f"клиент «{n}»")
+    if reserve.reserved_for_user:
+        dn = (reserve.reserved_for_user.display_name or "").strip() or "—"
+        parts.append(f"сотрудник «{dn}»")
+    if not parts:
+        return "цель не указана"
+    return " и ".join(parts)
 from app.questionnaire.answer_validate import (
     extract_questionnaire_raw_from_form,
     validate_and_coerce_answers,
@@ -1032,27 +1062,22 @@ def list_kits_for_stock(db: Session) -> list[Kit]:
                 Kit.is_active.is_(True),
                 Kit.pieces_available > 0,
             )
+            .options(
+                selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
+                selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_user),
+            )
             .order_by(Kit.sku.asc())
         ).all()
     )
 
 
 def kit_reserved_for_visit_label(kit: Kit) -> str | None:
-    """Краткое «для кого» резерв в анкете визита (без даты и автора)."""
-    if not kit.reserved_at:
+    """Краткое описание резервов в анкете визита (без даты и автора)."""
+    rows = list(kit.reserves or [])
+    if not rows:
         return None
-    parts: list[str] = []
-    if kit.reserved_for_client:
-        n = (kit.reserved_for_client.name or "").strip() or "—"
-        parts.append(f"клиент «{n}»")
-    if kit.reserved_for_user:
-        dn = (kit.reserved_for_user.display_name or "").strip() or "—"
-        parts.append(f"сотрудник «{dn}»")
-    if not parts:
-        return "цель резерва в карточке не заполнена"
-    if len(parts) == 1:
-        return parts[0]
-    return f"{parts[0]} и {parts[1]}"
+    bits = [f"{r.pieces_reserved} шт. — {_kit_reserve_target_short(r)}" for r in rows]
+    return "; ".join(bits)
 
 
 def kit_reserve_hint_by_id(db: Session, kit_id: int | None) -> str | None:
@@ -1061,8 +1086,8 @@ def kit_reserve_hint_by_id(db: Session, kit_id: int | None) -> str | None:
     k = db.scalar(
         select(Kit)
         .options(
-            selectinload(Kit.reserved_for_client),
-            selectinload(Kit.reserved_for_user),
+            selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
+            selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_user),
         )
         .where(Kit.id == kit_id)
     )
@@ -1082,8 +1107,8 @@ def suggest_kits_for_stock(db: Session, q: str, *, limit: int = 30) -> list[dict
             Kit.pieces_available > 0,
         )
         .options(
-            selectinload(Kit.reserved_for_client),
-            selectinload(Kit.reserved_for_user),
+            selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
+            selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_user),
         )
     )
     if needle:
@@ -1108,7 +1133,7 @@ def suggest_kits_for_stock(db: Session, q: str, *, limit: int = 30) -> list[dict
                 "stock_price_total": float(sp or 0.0),
                 "discount_percent": dp,
                 "missing_sale_price": not has_price,
-                "is_reserved": bool(k.reserved_at),
+                "is_reserved": bool(k.reserves),
                 "reserved_for_label": res_label,
             }
         )

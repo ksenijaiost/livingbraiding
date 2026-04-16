@@ -79,6 +79,7 @@ from app.db.models import (
     Kit,
     KitAuditLog,
     KitAuthorStaff,
+    KitReserve,
     MaterialPriceCurrent,
     MaterialType,
     PayrollFundPayoutPaymentKind,
@@ -141,8 +142,10 @@ from app import product_sales as product_sales_routes
 from app import work_products as work_products_routes
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
+    get_kit_max_reserves_per_kit,
     get_salon_cut_pct,
     kit_reserve_hint_by_id,
+    kit_reserve_slots_used,
     list_master_visit_services_catalog,
     master_visit_step1_prefill_from_form,
     parse_kit_inlay_form,
@@ -1126,19 +1129,53 @@ def _staff_users_for_reserve(db: Session) -> list[User]:
 
 
 def _kit_reservation_tooltip(kit: Kit, db: Session) -> str:
-    if not kit.reserved_at:
+    rows = list(kit.reserves or [])
+    if not rows:
         return ""
-    parts: list[str] = []
-    if kit.reserved_for_client:
-        parts.append(f"Клиент: {kit.reserved_for_client.name}")
-    if kit.reserved_for_user:
-        parts.append(f"Сотрудник: {kit.reserved_for_user.display_name}")
-    if kit.reserved_by_user:
-        parts.append(f"Забронировал: {kit.reserved_by_user.display_name}")
     tz = get_display_timezone(db)
-    when = format_naive_utc_datetime(kit.reserved_at, tz)
-    parts.append(f"Когда: {when} ({timezone_label(tz)})")
-    return " · ".join(parts)
+    chunks: list[str] = []
+    for r in rows:
+        who: list[str] = []
+        if r.reserved_for_client:
+            who.append(f"клиент: {r.reserved_for_client.name}")
+        if r.reserved_for_user:
+            who.append(f"сотр.: {r.reserved_for_user.display_name}")
+        if r.reserved_by_user:
+            who.append(f"забронировал: {r.reserved_by_user.display_name}")
+        when = format_naive_utc_datetime(r.reserved_at, tz)
+        chunks.append(
+            f"{r.pieces_reserved} шт. ({', '.join(who) if who else 'цель не указана'}) · {when} ({timezone_label(tz)})"
+        )
+    return " | ".join(chunks)
+
+
+def _kit_clear_modal_items(kit: Kit, display_tz: str) -> list[dict[str, Any]]:
+    """Данные для модалки снятия резервов (чекбоксы)."""
+    out: list[dict[str, Any]] = []
+    for r in kit.reserves or []:
+        parts: list[str] = []
+        if r.reserved_for_client:
+            parts.append((r.reserved_for_client.name or "").strip() or "—")
+        if r.reserved_for_user:
+            parts.append((r.reserved_for_user.display_name or "").strip() or "—")
+        target = " · ".join(parts) if parts else "—"
+        when = format_naive_utc_datetime(r.reserved_at, display_tz)
+        if r.reserved_by_user:
+            author = (
+                (r.reserved_by_user.display_name or r.reserved_by_user.username or "").strip() or "—"
+            )
+        else:
+            author = "—"
+        out.append(
+            {
+                "id": r.id,
+                "pieces": int(r.pieces_reserved or 0),
+                "target": target,
+                "when": when,
+                "author": author,
+            }
+        )
+    return out
 
 
 @app.get("/master/clients/suggest")
@@ -1555,13 +1592,11 @@ def _apply_booking_auto_reserves(
 ) -> None:
     """
     Автоматический резерв комплекта по броне:
-    - только под клиента (без сотрудника)
-    - если выбран режим IN_STOCK и указан kit_id
-    NOTE: количество заготовок пока сохраняем только в details_json (поле visit_*_kit_pieces),
-    т.к. в модели Kit резерв — один флаг без количеств.
+    - строка в kit_reserves + уменьшение pieces_available
+    - количество: из полей *_kit_pieces формы, иначе весь текущий остаток
     """
 
-    def _reserve_kit(kit_id_raw: str | None) -> None:
+    def _reserve_kit(kit_id_raw: str | None, pieces_field: str | None) -> None:
         if not kit_id_raw:
             return
         kit_id_raw = str(kit_id_raw).strip()
@@ -1570,46 +1605,50 @@ def _apply_booking_auto_reserves(
         kit = db.get(Kit, int(kit_id_raw))
         if not kit:
             return
-        before = SimpleNamespace(
-            reserved_at=kit.reserved_at,
-            reserved_by_user_id=kit.reserved_by_user_id,
-            reserved_for_client_id=kit.reserved_for_client_id,
-            reserved_for_user_id=kit.reserved_for_user_id,
-        )
-        kit.reserved_at = datetime.utcnow()
-        kit.reserved_by_user_id = changed_by_user_id
-        kit.reserved_for_client_id = booking_client_id
-        kit.reserved_for_user_id = None
+        avail = int(kit.pieces_available or 0)
+        if avail <= 0:
+            return
+        if kit_reserve_slots_used(db, kit.id) >= get_kit_max_reserves_per_kit(db):
+            return
+        pq = str(fp.get(pieces_field) or "").strip() if pieces_field else ""
+        if pq.isdigit():
+            qty = int(pq)
+        else:
+            qty = avail
+        qty = max(1, min(qty, avail))
+        before = SimpleNamespace(pieces_available=kit.pieces_available)
+        kit.pieces_available = avail - qty
         kit.updated_at = datetime.utcnow()
         kit.updated_by_user_id = changed_by_user_id
+        db.add(
+            KitReserve(
+                kit_id=kit.id,
+                pieces_reserved=qty,
+                reserved_at=datetime.utcnow(),
+                reserved_by_user_id=changed_by_user_id,
+                reserved_for_client_id=booking_client_id,
+                reserved_for_user_id=None,
+            )
+        )
         write_audit_rows(
             db,
             log_model=KitAuditLog,
             entity_field="kit_id",
             entity_id=kit.id,
             changed_by_user_id=changed_by_user_id,
-            changes=diff_fields(
-                before,
-                kit,
-                (
-                    "reserved_at",
-                    "reserved_by_user_id",
-                    "reserved_for_client_id",
-                    "reserved_for_user_id",
-                ),
-            ),
+            changes=diff_fields(before, kit, ("pieces_available",)),
         )
 
     # VISIT kit in stock
     if (fp.get("visit_kit_mode") or "") == "IN_STOCK":
-        _reserve_kit(fp.get("visit_stock_kit_id"))
+        _reserve_kit(fp.get("visit_stock_kit_id"), "visit_stock_kit_pieces")
     # VISIT extra blanks in stock
     if (fp.get("visit_kit_mode") or "") == "OWN" and (fp.get("visit_own_need_extra_blanks") or ""):
         if (fp.get("visit_extra_blanks_mode") or "") == "IN_STOCK":
-            _reserve_kit(fp.get("visit_extra_stock_kit_id"))
+            _reserve_kit(fp.get("visit_extra_stock_kit_id"), "visit_extra_stock_kit_pieces")
     # SALE kit in stock
     if (fp.get("product_kind") or "") == "KIT" and (fp.get("sale_kit_mode") or "") == "IN_STOCK":
-        _reserve_kit(fp.get("sale_stock_kit_id"))
+        _reserve_kit(fp.get("sale_stock_kit_id"), "sale_stock_kit_pieces")
 
 
 @app.get("/admin/bookings/new", response_class=HTMLResponse)
@@ -2489,15 +2528,26 @@ def admin_kits_list(
         db.scalars(
             select(Kit)
             .options(
-                selectinload(Kit.reserved_by_user),
-                selectinload(Kit.reserved_for_client),
-                selectinload(Kit.reserved_for_user),
+                selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
+                selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_user),
+                selectinload(Kit.reserves).selectinload(KitReserve.reserved_by_user),
             )
             .order_by(Kit.sku.asc())
         ).all()
     )
     staff_users = _staff_users_for_reserve(db)
-    kit_rows = [{"kit": k, "reserve_tooltip": _kit_reservation_tooltip(k, db)} for k in kits]
+    display_tz = get_display_timezone(db)
+    kit_rows = [
+        {
+            "kit": k,
+            "reserve_tooltip": _kit_reservation_tooltip(k, db),
+            "reserve_slots_used": len(k.reserves or []),
+            "clear_modal_items_json": json.dumps(
+                _kit_clear_modal_items(k, display_tz), ensure_ascii=False
+            ),
+        }
+        for k in kits
+    ]
     return templates.TemplateResponse(
         "admin_kits.html",
         _ctx(
@@ -2505,6 +2555,7 @@ def admin_kits_list(
             current_user=current_user,
             kit_rows=kit_rows,
             staff_users=staff_users,
+            kit_max_reserves=get_kit_max_reserves_per_kit(db),
             msg=msg,
             err=err,
         ),
@@ -2582,9 +2633,9 @@ def admin_kit_detail(
     kit = db.scalar(
         select(Kit)
         .options(
-            selectinload(Kit.reserved_by_user),
-            selectinload(Kit.reserved_for_client),
-            selectinload(Kit.reserved_for_user),
+            selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
+            selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_user),
+            selectinload(Kit.reserves).selectinload(KitReserve.reserved_by_user),
             selectinload(Kit.author_staff_links).selectinload(KitAuthorStaff.user),
         )
         .where(Kit.id == kit_id)
@@ -2600,6 +2651,7 @@ def admin_kit_detail(
             .limit(200)
         ).all()
     )
+    display_tz = get_display_timezone(db)
     return templates.TemplateResponse(
         "admin_kit_detail.html",
         _ctx(
@@ -2609,6 +2661,12 @@ def admin_kit_detail(
             audit_rows=audit_rows,
             reserve_tooltip=_kit_reservation_tooltip(kit, db),
             staff_users=_staff_users_for_reserve(db),
+            kit_max_reserves=get_kit_max_reserves_per_kit(db),
+            kit_reserve_slots_used=kit_reserve_slots_used(db, kit_id),
+            display_tz=display_tz,
+            clear_modal_items_json=json.dumps(
+                _kit_clear_modal_items(kit, display_tz), ensure_ascii=False
+            ),
             msg=msg,
             err=err,
         ),
@@ -2832,7 +2890,11 @@ async def admin_kit_reserve_post(
     ),
     db: Session = Depends(get_db),
 ):
-    kit = db.get(Kit, kit_id)
+    kit = db.scalar(
+        select(Kit)
+        .options(selectinload(Kit.reserves))
+        .where(Kit.id == kit_id)
+    )
     if not kit:
         return RedirectResponse(
             url="/admin/kits?err=" + quote("Комплект не найден", safe=""),
@@ -2842,29 +2904,36 @@ async def admin_kit_reserve_post(
     form = await request.form()
     redirect_base = _kit_reserve_redirect_base(kit_id, form)
     action = str(form.get("action") or "").strip().lower()
+    max_slots = get_kit_max_reserves_per_kit(db)
 
-    if action == "clear":
-        before = SimpleNamespace(
-            reserved_at=kit.reserved_at,
-            reserved_by_user_id=kit.reserved_by_user_id,
-            reserved_for_client_id=kit.reserved_for_client_id,
-            reserved_for_user_id=kit.reserved_for_user_id,
-        )
-        if current_user.role == UserRole.MASTER:
-            if not kit.is_reserved or kit.reserved_by_user_id != current_user.id:
-                return RedirectResponse(
-                    url=redirect_base
-                    + "?err="
-                    + quote(
-                        "Снять резерв может автор резерва или администратор.",
-                        safe="",
-                    ),
-                    status_code=303,
-                )
-        kit.reserved_at = None
-        kit.reserved_by_user_id = None
-        kit.reserved_for_client_id = None
-        kit.reserved_for_user_id = None
+    def _err(msg: str) -> RedirectResponse:
+        return RedirectResponse(url=redirect_base + "?err=" + quote(msg, safe=""), status_code=303)
+
+    if action == "clear_selected":
+        if current_user.role not in (UserRole.ADMIN, UserRole.ADMIN_SUPER):
+            return _err("Снятие нескольких резервов доступно администратору.")
+        raw_ids = form.getlist("reserve_id") if hasattr(form, "getlist") else []
+        ids: list[int] = []
+        for v in raw_ids:
+            if isinstance(v, UploadFile):
+                continue
+            s = str(v).strip()
+            if s.isdigit():
+                ids.append(int(s))
+        ids = list(dict.fromkeys(ids))
+        if not ids:
+            return _err("Отметьте хотя бы один резерв.")
+        rows: list[KitReserve] = []
+        for i in ids:
+            row = db.get(KitReserve, i)
+            if row is None or row.kit_id != kit.id:
+                return _err("Некорректный выбор резервов.")
+            rows.append(row)
+        total_back = sum(int(r.pieces_reserved or 0) for r in rows)
+        before = SimpleNamespace(pieces_available=kit.pieces_available)
+        for r in rows:
+            db.delete(r)
+        kit.pieces_available = int(kit.pieces_available or 0) + total_back
         kit.updated_at = datetime.utcnow()
         kit.updated_by_user_id = current_user.id
         write_audit_rows(
@@ -2873,87 +2942,98 @@ async def admin_kit_reserve_post(
             entity_field="kit_id",
             entity_id=kit.id,
             changed_by_user_id=current_user.id,
-            changes=diff_fields(
-                before,
-                kit,
-                (
-                    "reserved_at",
-                    "reserved_by_user_id",
-                    "reserved_for_client_id",
-                    "reserved_for_user_id",
-                ),
-            ),
+            changes=diff_fields(before, kit, ("pieces_available",)),
         )
         db.commit()
         return RedirectResponse(url=redirect_base + "?msg=cleared", status_code=303)
 
-    if current_user.role == UserRole.MASTER:
-        if kit.is_reserved and kit.reserved_by_user_id != current_user.id:
-            return RedirectResponse(
-                url=redirect_base
-                + "?err="
-                + quote(
-                    "Этот комплект зарезервирован другим пользователем. Изменить резерв может только администратор.",
-                    safe="",
-                ),
-                status_code=303,
+    if action == "clear":
+        rid_raw = str(form.get("reserve_id") or "").strip()
+        if rid_raw.isdigit():
+            row = db.get(KitReserve, int(rid_raw))
+            if not row or row.kit_id != kit.id:
+                return _err("Строка резерва не найдена.")
+            if current_user.role == UserRole.MASTER and row.reserved_by_user_id != current_user.id:
+                return _err("Снять резерв может автор резерва или администратор.")
+            before = SimpleNamespace(pieces_available=kit.pieces_available)
+            kit.pieces_available = int(kit.pieces_available or 0) + int(row.pieces_reserved or 0)
+            kit.updated_at = datetime.utcnow()
+            kit.updated_by_user_id = current_user.id
+            db.delete(row)
+            write_audit_rows(
+                db,
+                log_model=KitAuditLog,
+                entity_field="kit_id",
+                entity_id=kit.id,
+                changed_by_user_id=current_user.id,
+                changes=diff_fields(before, kit, ("pieces_available",)),
             )
+            db.commit()
+            return RedirectResponse(url=redirect_base + "?msg=cleared", status_code=303)
 
-    before = SimpleNamespace(
-        reserved_at=kit.reserved_at,
-        reserved_by_user_id=kit.reserved_by_user_id,
-        reserved_for_client_id=kit.reserved_for_client_id,
-        reserved_for_user_id=kit.reserved_for_user_id,
-    )
+        return _err("Укажите один резерв или отметьте строки в форме «Снять».")
+
+    reserve_full = str(form.get("reserve_full") or "").lower() in ("1", "on", "yes", "true")
+    qty_raw = str(form.get("reserve_pieces") or "").strip()
+    if reserve_full and qty_raw:
+        return _err("Выберите либо «весь остаток», либо укажите количество заготовок.")
+    if not reserve_full and not qty_raw:
+        return _err("Укажите «весь остаток» или количество заготовок.")
+    avail = int(kit.pieces_available or 0)
+    if avail <= 0:
+        return _err("Нет свободного остатка для резерва.")
+    if kit_reserve_slots_used(db, kit.id) >= max_slots:
+        return _err(f"Достигнут лимит резервов на комплект ({max_slots}). Увеличьте лимит в настройках.")
+
+    if reserve_full:
+        qty = avail
+    else:
+        try:
+            qty = int(qty_raw)
+        except ValueError:
+            return _err("Некорректное количество заготовок.")
+        if qty < 1:
+            return _err("Количество должно быть не меньше 1.")
+    if qty > avail:
+        return _err(f"Нельзя зарезервировать больше свободного остатка ({avail}).")
+
     cid_raw = str(form.get("reserved_for_client_id") or "").strip()
     uid_raw = str(form.get("reserved_for_user_id") or "").strip()
     cid = int(cid_raw) if cid_raw.isdigit() else None
     uid = int(uid_raw) if uid_raw.isdigit() else None
     if cid is None and uid is None:
-        return RedirectResponse(
-            url=redirect_base
-            + "?err="
-            + quote("Укажите клиента и/или сотрудника для резерва.", safe=""),
-            status_code=303,
-        )
+        return _err("Укажите клиента и/или сотрудника для резерва.")
     if cid is not None:
         if not db.get(Client, cid):
-            return RedirectResponse(
-                url=redirect_base + "?err=" + quote("Клиент не найден.", safe=""),
-                status_code=303,
-            )
+            return _err("Клиент не найден.")
     if uid is not None:
         u = db.get(User, uid)
         if not u or not user_has_any_role(
             db, uid, UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER
         ):
-            return RedirectResponse(
-                url=redirect_base + "?err=" + quote("Сотрудник не найден.", safe=""),
-                status_code=303,
-            )
+            return _err("Сотрудник не найден.")
 
-    kit.reserved_at = datetime.utcnow()
-    kit.reserved_by_user_id = current_user.id
-    kit.reserved_for_client_id = cid
-    kit.reserved_for_user_id = uid
+    before = SimpleNamespace(pieces_available=kit.pieces_available)
+    kit.pieces_available = avail - qty
     kit.updated_at = datetime.utcnow()
     kit.updated_by_user_id = current_user.id
+    db.add(
+        KitReserve(
+            kit_id=kit.id,
+            pieces_reserved=qty,
+            reserved_at=datetime.utcnow(),
+            reserved_by_user_id=current_user.id,
+            reserved_for_client_id=cid,
+            reserved_for_user_id=uid,
+        )
+    )
     write_audit_rows(
         db,
         log_model=KitAuditLog,
         entity_field="kit_id",
         entity_id=kit.id,
         changed_by_user_id=current_user.id,
-        changes=diff_fields(
-            before,
-            kit,
-            (
-                "reserved_at",
-                "reserved_by_user_id",
-                "reserved_for_client_id",
-                "reserved_for_user_id",
-            ),
-        ),
+        changes=diff_fields(before, kit, ("pieces_available",)),
     )
     db.commit()
     return RedirectResponse(url=redirect_base + "?msg=reserved", status_code=303)
@@ -3194,6 +3274,8 @@ def admin_settings_page(
     kanek_per_100 = str((pk.price_per_gram * 100) if pk else 400.0)
     kudri_per_100 = str((pku.price_per_gram * 100) if pku else 800.0)
     display_tz = get_display_timezone(db)
+    kit_max_row = db.get(Setting, "kit_max_reserves_per_kit")
+    kit_max_reserves_per_kit = kit_max_row.value if kit_max_row else "3"
 
     def _wr_float(key: str, default: float) -> float:
         r = db.scalar(select(WorkRate).where(WorkRate.key == key, WorkRate.is_active.is_(True)))
@@ -3223,6 +3305,7 @@ def admin_settings_page(
             kanek_per_100g=kanek_per_100,
             kudri_per_100g=kudri_per_100,
             display_timezone=display_tz,
+            kit_max_reserves_per_kit=kit_max_reserves_per_kit,
             timezone_choices=ALLOWED_TIMEZONES,
             saved=bool(saved),
             work_rates=work_rates,
@@ -3708,6 +3791,7 @@ def admin_settings_save(
     kanek_per_100g: str = Form(...),
     kudri_per_100g: str = Form(...),
     display_timezone: str = Form(...),
+    kit_max_reserves_per_kit: str = Form(...),
     current_user=Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -3801,6 +3885,30 @@ def admin_settings_save(
         changes=diff_fields(before_tz, tz_row, ("value",)),
     )
 
+    try:
+        kmn = int(str(kit_max_reserves_per_kit).strip())
+    except ValueError:
+        kmn = -1
+    if kmn < 1 or kmn > 20:
+        return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
+    kr_row = db.get(Setting, "kit_max_reserves_per_kit")
+    before_kr = SimpleNamespace(value=(kr_row.value if kr_row else None))
+    if not kr_row:
+        kr_row = Setting(key="kit_max_reserves_per_kit", value=str(kmn))
+        db.add(kr_row)
+    else:
+        kr_row.value = str(kmn)
+    kr_row.updated_at = now
+    kr_row.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=SettingAuditLog,
+        entity_field="setting_key",
+        entity_id=kr_row.key,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before_kr, kr_row, ("value",)),
+    )
+
     db.commit()
     return RedirectResponse(url="/admin/settings?saved=1", status_code=303)
 
@@ -3846,6 +3954,8 @@ async def admin_settings_work_rates_save(
         kanek_per_100 = str((pk.price_per_gram * 100) if pk else 400.0)
         kudri_per_100 = str((pku.price_per_gram * 100) if pku else 800.0)
         display_tz = get_display_timezone(db)
+        km_row = db.get(Setting, "kit_max_reserves_per_kit")
+        kit_max_reserves_per_kit_val = km_row.value if km_row else "3"
 
         def _safe(name: str, d: float) -> float:
             try:
@@ -3870,6 +3980,7 @@ async def admin_settings_work_rates_save(
                 kanek_per_100g=kanek_per_100,
                 kudri_per_100g=kudri_per_100,
                 display_timezone=display_tz,
+                kit_max_reserves_per_kit=kit_max_reserves_per_kit_val,
                 timezone_choices=ALLOWED_TIMEZONES,
                 saved=False,
                 work_rates=work_rates,

@@ -1,0 +1,99 @@
+  <div id="clear_reserves_overlay" style="display:none;pointer-events:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:55;align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this) closeClearReservesModal();">
+    <div class="card" style="max-width:520px;width:100%;margin:0;position:relative;max-height:90vh;overflow:auto;" onclick="event.stopPropagation();">
+      <h3 style="margin-top:0;">Снять резерв(ы): <span id="clear_reserves_sku"></span></h3>
+      <p class="muted" style="font-size:13px;">Отметьте строки. Свободный остаток на складе увеличится на сумму выбранных заготовок.</p>
+      <form id="clear_reserves_form" method="post" action="">
+        <input type="hidden" name="action" value="clear_selected" />
+        <input type="hidden" name="after_reserve" id="clear_reserves_after" value="list" />
+        <div id="clear_reserves_checkboxes" style="margin:12px 0 16px;"></div>
+        <div class="row" style="flex-wrap:wrap;">
+          <button type="submit">Снять выбранные</button>
+          <button type="button" class="secondary" onclick="closeClearReservesModal()">Отмена</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    function openClearReservesModal(kitId, sku, after, items) {
+      if (!items || !items.length) {
+        alert('Нет резервов для снятия.');
+        return;
+      }
+      var form = document.getElementById('clear_reserves_form');
+      form.action = '/admin/kits/' + kitId + '/reserve';
+      document.getElementById('clear_reserves_sku').textContent = sku || '';
+      document.getElementById('clear_reserves_after').value = after || 'list';
+      var box = document.getElementById('clear_reserves_checkboxes');
+      box.innerHTML = '';
+      items.forEach(function (item) {
+        var wrap = document.createElement('label');
+        wrap.style.cssText = 'display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;padding:10px;border-radius:8px;border:1px solid #e5e7eb;cursor:pointer;';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.name = 'reserve_id';
+        cb.value = String(item.id);
+        cb.style.marginTop = '4px';
+        var right = document.createElement('div');
+        var line1 = document.createElement('div');
+        var strong = document.createElement('strong');
+        strong.textContent = item.pieces + ' шт.';
+        line1.appendChild(strong);
+        line1.appendChild(document.createTextNode(' — '));
+        var tspan = document.createElement('span');
+        tspan.textContent = item.target || '—';
+        line1.appendChild(tspan);
+        var line2 = document.createElement('div');
+        line2.className = 'muted';
+        line2.style.fontSize = '12px';
+        line2.style.marginTop = '4px';
+        line2.textContent = (item.when || '') + ' · ' + (item.author || '');
+        right.appendChild(line1);
+        right.appendChild(line2);
+        wrap.appendChild(cb);
+        wrap.appendChild(right);
+        box.appendChild(wrap);
+      });
+      var ov = document.getElementById('clear_reserves_overlay');
+      ov.style.display = 'flex';
+      ov.style.pointerEvents = 'auto';
+    }
+    function closeClearReservesModal() {
+      var ov = document.getElementById('clear_reserves_overlay');
+      ov.style.display = 'none';
+      ov.style.pointerEvents = 'none';
+    }
+    function bindClearReservesUi() {
+      document.querySelectorAll('.js-clear-reserves-open').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var kitId = parseInt(btn.getAttribute('data-kit-id') || '0', 10);
+          var sku = btn.getAttribute('data-sku') || '';
+          var after = btn.getAttribute('data-after') || 'list';
+          var el = document.getElementById('clear-reserves-payload-' + kitId);
+          if (!el) return;
+          var items;
+          try {
+            items = JSON.parse(el.textContent.trim());
+          } catch (e) {
+            return;
+          }
+          openClearReservesModal(kitId, sku, after, items);
+        });
+      });
+      var cf = document.getElementById('clear_reserves_form');
+      if (cf) {
+        cf.addEventListener('submit', function (e) {
+          var n = document.querySelectorAll('#clear_reserves_checkboxes input[type="checkbox"]:checked').length;
+          if (!n) {
+            e.preventDefault();
+            alert('Отметьте хотя бы один резерв.');
+          }
+        });
+      }
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', bindClearReservesUi);
+    } else {
+      bindClearReservesUi();
+    }
+  </script>

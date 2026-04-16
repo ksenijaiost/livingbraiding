@@ -2,7 +2,7 @@
 {% block content %}
   <div class="card" style="max-width: 860px;">
     <h2 style="margin-top: 0;">Настройки</h2>
-    <p class="muted">Процент салона и цены материалов влияют только на <strong>новые</strong> визиты (в визите хранится снимок). Часовой пояс влияет на отображение времени в интерфейсе (например, дата резерва комплекта); в базе по-прежнему хранится UTC.</p>
+    <p class="muted">Процент салона и цены материалов влияют только на <strong>новые</strong> визиты (в визите хранится снимок). Часовой пояс влияет на отображение времени в интерфейсе (например, дата резерва комплекта); в базе по-прежнему хранится UTC. Лимит резервов — максимум строк резерва на один складской комплект (частичные резервы).</p>
 
     {% if saved %}
       <div class="card" style="border-color:#bbf7d0; background:#f0fdf4;">
@@ -34,6 +34,10 @@
             <option value="{{ tz_id }}" {% if display_timezone == tz_id %}selected{% endif %}>{{ tz_name }} — {{ tz_id }}</option>
           {% endfor %}
         </select>
+      </div>
+      <div style="margin-bottom: 12px;">
+        <label>Максимум резервов на один комплект (1–20)</label>
+        <input name="kit_max_reserves_per_kit" type="number" step="1" min="1" max="20" value="{{ kit_max_reserves_per_kit }}" />
       </div>
       <button type="submit">Сохранить</button>
     </form>

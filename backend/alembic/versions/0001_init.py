@@ -407,12 +407,19 @@ def upgrade() -> None:
         sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("is_in_stock", sa.Boolean(), nullable=False, server_default=sa.text("1")),
         sa.Column("is_archived", sa.Boolean(), nullable=False, server_default=sa.text("0")),
-        sa.Column("reserved_at", sa.DateTime(), nullable=True),
-        sa.Column("reserved_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("reserved_for_client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=True),
-        sa.Column("reserved_for_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("author_external", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.UniqueConstraint("sku", name="uq_kits_sku"),
+    )
+
+    op.create_table(
+        "kit_reserves",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("kit_id", sa.Integer(), sa.ForeignKey("kits.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("pieces_reserved", sa.Integer(), nullable=False),
+        sa.Column("reserved_at", sa.DateTime(), nullable=False),
+        sa.Column("reserved_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("reserved_for_client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=True),
+        sa.Column("reserved_for_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
     )
 
     op.create_table(
@@ -948,6 +955,7 @@ def downgrade() -> None:
     op.drop_table("visit_masters")
     op.drop_table("visits")
     op.drop_table("kit_author_staff")
+    op.drop_table("kit_reserves")
     op.drop_table("kits")
     op.drop_table("material_prices_current")
     op.drop_table("service_questionnaire_fields")
