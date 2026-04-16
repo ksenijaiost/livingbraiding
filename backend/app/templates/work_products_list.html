@@ -9,8 +9,31 @@
       </div>
     {% endif %}
 
-    <div style="display:flex; align-items:center; justify-content: space-between; gap: 12px; margin-bottom: 10px;">
-      <div></div>
+    <div style="display:flex; align-items:flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap:wrap;">
+      <p style="margin:0;font-size:13px;max-width:36rem;">
+        {% if current_user.role.value == 'MASTER' %}
+          {% if work_mine_only %}
+            <strong>Мои работы</strong>
+            <span class="muted">·</span>
+            <a href="/sales/work?mine=0">Все работы студии</a>
+          {% else %}
+            <strong>Все работы студии</strong>
+            <span class="muted">·</span>
+            <a href="/sales/work?mine=1">Только мои</a>
+          {% endif %}
+        {% else %}
+          {% if work_mine_only %}
+            <strong>Мои работы</strong>
+            <span class="muted">·</span>
+            <a href="/sales/work">Все работы</a>
+          {% else %}
+            <strong>Все работы</strong>
+            <span class="muted">·</span>
+            <a href="/sales/work?mine=1">Только мои</a>
+            <span class="muted">(создатель или доля в работе)</span>
+          {% endif %}
+        {% endif %}
+      </p>
       <div>
         {% if can_create %}
           <a href="/sales/work/new"><button>Новая работа</button></a>

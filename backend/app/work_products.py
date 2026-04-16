@@ -10,10 +10,10 @@ from datetime import date, datetime
 from types import SimpleNamespace
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.payroll_fund import post_work_accruals, replace_work_accruals, storno_source_accruals
@@ -833,20 +833,34 @@ async def work_new_post(
 @router.get("", response_class=HTMLResponse)
 def work_list(
     request: Request,
+    mine: str | None = Query(None),
     current_user: AuthUser = _VIEW,
     db: Session = Depends(get_db),
 ):
     msg = request.query_params.get("msg")
+    mine_raw = (mine or "").strip().lower()
+    if current_user.role == UserRole.MASTER:
+        if mine_raw in ("0", "false", "no", "all"):
+            work_mine_only = False
+        elif mine_raw in ("1", "true", "yes", "only"):
+            work_mine_only = True
+        else:
+            work_mine_only = True
+    else:
+        work_mine_only = mine_raw in ("1", "true", "yes", "only")
+
     stmt = select(WorkForInventory).options(
         selectinload(WorkForInventory.client),
         selectinload(WorkForInventory.staff_rows).selectinload(WorkForInventoryStaff.user),
     )
-    if current_user.role == UserRole.MASTER:
+    if work_mine_only:
         stmt = (
             stmt.outerjoin(WorkForInventoryStaff, WorkForInventoryStaff.work_id == WorkForInventory.id)
             .where(
-                (WorkForInventory.created_by_user_id == current_user.id)
-                | (WorkForInventoryStaff.user_id == current_user.id)
+                or_(
+                    WorkForInventory.created_by_user_id == current_user.id,
+                    WorkForInventoryStaff.user_id == current_user.id,
+                )
             )
             .distinct()
         )
@@ -854,7 +868,14 @@ def work_list(
     rows = list(db.scalars(stmt).all())
     return templates.TemplateResponse(
         "work_products_list.html",
-        _ctx(request, current_user=current_user, rows=rows, msg=msg, can_create=(current_user.role == UserRole.MASTER)),
+        _ctx(
+            request,
+            current_user=current_user,
+            rows=rows,
+            msg=msg,
+            can_create=(current_user.role == UserRole.MASTER),
+            work_mine_only=work_mine_only,
+        ),
     )
 
 

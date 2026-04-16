@@ -23,7 +23,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.datastructures import UploadFile
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.admin_questionnaire_fields import router as admin_questionnaire_fields_router
@@ -100,6 +100,9 @@ from app.db.models import (
     VisitKitUsage,
     VisitMaster,
     WorkForInventory,
+    WorkForInventoryStaff,
+    WorkKind,
+    WorkScope,
     WorkRate,
     WorkRateAuditLog,
 )
@@ -2281,6 +2284,156 @@ def admin_booking_cancel(
     return RedirectResponse(url=f"/admin/bookings/{booking_id}", status_code=303)
 
 
+def _product_sale_activity_label(sale: ProductSale) -> str:
+    k = sale.kind
+    if k == ProductSaleKind.KIT:
+        return "Продажа: комплект"
+    if k == ProductSaleKind.RUBBER:
+        return "Продажа: хвост/резинка"
+    if k == ProductSaleKind.MATERIAL:
+        return "Продажа: материал"
+    if k == ProductSaleKind.OTHER:
+        return "Продажа: другое"
+    return "Продажа"
+
+
+def _work_activity_label(w: WorkForInventory) -> str:
+    scope = "В наличие" if w.scope == WorkScope.IN_STOCK else "На заказ"
+    kind_map = {
+        WorkKind.KIT: "комплект/заготовки",
+        WorkKind.MIX: "смешка",
+        WorkKind.RUBBER: "хвосты/резинки",
+        WorkKind.KIT_CORRECTION: "коррекция комплекта",
+        WorkKind.HAIR_EXT_PREP: "подготовка к наращиванию",
+    }
+    kind_l = kind_map.get(w.kind, w.kind.value)
+    return f"Работа: {kind_l} ({scope})"
+
+
+def _master_activity_archive_row_id(row: dict[str, Any]) -> int:
+    if row["kind"] == "visit":
+        return row["visit"].id
+    if row["kind"] == "work":
+        return row["work"].id
+    return row["sale"].id
+
+
+def master_activity_archive(
+    db: Session,
+    master_id: int,
+    *,
+    days: int = 30,
+    max_rows: int = 50,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Визиты, работы с товарами и продажи за окно дней, где мастер участвовал."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    items: list[dict[str, Any]] = []
+
+    visits = list(
+        db.scalars(
+            select(Visit)
+            .where(
+                Visit.performed_date >= cutoff,
+                Visit.is_cancelled.is_(False),
+                or_(
+                    Visit.id.in_(
+                        select(VisitMaster.visit_id).where(VisitMaster.master_id == master_id)
+                    ),
+                    Visit.mix_bonus_master_id == master_id,
+                ),
+            )
+            .options(selectinload(Visit.client), selectinload(Visit.services))
+        ).all()
+    )
+    for v in visits:
+        if v.services:
+            vs0 = sorted(v.services, key=lambda s: s.id)[0]
+            svc_l = vs0.service_name
+        else:
+            svc_l = "Визит"
+        items.append(
+            {
+                "kind": "visit",
+                "sort_at": v.performed_date,
+                "visit": v,
+                "label": svc_l,
+                "client": v.client,
+            }
+        )
+
+    works = list(
+        db.scalars(
+            select(WorkForInventory)
+            .where(
+                WorkForInventory.created_at >= cutoff,
+                WorkForInventory.is_voided.is_(False),
+                or_(
+                    WorkForInventory.created_by_user_id == master_id,
+                    WorkForInventory.id.in_(
+                        select(WorkForInventoryStaff.work_id).where(
+                            WorkForInventoryStaff.user_id == master_id
+                        )
+                    ),
+                ),
+            )
+            .options(
+                selectinload(WorkForInventory.client),
+                selectinload(WorkForInventory.staff_rows).selectinload(WorkForInventoryStaff.user),
+            )
+        ).all()
+    )
+    for w in works:
+        items.append(
+            {
+                "kind": "work",
+                "sort_at": w.created_at,
+                "work": w,
+                "label": _work_activity_label(w),
+                "client": w.client,
+            }
+        )
+
+    staff_on_booking = exists(
+        select(1).where(
+            BookingStaff.booking_id == ProductSale.booking_id,
+            BookingStaff.user_id == master_id,
+        )
+    )
+    sales = list(
+        db.scalars(
+            select(ProductSale)
+            .where(
+                ProductSale.performed_date >= cutoff,
+                ProductSale.is_voided.is_(False),
+                or_(
+                    ProductSale.created_by_user_id == master_id,
+                    ProductSale.material_mix_bonus_user_id == master_id,
+                    staff_on_booking,
+                ),
+            )
+            .options(selectinload(ProductSale.client))
+        ).all()
+    )
+    for s in sales:
+        items.append(
+            {
+                "kind": "sale",
+                "sort_at": s.performed_date,
+                "sale": s,
+                "label": _product_sale_activity_label(s),
+                "client": s.client,
+            }
+        )
+
+    items.sort(
+        key=lambda r: (r["sort_at"], str(r["kind"]), _master_activity_archive_row_id(r)),
+        reverse=True,
+    )
+    truncated = len(items) > max_rows
+    items = items[:max_rows]
+    return items, truncated
+
+
 @app.get("/master/bookings", response_class=HTMLResponse)
 def master_bookings(
     request: Request,
@@ -2352,6 +2505,14 @@ def master_bookings(
             else:
                 label = _sale_order_label(b)
             rows.append({"booking": b, "label": label})
+    archive_days = 30
+    archive_cap = 50
+    archive_rows, archive_truncated = master_activity_archive(
+        db,
+        current_user.id,
+        days=archive_days,
+        max_rows=archive_cap,
+    )
     return templates.TemplateResponse(
         "master_bookings.html",
         _ctx(
@@ -2359,6 +2520,10 @@ def master_bookings(
             current_user=current_user,
             rows=rows,
             display_tz=display_tz,
+            archive_rows=archive_rows,
+            archive_days=archive_days,
+            archive_cap=archive_cap,
+            archive_truncated=archive_truncated,
         ),
     )
 
@@ -3042,19 +3207,34 @@ async def admin_kit_reserve_post(
 @app.get("/admin/visits", response_class=HTMLResponse)
 def admin_visits(
     request: Request,
+    mine: str | None = Query(None),
     current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
-    stmt = (
-        select(Visit)
-        .options(selectinload(Visit.client), selectinload(Visit.services))
-        .order_by(Visit.performed_date.desc())
-        .limit(200)
+    mine_raw = (mine or "").strip().lower()
+    visits_mine_only = mine_raw in ("1", "true", "yes", "only")
+    stmt = select(Visit).options(
+        selectinload(Visit.client), selectinload(Visit.services)
     )
+    if visits_mine_only:
+        stmt = stmt.where(
+            or_(
+                Visit.id.in_(
+                    select(VisitMaster.visit_id).where(VisitMaster.master_id == current_user.id)
+                ),
+                Visit.mix_bonus_master_id == current_user.id,
+            )
+        )
+    stmt = stmt.order_by(Visit.performed_date.desc()).limit(200)
     visits = list(db.scalars(stmt).all())
     return templates.TemplateResponse(
         "admin_visits.html",
-        _ctx(request, current_user=current_user, visits=visits),
+        _ctx(
+            request,
+            current_user=current_user,
+            visits=visits,
+            visits_mine_only=visits_mine_only,
+        ),
     )
 
 

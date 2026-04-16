@@ -3,7 +3,19 @@
   <div class="card">
     <h2 style="margin-top: 0;">Визиты</h2>
     <p><a href="/sales/work">Работа с товарами</a></p>
-    <p class="muted">Список последних визитов.</p>
+    <p class="muted" style="margin-bottom:8px;">Список последних визитов (до 200).</p>
+    <p style="margin:0 0 12px;font-size:13px;">
+      {% if visits_mine_only %}
+        <strong>Мои визиты</strong>
+        <span class="muted">·</span>
+        <a href="/admin/visits">Все визиты</a>
+      {% else %}
+        <strong>Все визиты</strong>
+        <span class="muted">·</span>
+        <a href="/admin/visits?mine=1">Только мои</a>
+        <span class="muted">(где вы в долях мастеров или бонус за смешку)</span>
+      {% endif %}
+    </p>
     <table>
       <thead>
         <tr>
