@@ -1,15 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
   <div class="card">
-    <div class="row" style="align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 8px;">
-      <h2 style="margin: 0;">Прайс · Услуги</h2>
-      <a href="/"><button class="secondary" type="button">← Главная</button></a>
-    </div>
+    <h2 style="margin-top: 0;">Прайс · Услуги</h2>
     <p class="muted" style="margin-top: -6px;">
-      Позиции каталога, доступные в форме визита. Цены на материал и прочие товары без визита — в разделе
-      <a href="/products-catalog">Прайс · Товары</a>.
-      Выберите категорию и подкатегорию; сначала активные услуги, неактивные — в конце списка.
+      Позиции каталога, доступные в форме визита. Выберите категорию и подкатегорию; сначала активные услуги, неактивные — в конце списка.
     </p>
+
+    <div style="display:flex; gap:8px; flex-wrap:nowrap; overflow-x:auto; margin-bottom:12px; padding-bottom:4px; align-items:center;">
+      <a href="/products-catalog" style="flex:0 0 auto;">
+        <button type="button" class="secondary">Прайс — товары</button>
+      </a>
+      {% if current_user.role.value == "ADMIN_SUPER" %}
+        <a href="/admin/catalog" style="flex:0 0 auto;">
+          <button type="button" class="secondary">Управление прайсом</button>
+        </a>
+      {% endif %}
+    </div>
 
     {% if mismatch %}
       <div class="error" style="margin-bottom: 12px;">
