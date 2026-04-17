@@ -71,6 +71,13 @@
           <option value="0" {% if form_kit_override == '0' %}selected{% endif %}>Не показывать</option>
         </select>
       </label>
+      <label style="display:block; margin-top: 8px;">Блок «Хвост/резинка» (склад)
+        <select name="tail_section_override" style="display:block; margin-top:4px; max-width: 28rem;">
+          <option value="" {% if form_tail_override == '' %}selected{% endif %}>Как у подкатегории</option>
+          <option value="1" {% if form_tail_override == '1' %}selected{% endif %}>Всегда показывать</option>
+          <option value="0" {% if form_tail_override == '0' %}selected{% endif %}>Не показывать</option>
+        </select>
+      </label>
       <label style="display:flex; align-items:center; gap:8px; margin-top: 12px;">
         <input type="checkbox" name="hide_material_description" {% if form_hide_material %}checked{% endif %} />
         Не показывать «Описание про материал» (даже если подкатегория разрешает)

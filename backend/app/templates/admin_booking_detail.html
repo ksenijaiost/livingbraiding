@@ -58,6 +58,18 @@
       </li>
     </ul>
 
+    <div class="row" style="margin-top: 10px; gap: 8px;">
+      {% if not linked_visit_id and booking.kind.value == "VISIT" %}
+        <a href="/master/visit/new?booking_id={{ booking.id }}"><button type="button" class="secondary">Создать визит</button></a>
+      {% endif %}
+      {% if not linked_sale_id %}
+        <a href="/sales/products/new?booking_id={{ booking.id }}"><button type="button" class="secondary">Создать продажу</button></a>
+      {% endif %}
+      {% if not linked_work_id %}
+        <a href="/sales/work/new?booking_id={{ booking.id }}"><button type="button" class="secondary">Создать работу</button></a>
+      {% endif %}
+    </div>
+
     {% if booking.kind.value == "VISIT" %}
       <h3 style="margin-top: 18px;">Параметры визита</h3>
       <p style="margin:6px 0;"><strong>Услуга</strong>:
@@ -76,6 +88,26 @@
           <span class="muted">—</span>
         {% endif %}
       </p>
+
+      {% if details %}
+        <div class="card" style="margin-top:10px;background:#f8fafc;">
+          <div class="muted" style="font-size:12px;margin-bottom:6px;">Детали из брони (префилл)</div>
+          {% if details.get('visit_kit_mode') %}
+            <p style="margin:6px 0;"><strong>Комплект</strong>: {{ details.get('visit_kit_mode') }}</p>
+          {% endif %}
+          {% if details.get('visit_order_blanks_qty') or details.get('visit_order_blanks_desc') %}
+            <p style="margin:6px 0;"><strong>Заказ (заготовки)</strong>:
+              {% if details.get('visit_order_blanks_qty') %}{{ details.get('visit_order_blanks_qty') }} шт{% endif %}
+            </p>
+            {% if details.get('visit_order_blanks_desc') %}
+              <p class="muted" style="margin:6px 0; white-space: pre-wrap;">{{ details.get('visit_order_blanks_desc') }}</p>
+            {% endif %}
+          {% endif %}
+          {% if details.get('visit_own_need_correction') %}
+            <p style="margin:6px 0;"><strong>Нужна коррекция</strong>: да</p>
+          {% endif %}
+        </div>
+      {% endif %}
     {% else %}
       <h3 style="margin-top: 18px;">Параметры продажи</h3>
       <p style="margin:6px 0;"><strong>Тип продажи</strong>: {{ product_kind_label }}</p>
@@ -84,6 +116,23 @@
       {% endif %}
       {% if sale_rubber_order_users and (sale_rubber_order_users|length > 0) %}
         <p style="margin:6px 0;"><strong>Назначенный мастер (заказ хвоста/резинки)</strong>: {{ sale_rubber_order_users|join(", ") }}</p>
+      {% endif %}
+
+      {% if details %}
+        <div class="card" style="margin-top:10px;background:#f8fafc;">
+          <div class="muted" style="font-size:12px;margin-bottom:6px;">Детали из брони (префилл)</div>
+          {% if details.get('product_kind') %}
+            <p style="margin:6px 0;"><strong>product_kind</strong>: {{ details.get('product_kind') }}</p>
+          {% endif %}
+          {% if details.get('sale_order_blanks_qty') or details.get('sale_order_blanks_desc') %}
+            <p style="margin:6px 0;"><strong>Заказ (заготовки)</strong>:
+              {% if details.get('sale_order_blanks_qty') %}{{ details.get('sale_order_blanks_qty') }} шт{% endif %}
+            </p>
+            {% if details.get('sale_order_blanks_desc') %}
+              <p class="muted" style="margin:6px 0; white-space: pre-wrap;">{{ details.get('sale_order_blanks_desc') }}</p>
+            {% endif %}
+          {% endif %}
+        </div>
       {% endif %}
     {% endif %}
 

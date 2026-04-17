@@ -299,7 +299,14 @@ def product_sale_new_get(
     current_user: AuthUser = _STAFF,
     db: Session = Depends(get_db),
 ):
-    return _render_new(request, current_user, db)
+    fp: dict[str, str] = {}
+    cid = str(request.query_params.get("client_id") or "").strip()
+    if cid.isdigit():
+        fp["existing_client_id"] = cid
+    bid = str(request.query_params.get("booking_id") or "").strip()
+    if bid.isdigit():
+        fp["booking_id"] = bid
+    return _render_new(request, current_user, db, fp=fp)
 
 
 @router.get("/{sale_id}", response_class=HTMLResponse)
@@ -793,6 +800,9 @@ async def product_sale_new_post(
         amount_from_client=amount_from_client,
         kind=kind,
     )
+    bid_raw = (_g_str(form, "booking_id") or "").strip()
+    if bid_raw.isdigit():
+        row.booking_id = int(bid_raw)
 
     if kind == ProductSaleKind.MATERIAL:
         try:

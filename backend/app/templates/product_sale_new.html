@@ -9,6 +9,7 @@
     {% endif %}
 
     <form method="post" action="/sales/products/new" id="product-sale-form">
+      <input type="hidden" name="booking_id" value="{{ fp.get('booking_id', '') }}" />
       <h3>Клиент</h3>
       <div class="card" style="margin-top: 8px;">
         <input type="hidden" name="existing_client_id" id="existing_client_id" value="{{ fp.get('existing_client_id', '') }}" />

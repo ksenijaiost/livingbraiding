@@ -55,6 +55,7 @@ from app.display_time import (
     get_display_timezone,
     timezone_label,
 )
+from app.db.models import MixSource
 from app.client_validation import (
     CLIENT_AGE_GROUP_OPTIONS,
     client_age_group_label,
@@ -151,7 +152,10 @@ from app.kit_crud import (
     validate_kit_admin_form,
     calc_kit_stock_price_total_from_composition,
 )
-from app.work_products import _rubber_type_items
+from app.work_products import _kit_client_stock_price_total, _rubber_type_items, _zakaz_subcategory_services_map
+from app.work_products import _kit_se_items, _kit_de_items
+from app.work_products_compute import compute_work_financials
+from app.zakaz_blanks import zakaz_blank_def_by_key
 from app import admin_studio_expenses as admin_studio_expenses_routes
 from app import product_sales as product_sales_routes
 from app import work_products as work_products_routes
@@ -162,6 +166,7 @@ from app.kit_inlay_visit import (
     kit_reserve_hint_by_id,
     kit_reserve_slots_used,
     list_master_visit_services_catalog,
+    service_requires_tail_block,
     master_visit_step1_prefill_from_form,
     parse_kit_inlay_form,
     save_kit_inlay_visit,
@@ -1125,6 +1130,424 @@ def products_catalog_view_legacy(category: str | None = None):
     return RedirectResponse(url=url, status_code=302)
 
 
+@app.get("/products-calc", response_class=HTMLResponse)
+def products_calc_view(
+    request: Request,
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
+    db: Session = Depends(get_db),
+):
+    # Services with kit block: allow choosing any service (sphinx etc.)
+    service_catalog = list_master_visit_services_catalog(db)
+    kit_services: list[dict[str, Any]] = []
+    tail_attach_services: list[dict[str, Any]] = []
+    service_price_meta: dict[int, dict[str, float]] = {}
+
+    def _service_price_range(svc: dict[str, Any]) -> tuple[float | None, float | None]:
+        vals: list[tuple[float | None, float | None]] = [
+            (svc.get("price_junior_from"), svc.get("price_junior_to")),
+            (svc.get("price_middle_from"), svc.get("price_middle_to")),
+            (svc.get("price_senior_from"), svc.get("price_senior_to")),
+        ]
+        lows: list[float] = []
+        highs: list[float] = []
+        for fr, to in vals:
+            if fr is not None:
+                lows.append(float(fr))
+            if to is not None:
+                highs.append(float(to))
+        # If only "from" exists and "to" missing, treat max = max(from).
+        if not highs and lows:
+            highs = list(lows)
+        if not lows and highs:
+            lows = list(highs)
+        return (min(lows) if lows else None, max(highs) if highs else None)
+
+    for c in service_catalog:
+        for sc in c.get("subcategories") or []:
+            for s in sc.get("services") or []:
+                sid = int(s.get("id") or 0)
+                if sid <= 0:
+                    continue
+                label = f"{c.get('name')} → {sc.get('name')} → {s.get('name')}"
+                lo, hi = _service_price_range(s)
+                if lo is not None or hi is not None:
+                    service_price_meta[sid] = {
+                        "min": float(lo if lo is not None else hi or 0.0),
+                        "max": float(hi if hi is not None else lo or 0.0),
+                    }
+                if bool(s.get("requires_kit_block")):
+                    kit_services.append({"id": sid, "label": label})
+                # Tail attach: explicit flag like kit block.
+                if bool(s.get("requires_tail_block")):
+                    tail_attach_services.append({"id": sid, "label": label})
+    kit_services = sorted(kit_services, key=lambda x: x["label"])
+    tail_attach_services = sorted(tail_attach_services, key=lambda x: x["label"])
+
+    return templates.TemplateResponse(
+        "products_calc.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+            visit_services_with_kit=kit_services,
+            visit_services_tail_attach=tail_attach_services,
+            kit_se_items=_kit_se_items(),
+            kit_de_items=_kit_de_items(),
+            service_price_meta_json=json.dumps(service_price_meta, ensure_ascii=False),
+        ),
+    )
+
+
+def _material_cost_total(db: Session, *, kanekalon_grams: float, kudri_grams: float) -> float:
+    pk = db.get(MaterialPriceCurrent, MaterialType.KANEKALON)
+    pku = db.get(MaterialPriceCurrent, MaterialType.KUDRI)
+    kpg = float(pk.price_per_gram) if pk else 0.0
+    kupg = float(pku.price_per_gram) if pku else 0.0
+    kan = max(0.0, float(kanekalon_grams or 0.0))
+    ku = max(0.0, float(kudri_grams or 0.0))
+    return float(kan) * float(kpg) + float(ku) * float(kupg)
+
+
+@app.post("/api/products-calc")
+async def api_products_calc(
+    request: Request,
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
+    db: Session = Depends(get_db),
+):
+    blank_by_key = zakaz_blank_def_by_key()
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Некорректный JSON."}, status_code=400)
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "Некорректный формат запроса."}, status_code=400)
+
+    kind_raw = str(payload.get("kind") or "").strip().upper() or "KIT"
+    if kind_raw not in ("KIT", "KIT_CORRECTION", "RUBBER"):
+        return JSONResponse({"error": "Некорректный тип расчёта."}, status_code=400)
+
+    def _f(name: str, d: float = 0.0) -> float:
+        try:
+            return float(payload.get(name) if payload.get(name) is not None else d)
+        except Exception:
+            return d
+
+    def _i(name: str, d: int = 0) -> int:
+        try:
+            return int(float(payload.get(name) if payload.get(name) is not None else d))
+        except Exception:
+            return d
+
+    def _b(name: str) -> bool:
+        v = payload.get(name)
+        if isinstance(v, bool):
+            return v
+        s = str(v or "").strip().lower()
+        return s in ("1", "true", "on", "yes")
+
+    kan = max(0.0, _f("kanekalon_grams", 0.0))
+    kud = max(0.0, _f("kudri_grams", 0.0))
+    grams_total = float(kan) + float(kud)
+    mat_cost = _material_cost_total(db, kanekalon_grams=kan, kudri_grams=kud)
+
+    mix_source_raw = str(payload.get("mix_source") or "").strip().upper()
+    mix_complexity_raw = str(payload.get("mix_complexity") or "").strip().upper()
+    if mix_source_raw in ("", "NO_MIX") or grams_total <= 0:
+        mix_source = MixSource.NO_MIX
+        mix_complexity = None
+    else:
+        try:
+            mix_source = MixSource(mix_source_raw)
+        except ValueError:
+            mix_source = MixSource.NO_MIX
+        # allow legacy values from older UI
+        mix_complexity_raw = {"SIMPLE": "STANDARD", "MEDIUM": "KANEK", "HARD": "THERMO"}.get(
+            mix_complexity_raw, mix_complexity_raw
+        )
+        try:
+            mix_complexity = MixComplexity(mix_complexity_raw) if mix_complexity_raw else None
+        except ValueError:
+            mix_complexity = None
+
+    extra_costs_amount = max(0.0, _f("extra_costs_amount", 0.0))
+
+    # Prepare inputs for compute_work_financials
+    try:
+        alloc = [(int(current_user.id), 1.0)]
+        scope = WorkScope.IN_STOCK
+        kit_totals: dict[str, int] = {}
+        client_min: float | None = None
+        client_max: float | None = None
+
+        if kind_raw == "KIT":
+            tt = payload.get("kit_totals") or {}
+            if isinstance(tt, dict):
+                for k, v in tt.items():
+                    try:
+                        qv = int(v)
+                    except Exception:
+                        qv = 0
+                    if qv > 0:
+                        kit_totals[str(k)] = qv
+            kit_staff_ids = [int(current_user.id)]
+            kit_by_staff = {int(current_user.id): dict(kit_totals)}
+            fin = compute_work_financials(
+                db,
+                kind=WorkKind.KIT,
+                scope=scope,
+                alloc=alloc,
+                current_user_id=int(current_user.id),
+                mat_cost=float(mat_cost),
+                kit_totals=kit_totals,
+                kit_staff_ids=kit_staff_ids,
+                kit_by_staff=kit_by_staff,
+                mix_source=mix_source,
+                mix_complexity=mix_complexity,
+                grams_total=float(grams_total),
+                rubber_type="",
+                rubber_qty=1,
+                corr_trim_qty=0,
+                corr_wash=False,
+                corr_circle=False,
+                corr_steam=False,
+                corr_dread_qty=0,
+                corr_curl_qty=0,
+                corr_curl_dread_complexity=None,
+            )
+            try:
+                client_total = _kit_client_stock_price_total(
+                    db, kit_totals=kit_totals, extra_costs_amount=float(extra_costs_amount)
+                )
+            except Exception:
+                client_total = None
+            if client_total is not None:
+                client_min = float(client_total)
+                client_max = float(client_total)
+            quoted = f"{client_total:.0f}" if client_total is not None else ""
+            client_hint = (
+                f"Цена для клиента (по прайсу): {client_total:.0f} ₽"
+                if client_total is not None
+                else "Цена для клиента: —"
+            )
+            # pieces/desc: exclude "техн" items (processing), keep them for pay/cost only.
+            client_piece_totals: dict[str, int] = {}
+            tech_totals: dict[str, int] = {}
+            for k, q in kit_totals.items():
+                q = int(q or 0)
+                if q <= 0:
+                    continue
+                d = blank_by_key.get(str(k))
+                if d and bool(d.exclude_from_inventory_piece_count):
+                    tech_totals[str(k)] = q
+                else:
+                    client_piece_totals[str(k)] = q
+
+            pieces = int(sum(int(v) for v in client_piece_totals.values()))
+
+            def _fmt_row(key: str, qty: int) -> str:
+                d = blank_by_key.get(key)
+                title = d.display_name if d else key
+                return f"{title} — {int(qty)} шт"
+
+            parts: list[str] = [f"Комплект на заказ: {pieces} шт"]
+            if client_piece_totals:
+                items = [_fmt_row(key, int(client_piece_totals[key])) for key in sorted(client_piece_totals.keys())]
+                parts.append("Состав: " + ", ".join(items))
+            if tech_totals:
+                items = [_fmt_row(key, int(tech_totals[key])) for key in sorted(tech_totals.keys())]
+                parts.append("Техн (не влияет на цену для клиента): " + ", ".join(items))
+
+            desc = "; ".join([p for p in parts if str(p).strip()])[:400]
+            prefill_sale = {
+                "kind": BookingKind.PRODUCT_SALE.value,
+                "product_kind": ProductSaleKind.KIT.value,
+                "sale_kit_mode": "ORDER",
+                "sale_order_blanks_qty": str(pieces or ""),
+                "sale_order_blanks_desc": desc,
+            }
+            svc_id = str(payload.get("visit_service_id") or "").strip()
+            prefill_visit = {
+                "kind": BookingKind.VISIT.value,
+                "service_id": svc_id,
+                "visit_kit_mode": "ORDER",
+                "visit_order_blanks_qty": str(pieces or ""),
+                "visit_order_blanks_desc": desc,
+            }
+
+        elif kind_raw == "KIT_CORRECTION":
+            fin = compute_work_financials(
+                db,
+                kind=WorkKind.KIT_CORRECTION,
+                scope=scope,
+                alloc=alloc,
+                current_user_id=int(current_user.id),
+                mat_cost=float(mat_cost),
+                kit_totals={},
+                kit_staff_ids=[],
+                kit_by_staff={},
+                mix_source=MixSource.NO_MIX,
+                mix_complexity=None,
+                grams_total=float(grams_total),
+                rubber_type="",
+                rubber_qty=1,
+                corr_trim_qty=max(0, _i("corr_trim_qty", 0)),
+                corr_wash=_b("corr_wash"),
+                corr_circle=_b("corr_circle"),
+                corr_steam=_b("corr_steam"),
+                corr_dread_qty=max(0, _i("corr_dread_qty", 0)),
+                corr_curl_qty=max(0, _i("corr_curl_qty", 0)),
+                corr_curl_dread_complexity=str(
+                    payload.get("corr_curl_dread_complexity") or "NORMAL"
+                ),
+            )
+            corr_map = _zakaz_subcategory_services_map(db, "Коррекция комплекта")
+
+            def _cp(name: str) -> float:
+                row = corr_map.get(name) or {}
+                v = row.get("client_price")
+                return float(v) if v is not None else 0.0
+
+            client_total = 0.0
+            any_price = False
+            tqty = max(0, _i("corr_trim_qty", 0))
+            if tqty:
+                client_total += _cp("Стрижка (1шт)") * float(tqty)
+                any_price = True
+            if _b("corr_circle"):
+                client_total += _cp("Одевание на круг")
+                any_price = True
+            if _b("corr_wash"):
+                client_total += _cp("Стирка")
+                any_price = True
+            if _b("corr_steam"):
+                client_total += _cp("Отпаривание")
+                any_price = True
+            dqty = max(0, _i("corr_dread_qty", 0))
+            if dqty:
+                client_total += _cp("Коррекция дреда (1шт)") * float(dqty)
+                any_price = True
+            cqty = max(0, _i("corr_curl_qty", 0))
+            if cqty:
+                client_total += _cp("Коррекция кудрей (1шт)") * float(cqty)
+                any_price = True
+            quoted = f"{client_total:.0f}" if any_price and client_total > 0 else ""
+            client_hint = (
+                f"Цена для клиента (по прайсу): {client_total:.0f} ₽"
+                if any_price and client_total > 0
+                else "Цена для клиента: —"
+            )
+            if any_price and float(client_total or 0) > 0:
+                client_min = float(client_total)
+                client_max = float(client_total)
+            svc_id = str(payload.get("visit_service_id") or "").strip()
+            prefill_sale = {
+                "kind": BookingKind.PRODUCT_SALE.value,
+                "product_kind": ProductSaleKind.OTHER.value,
+                "sale_rubber_desc": "Коррекция комплекта",
+            }
+            prefill_visit = {
+                "kind": BookingKind.VISIT.value,
+                "service_id": svc_id,
+                "visit_kit_mode": "OWN",
+                "visit_own_need_correction": "1",
+                "corr_trim_qty": str(max(0, _i("corr_trim_qty", 0))),
+                "corr_dread_qty": str(max(0, _i("corr_dread_qty", 0))),
+                "corr_curl_qty": str(max(0, _i("corr_curl_qty", 0))),
+                "corr_curl_dread_complexity": str(
+                    payload.get("corr_curl_dread_complexity") or "NORMAL"
+                ),
+                "corr_wash": "1" if _b("corr_wash") else "",
+                "corr_steam": "1" if _b("corr_steam") else "",
+                "corr_circle": "1" if _b("corr_circle") else "",
+            }
+
+        else:
+            rubber_type = str(payload.get("rubber_type") or "TAIL_ELASTIC").strip().upper()
+            if rubber_type not in ("TAIL_ELASTIC", "TAIL_CRAB", "TAIL_NET", "BRAIDS_ELASTIC"):
+                rubber_type = "TAIL_ELASTIC"
+            qty = 1
+            if rubber_type == "TAIL_ELASTIC":
+                qty = max(1, _i("rubber_attach_qty", 1))
+            elif rubber_type == "BRAIDS_ELASTIC":
+                qty = max(1, _i("rubber_braids_qty", 1))
+            fin = compute_work_financials(
+                db,
+                kind=WorkKind.RUBBER,
+                scope=scope,
+                alloc=alloc,
+                current_user_id=int(current_user.id),
+                mat_cost=float(mat_cost),
+                kit_totals={},
+                kit_staff_ids=[],
+                kit_by_staff={},
+                mix_source=MixSource.NO_MIX,
+                mix_complexity=None,
+                grams_total=float(grams_total),
+                rubber_type=rubber_type,
+                rubber_qty=int(qty),
+                corr_trim_qty=0,
+                corr_wash=False,
+                corr_circle=False,
+                corr_steam=False,
+                corr_dread_qty=0,
+                corr_curl_qty=0,
+                corr_curl_dread_complexity=None,
+            )
+            rub_map = _zakaz_subcategory_services_map(db, "Хвосты/резинки")
+            svc_name = {
+                "TAIL_ELASTIC": "Хвост на резинке (1 крепление)",
+                "TAIL_CRAB": "Хвост на крабе",
+                "TAIL_NET": "Хвост на сетке",
+                "BRAIDS_ELASTIC": "Косы на резинке (1 коса)",
+            }[rubber_type]
+            row = rub_map.get(svc_name) or {}
+            cp = row.get("client_price")
+            if cp is not None:
+                client_total = float(cp) * float(qty)
+                client_min = float(client_total)
+                client_max = float(client_total)
+                quoted = f"{client_total:.0f}"
+                client_hint = f"Цена для клиента (по прайсу): {client_total:.0f} ₽"
+            else:
+                quoted = ""
+                client_hint = "Цена для клиента: —"
+            prefill_sale = {
+                "kind": BookingKind.PRODUCT_SALE.value,
+                "product_kind": ProductSaleKind.RUBBER.value,
+                "sale_rubber_mode": "ORDER",
+                "sale_rubber_type": rubber_type,
+                "sale_rubber_attach_qty": str(qty) if rubber_type == "TAIL_ELASTIC" else "",
+                "sale_rubber_braids_qty": str(qty) if rubber_type == "BRAIDS_ELASTIC" else "",
+            }
+            svc_id = str(payload.get("visit_service_id") or "").strip()
+            prefill_visit = {
+                "kind": BookingKind.VISIT.value,
+                "service_id": svc_id,
+            }
+    except Exception as e:
+        msg = str(e).strip() or "Ошибка расчёта."
+        return JSONResponse({"error": msg}, status_code=400)
+
+    cost_hint = f"Себестоимость (материал + доп. расходы): {float(fin.cost_total_amount):.2f} ₽"
+    pay_hint = f"ЗП мастера (итого): {float(fin.master_total):.2f} ₽"
+    resp = {
+        "client_hint": client_hint,
+        "cost_hint": cost_hint,
+        "pay_hint": pay_hint,
+        "quoted_price_text": quoted,
+        "client_min": client_min,
+        "client_max": client_max,
+        "prefill_sale": prefill_sale,
+        "prefill_visit": prefill_visit,
+    }
+    return JSONResponse(resp)
+
+
 @app.get("/admin/clients", response_class=HTMLResponse)
 def admin_clients(
     request: Request,
@@ -1457,6 +1880,18 @@ async def admin_client_edit_post(
 
     db.commit()
     return RedirectResponse(url=f"/admin/clients?updated={client.id}", status_code=303)
+
+
+@app.get("/admin/clients/suggest")
+def admin_clients_suggest(
+    q: str = "",
+    current_user: AuthUser = Depends(
+        require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)
+    ),
+    db: Session = Depends(get_db),
+):
+    # Must be defined BEFORE /admin/clients/{client_id}, otherwise "suggest" is parsed as client_id -> 422.
+    return JSONResponse({"clients": _client_suggest_items(db, q)})
 
 
 @app.get("/admin/clients/{client_id}", response_class=HTMLResponse)
@@ -2012,15 +2447,6 @@ def api_calendar_day(
     return JSONResponse(resp)
 
 
-@app.get("/admin/clients/suggest")
-def admin_clients_suggest(
-    q: str = "",
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
-    db: Session = Depends(get_db),
-):
-    return JSONResponse({"clients": _client_suggest_items(db, q)})
-
-
 def _booking_kind_label(k: str) -> str:
     if k == BookingKind.VISIT.value:
         return "Визит (услуга)"
@@ -2478,6 +2904,57 @@ def admin_booking_new_get(
             select_users_with_any_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)
         ).all()
     )
+    fp: dict[str, str] = {"planned_date": date.today().isoformat(), "planned_time": ""}
+    # Prefill from query (used by calculator)
+    allow = {
+        "kind",
+        "service_id",
+        "product_kind",
+        # VISIT kit/correction
+        "visit_kit_mode",
+        "visit_stock_kit_id",
+        "visit_stock_kit_pieces",
+        "visit_own_need_correction",
+        "visit_own_need_extra_blanks",
+        "visit_extra_blanks_mode",
+        "visit_extra_stock_kit_id",
+        "visit_extra_stock_kit_pieces",
+        "visit_order_blanks_qty",
+        "visit_order_blanks_desc",
+        "visit_extra_order_blanks_qty",
+        "visit_extra_order_blanks_desc",
+        "corr_trim_qty",
+        "corr_dread_qty",
+        "corr_curl_qty",
+        "corr_curl_dread_complexity",
+        "corr_wash",
+        "corr_steam",
+        "corr_circle",
+        # SALE kit
+        "sale_kit_mode",
+        "sale_stock_kit_id",
+        "sale_stock_kit_pieces",
+        "sale_kit_order_master_ids",
+        "sale_order_blanks_qty",
+        "sale_order_blanks_desc",
+        # SALE rubber
+        "sale_rubber_mode",
+        "sale_rubber_order_master_id",
+        "sale_rubber_type",
+        "sale_rubber_attach_qty",
+        "sale_rubber_braids_qty",
+        "sale_rubber_desc",
+        # conditions
+        "quoted_price_text",
+        "deposit_amount",
+        "comment",
+        "planned_date",
+        "planned_time",
+    }
+    for k, v in request.query_params.items():
+        if k in allow and v is not None:
+            fp[k] = str(v)
+
     return templates.TemplateResponse(
         "admin_booking_form.html",
         _ctx(
@@ -2494,7 +2971,7 @@ def admin_booking_new_get(
             kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
             product_kind_options=[k.value for k in ProductSaleKind],
             rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
-            fp={"planned_date": date.today().isoformat(), "planned_time": ""},
+            fp=fp,
             booking_master_on_ids=[],
         ),
     )
@@ -2709,6 +3186,14 @@ def admin_booking_detail(
         ).all()
     )
     display_tz = get_display_timezone(db)
+    details: dict[str, Any] = {}
+    if b.details_json:
+        try:
+            raw = json.loads(b.details_json)
+            if isinstance(raw, dict):
+                details = raw
+        except Exception:
+            details = {}
     return templates.TemplateResponse(
         "admin_booking_detail.html",
         _ctx(
@@ -2725,6 +3210,7 @@ def admin_booking_detail(
             display_tz=display_tz,
             sale_kit_order_users=sale_kit_order_users,
             sale_rubber_order_users=sale_rubber_order_users,
+            details=details,
         ),
     )
 
@@ -3430,6 +3916,7 @@ def _master_visit_step1_template_response(
 def master_visit_new_get(
     request: Request,
     saved: str | None = None,
+    booking_id: int | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
@@ -3439,13 +3926,40 @@ def master_visit_new_get(
         v = db.scalar(select(Visit).where(Visit.id == vid).options(selectinload(Visit.client)))
         if v and v.client and not v.client.is_confirmed:
             saved_draft_client = True
+    form_prefill: dict[str, str] = {}
+    selected_client = None
+    if booking_id:
+        b = db.scalar(
+            select(Booking)
+            .where(Booking.id == int(booking_id))
+            .options(selectinload(Booking.client))
+        )
+        if b and b.client:
+            form_prefill["client_mode"] = "existing"
+            form_prefill["existing_client_id"] = str(b.client_id)
+            selected_client = b.client
+            if b.planned_service_id:
+                form_prefill["service_id"] = str(b.planned_service_id)
+            form_prefill["booking_id"] = str(b.id)
+            # Try to apply booking details_json as visit prefill (kit modes etc.)
+            try:
+                d = json.loads(b.details_json or "{}")
+                if isinstance(d, dict):
+                    for k, v in d.items():
+                        # Only allow visit-related keys here.
+                        if str(k).startswith("visit_") or str(k).startswith("corr_"):
+                            form_prefill[str(k)] = str(v)
+            except Exception:
+                pass
+
     return _master_visit_step1_template_response(
         request,
         current_user=current_user,
         db=db,
-        form_prefill={},
+        form_prefill=form_prefill,
         visit_master_on_ids=[current_user.id],
         visit_master_pct_str={},
+        selected_client=selected_client,
         saved=saved,
         saved_draft_client=saved_draft_client,
         default_date=date.today().isoformat(),
@@ -3467,6 +3981,13 @@ async def master_visit_new_post(
             inp,
             created_by_label=format_created_by_label(current_user),
         )
+        bid_raw = str(form.get("booking_id") or "").strip()
+        if bid_raw.isdigit():
+            try:
+                visit.booking_id = int(bid_raw)
+                db.commit()
+            except Exception:
+                db.rollback()
     except ValueError as exc:
         fp, vm_on_ids, vm_pct_str = master_visit_step1_prefill_from_form(form)
         fp.update(collect_questionnaire_prefill_from_form(form))

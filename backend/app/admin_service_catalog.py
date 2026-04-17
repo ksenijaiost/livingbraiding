@@ -81,6 +81,11 @@ def _parse_kit_section_override(raw: object | None) -> bool | None:
     return None
 
 
+def _parse_tail_section_override(raw: object | None) -> bool | None:
+    """Пусто → наследовать от подкатегории (NULL в БД)."""
+    return _parse_kit_section_override(raw)
+
+
 @router.get("", response_class=HTMLResponse)
 def catalog_index(
     request: Request,
@@ -275,6 +280,7 @@ def subcategory_new_form(
             form_name="",
             form_active=True,
             form_show_kit=False,
+            form_show_tail=False,
             form_show_material=True,
             form_show_thermo=False,
         ),
@@ -287,6 +293,7 @@ def subcategory_new_save(
     name: str = Form(...),
     is_active: str | None = Form(None),
     show_kit_section: str | None = Form(None),
+    show_tail_section: str | None = Form(None),
     show_material_description: str | None = Form(None),
     show_thermo_visit: str | None = Form(None),
     current_user: AuthUser = _SUPER,
@@ -306,6 +313,7 @@ def subcategory_new_save(
         name=nm,
         is_active=_is_checked(is_active),
         show_kit_section=_is_checked(show_kit_section),
+        show_tail_section=_is_checked(show_tail_section),
         show_material_description=_is_checked(show_material_description),
         show_thermo_visit=_is_checked(show_thermo_visit),
     )
@@ -345,6 +353,7 @@ def subcategory_edit_form(
             form_name=sub.name,
             form_active=sub.is_active,
             form_show_kit=sub.show_kit_section,
+            form_show_tail=getattr(sub, "show_tail_section", False),
             form_show_material=sub.show_material_description,
             form_show_thermo=sub.show_thermo_visit,
         ),
@@ -357,6 +366,7 @@ def subcategory_edit_save(
     name: str = Form(...),
     is_active: str | None = Form(None),
     show_kit_section: str | None = Form(None),
+    show_tail_section: str | None = Form(None),
     show_material_description: str | None = Form(None),
     show_thermo_visit: str | None = Form(None),
     current_user: AuthUser = _SUPER,
@@ -369,6 +379,7 @@ def subcategory_edit_save(
         name=sub.name,
         is_active=sub.is_active,
         show_kit_section=sub.show_kit_section,
+        show_tail_section=getattr(sub, "show_tail_section", False),
         show_material_description=sub.show_material_description,
         show_thermo_visit=sub.show_thermo_visit,
     )
@@ -384,6 +395,7 @@ def subcategory_edit_save(
     sub.name = nm
     sub.is_active = _is_checked(is_active)
     sub.show_kit_section = _is_checked(show_kit_section)
+    sub.show_tail_section = _is_checked(show_tail_section)
     sub.show_material_description = _is_checked(show_material_description)
     sub.show_thermo_visit = _is_checked(show_thermo_visit)
     sub.updated_at = datetime.utcnow()
@@ -401,6 +413,7 @@ def subcategory_edit_save(
                 "name",
                 "is_active",
                 "show_kit_section",
+                "show_tail_section",
                 "show_material_description",
                 "show_thermo_visit",
             ),
@@ -483,6 +496,7 @@ def service_new_form(
             form_is_per_unit=False,
             form_unit_label="",
             form_kit_override="",
+            form_tail_override="",
             form_hide_material=False,
             form_order_rubber=False,
             form_retail_kanekalon=False,
@@ -509,6 +523,7 @@ def service_new_save(
     is_per_unit: str | None = Form(None),
     unit_label: str | None = Form(None),
     kit_section_override: str | None = Form(None),
+    tail_section_override: str | None = Form(None),
     hide_material_description: str | None = Form(None),
     order_rubber_extra_time_amort: str | None = Form(None),
     retail_material_kanekalon: str | None = Form(None),
@@ -554,6 +569,7 @@ def service_new_save(
         is_per_unit=_is_checked(is_per_unit),
         unit_label=(unit_label or "").strip()[:60] or None,
         kit_section_override=_parse_kit_section_override(kit_section_override),
+        tail_section_override=_parse_tail_section_override(tail_section_override),
         hide_material_description=_is_checked(hide_material_description),
         order_rubber_extra_time_amort=_is_checked(order_rubber_extra_time_amort),
         retail_material_kanekalon=_is_checked(retail_material_kanekalon),
@@ -617,6 +633,11 @@ def service_edit_form(
                 if svc.kit_section_override is None
                 else ("1" if svc.kit_section_override else "0")
             ),
+            form_tail_override=(
+                ""
+                if getattr(svc, "tail_section_override", None) is None
+                else ("1" if svc.tail_section_override else "0")
+            ),
             form_hide_material=svc.hide_material_description,
             form_order_rubber=svc.order_rubber_extra_time_amort,
             form_retail_kanekalon=svc.retail_material_kanekalon,
@@ -643,6 +664,7 @@ def service_edit_save(
     is_per_unit: str | None = Form(None),
     unit_label: str | None = Form(None),
     kit_section_override: str | None = Form(None),
+    tail_section_override: str | None = Form(None),
     hide_material_description: str | None = Form(None),
     order_rubber_extra_time_amort: str | None = Form(None),
     retail_material_kanekalon: str | None = Form(None),
@@ -673,6 +695,7 @@ def service_edit_save(
         is_per_unit=svc.is_per_unit,
         unit_label=svc.unit_label,
         kit_section_override=svc.kit_section_override,
+        tail_section_override=getattr(svc, "tail_section_override", None),
         hide_material_description=svc.hide_material_description,
         order_rubber_extra_time_amort=svc.order_rubber_extra_time_amort,
         retail_material_kanekalon=svc.retail_material_kanekalon,
@@ -712,6 +735,7 @@ def service_edit_save(
     svc.is_per_unit = _is_checked(is_per_unit)
     svc.unit_label = (unit_label or "").strip()[:60] or None
     svc.kit_section_override = _parse_kit_section_override(kit_section_override)
+    svc.tail_section_override = _parse_tail_section_override(tail_section_override)
     svc.hide_material_description = _is_checked(hide_material_description)
     svc.order_rubber_extra_time_amort = _is_checked(order_rubber_extra_time_amort)
     svc.retail_material_kanekalon = _is_checked(retail_material_kanekalon)
@@ -743,6 +767,7 @@ def service_edit_save(
                 "is_per_unit",
                 "unit_label",
                 "kit_section_override",
+                "tail_section_override",
                 "hide_material_description",
                 "order_rubber_extra_time_amort",
                 "retail_material_kanekalon",

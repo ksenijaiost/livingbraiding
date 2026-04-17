@@ -107,6 +107,13 @@ def service_requires_kit_block(service: Service) -> bool:
     return bool(sub and sub.show_kit_section)
 
 
+def service_requires_tail_block(service: Service) -> bool:
+    if getattr(service, "tail_section_override", None) is not None:
+        return bool(service.tail_section_override)
+    sub = service.subcategory
+    return bool(sub and getattr(sub, "show_tail_section", False))
+
+
 def get_salon_cut_pct(db: Session) -> float:
     row = db.get(Setting, "salon_cut_pct")
     if not row:
@@ -1030,6 +1037,7 @@ def list_master_visit_services_catalog(db: Session) -> list[dict[str, Any]]:
                 "id": int(s.id),
                 "name": s.name,
                 "requires_kit_block": service_requires_kit_block(s),
+                "requires_tail_block": service_requires_tail_block(s),
                 "requires_thermo": service_requires_thermo_flow(s),
                 "price_junior_from": _opt_f(s.price_junior_from),
                 "price_junior_to": _opt_f(s.price_junior_to),

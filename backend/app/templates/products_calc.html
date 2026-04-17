@@ -1,0 +1,640 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 980px;">
+    <h2 style="margin-top: 0;">Калькулятор · Товары</h2>
+    <p class="muted" style="margin-top: -6px;">
+      Предварительный расчёт без сохранения. Можно сразу перейти к созданию брони.
+    </p>
+
+    <div class="row" style="align-items: flex-end; margin-bottom: 12px;">
+      <div style="flex: 0 0 auto;">
+        <label>Что считаем</label>
+        <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+          <label style="margin:0;"><input type="radio" name="calc_kind" value="KIT" checked /> Комплект</label>
+          <label style="margin:0;"><input type="radio" name="calc_kind" value="KIT_CORRECTION" /> Коррекция</label>
+          <label style="margin:0;"><input type="radio" name="calc_kind" value="RUBBER" /> Хвост/резинка</label>
+        </div>
+      </div>
+    </div>
+
+    <div id="common_block" class="card" style="background:#f8fafc; margin-bottom: 12px;">
+      <h3 style="margin-top:0;">Материал</h3>
+      <div class="row">
+        <div>
+          <label>Канекалон, г</label>
+          <input name="kanekalon_grams" type="number" step="0.01" min="0" value="0" />
+        </div>
+        <div>
+          <label>Кудри, г</label>
+          <input name="kudri_grams" type="number" step="0.01" min="0" value="0" />
+        </div>
+      </div>
+
+      <div id="mix_block" style="margin-top: 10px; opacity: 0.55; pointer-events: none;">
+        <div class="muted" style="font-size: 12px; margin-bottom: 8px;">Укажите граммы — затем выберите вариант смешки.</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px 16px;">
+          <label><input type="radio" name="mix_source" value="NO_MIX" checked /> Без смешки</label>
+          <label><input type="radio" name="mix_source" value="FROM_STOCK" /> Из наличия</label>
+          <label><input type="radio" name="mix_source" value="SELF_MIXED" /> Сама мешала</label>
+        </div>
+      </div>
+      <div id="mix_complexity_block" style="margin-top: 12px; display: none;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Сложность смешки *</div>
+        <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 14px;">
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="LIGHT" /> лёгкая (домешивание)</label>
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="STANDARD" checked /> стандарт</label>
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="KANEK" /> сложная канекалон (омбре, мелирование)</label>
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="THERMO" /> сложная термо</label>
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="LENGTH" /> сложная длина</label>
+        </div>
+      </div>
+    </div>
+
+    <div id="kit_block" class="card" style="background:#f8fafc; margin-bottom: 12px;">
+      <h3 style="margin-top:0;">Комплект</h3>
+      <p class="muted" style="margin-top:-6px;">
+        Укажите количество заготовок по видам. ЗП мастера берётся из прайса (колонка «Работа»).
+      </p>
+      <div class="row" style="margin-top: 8px; align-items: flex-end;">
+        <div style="flex: 0 0 auto;">
+          <label>Тип заготовок</label>
+          <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+            <label style="margin:0;"><input type="checkbox" id="kit_type_se" /> S.E.</label>
+            <label style="margin:0;"><input type="checkbox" id="kit_type_de" /> D.E.</label>
+          </div>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">
+            Строки «техн» не влияют на цену для клиента (используются только для расчёта работы/себестоимости).
+          </div>
+        </div>
+      </div>
+      <div style="overflow-x:auto; margin-top: 8px;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; width: 100%;">Наименование</th>
+              <th style="text-align:right; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; white-space: nowrap;">Кол-во</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="2" class="muted" style="padding: 8px 10px; font-size: 12px;">
+                Заполняйте только то, что есть в комплекте. Пустые строки считаются как 0.
+              </td>
+            </tr>
+            <tr>
+              <td colspan="2" style="padding: 8px 10px; font-weight: 700;">SE</td>
+            </tr>
+            {% for key, label in kit_se_items %}
+              <tr>
+                {% set is_tech = ('стрижка' in label|lower) or ('доплёт' in label|lower) %}
+                <td style="padding: 6px 10px; border-bottom: 1px solid #f1f5f9; {% if is_tech %}color:#64748b;{% endif %}">
+                  {{ label }}{% if is_tech %} <span class="muted" style="font-size:12px;">(техн)</span>{% endif %}
+                </td>
+                <td style="padding: 6px 10px; border-bottom: 1px solid #f1f5f9; text-align:right;">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value="0"
+                    style="width: 96px; text-align:right;"
+                    class="kit-qty"
+                    data-kit-section="SE"
+                    data-kit-key="{{ key }}"
+                    aria-label="Количество: {{ label }}"
+                  />
+                </td>
+              </tr>
+            {% endfor %}
+            <tr>
+              <td colspan="2" style="padding: 8px 10px; font-weight: 700;">DE</td>
+            </tr>
+            {% for key, label in kit_de_items %}
+              <tr>
+                {% set is_tech = ('стрижка' in label|lower) or ('доплёт' in label|lower) %}
+                <td style="padding: 6px 10px; border-bottom: 1px solid #f1f5f9; {% if is_tech %}color:#64748b;{% endif %}">
+                  {{ label }}{% if is_tech %} <span class="muted" style="font-size:12px;">(техн)</span>{% endif %}
+                </td>
+                <td style="padding: 6px 10px; border-bottom: 1px solid #f1f5f9; text-align:right;">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value="0"
+                    style="width: 96px; text-align:right;"
+                    class="kit-qty"
+                    data-kit-section="DE"
+                    data-kit-key="{{ key }}"
+                    aria-label="Количество: {{ label }}"
+                  />
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="row" style="margin-top: 10px;">
+        <div>
+          <label>Доп. расходы, ₽</label>
+          <input name="extra_costs_amount" type="number" step="0.01" min="0" value="0" />
+        </div>
+      </div>
+    </div>
+
+    <div id="correction_block" class="card" style="background:#f8fafc; margin-bottom: 12px; display:none;">
+      <h3 style="margin-top:0;">Коррекция комплекта</h3>
+      <p class="muted" style="margin-top:-6px;">Поля не обязательны — можно оставить пустыми, если деталей нет.</p>
+      <div class="row">
+        <div>
+          <label>Стрижка (1шт) — количество</label>
+          <input name="corr_trim_qty" type="number" step="1" min="0" value="0" />
+        </div>
+        <div>
+          <label>Коррекция дреда (1шт) — количество</label>
+          <input name="corr_dread_qty" type="number" step="1" min="0" value="0" />
+        </div>
+      </div>
+      <div class="row" style="margin-top: 10px;">
+        <div>
+          <label>Коррекция кудрей (1шт) — количество</label>
+          <input name="corr_curl_qty" type="number" step="1" min="0" value="0" />
+        </div>
+        <div>
+          <div style="font-weight: 600; margin-bottom: 6px;">Сложность кудрей / дредов</div>
+          <div id="corr_curl_dread_complexity_wrap" style="display: flex; flex-wrap: wrap; gap: 10px 16px; opacity: 0.55; pointer-events: none;">
+            <label><input type="radio" name="corr_curl_dread_complexity" value="NORMAL" checked /> Обычная</label>
+            <label><input type="radio" name="corr_curl_dread_complexity" value="HARD" /> Сложная (×1.5)</label>
+          </div>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Активируется, если указано количество для кудрей или дредов.</div>
+        </div>
+      </div>
+      <div style="margin-top: 10px;">
+        <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_wash" /> Стирка</label>
+        <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_steam" /> Отпаривание</label>
+        <label style="display:block; margin-bottom: 0;"><input type="checkbox" name="corr_circle" /> Одевание на круг</label>
+      </div>
+    </div>
+
+    <div id="rubber_block" class="card" style="background:#f8fafc; margin-bottom: 12px; display:none;">
+      <h3 style="margin-top:0;">Хвост/резинка</h3>
+      <div>
+        <label>Тип</label>
+        <div style="margin-top: 6px;">
+          {% for t in rubber_types %}
+            <label style="display:block; margin-bottom: 6px;">
+              <input type="radio" name="rubber_type" value="{{ t.value }}" {% if loop.index == 1 %}checked{% endif %} />
+              {{ t.label }}
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="row" style="margin-top: 10px;">
+        <div id="rubber_attach_qty_block" style="display:none;">
+          <label>Количество креплений (для хвоста на резинке)</label>
+          <input name="rubber_attach_qty" type="number" step="1" min="1" value="1" />
+        </div>
+        <div id="rubber_braids_qty_block" style="display:none;">
+          <label>Количество кос (для кос на резинке)</label>
+          <input name="rubber_braids_qty" type="number" step="1" min="1" value="1" />
+        </div>
+      </div>
+    </div>
+
+    <div id="result_block" class="card" style="background:#fff; border: 1px solid #e2e8f0;">
+      <div style="display:flex; align-items: center; justify-content: space-between; gap: 10px;">
+        <h3 style="margin:0;">Результат</h3>
+        <button id="btn_calc" type="button">Рассчитать</button>
+      </div>
+      <div id="res_client" style="margin-top:6px;">—</div>
+      <div id="res_cost" class="muted" style="margin-top:6px;">—</div>
+      <div id="res_pay" class="muted" style="margin-top:6px;">—</div>
+
+      <div id="booking_block" class="card" style="background:#f8fafc; margin-top: 12px;">
+        <h4 style="margin:0 0 8px;">Бронь</h4>
+        <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+          <label style="margin:0;"><input type="radio" name="booking_kind" value="SALE" checked /> Продажа</label>
+          <label style="margin:0;"><input type="radio" name="booking_kind" value="VISIT" /> Услуга</label>
+        </div>
+
+        <div id="service_picker_block" style="margin-top: 10px; display:none;">
+          <label>Услуга для брони визита</label>
+          <select id="visit_service_id" style="width: 100%; max-width: 100%; box-sizing: border-box;">
+            <option value="">— выберите —</option>
+          </select>
+          <div id="service_price_hint" class="muted" style="font-size: 12px; margin-top: 6px;">Прайс услуги: —</div>
+          <div style="display:flex; align-items:center; justify-content: space-between; gap: 10px; margin-top: 6px;">
+            <div id="service_total_hint" style="font-size: 13px; font-weight: 700; color:#0f172a;">Итого (расчёт + услуга): —</div>
+            <button id="btn_total_to_quoted" type="button" class="secondary" disabled style="white-space: nowrap;">в озвученную цену</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top: 12px; align-items:center;">
+        <div style="flex: 1;">
+          <label>Озвученная сумма (для брони)</label>
+          <input id="quoted_price_text" maxlength="120" placeholder="например 2500 ₽" />
+          <p class="muted" style="font-size:12px;margin:4px 0 0;">По умолчанию подставим подсказку из расчёта; можно поправить вручную.</p>
+        </div>
+      </div>
+      <div class="row" style="margin-top: 12px; gap: 8px; flex-wrap: wrap;">
+        <button id="btn_sale" type="button" class="secondary" disabled>Создать бронь продажи</button>
+        <button id="btn_visit" type="button" class="secondary" disabled>Создать бронь визита</button>
+        <button id="btn_reset" type="button" class="secondary">Завершить</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="application/json" id="service_price_meta">{{ service_price_meta_json | safe }}</script>
+
+  <script>
+    (function () {
+      function q(sel) { return document.querySelector(sel); }
+      function qa(sel) { return Array.from(document.querySelectorAll(sel)); }
+      function numVal(sel) {
+        var el = q(sel);
+        if (!el) return 0;
+        var v = String(el.value || '').replace(',', '.');
+        var n = parseFloat(v);
+        return isNaN(n) ? 0 : Math.max(0, n);
+      }
+      function isChecked(sel) { var el = q(sel); return !!(el && el.checked); }
+      function radioVal(name, def) {
+        var el = q('input[name="' + name + '"]:checked');
+        return el ? el.value : def;
+      }
+      function selectVal(name) { var el = q('select[name="' + name + '"]'); return el ? String(el.value || '') : ''; }
+      function setText(id, s) { var el = document.getElementById(id); if (el) el.textContent = s; }
+
+      function gramsTotal() {
+        return Math.max(0, numVal('input[name="kanekalon_grams"]')) + Math.max(0, numVal('input[name="kudri_grams"]'));
+      }
+      function syncMixUI() {
+        var g = gramsTotal();
+        var blk = document.getElementById('mix_block');
+        var wrap = document.getElementById('mix_complexity_block');
+        if (!blk || !wrap) return;
+        if (g <= 0) {
+          blk.style.opacity = '0.55';
+          blk.style.pointerEvents = 'none';
+          qa('input[name="mix_source"]').forEach(function (r) {
+            if (r.value === 'NO_MIX') r.checked = true;
+            r.disabled = (r.value !== 'NO_MIX');
+          });
+        } else {
+          blk.style.opacity = '1';
+          blk.style.pointerEvents = 'auto';
+          qa('input[name="mix_source"]').forEach(function (r) { r.disabled = false; });
+        }
+        var src = radioVal('mix_source', 'NO_MIX');
+        var need = g > 0 && (src === 'FROM_STOCK' || src === 'SELF_MIXED');
+        wrap.style.display = need ? 'block' : 'none';
+        qa('input[name="mix_complexity"]').forEach(function (r) { r.disabled = !need; });
+        if (!need) {
+          var st = q('input[name="mix_complexity"][value="STANDARD"]');
+          if (st) st.checked = true;
+        }
+      }
+
+      function syncKindUI() {
+        var k = radioVal('calc_kind', 'KIT');
+        var kit = document.getElementById('kit_block');
+        var cor = document.getElementById('correction_block');
+        var rub = document.getElementById('rubber_block');
+        if (kit) kit.style.display = (k === 'KIT') ? 'block' : 'none';
+        if (cor) cor.style.display = (k === 'KIT_CORRECTION') ? 'block' : 'none';
+        if (rub) rub.style.display = (k === 'RUBBER') ? 'block' : 'none';
+        syncRubberTypeFields();
+      }
+      function syncRubberTypeFields() {
+        var t = radioVal('rubber_type', '');
+        var a = document.getElementById('rubber_attach_qty_block');
+        var b = document.getElementById('rubber_braids_qty_block');
+        if (!a || !b) return;
+        a.style.display = (t === 'TAIL_ELASTIC') ? 'block' : 'none';
+        b.style.display = (t === 'BRAIDS_ELASTIC') ? 'block' : 'none';
+      }
+
+      function kitTotals() {
+        var out = {};
+        qa('input.kit-qty').forEach(function (el) {
+          var k = String(el.getAttribute('data-kit-key') || '').trim();
+          if (!k) return;
+          // skip hidden sections (unchecked SE/DE)
+          var sec = String(el.getAttribute('data-kit-section') || '').toUpperCase();
+          if (sec === 'SE' && q('#kit_type_se') && !q('#kit_type_se').checked) return;
+          if (sec === 'DE' && q('#kit_type_de') && !q('#kit_type_de').checked) return;
+          var v = parseInt(String(el.value || '0'), 10) || 0;
+          if (v > 0) out[k] = v;
+        });
+        return out;
+      }
+
+      function syncKitTypeUI() {
+        var seOn = q('#kit_type_se') ? !!q('#kit_type_se').checked : true;
+        var deOn = q('#kit_type_de') ? !!q('#kit_type_de').checked : true;
+
+        // Toggle SE/DE header rows by matching exact text in first cell.
+        qa('#kit_block table tbody tr').forEach(function (tr) {
+          var inp = tr.querySelector('input.kit-qty');
+          if (!inp) return;
+          var sec = String(inp.getAttribute('data-kit-section') || '').toUpperCase();
+          if (sec === 'SE') tr.style.display = seOn ? '' : 'none';
+          else if (sec === 'DE') tr.style.display = deOn ? '' : 'none';
+        });
+      }
+
+      function syncCorrectionComplexityUI() {
+        var d = Math.max(0, parseInt(String((q('input[name="corr_dread_qty"]') || {}).value || '0'), 10) || 0);
+        var c = Math.max(0, parseInt(String((q('input[name="corr_curl_qty"]') || {}).value || '0'), 10) || 0);
+        var need = (d > 0) || (c > 0);
+        var wrap = document.getElementById('corr_curl_dread_complexity_wrap');
+        if (!wrap) return;
+        wrap.style.opacity = need ? '1' : '0.55';
+        wrap.style.pointerEvents = need ? 'auto' : 'none';
+        qa('input[name="corr_curl_dread_complexity"]').forEach(function (r) { r.disabled = !need; });
+        if (!need) {
+          var nrm = q('input[name="corr_curl_dread_complexity"][value="NORMAL"]');
+          if (nrm) nrm.checked = true;
+        }
+      }
+
+      function bookingKind() {
+        return radioVal('booking_kind', 'SALE');
+      }
+
+      function serviceMeta() {
+        var el = document.getElementById('service_price_meta');
+        if (!el) return {};
+        try { return JSON.parse(el.textContent || '{}') || {}; } catch (e) { return {}; }
+      }
+
+      function readSelectedServiceId() {
+        if (bookingKind() !== 'VISIT') return '';
+        var sel = document.getElementById('visit_service_id');
+        return sel ? String(sel.value || '').trim() : '';
+      }
+
+      function _moneyRange(minV, maxV) {
+        if (minV == null && maxV == null) return '—';
+        if (minV != null && maxV != null && Math.abs(minV - maxV) < 0.0001) return String(Math.round(minV)) + ' ₽';
+        if (minV != null && maxV != null) return (String(Math.round(minV)) + '–' + String(Math.round(maxV)) + ' ₽');
+        var v = (minV != null) ? minV : maxV;
+        return String(Math.round(v || 0)) + ' ₽';
+      }
+
+      function syncServicePriceHints(calcClientMin, calcClientMax) {
+        var sid = readSelectedServiceId();
+        var meta = serviceMeta();
+        var ph = document.getElementById('service_price_hint');
+        var th = document.getElementById('service_total_hint');
+        var btn = document.getElementById('btn_total_to_quoted');
+        if (!ph || !th) return;
+        if (btn) { btn.disabled = true; btn.dataset.totalText = ''; }
+        if (!sid) {
+          ph.textContent = 'Прайс услуги: —';
+          th.textContent = 'Итого (расчёт + услуга): —';
+          return;
+        }
+        var m = meta[parseInt(sid, 10)];
+        if (!m) {
+          ph.textContent = 'Прайс услуги: —';
+          th.textContent = 'Итого (расчёт + услуга): —';
+          return;
+        }
+        var sMin = (typeof m.min === 'number') ? m.min : null;
+        var sMax = (typeof m.max === 'number') ? m.max : null;
+        ph.textContent = 'Прайс услуги: ' + _moneyRange(sMin, sMax);
+        if (calcClientMin == null && calcClientMax == null) {
+          th.textContent = 'Итого (расчёт + услуга): —';
+          return;
+        }
+        var tMin = (calcClientMin != null && sMin != null) ? (calcClientMin + sMin) : null;
+        var tMax = (calcClientMax != null && sMax != null) ? (calcClientMax + sMax) : null;
+        var totalPretty = _moneyRange(tMin, tMax);
+        th.textContent = 'Итого (расчёт + услуга): ' + totalPretty;
+        if (btn && totalPretty !== '—') {
+          // Put into quoted price as plain text without "₽"
+          btn.dataset.totalText = String(totalPretty).replace(/\s*₽\s*/g, '').trim();
+          btn.disabled = false;
+        }
+      }
+
+      function syncBookingUI() {
+        var k = bookingKind();
+        var blk = document.getElementById('service_picker_block');
+        if (blk) blk.style.display = (k === 'VISIT') ? 'block' : 'none';
+        var btnSale = document.getElementById('btn_sale');
+        var btnVisit = document.getElementById('btn_visit');
+        if (btnSale) btnSale.style.display = (k === 'SALE') ? 'inline-block' : 'none';
+        if (btnVisit) btnVisit.style.display = (k === 'VISIT') ? 'inline-block' : 'none';
+
+        var calcK = radioVal('calc_kind', 'KIT');
+        var sel = document.getElementById('visit_service_id');
+        if (!sel) return;
+
+        var opts = [];
+        if (calcK === 'RUBBER') {
+          opts = {{ visit_services_tail_attach | tojson }};
+        } else {
+          opts = {{ visit_services_with_kit | tojson }};
+        }
+
+        var prev = String(sel.value || '');
+        sel.innerHTML = '';
+        var o0 = document.createElement('option');
+        o0.value = '';
+        o0.textContent = '— выберите —';
+        sel.appendChild(o0);
+        (opts || []).forEach(function (o) {
+          var op = document.createElement('option');
+          op.value = String(o.id);
+          op.textContent = String(o.label);
+          sel.appendChild(op);
+        });
+        if (prev) sel.value = prev;
+      }
+
+      async function recalc() {
+        syncMixUI();
+        var kind = radioVal('calc_kind', 'KIT');
+        var visitSvc = readSelectedServiceId();
+        var payload = {
+          kind: kind,
+          kanekalon_grams: numVal('input[name="kanekalon_grams"]'),
+          kudri_grams: numVal('input[name="kudri_grams"]'),
+          mix_source: radioVal('mix_source', 'NO_MIX'),
+          mix_complexity: radioVal('mix_complexity', 'STANDARD'),
+          extra_costs_amount: numVal('input[name="extra_costs_amount"]'),
+          kit_totals: kitTotals(),
+          rubber_type: radioVal('rubber_type', 'TAIL_ELASTIC'),
+          rubber_attach_qty: parseInt(String((q('input[name="rubber_attach_qty"]') || {}).value || '1'), 10) || 1,
+          rubber_braids_qty: parseInt(String((q('input[name="rubber_braids_qty"]') || {}).value || '1'), 10) || 1,
+          corr_trim_qty: parseInt(String((q('input[name="corr_trim_qty"]') || {}).value || '0'), 10) || 0,
+          corr_dread_qty: parseInt(String((q('input[name="corr_dread_qty"]') || {}).value || '0'), 10) || 0,
+          corr_curl_qty: parseInt(String((q('input[name="corr_curl_qty"]') || {}).value || '0'), 10) || 0,
+          corr_curl_dread_complexity: radioVal('corr_curl_dread_complexity', 'NORMAL'),
+          corr_wash: isChecked('input[name="corr_wash"]'),
+          corr_steam: isChecked('input[name="corr_steam"]'),
+          corr_circle: isChecked('input[name="corr_circle"]'),
+          visit_service_id: visitSvc,
+        };
+
+        var res;
+        try {
+          res = await fetch('/api/products-calc', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+        } catch (e) {
+          setText('res_client', 'Ошибка сети');
+          return;
+        }
+        var data = {};
+        try { data = await res.json(); } catch (e) {}
+        if (!res.ok) {
+          setText('res_client', data && data.error ? data.error : 'Ошибка расчёта');
+          setText('res_cost', '—');
+          setText('res_pay', '—');
+          return;
+        }
+        setText('res_client', data.client_hint || '—');
+        setText('res_cost', data.cost_hint || '—');
+        setText('res_pay', data.pay_hint || '—');
+        window.__calc_client_min = (data && typeof data.client_min === 'number') ? data.client_min : null;
+        window.__calc_client_max = (data && typeof data.client_max === 'number') ? data.client_max : null;
+        syncServicePriceHints(window.__calc_client_min, window.__calc_client_max);
+        var qpt = document.getElementById('quoted_price_text');
+        if (qpt && (!qpt.value || String(qpt.value).trim() === '')) {
+          qpt.value = data.quoted_price_text || '';
+        }
+        var btnSale = document.getElementById('btn_sale');
+        var btnVisit = document.getElementById('btn_visit');
+        if (btnSale) btnSale.disabled = (bookingKind() !== 'SALE');
+        if (btnVisit) btnVisit.disabled = (bookingKind() !== 'VISIT') || !readSelectedServiceId();
+        if (btnSale) btnSale.dataset.prefill = JSON.stringify(data.prefill_sale || {});
+        if (btnVisit) btnVisit.dataset.prefill = JSON.stringify(data.prefill_visit || {});
+      }
+
+      function toQuery(obj, extra) {
+        var out = [];
+        Object.keys(obj || {}).forEach(function (k) {
+          var v = obj[k];
+          if (v === null || v === undefined) return;
+          out.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(v)));
+        });
+        Object.keys(extra || {}).forEach(function (k) {
+          var v = extra[k];
+          if (v === null || v === undefined) return;
+          out.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(v)));
+        });
+        return out.join('&');
+      }
+
+      function openBooking(kind) {
+        var btn = document.getElementById(kind === 'sale' ? 'btn_sale' : 'btn_visit');
+        if (!btn) return;
+        var raw = btn.dataset.prefill || '{}';
+        var pre = {};
+        try { pre = JSON.parse(raw) || {}; } catch (e) { pre = {}; }
+        var qpt = document.getElementById('quoted_price_text');
+        var extra = {};
+        if (qpt && String(qpt.value || '').trim()) extra['quoted_price_text'] = String(qpt.value || '').trim();
+        var url = '/admin/bookings/new?' + toQuery(pre, extra);
+        window.location.href = url;
+      }
+
+      function resetAll() {
+        // simplest: reload page
+        window.location.href = '/products-calc';
+      }
+
+      // listeners
+      (function setupListeners() {
+        var didCalc = false;
+        function maybeRecalc() { if (didCalc) recalc(); }
+
+        qa('input[name="calc_kind"]').forEach(function (r) {
+          r.addEventListener('change', function () {
+            syncKindUI();
+            syncBookingUI();
+            syncCorrectionComplexityUI();
+            maybeRecalc();
+          });
+        });
+        qa('input[name="mix_source"]').forEach(function (r) { r.addEventListener('change', function () { syncMixUI(); maybeRecalc(); }); });
+        qa('input[name="mix_complexity"]').forEach(function (r) { r.addEventListener('change', function () { syncMixUI(); maybeRecalc(); }); });
+        qa('input[name="kanekalon_grams"], input[name="kudri_grams"]').forEach(function (el) {
+          el.addEventListener('input', function () { syncMixUI(); maybeRecalc(); });
+          el.addEventListener('change', function () { syncMixUI(); maybeRecalc(); });
+        });
+        qa('input[name="extra_costs_amount"], input.kit-qty').forEach(function (el) {
+          el.addEventListener('input', maybeRecalc);
+          el.addEventListener('change', maybeRecalc);
+        });
+        qa('#kit_type_se, #kit_type_de').forEach(function (el) {
+          if (!el) return;
+          el.addEventListener('change', function () { syncKitTypeUI(); maybeRecalc(); });
+        });
+        qa('input[name="rubber_type"], input[name="rubber_attach_qty"], input[name="rubber_braids_qty"]').forEach(function (el) {
+          el.addEventListener('change', function () { syncRubberTypeFields(); syncBookingUI(); maybeRecalc(); });
+          el.addEventListener('input', function () { syncRubberTypeFields(); maybeRecalc(); });
+        });
+        qa('input[name="corr_trim_qty"], input[name="corr_dread_qty"], input[name="corr_curl_qty"], input[name="corr_curl_dread_complexity"], input[name="corr_wash"], input[name="corr_steam"], input[name="corr_circle"]').forEach(function (el) {
+          el.addEventListener('change', function () { syncCorrectionComplexityUI(); maybeRecalc(); });
+          el.addEventListener('input', function () { syncCorrectionComplexityUI(); maybeRecalc(); });
+        });
+
+        qa('input[name="booking_kind"]').forEach(function (el) {
+          el.addEventListener('change', function () {
+            syncBookingUI();
+            syncServicePriceHints(window.__calc_client_min, window.__calc_client_max);
+            var btnSale = document.getElementById('btn_sale');
+            var btnVisit = document.getElementById('btn_visit');
+            if (btnSale) btnSale.disabled = (bookingKind() !== 'SALE');
+            if (btnVisit) btnVisit.disabled = (bookingKind() !== 'VISIT') || !readSelectedServiceId();
+          });
+        });
+
+        var svcSel = document.getElementById('visit_service_id');
+        if (svcSel) {
+          svcSel.addEventListener('change', function () {
+            syncServicePriceHints(window.__calc_client_min, window.__calc_client_max);
+            var btnVisit = document.getElementById('btn_visit');
+            if (btnVisit) btnVisit.disabled = (bookingKind() !== 'VISIT') || !readSelectedServiceId();
+            maybeRecalc();
+          });
+        }
+
+        var btnCalc = document.getElementById('btn_calc');
+        if (btnCalc) {
+          btnCalc.addEventListener('click', function () { didCalc = true; recalc(); });
+        }
+
+        var btnToQuoted = document.getElementById('btn_total_to_quoted');
+        if (btnToQuoted) {
+          btnToQuoted.addEventListener('click', function () {
+            var qpt = document.getElementById('quoted_price_text');
+            if (!qpt) return;
+            var t = String(btnToQuoted.dataset.totalText || '').trim();
+            if (!t) return;
+            qpt.value = t;
+          });
+        }
+      })();
+
+      var btnSale = document.getElementById('btn_sale');
+      if (btnSale) btnSale.addEventListener('click', function () { openBooking('sale'); });
+      var btnVisit = document.getElementById('btn_visit');
+      if (btnVisit) btnVisit.addEventListener('click', function () { openBooking('visit'); });
+      var btnReset = document.getElementById('btn_reset');
+      if (btnReset) btnReset.addEventListener('click', resetAll);
+
+      syncKindUI();
+      syncMixUI();
+      syncBookingUI();
+      syncCorrectionComplexityUI();
+      syncKitTypeUI();
+    })();
+  </script>
+{% endblock %}
+

@@ -326,6 +326,8 @@ class ServiceSubcategory(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Форма визита: блок «Комплект» (склад) для услуг этой подкатегории, если у услуги нет своего override.
     show_kit_section: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Форма визита: блок «Хвост/резинка» (склад) для услуг этой подкатегории, если у услуги нет своего override.
+    show_tail_section: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Показывать поле «Описание про материал» из анкеты категории (если оно задано на категории).
     show_material_description: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Расширенный блок термозамещения на шаге 2 визита + шаблоны клиента (без общих полей категории).
@@ -361,6 +363,8 @@ class Service(Base):
     price_senior_to: Mapped[float | None] = mapped_column(Float, nullable=True)
     # None — брать из подкатегории show_kit_section; True/False — принудительно.
     kit_section_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # None — брать из подкатегории show_tail_section; True/False — принудительно.
+    tail_section_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Не показывать «Описание про материал» даже если подкатегория позволяет.
     hide_material_description: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     order_rubber_extra_time_amort: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

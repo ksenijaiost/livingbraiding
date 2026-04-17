@@ -607,6 +607,13 @@ def work_new_get(
     current_user: AuthUser = _MASTER,
     db: Session = Depends(get_db),
 ):
+    fp: dict[str, str] = {}
+    cid = str(request.query_params.get("client_id") or "").strip()
+    if cid.isdigit():
+        fp["client_id"] = cid
+    bid = str(request.query_params.get("booking_id") or "").strip()
+    if bid.isdigit():
+        fp["booking_id"] = bid
     masters = _list_masters_for_work_form(db)
     work_price_meta = {
         "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
@@ -620,7 +627,7 @@ def work_new_get(
             request,
             current_user=current_user,
             error=None,
-            fp={},
+            fp=fp,
             masters=masters,
             kit_master_on_ids=[],
             kit_table_state_json=_kit_table_state_json(current_user, masters, {}, db),
@@ -916,6 +923,9 @@ async def work_new_post(
             studio_profit_amount=studio_total,
             profit_total_amount=profit_total,
         )
+        bid_raw = (_g_str(form, "booking_id", "") or "").strip()
+        if bid_raw.isdigit():
+            work.booking_id = int(bid_raw)
         db.add(work)
         db.flush()
 

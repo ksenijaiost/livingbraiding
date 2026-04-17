@@ -97,6 +97,14 @@
       <a href="/service-catalog" style="flex:0 0 auto;">
         <button type="button" class="secondary">Прайс — услуги</button>
       </a>
+      <a href="/products-calc" style="flex:0 0 auto;">
+        <button type="button" class="secondary">Калькулятор</button>
+      </a>
+      {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
+        <a href="/admin/bookings/new" style="flex:0 0 auto;">
+          <button type="button" class="secondary">Новая бронь</button>
+        </a>
+      {% endif %}
       {% if categories %}
         {% for c in categories %}
           <a href="/products-catalog?category={{ c|urlencode }}" style="flex:0 0 auto;">

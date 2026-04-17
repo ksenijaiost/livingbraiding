@@ -185,6 +185,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=160), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
         sa.Column("show_kit_section", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("show_tail_section", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column("show_material_description", sa.Boolean(), nullable=False, server_default=sa.text("1")),
         sa.Column("show_thermo_visit", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
@@ -205,6 +206,7 @@ def upgrade() -> None:
         sa.Column("price_senior_from", sa.Float(), nullable=True),
         sa.Column("price_senior_to", sa.Float(), nullable=True),
         sa.Column("kit_section_override", sa.Boolean(), nullable=True),
+        sa.Column("tail_section_override", sa.Boolean(), nullable=True),
         sa.Column("hide_material_description", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column(
             "order_rubber_extra_time_amort",

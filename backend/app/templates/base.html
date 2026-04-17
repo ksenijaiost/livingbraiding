@@ -113,6 +113,7 @@
           <!-- Desktop: sections (A) -->
           <div class="nav-desktop" aria-label="Навигация">
             <a href="/">Главная</a>
+            <a href="/admin/clients">Клиенты</a>
 
             <details class="nav-dd">
               <summary>Записи</summary>
@@ -132,6 +133,7 @@
               <div class="dd">
                 <a href="/sales/products">Продажа товаров</a>
                 <a href="/sales/work">Работа с товарами</a>
+                <a href="/products-calc">Калькулятор</a>
                 <a href="/products-catalog">Прайс — товары</a>
               </div>
             </details>
@@ -163,6 +165,7 @@
           <!-- Mobile: "Главная" + ☰ (B) -->
           <div class="nav-mobile" aria-label="Навигация (мобильная)">
             <a href="/">Главная</a>
+            <a href="/admin/clients">Клиенты</a>
             <button type="button" class="hamburger" aria-label="Открыть меню" aria-controls="lbMobileDrawer" aria-expanded="false" onclick="window.lbToggleMobileNav(true)">☰</button>
           </div>
         {% else %}
@@ -182,6 +185,7 @@
         </div>
 
         <a class="md-link" href="/" onclick="window.lbToggleMobileNav(false)"><strong>Главная</strong></a>
+        <a class="md-link" href="/admin/clients" onclick="window.lbToggleMobileNav(false)"><strong>Клиенты</strong></a>
 
         <details>
           <summary><strong>Записи</strong></summary>
@@ -198,6 +202,7 @@
           <summary><strong>Товары</strong></summary>
           <a class="md-link" href="/sales/products" onclick="window.lbToggleMobileNav(false)">Продажа товаров</a>
           <a class="md-link" href="/sales/work" onclick="window.lbToggleMobileNav(false)">Работа с товарами</a>
+          <a class="md-link" href="/products-calc" onclick="window.lbToggleMobileNav(false)">Калькулятор</a>
           <a class="md-link" href="/products-catalog" onclick="window.lbToggleMobileNav(false)">Прайс — товары</a>
         </details>
 

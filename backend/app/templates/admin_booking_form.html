@@ -629,11 +629,31 @@
       const subSel = document.getElementById('service_subcategory_id');
       const svcSel = document.getElementById('service_id');
       if (!catSel || !subSel || !svcSel) return;
-      if (catId) catSel.value = String(catId);
+      let cid = catId;
+      let sid = subId;
+      let vid = svcId;
+      // If only service_id is provided (calculator prefill), locate its category/subcategory.
+      if ((!cid || !sid) && vid) {
+        for (const c of (serviceCatalog || [])) {
+          for (const sc of (c.subcategories || [])) {
+            for (const s of (sc.services || [])) {
+              if (parseInt(String(s.id||0), 10) === parseInt(String(vid||0), 10)) {
+                cid = c.id;
+                sid = sc.id;
+                break;
+              }
+            }
+            if (cid && sid) break;
+          }
+          if (cid && sid) break;
+        }
+      }
+      if (cid) catSel.value = String(cid);
       serviceCatalogOnCategory();
-      if (subId) subSel.value = String(subId);
+      if (sid) subSel.value = String(sid);
       serviceCatalogOnSubcategory();
-      if (svcId) svcSel.value = String(svcId);
+      if (vid) svcSel.value = String(vid);
+      updateVisitKitVisibility();
     }
 
     // init

@@ -25,6 +25,10 @@
         Раздел «Комплект» (склад) для услуг этой подкатегории
       </label>
       <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+        <input type="checkbox" name="show_tail_section" {% if form_show_tail %}checked{% endif %} />
+        Раздел «Хвост/резинка» (склад) для услуг этой подкатегории
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
         <input type="checkbox" name="show_material_description" {% if form_show_material %}checked{% endif %} />
         Показывать поле «Описание про материал» из анкеты категории (если оно задано)
       </label>

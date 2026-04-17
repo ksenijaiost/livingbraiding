@@ -23,6 +23,7 @@
       </div>
     {% endif %}
     <form method="post" action="/master/visit/new" id="visit-form">
+      <input type="hidden" name="booking_id" value="{{ fp.get('booking_id', '') }}" />
       <h3>Клиент</h3>
       <div style="margin-bottom: 10px;">
         <label style="margin-right: 16px;">
