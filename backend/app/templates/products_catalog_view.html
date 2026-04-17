@@ -1,14 +1,87 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="card">
+  <style>
+    .products-catalog-wrap table {
+      table-layout: fixed;
+      width: 100%;
+    }
+    .products-catalog-wrap th,
+    .products-catalog-wrap td {
+      vertical-align: middle;
+      overflow-wrap: anywhere;
+    }
+    .products-catalog-wrap .pcat-name {
+      text-align: left;
+      min-width: 14rem;
+    }
+    .products-catalog-wrap .pcat-name strong {
+      font-weight: 600;
+    }
+    .products-catalog-wrap th.pcat-num,
+    .products-catalog-wrap td.pcat-num {
+      width: 7rem;
+      max-width: 7rem;
+    }
+    .products-catalog-wrap .pcat-num input {
+      width: 100%;
+      max-width: 6.5rem;
+      box-sizing: border-box;
+    }
+    .products-catalog-wrap th.pcat-active,
+    .products-catalog-wrap td.pcat-active {
+      width: 6.25rem;
+      max-width: 6.25rem;
+    }
+    .products-catalog-wrap th.pcat-actions,
+    .products-catalog-wrap td.pcat-actions {
+      width: 6.75rem;
+      max-width: 6.75rem;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .products-catalog-wrap .pcat-actions form {
+      margin: 0;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+    }
+    .products-catalog-wrap .pcat-labels {
+      width: 5.75rem;
+      font-size: 0.78rem;
+      line-height: 1.25;
+    }
+    .products-catalog-wrap .pcat-labels .pcat-label-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1px;
+    }
+    .products-catalog-wrap .pcat-labels label {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      margin: 0;
+      font-size: inherit;
+      font-weight: 400;
+    }
+    .products-catalog-wrap .pcat-labels input[type="checkbox"] {
+      width: 0.85rem;
+      height: 0.85rem;
+      margin: 0;
+      flex-shrink: 0;
+    }
+    .products-catalog-wrap .pcat-active label {
+      margin: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+  </style>
+  <div class="card products-catalog-wrap">
     <h2 style="margin-top: 0;">Прайс · Товары</h2>
     <p class="muted" style="margin-top:-6px;">
-      Категории каталога без формы визита (например «Продажа материала», «Заказ») — вкладки. Внутри категории позиции разделены по подкатегориям.
+      Категории каталога без формы визита (например «Продажа материала», «Заказ») — вкладки ниже. Внутри категории позиции разделены по подкатегориям.
     </p>
-
-    <div style="margin-bottom: 12px;">
-      <a href="/"><button class="secondary" type="button">← Главная</button></a>
-    </div>
 
     {% if msg == "saved" %}
       <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Прайс сохранён.</p>
@@ -20,8 +93,11 @@
       <p class="error">Такой элемент уже есть в этой подкатегории.</p>
     {% endif %}
 
-    {% if categories %}
-      <div style="display:flex; gap:8px; flex-wrap:nowrap; overflow-x:auto; margin-bottom:12px; padding-bottom:4px;">
+    <div style="display:flex; gap:8px; flex-wrap:nowrap; overflow-x:auto; margin-bottom:12px; padding-bottom:4px; align-items:center;">
+      <a href="/service-catalog" style="flex:0 0 auto;">
+        <button type="button" class="secondary">Прайс — услуги</button>
+      </a>
+      {% if categories %}
         {% for c in categories %}
           <a href="/products-catalog?category={{ c|urlencode }}" style="flex:0 0 auto;">
             <button type="button" class="{% if c == selected_category %}{% else %}secondary{% endif %}">
@@ -29,13 +105,32 @@
             </button>
           </a>
         {% endfor %}
-      </div>
-    {% endif %}
+      {% endif %}
+    </div>
 
-    {% if selected_category %}
-      <p class="muted" style="font-size: 13px;">
-        Категория: <strong>{{ selected_category }}</strong>
-      </p>
+    {% if selected_category == "Заказ" %}
+      <details class="muted" style="font-size: 13px; margin: 10px 0 14px; max-width: 52rem;">
+        <summary style="cursor: pointer; user-select: none;">Справка по меткам «кальк», «техн», «Б/У»</summary>
+        <div style="margin-top: 10px; line-height: 1.45;">
+          <p style="margin: 0 0 0.65em 0;">
+            Метки задают, как строка прайса участвует в форме «Работа с товарами» и в автоматических суммах по комплекту.
+          </p>
+          <ul style="margin: 0; padding-left: 1.2em;">
+            <li style="margin-bottom: 0.5em;">
+              <strong>кальк</strong> — позиция отображается в форме комплекта (блоки S.E. и D.E.) и может быть выбрана при сборке. Без этой метки строка в форме не показывается.
+            </li>
+            <li style="margin-bottom: 0.5em;">
+              <strong>техн</strong> — позиция не включается в автосумму <strong>цены для клиента</strong> по комплекту (по колонке «Цена»). Начисление <strong>ЗП</strong> и учёт в разборе себестоимости идут по колонке «Работа», если она заполнена.
+            </li>
+            <li style="margin-bottom: 0.5em;">
+              <strong>Б/У</strong> — служебная пометка каталога. Такие строки не участвуют в автосуммах цены для клиента и ЗП по комплекту.
+            </li>
+          </ul>
+          <p style="margin: 0.65em 0 0 0;">
+            Метки <strong>кальк</strong> и <strong>техн</strong> независимы: можно включить строку в форму (кальк) и одновременно исключить её цену из клиентской суммы (техн). Если <strong>кальк</strong> снят, позиция в форме недоступна, независимо от остальных меток.
+          </p>
+        </div>
+      </details>
     {% endif %}
 
     {% if grouped_rows %}
@@ -43,113 +138,143 @@
         <div class="card" style="margin-top:12px;">
           <h3 style="margin-top:0;">{{ g.subcategory_name }}</h3>
           {% set show_work = selected_category != "Продажа материала" %}
-          {% set show_fixed_expense = selected_category == "Заказ" and g.subcategory_name in ["Коррекция комплекта", "Хвосты/резинки"] %}
+          {% set zakaz_no_labels = g.subcategory_name in ["Коррекция комплекта", "Хвосты/резинки"] %}
+          {% set show_labels_col = selected_category == "Заказ" and not zakaz_no_labels %}
+          {% set show_expense_col = selected_category == "Заказ" and zakaz_no_labels %}
           <div style="overflow-x:auto;">
             <table>
               <thead>
                 <tr>
-                  <th>Наименование</th>
-                  {% if selected_category == "Заказ" %}<th>Метки</th>{% endif %}
-                  <th>Цена</th>
-                  {% if show_work %}<th>Работа</th>{% endif %}
-                  {% if show_fixed_expense %}<th>Расход</th>{% endif %}
-                  <th>Актуально</th>
+                  <th class="pcat-name">Наименование</th>
+                  {% if show_labels_col %}<th class="pcat-labels">Метки</th>{% endif %}
+                  <th class="pcat-num">Цена</th>
+                  {% if show_work %}<th class="pcat-num">Работа</th>{% endif %}
+                  {% if show_expense_col %}<th class="pcat-num">Расход</th>{% endif %}
+                  <th class="pcat-active">Актуально</th>
                   {% if current_user.role.value == "ADMIN_SUPER" %}
-                    <th></th>
+                    <th class="pcat-actions"></th>
                   {% endif %}
                 </tr>
               </thead>
               <tbody>
                 {% for r in g.rows %}
                   <tr>
-                    <td><strong>{{ r.name }}</strong></td>
-                    {% if selected_category == "Заказ" %}
-                      <td>
+                    <td class="pcat-name"><strong>{{ r.name }}</strong></td>
+                    {% if show_labels_col %}
+                      <td class="pcat-labels">
                         {% set is_bu = r.is_bu %}
                         {% set is_kit = r.is_used_in_kit_form %}
                         {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
-                          <label style="display:inline-flex;align-items:center;gap:4px;margin:0 8px 0 0;"><input form="row-edit-{{ r.id }}" type="checkbox" name="is_used_in_kit_form" {% if is_kit %}checked{% endif %} /> кальк</label>
-                          <label style="display:inline-flex;align-items:center;gap:4px;margin:0 8px 0 0;"><input form="row-edit-{{ r.id }}" type="checkbox" name="ignore_in_calc" {% if r.ignore_in_calc %}checked{% endif %} /> техн</label>
-                          <label style="display:inline-flex;align-items:center;gap:4px;margin:0;"><input form="row-edit-{{ r.id }}" type="checkbox" name="is_bu" {% if is_bu %}checked{% endif %} /> Б/У</label>
+                          <div class="pcat-label-stack">
+                            <label><input form="row-edit-{{ r.id }}" type="checkbox" name="is_used_in_kit_form" {% if is_kit %}checked{% endif %} />кальк</label>
+                            <label><input form="row-edit-{{ r.id }}" type="checkbox" name="ignore_in_calc" {% if r.ignore_in_calc %}checked{% endif %} />техн</label>
+                            <label><input form="row-edit-{{ r.id }}" type="checkbox" name="is_bu" {% if is_bu %}checked{% endif %} />Б/У</label>
+                          </div>
                         {% else %}
-                          {% if is_kit %}<span class="muted">кальк</span>{% endif %}
-                          {% if r.ignore_in_calc %}{% if is_kit %}<span class="muted"> · </span>{% endif %}<span class="muted">техн</span>{% endif %}
-                          {% if is_bu %}{% if is_kit or r.ignore_in_calc %}<span class="muted"> · </span>{% endif %}<span class="muted">Б/У</span>{% endif %}
-                          {% if not is_kit and not r.ignore_in_calc and not is_bu %}<span class="muted">—</span>{% endif %}
+                          <div class="pcat-label-stack">
+                            {% if is_kit %}<span class="muted">кальк</span>{% endif %}
+                            {% if r.ignore_in_calc %}<span class="muted">техн</span>{% endif %}
+                            {% if is_bu %}<span class="muted">Б/У</span>{% endif %}
+                            {% if not is_kit and not r.ignore_in_calc and not is_bu %}<span class="muted">—</span>{% endif %}
+                          </div>
                         {% endif %}
                       </td>
                     {% endif %}
                     {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
-                      <td>
-                        <form id="row-edit-{{ r.id }}" method="post" action="/products-catalog/{{ r.id }}/edit" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0;">
-                          <input type="hidden" name="category" value="{{ selected_category }}" />
-                          <input name="price" type="text" inputmode="decimal" value="{{ '' if r.price is none else r.price }}" style="width:7rem;" />
+                      <td class="pcat-num">
+                        <input form="row-edit-{{ r.id }}" name="price" type="text" inputmode="decimal" value="{{ '' if r.price is none else r.price }}" />
                       </td>
                       {% if show_work %}
-                        <td>
-                            <input name="master_pay" type="text" inputmode="decimal" value="{{ '' if r.master_pay is none else r.master_pay }}" style="width:7rem;" />
+                        <td class="pcat-num">
+                          <input form="row-edit-{{ r.id }}" name="master_pay" type="text" inputmode="decimal" value="{{ '' if r.master_pay is none else r.master_pay }}" />
                         </td>
-                      {% else %}
-                        <input type="hidden" name="master_pay" value="" />
                       {% endif %}
-                      {% if show_fixed_expense %}
-                        <td>
-                            <input name="fixed_expense" type="text" inputmode="decimal" value="{{ '' if r.fixed_expense is none else r.fixed_expense }}" style="width:7rem;" />
+                      {% if show_expense_col %}
+                        <td class="pcat-num">
+                          <input form="row-edit-{{ r.id }}" name="fixed_expense" type="text" inputmode="decimal" value="{{ '' if r.fixed_expense is none else r.fixed_expense }}" />
                         </td>
-                      {% else %}
-                        <input type="hidden" name="fixed_expense" value="" />
                       {% endif %}
-                      <td>
-                        <label style="display:flex;align-items:center;gap:6px;margin:0;">
-                          <input name="is_active" type="checkbox" {% if r.is_active %}checked{% endif %} />
+                      <td class="pcat-active">
+                        <label>
+                          <input form="row-edit-{{ r.id }}" name="is_active" type="checkbox" {% if r.is_active %}checked{% endif %} />
                           <span>{% if r.is_active %}да{% else %}нет{% endif %}</span>
                         </label>
                       </td>
-                      <td>
+                      <td class="pcat-actions">
+                        <form id="row-edit-{{ r.id }}" method="post" action="/products-catalog/{{ r.id }}/edit">
+                          <input type="hidden" name="category" value="{{ selected_category }}" />
+                          {% if not show_work %}
+                            <input type="hidden" name="master_pay" value="" />
+                          {% endif %}
+                          {% if not show_expense_col %}
+                            <input type="hidden" name="fixed_expense" value="{{ '' if r.fixed_expense is none else r.fixed_expense }}" />
+                          {% endif %}
+                          {% if selected_category == "Заказ" and not show_labels_col %}
+                            <input type="hidden" name="is_used_in_kit_form" value="{% if r.is_used_in_kit_form %}on{% endif %}" />
+                            <input type="hidden" name="ignore_in_calc" value="{% if r.ignore_in_calc %}on{% endif %}" />
+                            <input type="hidden" name="is_bu" value="{% if r.is_bu %}on{% endif %}" />
+                          {% endif %}
                           <button type="submit" class="secondary" style="padding:4px 10px;">Сохранить</button>
                         </form>
                       </td>
                     {% else %}
-                      <td>{% if r.price is not none %}{{ r.price }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                      <td class="pcat-num">{% if r.price is not none %}{{ r.price }}{% else %}<span class="muted">—</span>{% endif %}</td>
                       {% if show_work %}
-                        <td>{% if r.master_pay is not none %}{{ r.master_pay }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                        <td class="pcat-num">{% if r.master_pay is not none %}{{ r.master_pay }}{% else %}<span class="muted">—</span>{% endif %}</td>
                       {% endif %}
-                      {% if show_fixed_expense %}
-                        <td>{% if r.fixed_expense is not none %}{{ r.fixed_expense }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                      {% if show_expense_col %}
+                        <td class="pcat-num">{% if r.fixed_expense is not none %}{{ r.fixed_expense }}{% else %}<span class="muted">—</span>{% endif %}</td>
                       {% endif %}
-                      <td>{% if r.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
+                      <td class="pcat-active">{% if r.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
                       {% if current_user.role.value == "ADMIN_SUPER" %}
-                        <td><span class="muted">—</span></td>
+                        <td class="pcat-actions"><span class="muted">—</span></td>
                       {% endif %}
                     {% endif %}
                   </tr>
                 {% endfor %}
                 {% if current_user.role.value == "ADMIN_SUPER" and is_catalog_products_category %}
                   <tr>
-                      <td><input form="new-row-{{ loop.index }}" name="name" type="text" placeholder="Новый элемент" style="min-width:16rem;" /></td>
-                      {% if selected_category == "Заказ" %}
-                        <td>
-                          <label style="display:inline-flex;align-items:center;gap:4px;margin:0 8px 0 0;"><input form="new-row-{{ loop.index }}" type="checkbox" name="is_used_in_kit_form" /> кальк</label>
-                          <label style="display:inline-flex;align-items:center;gap:4px;margin:0 8px 0 0;"><input form="new-row-{{ loop.index }}" type="checkbox" name="ignore_in_calc" /> техн</label>
-                          <label style="display:inline-flex;align-items:center;gap:4px;margin:0;"><input form="new-row-{{ loop.index }}" type="checkbox" name="is_bu" /> Б/У</label>
-                        </td>
-                      {% endif %}
-                      <td><input form="new-row-{{ loop.index }}" name="price" type="text" inputmode="decimal" style="width:7rem;" /></td>
-                      {% if show_work %}<td><input form="new-row-{{ loop.index }}" name="master_pay" type="text" inputmode="decimal" style="width:7rem;" /></td>{% endif %}
-                      {% if show_fixed_expense %}<td><input form="new-row-{{ loop.index }}" name="fixed_expense" type="text" inputmode="decimal" value="0" style="width:7rem;" /></td>{% endif %}
-                      <td>
-                        <label style="display:flex;align-items:center;gap:6px;margin:0;">
-                          <input form="new-row-{{ loop.index }}" name="is_active" type="checkbox" checked />
-                          <span>да</span>
-                        </label>
+                    <td class="pcat-name"><input form="new-row-{{ loop.index }}" name="name" type="text" placeholder="Новый элемент" style="width:100%;max-width:100%;box-sizing:border-box;" /></td>
+                    {% if show_labels_col %}
+                      <td class="pcat-labels">
+                        <div class="pcat-label-stack">
+                          <label><input form="new-row-{{ loop.index }}" type="checkbox" name="is_used_in_kit_form" />кальк</label>
+                          <label><input form="new-row-{{ loop.index }}" type="checkbox" name="ignore_in_calc" />техн</label>
+                          <label><input form="new-row-{{ loop.index }}" type="checkbox" name="is_bu" />Б/У</label>
+                        </div>
                       </td>
-                      <td>
-                        <form id="new-row-{{ loop.index }}" method="post" action="/products-catalog/new" style="margin:0;">
-                          <input type="hidden" name="category" value="{{ selected_category }}" />
-                          <input type="hidden" name="subcategory_name" value="{{ g.subcategory_name }}" />
-                          <button type="submit" class="secondary" style="padding:4px 10px;">Добавить</button>
-                        </form>
+                    {% endif %}
+                    <td class="pcat-num"><input form="new-row-{{ loop.index }}" name="price" type="text" inputmode="decimal" /></td>
+                    {% if show_work %}<td class="pcat-num"><input form="new-row-{{ loop.index }}" name="master_pay" type="text" inputmode="decimal" /></td>{% endif %}
+                    {% if show_expense_col %}
+                      <td class="pcat-num">
+                        <input form="new-row-{{ loop.index }}" name="fixed_expense" type="text" inputmode="decimal" value="0" />
                       </td>
+                    {% endif %}
+                    <td class="pcat-active">
+                      <label>
+                        <input form="new-row-{{ loop.index }}" name="is_active" type="checkbox" checked />
+                        <span>да</span>
+                      </label>
+                    </td>
+                    <td class="pcat-actions">
+                      <form id="new-row-{{ loop.index }}" method="post" action="/products-catalog/new">
+                        <input type="hidden" name="category" value="{{ selected_category }}" />
+                        <input type="hidden" name="subcategory_name" value="{{ g.subcategory_name }}" />
+                        {% if not show_work %}
+                          <input type="hidden" name="master_pay" value="" />
+                        {% endif %}
+                        {% if not show_expense_col %}
+                          <input type="hidden" name="fixed_expense" value="" />
+                        {% endif %}
+                        {% if selected_category == "Заказ" and not show_labels_col %}
+                          <input type="hidden" name="is_used_in_kit_form" value="" />
+                          <input type="hidden" name="ignore_in_calc" value="" />
+                          <input type="hidden" name="is_bu" value="" />
+                        {% endif %}
+                        <button type="submit" class="secondary" style="padding:4px 10px;">Добавить</button>
+                      </form>
+                    </td>
                   </tr>
                 {% endif %}
               </tbody>

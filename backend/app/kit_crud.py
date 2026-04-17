@@ -13,6 +13,22 @@ from starlette.datastructures import UploadFile
 from app.db.models import CatalogProduct, Kit, KitAuthorStaff, User, UserRole
 from app.user_roles import select_users_with_role, user_has_role
 
+# Ключи, исключённые из цены клиента до появления флагов в каталоге (оставляем для совместимости).
+LEGACY_KIT_CLIENT_PRICE_EXCLUDE_KEYS: frozenset[str] = frozenset(
+    {"SE_TIP_ADDON", "SE_TRIM_SHORT", "SE_TRIM_LONG", "DE_TRIM"}
+)
+
+
+def kit_key_excluded_from_client_price(meta: dict[str, Any], kit_key: str) -> bool:
+    """Не суммировать прайсовую цену этой заготовки в «цену для клиента» по комплекту."""
+    if kit_key in LEGACY_KIT_CLIENT_PRICE_EXCLUDE_KEYS:
+        return True
+    if bool(meta.get("ignore_in_calc")):
+        return True
+    if bool(meta.get("is_bu")):
+        return True
+    return False
+
 
 def list_masters_for_kit_author_pick(db: Session) -> list[User]:
     """Активные пользователи с ролью MASTER (выбор авторов комплекта)."""
@@ -185,6 +201,7 @@ def calc_kit_stock_price_total_from_composition(
         ).all()
     )
     price_map: dict[str, float] = {}
+    meta_by_key: dict[str, dict[str, Any]] = {}
     for r in rows:
         try:
             meta = json.loads(r.meta_json or "{}")
@@ -196,13 +213,13 @@ def calc_kit_stock_price_total_from_composition(
         if not k or r.price is None:
             continue
         price_map[k] = float(r.price)
+        meta_by_key[k] = meta
 
-    excluded_keys = {"SE_TIP_ADDON", "SE_TRIM_SHORT", "SE_TRIM_LONG", "DE_TRIM"}
     missing: list[str] = []
     total = 0.0
     for k, q in totals.items():
         q = int(q)
-        if q <= 0 or k in excluded_keys:
+        if q <= 0 or kit_key_excluded_from_client_price(meta_by_key.get(k) or {}, k):
             continue
         p = price_map.get(k)
         if p is None:

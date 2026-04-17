@@ -56,6 +56,7 @@ from app.visit_edit_policy import (
 )
 from app.ru_labels import ru_user_role
 from app.audit import diff_fields, write_audit_rows
+from app.kit_crud import kit_key_excluded_from_client_price
 from app.zakaz_blanks import kit_form_blank_defs
 
 templates = Jinja2Templates(directory="app/templates")
@@ -364,6 +365,30 @@ def _kit_de_items() -> list[tuple[str, str]]:
     return [(row.key or "", row.display_name) for row in kit_form_blank_defs("DE") if row.key]
 
 
+def _kit_meta_by_kit_key(db: Session) -> dict[str, dict[str, Any]]:
+    rows = list(
+        db.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.category_name == "Заказ",
+                CatalogProduct.subcategory_name == "Заготовки поштучно",
+                CatalogProduct.is_active.is_(True),
+            )
+        ).all()
+    )
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        try:
+            meta = json.loads(r.meta_json or "{}")
+        except Exception:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        k = str(meta.get("kit_key") or "").strip()
+        if k:
+            out[k] = meta
+    return out
+
+
 def _kit_work_pay_map_from_catalog(db: Session) -> dict[str, float]:
     rows = list(
         db.scalars(
@@ -384,6 +409,8 @@ def _kit_work_pay_map_from_catalog(db: Session) -> dict[str, float]:
             meta = {}
         k = str(meta.get("kit_key") or "").strip()
         if not k:
+            continue
+        if bool(meta.get("is_bu")):
             continue
         out[k] = float(meta.get("master_pay") or 0.0)
     return out
@@ -463,14 +490,14 @@ def _kit_composition_json(kit_totals: dict[str, int]) -> str | None:
 
 def _kit_client_stock_price_total(db: Session, *, kit_totals: dict[str, int], extra_costs_amount: float) -> float:
     price_map = _kit_price_map_from_catalog(db)
-    excluded_keys = {"SE_TIP_ADDON", "SE_TRIM_SHORT", "SE_TRIM_LONG", "DE_TRIM"}
+    meta_by_key = _kit_meta_by_kit_key(db)
     missing: list[str] = []
     total = 0.0
     for k, q in kit_totals.items():
         q = int(q)
         if q <= 0:
             continue
-        if k in excluded_keys:
+        if kit_key_excluded_from_client_price(meta_by_key.get(k) or {}, k):
             continue
         p = price_map.get(k)
         if p is None:
@@ -488,7 +515,7 @@ def _kit_stock_price_snapshot_text(
 ) -> str:
     catalog = _kit_catalog_rows_by_key(db)
     labels = _kit_item_labels_map()
-    excluded_keys = {"SE_TIP_ADDON", "SE_TRIM_SHORT", "SE_TRIM_LONG", "DE_TRIM"}
+    meta_by_key = _kit_meta_by_kit_key(db)
     missing: list[str] = []
     lines = ["Расчёт цены комплекта:"]
     total = 0.0
@@ -496,7 +523,7 @@ def _kit_stock_price_snapshot_text(
         qty = int(kit_totals.get(key, 0) or 0)
         if qty <= 0:
             continue
-        if key in excluded_keys:
+        if kit_key_excluded_from_client_price(meta_by_key.get(key) or {}, key):
             continue
         row = catalog.get(key)
         price = None if row is None else row.get("price")
