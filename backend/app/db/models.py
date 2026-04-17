@@ -67,9 +67,13 @@ class MixSource(str, enum.Enum):
 
 
 class MixComplexity(str, enum.Enum):
-    SIMPLE = "SIMPLE"  # 1 ₽/г
-    MEDIUM = "MEDIUM"  # 1.5 ₽/г
-    HARD = "HARD"  # 2 ₽/г
+    """Сложность смешки; ₽/г задаются в настройках (work_rates)."""
+
+    LIGHT = "LIGHT"  # 0.5 по умолчанию
+    STANDARD = "STANDARD"  # 1
+    KANEK = "KANEK"  # 1.5
+    THERMO = "THERMO"  # 2
+    LENGTH = "LENGTH"  # 2.5
 
 
 class AmortizationLevel(str, enum.Enum):

@@ -57,6 +57,8 @@ from app.visit_edit_policy import (
 from app.ru_labels import ru_user_role
 from app.audit import diff_fields, write_audit_rows
 from app.kit_crud import kit_key_excluded_from_client_price
+from app.mix_rates import mix_complexity_rate_for, mix_rates_meta_json_dict
+from app.ui_visit_display import ru_mix_complexity as ru_mix_complexity_label
 from app.zakaz_blanks import kit_form_blank_defs
 
 templates = Jinja2Templates(directory="app/templates")
@@ -343,10 +345,6 @@ def _ru_mix_source(v: MixSource | None) -> str:
     return "—"
 
 
-def _ru_mix_complexity(v: str | None) -> str:
-    return {"SIMPLE": "Простая", "MEDIUM": "Средняя", "HARD": "Сложная"}.get(v or "", "—")
-
-
 def _kind_label(k: WorkKind) -> str:
     return {
         WorkKind.KIT: "Комплект/Заготовки (поштучно)",
@@ -575,16 +573,12 @@ def _kit_cost_snapshot_text(
         lines.append(f"{labels.get(key) or key} — {qty} шт — ЗП {_fmt_money(row_total)}")
 
     if mix_source == MixSource.SELF_MIXED and grams_total > 0 and mix_complexity is not None:
-        mix_rate = {
-            MixComplexity.SIMPLE: _wr_float(db, "mix_simple", 1.0),
-            MixComplexity.MEDIUM: _wr_float(db, "mix_medium", 1.5),
-            MixComplexity.HARD: _wr_float(db, "mix_hard", 2.0),
-        }.get(mix_complexity, 0.0)
+        mix_rate = mix_complexity_rate_for(db, mix_complexity)
         mix_pay = float(grams_total) * float(mix_rate)
         if mix_pay > 0:
             wage_total += mix_pay
             lines.append(
-                f"Смешка ({_ru_mix_complexity(mix_complexity.value)}) — {grams_total:.0f} г × {_fmt_money(float(mix_rate)).replace(' ₽', ' ₽/г')} = {_fmt_money(mix_pay)}"
+                f"Смешка ({ru_mix_complexity_label(mix_complexity.value)}) — {grams_total:.0f} г × {_fmt_money(float(mix_rate)).replace(' ₽', ' ₽/г')} = {_fmt_money(mix_pay)}"
             )
 
     if wage_total > 0:
@@ -618,11 +612,7 @@ def work_new_get(
         "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
         "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
         "customOrderBonus": _wr_float(db, "custom_order_bonus_multiplier", 1.0),
-        "mixRates": {
-            "SIMPLE": _wr_float(db, "mix_simple", 1.0),
-            "MEDIUM": _wr_float(db, "mix_medium", 1.5),
-            "HARD": _wr_float(db, "mix_hard", 2.0),
-        },
+        "mixRates": mix_rates_meta_json_dict(db),
     }
     return templates.TemplateResponse(
         "work_products_new.html",
@@ -707,7 +697,8 @@ async def work_new_post(
 
         mix_complexity: MixComplexity | None = None
         if grams_total > 0 and mix_source != MixSource.NO_MIX:
-            mc_raw = _g_str(form, "mix_complexity", "")
+            mc_raw = (_g_str(form, "mix_complexity", "") or "").strip().upper()
+            mc_raw = {"SIMPLE": "STANDARD", "MEDIUM": "KANEK", "HARD": "THERMO"}.get(mc_raw, mc_raw)
             try:
                 mix_complexity = MixComplexity(mc_raw) if mc_raw else None
             except ValueError:
@@ -1051,11 +1042,7 @@ async def work_new_post(
             "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
             "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
             "customOrderBonus": _wr_float(db, "custom_order_bonus_multiplier", 1.0),
-            "mixRates": {
-                "SIMPLE": _wr_float(db, "mix_simple", 1.0),
-                "MEDIUM": _wr_float(db, "mix_medium", 1.5),
-                "HARD": _wr_float(db, "mix_hard", 2.0),
-            },
+            "mixRates": mix_rates_meta_json_dict(db),
         }
         kit_master_on_ids = _read_kit_master_on_ids(form)
         kit_prefill = _kit_qty_prefill_from_form(form)
@@ -1144,7 +1131,13 @@ def work_detail(
     if not w:
         return templates.TemplateResponse(
             "work_products_detail.html",
-            _ctx(request, current_user=current_user, row=None, err="Работа не найдена."),
+            _ctx(
+                request,
+                current_user=current_user,
+                row=None,
+                err="Работа не найдена.",
+                mix_complexity_label="—",
+            ),
             status_code=404,
         )
     # load relations for template
@@ -1163,7 +1156,13 @@ def work_detail(
         if not allowed:
             return templates.TemplateResponse(
                 "work_products_detail.html",
-                _ctx(request, current_user=current_user, row=None, err="Недостаточно прав для просмотра этой работы."),
+                _ctx(
+                    request,
+                    current_user=current_user,
+                    row=None,
+                    err="Недостаточно прав для просмотра этой работы.",
+                    mix_complexity_label="—",
+                ),
                 status_code=403,
             )
     can_edit = (current_user.role == UserRole.ADMIN_SUPER)
@@ -1185,6 +1184,7 @@ def work_detail(
             current_user=current_user,
             row=w,
             details=details,
+            mix_complexity_label=ru_mix_complexity_label(details.get("mix_complexity")),
             err=None,
             saved=(request.query_params.get("msg") == "saved"),
             can_edit=can_edit,

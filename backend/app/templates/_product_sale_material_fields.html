@@ -34,12 +34,15 @@
     <input type="hidden" name="material_mix_source" value="FROM_STOCK" />
   {% endif %}
   <div>
-    <label>Сложность *</label>
+    <label>Сложность * <span class="muted">(ставки ₽/г — в настройках суперадмина)</span></label>
+    {% set mmx = fp.get('material_mix_complexity') or '' %}
     <select name="material_mix_complexity">
       <option value="">—</option>
-      <option value="SIMPLE" {% if fp.get('material_mix_complexity') == 'SIMPLE' %}selected{% endif %}>Простая (1 &#8381;/г)</option>
-      <option value="MEDIUM" {% if fp.get('material_mix_complexity') == 'MEDIUM' %}selected{% endif %}>Средняя (1,5 &#8381;/г)</option>
-      <option value="HARD" {% if fp.get('material_mix_complexity') == 'HARD' %}selected{% endif %}>Сложная (2 &#8381;/г)</option>
+      <option value="LIGHT" {% if mmx == 'LIGHT' %}selected{% endif %}>лёгкая (домешивание)</option>
+      <option value="STANDARD" {% if mmx == 'STANDARD' or mmx == 'SIMPLE' %}selected{% endif %}>стандарт</option>
+      <option value="KANEK" {% if mmx == 'KANEK' or mmx == 'MEDIUM' %}selected{% endif %}>сложная канекалон (омбре, мелирование)</option>
+      <option value="THERMO" {% if mmx == 'THERMO' or mmx == 'HARD' %}selected{% endif %}>сложная термо</option>
+      <option value="LENGTH" {% if mmx == 'LENGTH' %}selected{% endif %}>сложная длина</option>
     </select>
   </div>
 </div>

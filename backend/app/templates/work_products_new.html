@@ -99,10 +99,13 @@
         </div>
         <div id="mix_complexity_block" style="margin-top: 10px; display:none;">
           <label>Сложность смешки</label>
-          <div style="display:flex; flex-wrap: wrap; gap: 12px 16px; margin-top: 6px;">
-            <label style="margin:0;"><input type="radio" name="mix_complexity" value="SIMPLE" {% if (fp.mix_complexity or 'SIMPLE') == 'SIMPLE' %}checked{% endif %} /> Простая</label>
-            <label style="margin:0;"><input type="radio" name="mix_complexity" value="MEDIUM" {% if fp.mix_complexity == 'MEDIUM' %}checked{% endif %} /> Средняя</label>
-            <label style="margin:0;"><input type="radio" name="mix_complexity" value="HARD" {% if fp.mix_complexity == 'HARD' %}checked{% endif %} /> Сложная</label>
+          {% set mc = fp.mix_complexity or 'STANDARD' %}
+          <div style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-top: 6px; font-size: 14px;">
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="LIGHT" {% if mc == 'LIGHT' %}checked{% endif %} /> лёгкая (домешивание)</label>
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="STANDARD" {% if mc == 'STANDARD' or mc == 'SIMPLE' %}checked{% endif %} /> стандарт</label>
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="KANEK" {% if mc == 'KANEK' or mc == 'MEDIUM' %}checked{% endif %} /> сложная канекалон (омбре, мелирование)</label>
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="THERMO" {% if mc == 'THERMO' or mc == 'HARD' %}checked{% endif %} /> сложная термо</label>
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="LENGTH" {% if mc == 'LENGTH' %}checked{% endif %} /> сложная длина</label>
           </div>
         </div>
       </div>
@@ -404,7 +407,7 @@
 
         var gramsTotal = kan + kud;
         var mixSrc = (document.querySelector('input[name="mix_source"]:checked') || {}).value || 'NO_MIX';
-        var mixComp = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || 'SIMPLE';
+        var mixComp = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || 'STANDARD';
         var rm0 = (meta && meta.mixRates) ? meta.mixRates : {};
         var mixRate0 = parseFloat(rm0[mixComp]) || 0;
         var mixBonusTotal = (gramsTotal > 0 && mixSrc === 'SELF_MIXED') ? (gramsTotal * mixRate0) : 0;
@@ -499,7 +502,7 @@
 
       if (k === 'MIX') {
         var gramsTotal = kan + kud;
-        var mc = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || 'SIMPLE';
+        var mc = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || 'STANDARD';
         var rm = (meta && meta.mixRates) ? meta.mixRates : {};
         var rate = parseFloat(rm[mc]) || 0;
         var payM = gramsTotal > 0 ? gramsTotal * rate : 0;
@@ -683,6 +686,10 @@
       document.querySelectorAll('input[name="mix_complexity"]').forEach(function (el) {
         el.disabled = !showComplexity;
       });
+      if (!showComplexity) {
+        var st0 = document.querySelector('input[name="mix_complexity"][value="STANDARD"]');
+        if (st0) st0.checked = true;
+      }
     }
     document.querySelectorAll('input[name="scope"]').forEach(function (el) {
       el.addEventListener('change', syncClientBlock);

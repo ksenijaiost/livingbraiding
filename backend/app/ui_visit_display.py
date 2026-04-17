@@ -42,10 +42,17 @@ def ru_mix_complexity(c: MixComplexity | str | None) -> str:
     if c is None:
         return "—"
     v = c.value if isinstance(c, MixComplexity) else str(c)
+    v = {
+        "SIMPLE": "STANDARD",
+        "MEDIUM": "KANEK",
+        "HARD": "THERMO",
+    }.get(str(v).strip().upper(), str(v).strip().upper())
     return {
-        "SIMPLE": "Простая",
-        "MEDIUM": "Средняя",
-        "HARD": "Сложная",
+        "LIGHT": "лёгкая (домешивание)",
+        "STANDARD": "стандарт",
+        "KANEK": "сложная канекалон (омбре, мелирование)",
+        "THERMO": "сложная термо",
+        "LENGTH": "сложная длина",
     }.get(v, v)
 
 

@@ -223,10 +223,13 @@
       </div>
         <div id="mix_complexity_block" style="margin-top: 12px; display: none;">
         <div style="font-weight: 600; margin-bottom: 8px;">Сложность смешки *</div>
-        <div style="display: flex; flex-wrap: wrap; gap: 12px 16px;">
-          <label><input type="radio" name="mix_complexity" value="SIMPLE" {% if (fp.get('mix_complexity') or 'SIMPLE') == 'SIMPLE' %}checked{% endif %} /> Простая</label>
-          <label><input type="radio" name="mix_complexity" value="MEDIUM" {% if fp.get('mix_complexity') == 'MEDIUM' %}checked{% endif %} /> Средняя</label>
-          <label><input type="radio" name="mix_complexity" value="HARD" {% if fp.get('mix_complexity') == 'HARD' %}checked{% endif %} /> Сложная</label>
+        {% set mxc = fp.get('mix_complexity') or 'STANDARD' %}
+        <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 14px;">
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="LIGHT" {% if mxc == 'LIGHT' %}checked{% endif %} /> лёгкая (домешивание)</label>
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="STANDARD" {% if mxc == 'STANDARD' or mxc == 'SIMPLE' %}checked{% endif %} /> стандарт</label>
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="KANEK" {% if mxc == 'KANEK' or mxc == 'MEDIUM' %}checked{% endif %} /> сложная канекалон (омбре, мелирование)</label>
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="THERMO" {% if mxc == 'THERMO' or mxc == 'HARD' %}checked{% endif %} /> сложная термо</label>
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="LENGTH" {% if mxc == 'LENGTH' %}checked{% endif %} /> сложная длина</label>
         </div>
       </div>
 
@@ -499,8 +502,8 @@
       const need = g > 0 && mix && (mix.value === 'FROM_STOCK' || mix.value === 'SELF_MIXED');
       wrap.style.display = need ? 'block' : 'none';
       if (!need) {
-        const simple = wrap.querySelector('input[name="mix_complexity"][value="SIMPLE"]');
-        if (simple) simple.checked = true;
+        const std = wrap.querySelector('input[name="mix_complexity"][value="STANDARD"]');
+        if (std) std.checked = true;
       }
     }
     function updateMixBlockUI() {
@@ -790,6 +793,7 @@
     const currentUserId = {{ current_user.id|int }};
     const salonCutPct = {{ salon_cut_pct|float }};
     const materialPricePerGram = {{ (material_price_per_gram_json or '{}') | safe }};
+    const mixComplexityRatesPerGram = {{ (mix_complexity_rates_json or '{}') | safe }};
 
     let selectedMainStockKit = null;
     let selectedExtraStockKit = null;
@@ -871,8 +875,8 @@
       const gramsTotal = kan + kud;
       const mixSource = (document.querySelector('input[name="mix_source"]:checked') || {}).value || 'NO_MIX';
       const mixComp = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || null;
-      const coef = { SIMPLE: 1.0, MEDIUM: 1.5, HARD: 2.0 };
-      const mixCost = (gramsTotal > 0 && mixSource !== 'NO_MIX' && mixComp && coef[mixComp]) ? (gramsTotal * coef[mixComp]) : 0;
+      const mixCoef = mixComp ? (parseFloat(mixComplexityRatesPerGram[mixComp]) || 0) : 0;
+      const mixCost = (gramsTotal > 0 && mixSource !== 'NO_MIX' && mixComp && mixCoef) ? (gramsTotal * mixCoef) : 0;
       const mixBonus = (mixSource === 'SELF_MIXED') ? mixCost : 0;
 
       const amort = (function () {

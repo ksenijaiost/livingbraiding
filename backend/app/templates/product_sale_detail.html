@@ -84,7 +84,7 @@
             <p style="margin:6px 0;"><strong>Себестоимость</strong>: {{ '%.2f'|format(sale.material_manual_cost) }} &#8381;</p>
           {% endif %}
           {% if sale.material_mix_cost_amount and sale.material_mix_cost_amount > 0 %}
-            <p style="margin:6px 0;"><strong>Смешка</strong>: {{ sale.material_mix_source.value if sale.material_mix_source else '—' }}, сложность {{ sale.material_mix_complexity.value if sale.material_mix_complexity else '—' }}, в расчёт {{ '%.2f'|format(sale.material_mix_cost_amount) }} &#8381;</p>
+            <p style="margin:6px 0;"><strong>Смешка</strong>: {{ sale.material_mix_source.value if sale.material_mix_source else '—' }}, сложность {{ material_mix_complexity_ru }}, в расчёт {{ '%.2f'|format(sale.material_mix_cost_amount) }} &#8381;</p>
             {% if sale.material_mix_bonus_amount and sale.material_mix_bonus_amount > 0 and sale.material_mix_bonus_user %}
               <p style="margin:6px 0;" class="muted">Бонус мастеру {{ sale.material_mix_bonus_user.display_name }}: {{ '%.2f'|format(sale.material_mix_bonus_amount) }} &#8381;</p>
             {% endif %}

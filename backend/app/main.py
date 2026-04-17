@@ -137,6 +137,7 @@ from app.payroll_fund import (
     studio_fund_balance,
 )
 from app.db.session import get_db
+from app.mix_rates import mix_rates_for_admin_form, mix_rates_meta_json_dict
 from app.kit_crud import (
     apply_kit_admin_form,
     kit_edit_error_prefill,
@@ -3412,6 +3413,7 @@ def _master_visit_step1_template_response(
             ),
             salon_cut_pct=salon_cut_pct,
             material_price_per_gram_json=json.dumps(material_price_per_gram, ensure_ascii=False),
+            mix_complexity_rates_json=json.dumps(mix_rates_meta_json_dict(db), ensure_ascii=False),
             visit_master_level_ru=ru_master_level(current_user.master_level),
             default_date=performed,
             form_prefill=form_prefill,
@@ -4290,9 +4292,7 @@ def admin_settings_page(
 
     work_rates = {
         "studio_share": _wr_float("studio_share", 0.30),
-        "mix_simple": _wr_float("mix_simple", 1.0),
-        "mix_medium": _wr_float("mix_medium", 1.5),
-        "mix_hard": _wr_float("mix_hard", 2.0),
+        **mix_rates_for_admin_form(db),
         "custom_order_bonus_multiplier": _wr_float("custom_order_bonus_multiplier", 1.0),
     }
 
@@ -5318,9 +5318,11 @@ async def admin_settings_work_rates_save(
 
         payload: dict[str, float] = {
             "studio_share": studio_share,
-            "mix_simple": _p("mix_simple", 1.0),
-            "mix_medium": _p("mix_medium", 1.5),
-            "mix_hard": _p("mix_hard", 2.0),
+            "mix_light": _p("mix_light", 0.5),
+            "mix_standard": _p("mix_standard", 1.0),
+            "mix_kanek": _p("mix_kanek", 1.5),
+            "mix_thermo": _p("mix_thermo", 2.0),
+            "mix_length": _p("mix_length", 2.5),
             "custom_order_bonus_multiplier": _p("custom_order_bonus_multiplier", 1.0),
         }
         for k, v in payload.items():
@@ -5349,9 +5351,11 @@ async def admin_settings_work_rates_save(
 
         work_rates = {
             "studio_share": _safe("studio_share", 0.30),
-            "mix_simple": _safe("mix_simple", 1.0),
-            "mix_medium": _safe("mix_medium", 1.5),
-            "mix_hard": _safe("mix_hard", 2.0),
+            "mix_light": _safe("mix_light", 0.5),
+            "mix_standard": _safe("mix_standard", 1.0),
+            "mix_kanek": _safe("mix_kanek", 1.5),
+            "mix_thermo": _safe("mix_thermo", 2.0),
+            "mix_length": _safe("mix_length", 2.5),
             "custom_order_bonus_multiplier": _safe("custom_order_bonus_multiplier", 1.0),
         }
         return templates.TemplateResponse(

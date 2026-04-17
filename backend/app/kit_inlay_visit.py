@@ -40,6 +40,7 @@ from app.db.models import (
     VisitService,
 )
 from app.client_validation import client_has_any_contact, strip_or_none
+from app.mix_rates import mix_complexity_rate_for
 
 
 def get_kit_max_reserves_per_kit(db: Session) -> int:
@@ -375,7 +376,8 @@ def parse_kit_inlay_form(
 
     comp: MixComplexity | None = None
     if grams_total > 0 and mix is not None and mix != MixSource.NO_MIX:
-        comp_raw = g("mix_complexity", "")
+        comp_raw = (g("mix_complexity", "") or "").strip().upper()
+        comp_raw = {"SIMPLE": "STANDARD", "MEDIUM": "KANEK", "HARD": "THERMO"}.get(comp_raw, comp_raw)
         if comp_raw:
             try:
                 comp = MixComplexity(comp_raw)
@@ -854,7 +856,7 @@ def save_kit_inlay_visit(
     if inp.mix_source and inp.mix_source != MixSource.NO_MIX:
         if inp.mix_complexity is None:
             raise ValueError("Укажите сложность смешки")
-        coef = {"SIMPLE": 1.0, "MEDIUM": 1.5, "HARD": 2.0}[inp.mix_complexity.value]
+        coef = mix_complexity_rate_for(db, inp.mix_complexity)
         mix_cost = grams_total * coef
         if inp.mix_source == MixSource.SELF_MIXED:
             mix_bonus_amount = mix_cost

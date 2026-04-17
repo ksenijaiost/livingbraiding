@@ -96,7 +96,7 @@
         {% else %}
           <div class="muted" style="font-size: 12px; margin-top: 6px;">Смешка: {{ "Без смешки" if (row.mix_source and row.mix_source.value == "NO_MIX") else ("Из наличия" if (row.mix_source and row.mix_source.value == "FROM_STOCK") else ("Сама мешала" if (row.mix_source and row.mix_source.value == "SELF_MIXED") else "—")) }}</div>
           {% if details.get("mix_complexity") and row.mix_source and row.mix_source.value != "NO_MIX" %}
-            <div class="muted" style="font-size: 12px; margin-top: 2px;">Сложность: {{ "Простая" if details.get("mix_complexity") == "SIMPLE" else ("Средняя" if details.get("mix_complexity") == "MEDIUM" else ("Сложная" if details.get("mix_complexity") == "HARD" else "—")) }}</div>
+            <div class="muted" style="font-size: 12px; margin-top: 2px;">Сложность: {{ mix_complexity_label }}</div>
           {% endif %}
         {% endif %}
       </div>

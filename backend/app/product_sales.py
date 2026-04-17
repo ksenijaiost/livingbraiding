@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
 from app.auth import AuthUser, require_role
+from app.ui_visit_display import ru_mix_complexity
 from app.audit import diff_fields, write_audit_rows
 from app.db.models import (
     Client,
@@ -214,13 +215,10 @@ def _apply_material_from_form(
         else:
             sale.material_mix_source = MixSource.FROM_STOCK
         mc = (_g_str(form, "material_mix_complexity") or "").strip().upper()
-        if mc == "SIMPLE":
-            sale.material_mix_complexity = MixComplexity.SIMPLE
-        elif mc == "MEDIUM":
-            sale.material_mix_complexity = MixComplexity.MEDIUM
-        elif mc == "HARD":
-            sale.material_mix_complexity = MixComplexity.HARD
-        else:
+        mc = {"SIMPLE": "STANDARD", "MEDIUM": "KANEK", "HARD": "THERMO"}.get(mc, mc)
+        try:
+            sale.material_mix_complexity = MixComplexity(mc) if mc else None
+        except ValueError:
             sale.material_mix_complexity = None
         if sale.material_mix_complexity is None:
             raise ValueError("Укажите сложность смешки.")
@@ -335,6 +333,7 @@ def product_sale_detail(
                 edit_allowed=False,
                 edit_block_msg="",
                 ru_kind="",
+                material_mix_complexity_ru="—",
             ),
             status_code=404,
         )
@@ -361,6 +360,9 @@ def product_sale_detail(
             edit_allowed=edit_allowed,
             edit_block_msg=edit_block_msg,
             ru_kind=_ru_kind(sale.kind),
+            material_mix_complexity_ru=ru_mix_complexity(
+                getattr(sale, "material_mix_complexity", None)
+            ),
         ),
     )
 

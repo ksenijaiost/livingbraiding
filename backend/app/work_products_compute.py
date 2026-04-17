@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.db.models import MixComplexity, MixSource, WorkKind, WorkScope
+from app.mix_rates import mix_complexity_rate_map
 
 
 @dataclass(frozen=True)
@@ -72,12 +73,7 @@ def compute_work_financials(
                 if q > 0:
                     staff_master_profit[uid] += rate * q
         if mix_source == MixSource.SELF_MIXED and grams_total > 0 and mix_complexity is not None:
-            rate_map = {
-                MixComplexity.SIMPLE: _wr_float(db, "mix_simple", 1.0),
-                MixComplexity.MEDIUM: _wr_float(db, "mix_medium", 1.5),
-                MixComplexity.HARD: _wr_float(db, "mix_hard", 2.0),
-            }
-            mrate = float(rate_map.get(mix_complexity, 0.0))
+            mrate = float(mix_complexity_rate_map(db).get(mix_complexity, 0.0))
             mix_pay = max(0.0, float(grams_total) * mrate)
             if mix_pay > 0:
                 if current_user_id in staff_master_profit:
@@ -154,12 +150,9 @@ def compute_work_financials(
         extra_costs_amount = fx_total
 
     elif kind == WorkKind.MIX:
-        rate_map = {
-            MixComplexity.SIMPLE: _wr_float(db, "mix_simple", 1.0),
-            MixComplexity.MEDIUM: _wr_float(db, "mix_medium", 1.5),
-            MixComplexity.HARD: _wr_float(db, "mix_hard", 2.0),
-        }
-        rate = float(rate_map.get(mix_complexity or MixComplexity.SIMPLE, 0.0))
+        rate = float(
+            mix_complexity_rate_map(db).get(mix_complexity or MixComplexity.STANDARD, 0.0)
+        )
         staff_master_profit[current_user_id] = max(0.0, float(grams_total) * rate)
 
     master_total = float(sum(staff_master_profit.values()))

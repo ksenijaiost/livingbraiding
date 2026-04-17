@@ -14,13 +14,8 @@ from app.db.models import (
     Service,
     UserRole,
 )
+from app.mix_rates import mix_complexity_rate_for
 from app.payroll_fund import money_q2
-
-_MIX_COEF: dict[MixComplexity, float] = {
-    MixComplexity.SIMPLE: 1.0,
-    MixComplexity.MEDIUM: 1.5,
-    MixComplexity.HARD: 2.0,
-}
 
 
 def material_retail_has_pricing_path(svc: Service) -> bool:
@@ -123,7 +118,7 @@ def finalize_material_sale_fields(
             )
             if grams_t <= 0:
                 raise ValueError("Для смешки укажите граммы (по полям канекалона/кудрей или отдельное поле).")
-            coef = _MIX_COEF[comp]
+            coef = mix_complexity_rate_for(db, comp)
             mix_cost = money_q2(grams_t * coef)
             sale.material_mix_cost_amount = mix_cost
             if mix_src == MixSource.SELF_MIXED:

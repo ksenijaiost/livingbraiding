@@ -10,6 +10,7 @@ services.retail_material_* — флаги розницы материала (к�
 product_sales — поля материала: граммы по типам, снимки цен, смешка, ручная себестоимость, material_cost_review_pending.
 
 Порядок значений mixsource в схеме: NO_MIX, FROM_STOCK, SELF_MIXED (без смешки первым).
+mixcomplexity: LIGHT, STANDARD, KANEK, THERMO, LENGTH (ставки ₽/г в work_rates: mix_light … mix_length).
 
 Для ранней разработки: удалить файл SQLite и снова выполнить `alembic upgrade head`.
 """
@@ -485,7 +486,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "mix_complexity",
-            sa.Enum("SIMPLE", "MEDIUM", "HARD", name="mixcomplexity"),
+            sa.Enum("LIGHT", "STANDARD", "KANEK", "THERMO", "LENGTH", name="mixcomplexity"),
             nullable=True,
         ),
         sa.Column("mix_cost_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
@@ -791,7 +792,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "material_mix_complexity",
-            sa.Enum("SIMPLE", "MEDIUM", "HARD", name="mixcomplexity"),
+            sa.Enum("LIGHT", "STANDARD", "KANEK", "THERMO", "LENGTH", name="mixcomplexity"),
             nullable=True,
         ),
         sa.Column(
