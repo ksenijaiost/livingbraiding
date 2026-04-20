@@ -948,7 +948,6 @@ def _ensure_demo_operational_data(db: Session) -> None:
             scope=WorkScope.IN_STOCK,
             client_id=None,
             amount_from_client=None,
-            ready_date=None,
             comment="Демо: смешка",
             kanekalon_grams=20.0,
             kudri_grams=10.0,

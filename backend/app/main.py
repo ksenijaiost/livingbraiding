@@ -1276,6 +1276,25 @@ async def api_products_calc(
 
     extra_costs_amount = max(0.0, _f("extra_costs_amount", 0.0))
 
+    def _service_price_range_row(svc: Service) -> tuple[float | None, float | None]:
+        vals: list[tuple[float | None, float | None]] = [
+            (svc.price_junior_from, svc.price_junior_to),
+            (svc.price_middle_from, svc.price_middle_to),
+            (svc.price_senior_from, svc.price_senior_to),
+        ]
+        lows: list[float] = []
+        highs: list[float] = []
+        for fr, to in vals:
+            if fr is not None:
+                lows.append(float(fr))
+            if to is not None:
+                highs.append(float(to))
+        if not highs and lows:
+            highs = list(lows)
+        if not lows and highs:
+            lows = list(highs)
+        return (min(lows) if lows else None, max(highs) if highs else None)
+
     # Prepare inputs for compute_work_financials
     try:
         alloc = [(int(current_user.id), 1.0)]
@@ -1532,6 +1551,30 @@ async def api_products_calc(
     except Exception as e:
         msg = str(e).strip() or "Ошибка расчёта."
         return JSONResponse({"error": msg}, status_code=400)
+
+    # Split calc: product and service prices for booking prefill.
+    svc_id_raw = str(payload.get("visit_service_id") or "").strip()
+    svc_min: float | None = None
+    svc_max: float | None = None
+    if svc_id_raw.isdigit():
+        svc = db.get(Service, int(svc_id_raw))
+        if svc:
+            svc_min, svc_max = _service_price_range_row(svc)
+    prod_min = client_min
+    prod_max = client_max
+    calc_payload = {
+        "calc_product_min": "" if prod_min is None else f"{float(prod_min):.0f}",
+        "calc_product_max": "" if prod_max is None else f"{float(prod_max):.0f}",
+        "calc_service_min": "" if svc_min is None else f"{float(svc_min):.0f}",
+        "calc_service_max": "" if svc_max is None else f"{float(svc_max):.0f}",
+    }
+    try:
+        if isinstance(prefill_sale, dict):
+            prefill_sale.update(calc_payload)
+        if isinstance(prefill_visit, dict):
+            prefill_visit.update(calc_payload)
+    except Exception:
+        pass
 
     cost_hint = f"Себестоимость (материал + доп. расходы): {float(fin.cost_total_amount):.2f} ₽"
     pay_hint = f"ЗП мастера (итого): {float(fin.master_total):.2f} ₽"
@@ -2672,6 +2715,121 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
     return fp, master_ids
 
 
+def _booking_details_flag(v: Any) -> bool:
+    return str(v or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def booking_linked_need_work(b: Booking, details: dict[str, Any]) -> bool:
+    """Нужна ли для этой брони запись «работа с товарами» до визита/продажи."""
+    if b.kind == BookingKind.VISIT:
+        mode = str(details.get("visit_kit_mode") or "").strip().upper()
+        if mode == "ORDER":
+            return True
+        if mode == "OWN" and _booking_details_flag(details.get("visit_own_need_correction")):
+            return True
+        return False
+    if b.kind == BookingKind.PRODUCT_SALE:
+        pk = (b.planned_product_kind or "").strip().upper()
+        if pk == "KIT" and str(details.get("sale_kit_mode") or "").strip().upper() == "ORDER":
+            return True
+        if pk == "RUBBER" and str(details.get("sale_rubber_mode") or "").strip().upper() == "ORDER":
+            return True
+    return False
+
+
+def booking_linked_need_visit(b: Booking) -> bool:
+    return b.kind == BookingKind.VISIT
+
+
+def booking_linked_need_sale(b: Booking) -> bool:
+    return b.kind == BookingKind.PRODUCT_SALE
+
+
+def _amount_hint_from_booking(b: Booking) -> str:
+    """Первая уместная сумма из озвученной цены / предоплаты для префилла."""
+    if b.deposit_amount is not None and int(b.deposit_amount) > 0:
+        return str(int(b.deposit_amount))
+    raw = (b.quoted_price_text or "").strip()
+    if not raw:
+        return ""
+    m = re.search(r"(\d[\d\s]{2,})", raw)
+    if not m:
+        return ""
+    digits = re.sub(r"\D", "", m.group(1))
+    return digits if digits else ""
+
+
+def _booking_work_new_query_params(db: Session, b: Booking, details: dict[str, Any]) -> dict[str, str]:
+    """Query-параметры для /sales/work/new (префилл с брони)."""
+    q: dict[str, str] = {"booking_id": str(b.id), "client_id": str(b.client_id)}
+    tz = get_display_timezone(db)
+    local = _utc_naive_to_local(b.planned_date, tz) if b.planned_date else None
+    if local:
+        q["performed_date"] = local.date().isoformat()
+    parts: list[str] = [f"бронь #{b.id}"]
+    if b.kind == BookingKind.VISIT:
+        mode = str(details.get("visit_kit_mode") or "").strip().upper()
+        if mode == "ORDER":
+            q["scope"] = WorkScope.CUSTOM_ORDER.value
+            q["kind"] = WorkKind.KIT.value
+            qb = str(details.get("visit_order_blanks_qty") or "").strip()
+            if qb:
+                parts.append(f"заказ заготовок: {qb} шт")
+            qd = str(details.get("visit_order_blanks_desc") or "").strip()
+            if qd:
+                parts.append(qd[:400])
+        elif mode == "OWN" and _booking_details_flag(details.get("visit_own_need_correction")):
+            q["scope"] = WorkScope.CUSTOM_ORDER.value
+            q["kind"] = WorkKind.KIT_CORRECTION.value
+            for key in (
+                "corr_trim_qty",
+                "corr_dread_qty",
+                "corr_curl_qty",
+                "corr_curl_dread_complexity",
+                "corr_wash",
+                "corr_steam",
+                "corr_circle",
+            ):
+                val = details.get(key)
+                if val is None or str(val).strip() == "":
+                    continue
+                if str(key).startswith("corr_") and str(val).strip() in ("0", "0.0"):
+                    continue
+                q[key] = str(val)
+    elif b.kind == BookingKind.PRODUCT_SALE:
+        pk = (b.planned_product_kind or "").strip().upper()
+        if pk == "KIT" and str(details.get("sale_kit_mode") or "").strip().upper() == "ORDER":
+            q["scope"] = WorkScope.CUSTOM_ORDER.value
+            q["kind"] = WorkKind.KIT.value
+            qb = str(details.get("sale_order_blanks_qty") or "").strip()
+            if qb:
+                parts.append(f"заказ заготовок: {qb} шт")
+            qd = str(details.get("sale_order_blanks_desc") or "").strip()
+            if qd:
+                parts.append(qd[:400])
+        elif pk == "RUBBER" and str(details.get("sale_rubber_mode") or "").strip().upper() == "ORDER":
+            q["scope"] = WorkScope.CUSTOM_ORDER.value
+            q["kind"] = WorkKind.RUBBER.value
+            rt = str(details.get("sale_rubber_type") or "").strip()
+            if rt:
+                q["rubber_type"] = rt
+            aq = str(details.get("sale_rubber_attach_qty") or "").strip()
+            if aq:
+                q["rubber_attach_qty"] = aq
+            bq = str(details.get("sale_rubber_braids_qty") or "").strip()
+            if bq:
+                q["rubber_braids_qty"] = bq
+    hint = _amount_hint_from_booking(b)
+    if hint:
+        q["amount_from_client"] = hint
+    comment = "; ".join(parts)
+    if b.comment:
+        comment = f"{comment}\n{b.comment}" if comment else str(b.comment)
+    if comment:
+        q["comment"] = comment[:900]
+    return q
+
+
 def _booking_details_from_form(fp: dict[str, str]) -> dict[str, object]:
     """
     MVP: храним сложные поля брони (комплект/заказ/коррекция/доп.заготовки и т.п.) в details_json.
@@ -2689,6 +2847,7 @@ def _booking_details_from_form(fp: dict[str, str]) -> dict[str, object]:
     )
     d: dict[str, object] = {}
     keys: tuple[str, ...]
+    calc_keys = ("calc_product_min", "calc_product_max", "calc_service_min", "calc_service_max")
     if kind_raw == BookingKind.VISIT.value:
         keys = (
             # VISIT: комплект
@@ -2704,7 +2863,7 @@ def _booking_details_from_form(fp: dict[str, str]) -> dict[str, object]:
             "visit_order_blanks_desc",
             "visit_extra_order_blanks_qty",
             "visit_extra_order_blanks_desc",
-        )
+        ) + calc_keys
         # VISIT: коррекция — только если явно отмечено, что коррекция нужна
         if str(fp.get("visit_own_need_correction") or "").lower() in ("1", "on", "true", "yes"):
             keys = keys + (
@@ -2718,7 +2877,7 @@ def _booking_details_from_form(fp: dict[str, str]) -> dict[str, object]:
             )
     else:
         # PRODUCT_SALE: берём только относящиеся к продаже поля, без визитных/коррекции
-        keys = ("product_kind",)
+        keys = ("product_kind",) + calc_keys
         if product_kind == "KIT":
             keys = keys + (
                 "sale_kit_mode",
@@ -2948,6 +3107,11 @@ def admin_booking_new_get(
         "quoted_price_text",
         "deposit_amount",
         "comment",
+        # calc split (service/product)
+        "calc_product_min",
+        "calc_product_max",
+        "calc_service_min",
+        "calc_service_max",
         "planned_date",
         "planned_time",
     }
@@ -3194,6 +3358,55 @@ def admin_booking_detail(
                 details = raw
         except Exception:
             details = {}
+
+    # Calc split (service/product): old bookings may not have these stored in details_json.
+    calc_product_min = str(details.get("calc_product_min") or "").strip()
+    calc_product_max = str(details.get("calc_product_max") or "").strip()
+    calc_service_min = str(details.get("calc_service_min") or "").strip()
+    calc_service_max = str(details.get("calc_service_max") or "").strip()
+    if (not calc_service_min and not calc_service_max) and b.planned_service:
+        lo, hi = None, None
+        try:
+            svc = b.planned_service
+            vals = [
+                (svc.price_junior_from, svc.price_junior_to),
+                (svc.price_middle_from, svc.price_middle_to),
+                (svc.price_senior_from, svc.price_senior_to),
+            ]
+            lows: list[float] = []
+            highs: list[float] = []
+            for fr, to in vals:
+                if fr is not None:
+                    lows.append(float(fr))
+                if to is not None:
+                    highs.append(float(to))
+            if not highs and lows:
+                highs = list(lows)
+            if not lows and highs:
+                lows = list(highs)
+            lo = min(lows) if lows else None
+            hi = max(highs) if highs else None
+        except Exception:
+            lo, hi = None, None
+        if lo is not None or hi is not None:
+            calc_service_min = "" if lo is None else f"{float(lo):.0f}"
+            calc_service_max = "" if hi is None else f"{float(hi):.0f}"
+    need_work = booking_linked_need_work(b, details)
+    need_visit = booking_linked_need_visit(b)
+    need_sale = booking_linked_need_sale(b)
+    visit_blocked = need_visit and not linked_visit_id and need_work and not linked_work_id
+    sale_blocked = need_sale and not linked_sale_id and need_work and not linked_work_id
+    work_q: dict[str, str] = {}
+    work_create_url = ""
+    if need_work and not linked_work_id:
+        work_q = _booking_work_new_query_params(db, b, details)
+        work_create_url = "/sales/work/new?" + urlencode(work_q, quote_via=quote)
+    visit_create_url = ""
+    if need_visit and not linked_visit_id:
+        visit_create_url = f"/master/visit/new?booking_id={b.id}"
+    sale_create_url = ""
+    if need_sale and not linked_sale_id:
+        sale_create_url = f"/sales/products/new?booking_id={b.id}"
     return templates.TemplateResponse(
         "admin_booking_detail.html",
         _ctx(
@@ -3211,6 +3424,18 @@ def admin_booking_detail(
             sale_kit_order_users=sale_kit_order_users,
             sale_rubber_order_users=sale_rubber_order_users,
             details=details,
+            calc_product_min=calc_product_min,
+            calc_product_max=calc_product_max,
+            calc_service_min=calc_service_min,
+            calc_service_max=calc_service_max,
+            need_work=need_work,
+            need_visit=need_visit,
+            need_sale=need_sale,
+            visit_blocked=visit_blocked,
+            sale_blocked=sale_blocked,
+            work_create_url=work_create_url,
+            visit_create_url=visit_create_url,
+            sale_create_url=sale_create_url,
         ),
     )
 
@@ -3504,10 +3729,17 @@ async def admin_booking_edit_post(
 def admin_bookings(
     request: Request,
     show: str | None = None,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    mine: str | None = Query(None),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     show_mode = (show or "").strip().lower() or "active"
+    mine_raw = (mine or "").strip().lower()
+    can_manage = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    bookings_mine_only = mine_raw in ("1", "true", "yes", "only")
+    if current_user.role == UserRole.MASTER and mine_raw not in ("0", "false", "no", "all"):
+        bookings_mine_only = True
+
     stmt = (
         select(Booking)
         .options(selectinload(Booking.client))
@@ -3516,6 +3748,27 @@ def admin_bookings(
     )
     if show_mode != "all":
         stmt = stmt.where(Booking.status == BookingStatus.ACTIVE)
+    if bookings_mine_only:
+        stmt = stmt.where(
+            or_(
+                exists(
+                    select(1).where(
+                        and_(
+                            BookingMaster.booking_id == Booking.id,
+                            BookingMaster.master_id == current_user.id,
+                        )
+                    )
+                ),
+                exists(
+                    select(1).where(
+                        and_(
+                            BookingStaff.booking_id == Booking.id,
+                            BookingStaff.user_id == current_user.id,
+                        )
+                    )
+                ),
+            )
+        )
     rows = list(db.scalars(stmt).all())
     display_tz = get_display_timezone(db)
     return templates.TemplateResponse(
@@ -3526,6 +3779,8 @@ def admin_bookings(
             rows=rows,
             show_mode="all" if show_mode == "all" else "active",
             display_tz=display_tz,
+            can_manage=can_manage,
+            bookings_mine_only=bookings_mine_only,
         ),
     )
 
@@ -3928,6 +4183,7 @@ def master_visit_new_get(
             saved_draft_client = True
     form_prefill: dict[str, str] = {}
     selected_client = None
+    default_date = date.today().isoformat()
     if booking_id:
         b = db.scalar(
             select(Booking)
@@ -3941,6 +4197,13 @@ def master_visit_new_get(
             if b.planned_service_id:
                 form_prefill["service_id"] = str(b.planned_service_id)
             form_prefill["booking_id"] = str(b.id)
+            tz = get_display_timezone(db)
+            local_dt = _utc_naive_to_local(b.planned_date, tz) if b.planned_date else None
+            if local_dt:
+                default_date = local_dt.date().isoformat()
+            amt = _amount_hint_from_booking(b)
+            if amt:
+                form_prefill["amount_from_client"] = amt
             # Try to apply booking details_json as visit prefill (kit modes etc.)
             try:
                 d = json.loads(b.details_json or "{}")
@@ -3962,7 +4225,7 @@ def master_visit_new_get(
         selected_client=selected_client,
         saved=saved,
         saved_draft_client=saved_draft_client,
-        default_date=date.today().isoformat(),
+        default_date=default_date,
     )
 
 
@@ -5488,7 +5751,9 @@ def admin_payroll_periods_list(
     db: Session = Depends(get_db),
 ):
     periods = list(
-        db.scalars(select(PayrollPeriod).order_by(PayrollPeriod.date_from.asc(), PayrollPeriod.id.asc())).all()
+        db.scalars(
+            select(PayrollPeriod).order_by(PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc())
+        ).all()
     )
     has_open = any(p.closed_at is None for p in periods)
     can_open_next = not has_open
@@ -5514,7 +5779,10 @@ def admin_payroll_periods_open_next(
         return RedirectResponse(url="/admin/payroll-periods?err=open_exists", status_code=303)
 
     last = db.scalar(
-        select(PayrollPeriod).order_by(PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc()).limit(1)
+        select(PayrollPeriod)
+        .where(PayrollPeriod.closed_at.is_not(None))
+        .order_by(PayrollPeriod.date_to.desc(), PayrollPeriod.id.desc())
+        .limit(1)
     )
     if last is None:
         df_d = datetime.utcnow().date()

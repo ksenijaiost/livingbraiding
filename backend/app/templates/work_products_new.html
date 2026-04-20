@@ -51,7 +51,11 @@
         </div>
         <ul id="client_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
         <div id="selected_client_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not fp.client_id %}display:none;{% endif %}">
-          <p id="selected_client_line" style="margin:0;"></p>
+          <p id="selected_client_line" style="margin:0;">
+            {% if selected_client %}
+              Выбрано: <strong>{{ selected_client.name }}</strong>{% if not selected_client.is_confirmed %} <span class="muted">(черновик)</span>{% endif %}
+            {% endif %}
+          </p>
         </div>
         <div id="amount_from_client_block" style="margin-top: 10px; display:none;">
           <label>Сколько взяли с клиента</label>
@@ -69,14 +73,11 @@
           <input type="date" name="performed_date" required value="{{ fp.performed_date or default_date }}" />
           <p class="muted" style="font-size:12px;margin:4px 0 0;">Эта дата влияет на календарь и период ЗП.</p>
         </div>
-        <div>
-          <label>Дата готовности (для истории)</label>
-          <input name="ready_date" value="{{ fp.ready_date or default_date }}" placeholder="YYYY-MM-DD" />
-        </div>
-        <div>
-          <label>Комментарий</label>
-          <input name="comment" value="{{ fp.comment }}" placeholder="необязательно" />
-        </div>
+      </div>
+
+      <div style="margin-top: 10px;">
+        <label>Комментарий</label>
+        <textarea name="comment" rows="4" maxlength="2000" placeholder="необязательно" style="width: 100%; resize: vertical;">{{ fp.comment }}</textarea>
       </div>
 
       <div class="card" style="background:#f8fafc; margin: 12px 0;">

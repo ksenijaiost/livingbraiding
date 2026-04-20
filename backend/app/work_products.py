@@ -48,6 +48,30 @@ from app.db.session import get_db
 from app.user_roles import select_users_with_role, user_has_role
 from app.kit_inlay_visit import _materials_cost_and_snapshot
 from app.work_products_compute import compute_work_financials
+
+_WORK_NEW_FP_KEYS = frozenset({
+    "booking_id",
+    "client_id",
+    "performed_date",
+    "scope",
+    "kind",
+    "amount_from_client",
+    "comment",
+    "kanekalon_grams",
+    "kudri_grams",
+    "mix_source",
+    "mix_complexity",
+    "rubber_type",
+    "rubber_attach_qty",
+    "rubber_braids_qty",
+    "corr_trim_qty",
+    "corr_dread_qty",
+    "corr_curl_qty",
+    "corr_curl_dread_complexity",
+    "corr_wash",
+    "corr_steam",
+    "corr_circle",
+})
 from app.visit_edit_policy import (
     edit_window_days,
     ensure_event_date_in_open_payroll_period,
@@ -608,12 +632,18 @@ def work_new_get(
     db: Session = Depends(get_db),
 ):
     fp: dict[str, str] = {}
+    selected_client = None
     cid = str(request.query_params.get("client_id") or "").strip()
     if cid.isdigit():
         fp["client_id"] = cid
+        selected_client = db.get(Client, int(cid))
     bid = str(request.query_params.get("booking_id") or "").strip()
     if bid.isdigit():
         fp["booking_id"] = bid
+    for key in _WORK_NEW_FP_KEYS:
+        v = request.query_params.get(key)
+        if v is not None and str(v).strip() != "":
+            fp[key] = str(v).strip()
     masters = _list_masters_for_work_form(db)
     work_price_meta = {
         "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
@@ -628,6 +658,7 @@ def work_new_get(
             current_user=current_user,
             error=None,
             fp=fp,
+            selected_client=selected_client,
             masters=masters,
             kit_master_on_ids=[],
             kit_table_state_json=_kit_table_state_json(current_user, masters, {}, db),
@@ -860,14 +891,6 @@ async def work_new_post(
         else:
             alloc = [(current_user.id, 1.0)]
 
-        ready_date_raw = _g_str(form, "ready_date", "")
-        ready_dt = None
-        if ready_date_raw:
-            try:
-                ready_dt = datetime.combine(date.fromisoformat(ready_date_raw), datetime.min.time())
-            except ValueError:
-                raise ValueError("Некорректная дата готовности (ожидается YYYY-MM-DD).")
-
         fin = compute_work_financials(
             db,
             kind=kind,
@@ -906,7 +929,6 @@ async def work_new_post(
             scope=scope,
             client_id=client_id,
             amount_from_client=amount_from_client,
-            ready_date=ready_dt,
             comment=(_g_str(form, "comment", "") or "").strip() or None,
             kanekalon_grams=kanek,
             kudri_grams=kudri,
@@ -959,7 +981,7 @@ async def work_new_post(
                     sku = f"ORDER-{work.id}"
                 if not title:
                     cl = db.get(Client, client_id) if client_id else None
-                    title = f"Заказ — комплект (клиент {cl.full_name if cl else client_id})"
+                    title = f"Заказ — комплект (клиент {cl.name if cl else client_id})"
                 # Если внезапно пересекается (крайне редко), дополним временем.
                 if db.scalar(select(Kit.id).where(Kit.sku == sku)):
                     sku = f"{sku}-{int(datetime.utcnow().timestamp())}"

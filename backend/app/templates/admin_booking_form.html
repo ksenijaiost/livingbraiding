@@ -12,6 +12,10 @@
 
     <form method="post" action="{% if is_new %}/admin/bookings/new{% else %}/admin/bookings/{{ booking.id }}/edit{% endif %}">
       <input type="hidden" name="client_id" id="client_id" value="{{ selected_client.id if selected_client else fp.get('client_id','') }}" />
+      <input type="hidden" name="calc_product_min" value="{{ fp.get('calc_product_min','') }}" />
+      <input type="hidden" name="calc_product_max" value="{{ fp.get('calc_product_max','') }}" />
+      <input type="hidden" name="calc_service_min" value="{{ fp.get('calc_service_min','') }}" />
+      <input type="hidden" name="calc_service_max" value="{{ fp.get('calc_service_max','') }}" />
 
       <div class="card" style="background:#f8fafc;">
         <h3 style="margin-top:0;">Клиент</h3>

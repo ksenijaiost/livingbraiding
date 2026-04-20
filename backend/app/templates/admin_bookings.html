@@ -3,7 +3,9 @@
   <div class="card">
     <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
       <h2 style="margin-top:0;">Брони</h2>
-      <a href="/admin/bookings/new"><button type="button" class="secondary">Новая бронь</button></a>
+      {% if can_manage %}
+        <a href="/admin/bookings/new"><button type="button" class="secondary">Новая бронь</button></a>
+      {% endif %}
     </div>
 
     <form method="get" action="/admin/bookings" class="row" style="margin: 12px 0;">
@@ -13,6 +15,16 @@
           <label><input type="radio" name="show" value="active" {% if show_mode != 'all' %}checked{% endif %} /> Только активные</label>
           <label><input type="radio" name="show" value="all" {% if show_mode == 'all' %}checked{% endif %} /> Все брони</label>
         </div>
+      </div>
+      <div>
+        <label>Фильтр</label>
+        <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+          <label><input type="radio" name="mine" value="1" {% if bookings_mine_only %}checked{% endif %} /> Мои</label>
+          <label><input type="radio" name="mine" value="0" {% if not bookings_mine_only %}checked{% endif %} /> Все</label>
+        </div>
+        {% if current_user.role.value == "MASTER" %}
+          <div class="muted" style="font-size:12px;margin-top:6px;">По умолчанию показываются «мои»: где вы указаны мастером или ответственным по брони.</div>
+        {% endif %}
       </div>
       <div style="align-self:end;">
         <button type="submit">Применить</button>
@@ -47,12 +59,14 @@
               </td>
               <td style="white-space:nowrap;">
                 <a href="/admin/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
-                <a href="/admin/bookings/{{ b.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
-                {% if b.status.value == "ACTIVE" %}
-                  <form method="post" action="/admin/bookings/{{ b.id }}/cancel" style="display:inline; margin:0;" onsubmit="var r = prompt('Причина отмены'); if(!r) return false; this.querySelector('input[name=reason]').value = r; return confirm('Отменить бронь?');">
-                    <input type="hidden" name="reason" value="" />
-                    <button type="submit" class="secondary">Отменить</button>
-                  </form>
+                {% if can_manage %}
+                  <a href="/admin/bookings/{{ b.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+                  {% if b.status.value == "ACTIVE" %}
+                    <form method="post" action="/admin/bookings/{{ b.id }}/cancel" style="display:inline; margin:0;" onsubmit="var r = prompt('Причина отмены'); if(!r) return false; this.querySelector('input[name=reason]').value = r; return confirm('Отменить бронь?');">
+                      <input type="hidden" name="reason" value="" />
+                      <button type="submit" class="secondary">Отменить</button>
+                    </form>
+                  {% endif %}
                 {% endif %}
               </td>
             </tr>

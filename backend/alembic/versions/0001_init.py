@@ -862,7 +862,6 @@ def upgrade() -> None:
         sa.Column("booking_id", sa.Integer(), sa.ForeignKey("bookings.id"), nullable=True),
         sa.Column("client_id", sa.Integer(), sa.ForeignKey("clients.id"), nullable=True),
         sa.Column("amount_from_client", sa.Integer(), nullable=True),
-        sa.Column("ready_date", sa.DateTime(), nullable=True),
         sa.Column("comment", sa.Text(), nullable=True),
         sa.Column("kanekalon_grams", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("kudri_grams", sa.Float(), nullable=False, server_default=sa.text("0")),

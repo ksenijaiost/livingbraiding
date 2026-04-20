@@ -837,7 +837,6 @@ class WorkForInventory(Base):
     booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True)
     client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
     amount_from_client: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    ready_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Материал (как в визите) + снимки цен/ставок на момент записи

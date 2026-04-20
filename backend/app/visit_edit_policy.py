@@ -50,7 +50,7 @@ def ensure_event_date_in_open_payroll_period(db: Session, event_at: datetime) ->
 
     Правило:
     - если дата попадает в закрытый период → ошибка
-    - иначе должна быть в текущем открытом периоде (от date_from до конца текущего дня UTC)
+    - иначе должна быть не раньше текущего открытого периода (от date_from и дальше)
     """
     closed = db.scalar(
         select(PayrollPeriod.id).where(
@@ -72,9 +72,8 @@ def ensure_event_date_in_open_payroll_period(db: Session, event_at: datetime) ->
         # В MVP без периода лучше не блокировать совсем, но по требованиям — ошибка.
         raise ValueError("Нет открытого периода ЗП. Суперадмин должен открыть текущий период.")
 
-    open_end = datetime.combine(datetime.utcnow().date(), time.max)
-    if event_at < open_p.date_from or event_at > open_end:
-        raise ValueError("Дата попадает в закрытый период ЗП, создание невозможно.")
+    if event_at < open_p.date_from:
+        raise ValueError("Дата раньше начала текущего открытого периода ЗП, создание невозможно.")
 
 
 @dataclass(frozen=True)

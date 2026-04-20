@@ -5,6 +5,8 @@
       <div>
         <p class="muted" style="margin-top:0;">
           <a href="/admin/clients/{{ booking.client.id }}">← К клиенту</a>
+          <span class="muted" style="margin: 0 6px;">·</span>
+          <a href="/admin/bookings">← Бронь (список)</a>
         </p>
         <h2 style="margin:0;">Бронь #{{ booking.id }}</h2>
       </div>
@@ -43,32 +45,82 @@
     </div>
 
     <h3 style="margin-top: 18px;">Связанные записи</h3>
-    <ul style="margin: 8px 0 0;">
-      <li>
-        <strong>Визит</strong>:
-        {% if linked_visit_id %}<a href="/admin/visits/{{ linked_visit_id }}">№{{ linked_visit_id }}</a>{% else %}<span class="muted">—</span>{% endif %}
-      </li>
-      <li>
-        <strong>Продажа</strong>:
-        {% if linked_sale_id %}<a href="/sales/products/{{ linked_sale_id }}">№{{ linked_sale_id }}</a>{% else %}<span class="muted">—</span>{% endif %}
-      </li>
-      <li>
-        <strong>Работа с товарами</strong>:
-        {% if linked_work_id %}<a href="/sales/work/{{ linked_work_id }}">№{{ linked_work_id }}</a>{% else %}<span class="muted">—</span>{% endif %}
-      </li>
-    </ul>
-
-    <div class="row" style="margin-top: 10px; gap: 8px;">
-      {% if not linked_visit_id and booking.kind.value == "VISIT" %}
-        <a href="/master/visit/new?booking_id={{ booking.id }}"><button type="button" class="secondary">Создать визит</button></a>
-      {% endif %}
-      {% if not linked_sale_id %}
-        <a href="/sales/products/new?booking_id={{ booking.id }}"><button type="button" class="secondary">Создать продажу</button></a>
-      {% endif %}
-      {% if not linked_work_id %}
-        <a href="/sales/work/new?booking_id={{ booking.id }}"><button type="button" class="secondary">Создать работу</button></a>
-      {% endif %}
-    </div>
+    {% set wait_work_title = "Сначала создайте работу с товарами по этой брони." %}
+    <table style="width:100%; max-width: 720px; border-collapse: collapse; margin-top: 8px;">
+      <tbody>
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding: 8px 10px 8px 0; vertical-align: middle; white-space: nowrap;"><strong>Работа с товарами</strong></td>
+          <td style="padding: 8px 10px; vertical-align: middle;">
+            {% if linked_work_id %}
+              <a href="/sales/work/{{ linked_work_id }}">№{{ linked_work_id }}</a>
+            {% elif need_work %}
+              <span class="muted">нет записи</span>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td style="padding: 8px 0 8px 10px; vertical-align: middle; text-align: right; white-space: nowrap;">
+            {% if not need_work %}
+              <span class="muted">—</span>
+            {% elif linked_work_id %}
+              <a href="/sales/work/{{ linked_work_id }}"><button type="button" class="secondary">Открыть</button></a>
+            {% else %}
+              <a href="{{ work_create_url }}"><button type="button" class="secondary">Создать</button></a>
+            {% endif %}
+          </td>
+        </tr>
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding: 8px 10px 8px 0; vertical-align: middle; white-space: nowrap;"><strong>Визит</strong></td>
+          <td style="padding: 8px 10px; vertical-align: middle;">
+            {% if linked_visit_id %}
+              <a href="/admin/visits/{{ linked_visit_id }}">№{{ linked_visit_id }}</a>
+            {% elif need_visit %}
+              <span class="muted">нет записи</span>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td style="padding: 8px 0 8px 10px; vertical-align: middle; text-align: right; white-space: nowrap;">
+            {% if not need_visit %}
+              <span class="muted">—</span>
+            {% elif linked_visit_id %}
+              <a href="/admin/visits/{{ linked_visit_id }}"><button type="button" class="secondary">Открыть</button></a>
+            {% elif visit_blocked %}
+              <span title="{{ wait_work_title }}" style="cursor: help;">
+                <button type="button" class="secondary" disabled style="opacity: 0.45; cursor: not-allowed;">Создать</button>
+              </span>
+            {% else %}
+              <a href="{{ visit_create_url }}"><button type="button" class="secondary">Создать</button></a>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 10px 8px 0; vertical-align: middle; white-space: nowrap;"><strong>Продажа</strong></td>
+          <td style="padding: 8px 10px; vertical-align: middle;">
+            {% if linked_sale_id %}
+              <a href="/sales/products/{{ linked_sale_id }}">№{{ linked_sale_id }}</a>
+            {% elif need_sale %}
+              <span class="muted">нет записи</span>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td style="padding: 8px 0 8px 10px; vertical-align: middle; text-align: right; white-space: nowrap;">
+            {% if not need_sale %}
+              <span class="muted">—</span>
+            {% elif linked_sale_id %}
+              <a href="/sales/products/{{ linked_sale_id }}"><button type="button" class="secondary">Открыть</button></a>
+            {% elif sale_blocked %}
+              <span title="{{ wait_work_title }}" style="cursor: help;">
+                <button type="button" class="secondary" disabled style="opacity: 0.45; cursor: not-allowed;">Создать</button>
+              </span>
+            {% else %}
+              <a href="{{ sale_create_url }}"><button type="button" class="secondary">Создать</button></a>
+            {% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
 
     {% if booking.kind.value == "VISIT" %}
       <h3 style="margin-top: 18px;">Параметры визита</h3>
@@ -93,7 +145,10 @@
         <div class="card" style="margin-top:10px;background:#f8fafc;">
           <div class="muted" style="font-size:12px;margin-bottom:6px;">Детали из брони (префилл)</div>
           {% if details.get('visit_kit_mode') %}
-            <p style="margin:6px 0;"><strong>Комплект</strong>: {{ details.get('visit_kit_mode') }}</p>
+            {% set _km = (details.get('visit_kit_mode') or '') %}
+            <p style="margin:6px 0;"><strong>Комплект</strong>:
+              {% if _km == 'ORDER' %}На заказ{% elif _km == 'IN_STOCK' %}Из наличия{% elif _km == 'OWN' %}Свой{% else %}{{ _km }}{% endif %}
+            </p>
           {% endif %}
           {% if details.get('visit_order_blanks_qty') or details.get('visit_order_blanks_desc') %}
             <p style="margin:6px 0;"><strong>Заказ (заготовки)</strong>:
@@ -122,14 +177,29 @@
         <div class="card" style="margin-top:10px;background:#f8fafc;">
           <div class="muted" style="font-size:12px;margin-bottom:6px;">Детали из брони (префилл)</div>
           {% if details.get('product_kind') %}
-            <p style="margin:6px 0;"><strong>product_kind</strong>: {{ details.get('product_kind') }}</p>
+            {% set _pk = (details.get('product_kind') or '')|trim|upper %}
+            <p style="margin:6px 0;"><strong>Тип товара</strong>:
+              {% if _pk == 'MATERIAL' %}Материал{% elif _pk == 'KIT' %}Комплект{% elif _pk == 'RUBBER' %}Хвост/резинка{% elif _pk == 'OTHER' %}Другое{% else %}{{ details.get('product_kind') }}{% endif %}
+            </p>
+          {% endif %}
+          {% if details.get('sale_kit_mode') %}
+            {% set _skm = (details.get('sale_kit_mode') or '') %}
+            <p style="margin:6px 0;"><strong>Комплект</strong>:
+              {% if _skm == 'ORDER' %}На заказ{% elif _skm == 'IN_STOCK' %}Из наличия{% else %}{{ _skm }}{% endif %}
+            </p>
+          {% endif %}
+          {% if details.get('sale_rubber_mode') %}
+            {% set _rm = (details.get('sale_rubber_mode') or '') %}
+            <p style="margin:6px 0;"><strong>Хвост/резинка</strong>:
+              {% if _rm == 'ORDER' %}На заказ{% elif _rm == 'IN_STOCK' %}Из наличия{% else %}{{ _rm }}{% endif %}
+            </p>
           {% endif %}
           {% if details.get('sale_order_blanks_qty') or details.get('sale_order_blanks_desc') %}
             <p style="margin:6px 0;"><strong>Заказ (заготовки)</strong>:
               {% if details.get('sale_order_blanks_qty') %}{{ details.get('sale_order_blanks_qty') }} шт{% endif %}
             </p>
             {% if details.get('sale_order_blanks_desc') %}
-              <p class="muted" style="margin:6px 0; white-space: pre-wrap;">{{ details.get('sale_order_blanks_desc') }}</p>
+              <div class="muted" style="margin:8px 0 0; width:100%; box-sizing:border-box; white-space:pre-wrap; word-break:break-word; line-height:1.45;">{{ details.get('sale_order_blanks_desc') }}</div>
             {% endif %}
           {% endif %}
         </div>
@@ -138,6 +208,24 @@
 
     <h3 style="margin-top: 18px;">Условия</h3>
     <p style="margin:6px 0;"><strong>Озвученная сумма</strong>: {{ booking.quoted_price_text or "—" }}</p>
+    {% set _pmin = (calc_product_min or '') %}
+    {% set _pmax = (calc_product_max or '') %}
+    {% set _smin = (calc_service_min or '') %}
+    {% set _smax = (calc_service_max or '') %}
+    <p style="margin:6px 0;"><strong>Расчёт (услуга)</strong>:
+      {% if _smin or _smax %}
+        {% if _smin and _smax and _smin != _smax %}{{ _smin }}—{{ _smax }}{% else %}{{ _smin or _smax }}{% endif %} ₽
+      {% else %}
+        <span class="muted">—</span>
+      {% endif %}
+    </p>
+    <p style="margin:6px 0;"><strong>Расчёт (товар)</strong>:
+      {% if _pmin or _pmax %}
+        {% if _pmin and _pmax and _pmin != _pmax %}{{ _pmin }}—{{ _pmax }}{% else %}{{ _pmin or _pmax }}{% endif %} ₽
+      {% else %}
+        <span class="muted">—</span>
+      {% endif %}
+    </p>
     <p style="margin:6px 0;"><strong>Предоплата</strong>: {% if booking.deposit_amount is not none %}{{ booking.deposit_amount }} &#8381;{% else %}—{% endif %}</p>
     {% if booking.comment %}
       <div class="card" style="margin-top:10px;background:#f8fafc;">

@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -19,9 +21,12 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
 from app.auth import AuthUser, require_role
+from app.display_time import get_display_timezone
 from app.ui_visit_display import ru_mix_complexity
 from app.audit import diff_fields, write_audit_rows
 from app.db.models import (
+    Booking,
+    BookingKind,
     Client,
     Kit,
     MixComplexity,
@@ -224,6 +229,72 @@ def _apply_material_from_form(
             raise ValueError("Укажите сложность смешки.")
 
 
+def _booking_amount_hint_for_prefill(b: Booking) -> str:
+    if b.deposit_amount is not None and int(b.deposit_amount) > 0:
+        return str(int(b.deposit_amount))
+    raw = (b.quoted_price_text or "").strip()
+    if not raw:
+        return ""
+    m = re.search(r"(\d[\d\s]{2,})", raw)
+    if not m:
+        return ""
+    digits = re.sub(r"\D", "", m.group(1))
+    return digits if digits else ""
+
+
+def _merge_product_sale_fp_from_booking(db: Session, b: Booking, fp: dict[str, str]) -> None:
+    if b.kind != BookingKind.PRODUCT_SALE:
+        return
+    fp["existing_client_id"] = str(b.client_id)
+    pk = (b.planned_product_kind or "MATERIAL").strip().upper()
+    if pk in ("MATERIAL", "KIT", "RUBBER", "OTHER"):
+        fp["kind"] = pk
+    tz = get_display_timezone(db)
+    if b.planned_date:
+        utc_dt = (
+            b.planned_date.replace(tzinfo=ZoneInfo("UTC"))
+            if b.planned_date.tzinfo is None
+            else b.planned_date.astimezone(ZoneInfo("UTC"))
+        )
+        local_dt = utc_dt.astimezone(ZoneInfo(tz)).replace(tzinfo=None)
+        fp["performed_date"] = local_dt.date().isoformat()
+    hint = _booking_amount_hint_for_prefill(b)
+    if hint:
+        fp["amount_from_client"] = hint
+    details: dict[str, Any] = {}
+    try:
+        raw = json.loads(b.details_json or "{}")
+        if isinstance(raw, dict):
+            details = raw
+    except Exception:
+        pass
+    k = (fp.get("kind") or "").upper()
+    if k == "RUBBER":
+        desc = str(details.get("sale_rubber_desc") or "").strip()
+        if desc:
+            fp["rubber_description"] = desc
+        rv = str(details.get("sale_rubber_price_override") or "").strip()
+        if rv.isdigit():
+            fp["rubber_price_override"] = rv
+    elif k == "KIT":
+        sm = str(details.get("sale_kit_mode") or "").strip().upper()
+        if sm == "IN_STOCK":
+            sk = str(details.get("sale_stock_kit_id") or "").strip()
+            if sk.isdigit():
+                fp["kit_id"] = sk
+            sp = str(details.get("sale_stock_kit_pieces") or "").strip()
+            if sp.isdigit():
+                fp["kit_pieces_sold"] = sp
+    elif k == "OTHER":
+        od = str(details.get("sale_rubber_desc") or "").strip()
+        if od:
+            fp["other_description"] = od
+    elif k == "MATERIAL":
+        md = str(details.get("sale_rubber_desc") or "").strip()
+        if md:
+            fp["material_description"] = md
+
+
 def _material_services_meta_json(services: list[Service]) -> str:
     d: dict[str, dict[str, bool]] = {}
     for s in services:
@@ -306,6 +377,9 @@ def product_sale_new_get(
     bid = str(request.query_params.get("booking_id") or "").strip()
     if bid.isdigit():
         fp["booking_id"] = bid
+        b = db.scalar(select(Booking).where(Booking.id == int(bid)))
+        if b:
+            _merge_product_sale_fp_from_booking(db, b, fp)
     return _render_new(request, current_user, db, fp=fp)
 
 
