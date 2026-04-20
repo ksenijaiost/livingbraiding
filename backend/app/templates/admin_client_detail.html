@@ -118,7 +118,7 @@
             {% set v = row.visit %}
             <tr>
               <td>
-                <a href="/admin/visits/{{ v.id }}">№{{ v.id }}, {{ v.performed_date.strftime("%d.%m.%Y") }}</a>
+                <a href="/visits/{{ v.id }}">№{{ v.id }}, {{ v.performed_date.strftime("%d.%m.%Y") }}</a>
               </td>
               <td>{{ row.services_line }}</td>
               <td>{{ "%.0f"|format(v.amount_from_client) }}</td>
@@ -148,7 +148,7 @@
             {% set vis = ku.visit %}
             <tr>
               <td>
-                <a href="/admin/visits/{{ vis.id }}">№{{ vis.id }}, {{ vis.performed_date.strftime("%d.%m.%Y") }}</a>
+                <a href="/visits/{{ vis.id }}">№{{ vis.id }}, {{ vis.performed_date.strftime("%d.%m.%Y") }}</a>
               </td>
               <td>{{ k.sku }}</td>
               <td>{{ k.title }}</td>

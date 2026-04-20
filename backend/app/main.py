@@ -2442,7 +2442,7 @@ def api_calendar_day(
                 "id": vid,
                 "client": (v.client.name if v.client else "—"),
                 "label": svc_name,
-                "url": f"/admin/visits/{vid}",
+                "url": f"/visits/{vid}",
                 "payout_sum": float(visit_payout.get(vid, 0.0)),
                 "studio_sum": float(visit_studio.get(vid, 0.0)),
             }
@@ -5014,6 +5014,7 @@ async def admin_kit_reserve_post(
     return RedirectResponse(url=redirect_base + "?msg=reserved", status_code=303)
 
 
+@app.get("/visits", response_class=HTMLResponse)
 @app.get("/admin/visits", response_class=HTMLResponse)
 def admin_visits(
     request: Request,
@@ -5048,6 +5049,7 @@ def admin_visits(
     )
 
 
+@app.get("/visits/{visit_id}", response_class=HTMLResponse)
 @app.get("/admin/visits/{visit_id}", response_class=HTMLResponse)
 def admin_visit_detail(
     visit_id: int,
@@ -5166,13 +5168,13 @@ async def admin_visit_cancel(
     if not visit:
         raise HTTPException(status_code=404, detail="Визит не найден")
     if visit.is_cancelled:
-        return RedirectResponse(url=f"/admin/visits/{visit_id}?msg=already_cancelled", status_code=303)
+        return RedirectResponse(url=f"/visits/{visit_id}?msg=already_cancelled", status_code=303)
     if is_in_closed_payroll_period(db, visit.created_at):
-        return RedirectResponse(url=f"/admin/visits/{visit_id}?msg=cancel_closed_period", status_code=303)
+        return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_closed_period", status_code=303)
 
     ok, err = _visit_cancel_revert_stock(db, visit)
     if not ok:
-        return RedirectResponse(url=f"/admin/visits/{visit_id}?msg=cancel_conflict", status_code=303)
+        return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_conflict", status_code=303)
 
     before = SimpleNamespace(
         is_cancelled=visit.is_cancelled,
@@ -5194,7 +5196,7 @@ async def admin_visit_cancel(
     )
     storno_source_accruals(db, PayrollFundSourceKind.VISIT, visit.id, current_user.id)
     db.commit()
-    return RedirectResponse(url=f"/admin/visits/{visit_id}?msg=cancelled", status_code=303)
+    return RedirectResponse(url=f"/visits/{visit_id}?msg=cancelled", status_code=303)
 
 
 @app.post("/admin/visits/{visit_id}/client")
@@ -5217,18 +5219,18 @@ async def admin_visit_change_client(
     try:
         new_cid = int(str(raw).strip())
     except (TypeError, ValueError):
-        return RedirectResponse(url=f"/admin/visits/{visit_id}?client_err=bad_id", status_code=303)
+        return RedirectResponse(url=f"/visits/{visit_id}?client_err=bad_id", status_code=303)
 
     confirm_late = str(form.get("confirm_late") or "").lower() in ("1", "on", "true", "yes")
     if policy.super_outside_window and not confirm_late:
-        return RedirectResponse(url=f"/admin/visits/{visit_id}?client_err=need_confirm", status_code=303)
+        return RedirectResponse(url=f"/visits/{visit_id}?client_err=need_confirm", status_code=303)
 
     if new_cid == visit.client_id:
-        return RedirectResponse(url=f"/admin/visits/{visit_id}?client_err=same", status_code=303)
+        return RedirectResponse(url=f"/visits/{visit_id}?client_err=same", status_code=303)
 
     new_client = db.get(Client, new_cid)
     if new_client is None:
-        return RedirectResponse(url=f"/admin/visits/{visit_id}?client_err=not_found", status_code=303)
+        return RedirectResponse(url=f"/visits/{visit_id}?client_err=not_found", status_code=303)
 
     old_id = visit.client_id
     visit.client_id = new_cid
@@ -5245,7 +5247,7 @@ async def admin_visit_change_client(
         )
     )
     db.commit()
-    return RedirectResponse(url=f"/admin/visits/{visit_id}", status_code=303)
+    return RedirectResponse(url=f"/visits/{visit_id}", status_code=303)
 
 
 @app.get("/admin/settings", response_class=HTMLResponse)

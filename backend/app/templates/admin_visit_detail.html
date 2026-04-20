@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
   <div class="card">
-    <p><a href="/admin/visits">← Все визиты</a></p>
+    <p><a href="/visits">← Все визиты</a></p>
     <h2 style="margin-top: 0;">Визит #{{ visit.id }}. Дата: {{ visit.performed_date.strftime("%d.%m.%Y") }}</h2>
     <p class="muted">
       Создан: {{ visit.created_at.strftime("%d.%m.%Y %H:%M") }}

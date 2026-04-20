@@ -94,7 +94,7 @@
           <td style="padding: 8px 10px 8px 0; vertical-align: middle; white-space: nowrap;"><strong>Визит</strong></td>
           <td style="padding: 8px 10px; vertical-align: middle;">
             {% if linked_visit_id %}
-              <a href="/admin/visits/{{ linked_visit_id }}">№{{ linked_visit_id }}</a>
+              <a href="/visits/{{ linked_visit_id }}">№{{ linked_visit_id }}</a>
             {% elif need_visit %}
               <span class="muted">нет записи</span>
             {% else %}
@@ -105,7 +105,7 @@
             {% if not need_visit %}
               <span class="muted">—</span>
             {% elif linked_visit_id %}
-              <a href="/admin/visits/{{ linked_visit_id }}"><button type="button" class="secondary">Открыть</button></a>
+              <a href="/visits/{{ linked_visit_id }}"><button type="button" class="secondary">Открыть</button></a>
             {% elif visit_blocked %}
               <span title="{{ wait_work_title }}" style="cursor: help;">
                 <button type="button" class="secondary" disabled style="opacity: 0.45; cursor: not-allowed;">Создать</button>

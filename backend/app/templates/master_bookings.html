@@ -42,7 +42,7 @@
     <p class="muted" style="margin-top:0;">
       Визиты, работы с товарами и продажи, где вы участвовали (мастер визита, в долях работы, оформление/бонус по продаже или назначение по брони).
       {% if archive_truncated %}
-        Показано не более {{ archive_cap }} последних событий — откройте <a href="/admin/visits?mine=1">визиты</a> или <a href="/sales/work?mine=1">работы</a> для полного списка.
+        Показано не более {{ archive_cap }} последних событий — откройте <a href="/visits?mine=1">визиты</a> или <a href="/sales/work?mine=1">работы</a> для полного списка.
       {% endif %}
     </p>
 
@@ -87,7 +87,7 @@
               </td>
               <td style="white-space:nowrap;">
                 {% if row.kind == 'visit' %}
-                  <a href="/admin/visits/{{ row.visit.id }}"><button type="button" class="secondary">Открыть</button></a>
+                  <a href="/visits/{{ row.visit.id }}"><button type="button" class="secondary">Открыть</button></a>
                 {% elif row.kind == 'work' %}
                   <a href="/sales/work/{{ row.work.id }}"><button type="button" class="secondary">Открыть</button></a>
                 {% else %}

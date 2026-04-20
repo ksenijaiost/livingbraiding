@@ -8,11 +8,11 @@
       {% if visits_mine_only %}
         <strong>Мои визиты</strong>
         <span class="muted">·</span>
-        <a href="/admin/visits">Все визиты</a>
+        <a href="/visits">Все визиты</a>
       {% else %}
         <strong>Все визиты</strong>
         <span class="muted">·</span>
-        <a href="/admin/visits?mine=1">Только мои</a>
+        <a href="/visits?mine=1">Только мои</a>
         <span class="muted">(где вы в долях мастеров или бонус за смешку)</span>
       {% endif %}
     </p>
@@ -32,9 +32,9 @@
       <tbody>
         {% for v in visits %}
           <tr>
-            <td><a href="/admin/visits/{{ v.id }}">{{ v.id }}</a></td>
+            <td><a href="/visits/{{ v.id }}">{{ v.id }}</a></td>
             <td>
-              <a href="/admin/visits/{{ v.id }}">{{ v.performed_date.strftime("%d.%m.%Y") }}</a>
+              <a href="/visits/{{ v.id }}">{{ v.performed_date.strftime("%d.%m.%Y") }}</a>
             </td>
             <td>{{ v.client.name }}</td>
             <td>
