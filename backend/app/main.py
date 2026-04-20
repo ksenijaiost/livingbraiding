@@ -2745,6 +2745,69 @@ def booking_linked_need_sale(b: Booking) -> bool:
     return b.kind == BookingKind.PRODUCT_SALE
 
 
+def try_auto_complete_booking(db: Session, booking_id: int) -> None:
+    """
+    Если по активной брони созданы все требуемые связанные записи (работа / визит / продажа),
+    переводит бронь в DONE и пишет аудит статуса без пользователя (системное изменение).
+    """
+    b = db.get(Booking, booking_id)
+    if not b or b.status != BookingStatus.ACTIVE:
+        return
+    details: dict[str, Any] = {}
+    if b.details_json:
+        try:
+            raw = json.loads(b.details_json or "{}")
+            if isinstance(raw, dict):
+                details = raw
+        except Exception:
+            pass
+    if booking_linked_need_work(b, details):
+        wid = db.scalar(
+            select(WorkForInventory.id).where(
+                WorkForInventory.booking_id == booking_id,
+                WorkForInventory.is_voided.is_(False),
+            ).limit(1)
+        )
+        if wid is None:
+            return
+    if booking_linked_need_visit(b):
+        vid = db.scalar(
+            select(Visit.id).where(
+                Visit.booking_id == booking_id,
+                Visit.is_cancelled.is_(False),
+            ).limit(1)
+        )
+        if vid is None:
+            return
+    if booking_linked_need_sale(b):
+        sid = db.scalar(
+            select(ProductSale.id).where(
+                ProductSale.booking_id == booking_id,
+                ProductSale.is_voided.is_(False),
+            ).limit(1)
+        )
+        if sid is None:
+            return
+    old_status = b.status
+    b.status = BookingStatus.DONE
+    b.updated_at = datetime.utcnow()
+    b.updated_by_user_id = None
+    write_audit_rows(
+        db,
+        log_model=BookingAuditLog,
+        entity_field="booking_id",
+        entity_id=b.id,
+        changed_by_user_id=None,
+        changes=[
+            FieldChange(
+                "status",
+                _booking_status_label(old_status.value),
+                _booking_status_label(BookingStatus.DONE.value),
+            )
+        ],
+    )
+
+
 def _amount_hint_from_booking(b: Booking) -> str:
     """Первая уместная сумма из озвученной цены / предоплаты для префилла."""
     if b.deposit_amount is not None and int(b.deposit_amount) > 0:
@@ -2757,6 +2820,55 @@ def _amount_hint_from_booking(b: Booking) -> str:
         return ""
     digits = re.sub(r"\D", "", m.group(1))
     return digits if digits else ""
+
+
+def _prefill_visit_stock_kit_from_booking(
+    db: Session, b: Booking, form_prefill: dict[str, str]
+) -> None:
+    """
+    Шаг 1 визита ожидает stock_kit_id / stock_blanks_used; в брони хранятся visit_stock_kit_*.
+    Если комплект появился только после «работы с товарами», подставляем created_kit_id и объём резерва.
+    """
+    vs = (form_prefill.get("visit_stock_kit_id") or "").strip()
+    if vs.isdigit() and not (form_prefill.get("stock_kit_id") or "").strip():
+        form_prefill["stock_kit_id"] = vs
+    vp = (form_prefill.get("visit_stock_kit_pieces") or "").strip()
+    if vp.isdigit() and not (form_prefill.get("stock_blanks_used") or "").strip():
+        form_prefill["stock_blanks_used"] = vp
+    if (form_prefill.get("stock_kit_id") or "").strip().isdigit():
+        return
+    if b.kind != BookingKind.VISIT:
+        return
+    work = db.scalar(
+        select(WorkForInventory)
+        .where(
+            WorkForInventory.booking_id == b.id,
+            WorkForInventory.is_voided.is_(False),
+            WorkForInventory.kind == WorkKind.KIT,
+            WorkForInventory.created_kit_id.isnot(None),
+        )
+        .order_by(WorkForInventory.id.desc())
+        .limit(1)
+    )
+    if not work or not work.created_kit_id:
+        return
+    kid = int(work.created_kit_id)
+    form_prefill["stock_kit_id"] = str(kid)
+    if (form_prefill.get("stock_blanks_used") or "").strip().isdigit():
+        return
+    total_r = db.scalar(
+        select(func.coalesce(func.sum(KitReserve.pieces_reserved), 0)).where(
+            KitReserve.kit_id == kid,
+            KitReserve.reserved_for_client_id == b.client_id,
+        )
+    )
+    total_r = int(total_r or 0)
+    if total_r > 0:
+        form_prefill["stock_blanks_used"] = str(total_r)
+    else:
+        kit = db.get(Kit, kid)
+        if kit and int(kit.pieces_total or 0) > 0:
+            form_prefill["stock_blanks_used"] = str(int(kit.pieces_total))
 
 
 def _booking_work_new_query_params(db: Session, b: Booking, details: dict[str, Any]) -> dict[str, str]:
@@ -3407,6 +3519,11 @@ def admin_booking_detail(
     sale_create_url = ""
     if need_sale and not linked_sale_id:
         sale_create_url = f"/sales/products/new?booking_id={b.id}"
+    booking_can_create_master_records = current_user.role == UserRole.MASTER
+    booking_link_master_only_title = (
+        "Создание работы и визита доступно только под активной ролью «Мастер». "
+        "Выберите роль мастера при входе или попросите мастера создать запись."
+    )
     return templates.TemplateResponse(
         "admin_booking_detail.html",
         _ctx(
@@ -3416,6 +3533,8 @@ def admin_booking_detail(
             kind_label=_booking_kind_label(b.kind.value),
             status_label=_booking_status_label(b.status.value),
             product_kind_label=_product_kind_label(b.planned_product_kind),
+            booking_can_create_master_records=booking_can_create_master_records,
+            booking_link_master_only_title=booking_link_master_only_title,
             linked_visit_id=linked_visit_id,
             linked_sale_id=linked_sale_id,
             linked_work_id=linked_work_id,
@@ -3736,9 +3855,14 @@ def admin_bookings(
     show_mode = (show or "").strip().lower() or "active"
     mine_raw = (mine or "").strip().lower()
     can_manage = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
-    bookings_mine_only = mine_raw in ("1", "true", "yes", "only")
-    if current_user.role == UserRole.MASTER and mine_raw not in ("0", "false", "no", "all"):
-        bookings_mine_only = True
+    # У кого в профиле есть админские роли — по умолчанию «Все», даже если активная роль «мастер».
+    has_admin_roles = UserRole.ADMIN in current_user.roles or UserRole.ADMIN_SUPER in current_user.roles
+    if has_admin_roles:
+        bookings_mine_only = mine_raw in ("1", "true", "yes", "only")
+    else:
+        bookings_mine_only = mine_raw in ("1", "true", "yes", "only")
+        if mine_raw not in ("0", "false", "no", "all"):
+            bookings_mine_only = True
 
     stmt = (
         select(Booking)
@@ -3829,6 +3953,40 @@ def admin_booking_cancel(
                 "cancelled_reason",
             ),
         ),
+    )
+    db.commit()
+    return RedirectResponse(url=f"/admin/bookings/{booking_id}", status_code=303)
+
+
+@app.post("/admin/bookings/{booking_id}/mark-done")
+def admin_booking_mark_done(
+    booking_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    """Ручное закрытие брони (суперадмин), если автозакрытие не сработало."""
+    b = db.get(Booking, booking_id)
+    if b is None:
+        raise HTTPException(status_code=404, detail="Бронь не найдена")
+    if b.status != BookingStatus.ACTIVE:
+        return RedirectResponse(url=f"/admin/bookings/{booking_id}", status_code=303)
+    old_status = b.status
+    b.status = BookingStatus.DONE
+    b.updated_at = datetime.utcnow()
+    b.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=BookingAuditLog,
+        entity_field="booking_id",
+        entity_id=b.id,
+        changed_by_user_id=current_user.id,
+        changes=[
+            FieldChange(
+                "status",
+                _booking_status_label(old_status.value),
+                _booking_status_label(BookingStatus.DONE.value),
+            )
+        ],
     )
     db.commit()
     return RedirectResponse(url=f"/admin/bookings/{booking_id}", status_code=303)
@@ -4214,6 +4372,7 @@ def master_visit_new_get(
                             form_prefill[str(k)] = str(v)
             except Exception:
                 pass
+            _prefill_visit_stock_kit_from_booking(db, b, form_prefill)
 
     return _master_visit_step1_template_response(
         request,
@@ -4246,8 +4405,11 @@ async def master_visit_new_post(
         )
         bid_raw = str(form.get("booking_id") or "").strip()
         if bid_raw.isdigit():
+            bid_int = int(bid_raw)
             try:
-                visit.booking_id = int(bid_raw)
+                visit.booking_id = bid_int
+                db.commit()
+                try_auto_complete_booking(db, bid_int)
                 db.commit()
             except Exception:
                 db.rollback()

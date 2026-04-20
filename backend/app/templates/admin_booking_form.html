@@ -20,22 +20,26 @@
       <div class="card" style="background:#f8fafc;">
         <h3 style="margin-top:0;">Клиент</h3>
 
-        <div id="selected_client_box" style="{% if selected_client or fp.get('client_id') %}display:block{% else %}display:none{% endif %}; margin-bottom: 10px;">
-          <p id="selected_client_line" style="margin:0;">
-            {% if selected_client %}
-              Выбрано: <strong>{{ selected_client.name }}</strong>{% if not selected_client.is_confirmed %} <span class="muted">(черновик)</span>{% endif %}
-            {% else %}
-              Выбрано: <strong>{{ fp.get('client_name','') }}</strong>
-            {% endif %}
-          </p>
+        <div id="booking_client_search_row" style="display:flex;gap:8px;align-items:stretch;margin-top:6px;">
+          <div style="flex:1;min-width:0;">
+            <label>Поиск клиента</label>
+            <input id="client_search_q" type="search" placeholder="имя или контакт" autocomplete="off" style="width:100%;box-sizing:border-box;" />
+          </div>
+          <div style="align-self:flex-end;padding-top:1.4rem;">
+            <button type="button" id="booking_client_find_btn" class="secondary" onclick="clientSuggest()" style="white-space:nowrap;">Найти</button>
+          </div>
         </div>
-
-        <div>
-          <label>Поиск клиента</label>
-          <input id="client_search_q" placeholder="имя или контакт" autocomplete="off" />
-          <ul id="client_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0;"></ul>
-          <p class="muted" style="margin:8px 0 0;">Подсказка: клиент обязателен для брони.</p>
+        <ul id="client_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0;"></ul>
+        <div id="booking_client_selected_panel" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
+            <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;">
+              <span style="font-weight:700;color:#065f46;">Выбран клиент</span>
+              <span id="booking_client_selected_name" style="font-weight:600;color:#047857;">{% if selected_client %}{{ selected_client.name }}{% if not selected_client.is_confirmed %} (черновик){% endif %}{% elif fp.get('client_id') %}{{ fp.get('client_name','') or ('id ' ~ fp.get('client_id')) }}{% endif %}</span>
+            </div>
+            <button type="button" id="booking_client_change_btn" class="secondary" style="flex-shrink:0;">Изменить</button>
+          </div>
         </div>
+        <p class="muted" style="margin:8px 0 0;">Подсказка: клиент обязателен для брони.</p>
       </div>
 
       <div class="row" style="margin-top: 12px;">
@@ -381,19 +385,40 @@
         return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
       });
     }
-    function renderSelectedClient(name, isDraft) {
-      const box = document.getElementById('selected_client_box');
-      const line = document.getElementById('selected_client_line');
-      box.style.display = 'block';
-      const draftNote = isDraft ? ' <span class="muted">(черновик)</span>' : '';
-      line.innerHTML = 'Выбрано: <strong>' + escapeHtml(name) + '</strong>' + draftNote;
+    function syncBookingClientUi() {
+      const cidEl = document.getElementById('client_id');
+      const q = document.getElementById('client_search_q');
+      const findBtn = document.getElementById('booking_client_find_btn');
+      const row = document.getElementById('booking_client_search_row');
+      const panel = document.getElementById('booking_client_selected_panel');
+      const nameEl = document.getElementById('booking_client_selected_name');
+      if (!cidEl || !q || !findBtn || !row || !panel || !nameEl) return;
+      const cid = (cidEl.value || '').trim();
+      const has = !!cid;
+      q.disabled = has;
+      findBtn.disabled = has;
+      row.style.opacity = has ? '0.55' : '1';
+      panel.style.display = has ? 'block' : 'none';
+      if (!has) nameEl.textContent = '';
+    }
+    function clearBookingClientSelection() {
+      document.getElementById('client_id').value = '';
+      document.getElementById('client_suggest_list').innerHTML = '';
+      const q = document.getElementById('client_search_q');
+      q.value = '';
+      q.focus();
+      syncBookingClientUi();
     }
     function selectClient(id, name, isDraft) {
       document.getElementById('client_id').value = String(id);
-      renderSelectedClient(name, isDraft);
+      const nameEl = document.getElementById('booking_client_selected_name');
+      if (nameEl) nameEl.textContent = (name || '') + (isDraft ? ' (черновик)' : '');
       document.getElementById('client_suggest_list').innerHTML = '';
+      syncBookingClientUi();
     }
     async function clientSuggest() {
+      const qEl = document.getElementById('client_search_q');
+      if (qEl && qEl.disabled) return;
       const q = document.getElementById('client_search_q').value.trim();
       const res = await fetch('/admin/clients/suggest?q=' + encodeURIComponent(q));
       if (!res.ok) return;
@@ -419,10 +444,15 @@
     }
     let suggestTimer = null;
     function scheduleSuggest() {
+      const qEl = document.getElementById('client_search_q');
+      if (qEl && qEl.disabled) return;
       clearTimeout(suggestTimer);
       suggestTimer = setTimeout(clientSuggest, 350);
     }
     document.getElementById('client_search_q').addEventListener('input', scheduleSuggest);
+    const bookingClientChg = document.getElementById('booking_client_change_btn');
+    if (bookingClientChg) bookingClientChg.addEventListener('click', clearBookingClientSelection);
+    syncBookingClientUi();
 
     function getKindValue() {
       const el = document.querySelector('input[name="kind"]:checked');

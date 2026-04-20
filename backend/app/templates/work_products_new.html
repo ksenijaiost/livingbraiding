@@ -40,22 +40,24 @@
       <div id="client_block" class="card" style="background:#f8fafc; margin: 12px 0;">
         <strong style="display:block; margin-bottom: 6px;">Клиент (обязательно для «на заказ»)</strong>
         <input type="hidden" name="client_id" id="client_id" value="{{ fp.client_id }}" />
-        <div class="row" style="align-items: flex-end;">
+        <div id="work_client_search_row" class="row" style="align-items: flex-end;">
           <div style="flex:1;">
             <label>Поиск клиента по имени или телефону</label>
             <input type="search" id="client_search_q" autocomplete="off" placeholder="Имя или цифры телефона (например, последние 4), подожди или нажми «Найти»" value="" />
           </div>
           <div>
-            <button type="button" class="secondary" onclick="clientSuggest()">Найти</button>
+            <button type="button" id="work_client_find_btn" class="secondary" onclick="clientSuggest()">Найти</button>
           </div>
         </div>
         <ul id="client_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
-        <div id="selected_client_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not fp.client_id %}display:none;{% endif %}">
-          <p id="selected_client_line" style="margin:0;">
-            {% if selected_client %}
-              Выбрано: <strong>{{ selected_client.name }}</strong>{% if not selected_client.is_confirmed %} <span class="muted">(черновик)</span>{% endif %}
-            {% endif %}
-          </p>
+        <div id="work_client_selected_panel" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
+            <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;">
+              <span style="font-weight:700;color:#065f46;">Выбран клиент</span>
+              <span id="work_client_selected_name" style="font-weight:600;color:#047857;">{% if selected_client %}{{ selected_client.name }}{% if not selected_client.is_confirmed %} (черновик){% endif %}{% elif fp.client_id %}id {{ fp.client_id }}{% endif %}</span>
+            </div>
+            <button type="button" id="work_client_change_btn" class="secondary" style="flex-shrink:0;">Изменить</button>
+          </div>
         </div>
         <div id="amount_from_client_block" style="margin-top: 10px; display:none;">
           <label>Сколько взяли с клиента</label>
@@ -589,24 +591,47 @@
       el.style.display = (getScopeValue() === 'CUSTOM_ORDER') ? 'block' : 'none';
       var a = document.getElementById('amount_from_client_block');
       if (a) a.style.display = (getScopeValue() === 'CUSTOM_ORDER') ? 'block' : 'none';
+      if (typeof syncWorkClientUi === 'function') syncWorkClientUi();
     }
-    function renderSelectedClient(name, isDraft) {
-      var box = document.getElementById('selected_client_box');
-      var line = document.getElementById('selected_client_line');
-      if (!box || !line) return;
-      box.style.display = 'block';
-      line.innerHTML = 'Выбрано: <strong>' + (name || '') + '</strong>' + (isDraft ? ' <span class="muted">(черновик)</span>' : '');
+    function syncWorkClientUi() {
+      var cidEl = document.getElementById('client_id');
+      var q = document.getElementById('client_search_q');
+      var findBtn = document.getElementById('work_client_find_btn');
+      var row = document.getElementById('work_client_search_row');
+      var panel = document.getElementById('work_client_selected_panel');
+      var nameEl = document.getElementById('work_client_selected_name');
+      if (!cidEl || !q || !findBtn || !row || !panel || !nameEl) return;
+      var cid = (cidEl.value || '').trim();
+      var has = !!cid;
+      q.disabled = has;
+      findBtn.disabled = has;
+      row.style.opacity = has ? '0.55' : '1';
+      panel.style.display = has ? 'block' : 'none';
+      if (!has) nameEl.textContent = '';
+    }
+    function clearWorkClientSelection() {
+      var inp = document.getElementById('client_id');
+      if (inp) inp.value = '';
+      var ul = document.getElementById('client_suggest_list');
+      if (ul) ul.innerHTML = '';
+      var q = document.getElementById('client_search_q');
+      if (q) { q.value = ''; q.focus(); }
+      syncWorkClientUi();
+      syncPriceHint();
     }
     function selectClient(id, name, isDraft) {
       var inp = document.getElementById('client_id');
       if (inp) inp.value = String(id);
-      renderSelectedClient(name, !!isDraft);
+      var nameEl = document.getElementById('work_client_selected_name');
+      if (nameEl) nameEl.textContent = (name || '') + (isDraft ? ' (черновик)' : '');
       var ul = document.getElementById('client_suggest_list');
       if (ul) ul.innerHTML = '';
+      syncWorkClientUi();
       syncPriceHint();
     }
     async function clientSuggest() {
       var qEl = document.getElementById('client_search_q');
+      if (qEl && qEl.disabled) return;
       var q = qEl ? qEl.value.trim() : '';
       var res = await fetch('/master/clients/suggest?q=' + encodeURIComponent(q));
       var data = await res.json();
@@ -630,11 +655,16 @@
     }
     var suggestTimer = null;
     function scheduleSuggest() {
+      var qEl = document.getElementById('client_search_q');
+      if (qEl && qEl.disabled) return;
       if (suggestTimer) clearTimeout(suggestTimer);
       suggestTimer = setTimeout(clientSuggest, 350);
     }
     var clientQ = document.getElementById('client_search_q');
     if (clientQ) clientQ.addEventListener('input', scheduleSuggest);
+    var workClientChg = document.getElementById('work_client_change_btn');
+    if (workClientChg) workClientChg.addEventListener('click', clearWorkClientSelection);
+    syncWorkClientUi();
     function syncKitStockBlock() {
       var el = document.getElementById('kit_stock_block');
       if (!el) return;

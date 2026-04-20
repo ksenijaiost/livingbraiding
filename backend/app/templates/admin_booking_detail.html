@@ -11,11 +11,17 @@
         <h2 style="margin:0;">Бронь #{{ booking.id }}</h2>
       </div>
 
-      {% if current_user and (current_user.role in ["ADMIN", "ADMIN_SUPER"]) %}
+      {% if current_user and (current_user.role.value in ["ADMIN", "ADMIN_SUPER"]) %}
         <div style="display:flex; gap: 10px; flex-wrap: wrap; justify-content:flex-end;">
           <form method="get" action="/admin/bookings/{{ booking.id }}/edit" style="margin:0;">
             <button type="submit">Изменить</button>
           </form>
+          {% if current_user.role.value == "ADMIN_SUPER" and booking.status.value == "ACTIVE" %}
+            <form method="post" action="/admin/bookings/{{ booking.id }}/mark-done" style="margin:0;"
+                  onsubmit="return confirm('Отметить бронь выполненной?');">
+              <button class="secondary" type="submit">Выполнено</button>
+            </form>
+          {% endif %}
           {% if booking.status.value == "ACTIVE" %}
             <form method="post" action="/admin/bookings/{{ booking.id }}/cancel" style="margin:0;"
                   onsubmit="const r = prompt('Причина отмены брони:'); if(!r){ return false; } this.reason.value = r; return true;">
@@ -35,16 +41,27 @@
 
     <div class="card" style="background:#f8fafc;">
       <p style="margin:6px 0;"><strong>Клиент</strong>: <a href="/admin/clients/{{ booking.client.id }}">{{ booking.client.name }}</a></p>
-      <p style="margin:6px 0;"><strong>Дата и время</strong>: {{ format_naive_utc_datetime(booking.planned_date, display_tz) }} ({{ timezone_label(display_tz) }})</p>
+      <p style="margin:6px 0;"><strong>Дата и время записи</strong>: {{ format_naive_utc_datetime(booking.planned_date, display_tz) }} ({{ timezone_label(display_tz) }})</p>
       <p style="margin:6px 0;"><strong>Тип</strong>: {{ kind_label }}</p>
       <p style="margin:6px 0;"><strong>Статус</strong>: {{ status_label }}</p>
-      <p style="margin:6px 0;"><strong>Кто создал</strong>: {{ booking.created_by_user.display_name if booking.created_by_user else "—" }}</p>
+      <p style="margin:6px 0;"><strong>Создание</strong>:
+        {% if booking.created_by_user %}
+          {{ booking.created_by_user.display_name }} ({{ ru_user_role(booking.created_by_user.role) }}) · {{ format_naive_utc_datetime(booking.created_at, display_tz) }}
+        {% else %}
+          —
+        {% endif %}
+      </p>
       {% if booking.status.value == "CANCELLED" and booking.cancelled_reason %}
         <p style="margin:6px 0;"><strong>Причина отмены</strong>: {{ booking.cancelled_reason }}</p>
       {% endif %}
     </div>
 
     <h3 style="margin-top: 18px;">Связанные записи</h3>
+    {% if not booking_can_create_master_records and (need_work or need_visit) %}
+      <p class="muted" style="font-size:13px;margin:-4px 0 10px;max-width:720px;">
+        Создание работы с товарами и визита по брони доступно только под активной ролью «Мастер» (кнопки «Создать» ниже неактивны для администратора).
+      </p>
+    {% endif %}
     {% set wait_work_title = "Сначала создайте работу с товарами по этой брони." %}
     <table style="width:100%; max-width: 720px; border-collapse: collapse; margin-top: 8px;">
       <tbody>
@@ -64,6 +81,10 @@
               <span class="muted">—</span>
             {% elif linked_work_id %}
               <a href="/sales/work/{{ linked_work_id }}"><button type="button" class="secondary">Открыть</button></a>
+            {% elif not booking_can_create_master_records %}
+              <span title="{{ booking_link_master_only_title }}" style="cursor: help;">
+                <button type="button" class="secondary" disabled style="opacity: 0.45; cursor: not-allowed;">Создать</button>
+              </span>
             {% else %}
               <a href="{{ work_create_url }}"><button type="button" class="secondary">Создать</button></a>
             {% endif %}
@@ -87,6 +108,10 @@
               <a href="/admin/visits/{{ linked_visit_id }}"><button type="button" class="secondary">Открыть</button></a>
             {% elif visit_blocked %}
               <span title="{{ wait_work_title }}" style="cursor: help;">
+                <button type="button" class="secondary" disabled style="opacity: 0.45; cursor: not-allowed;">Создать</button>
+              </span>
+            {% elif not booking_can_create_master_records %}
+              <span title="{{ booking_link_master_only_title }}" style="cursor: help;">
                 <button type="button" class="secondary" disabled style="opacity: 0.45; cursor: not-allowed;">Создать</button>
               </span>
             {% else %}
@@ -251,7 +276,7 @@
           {% for r in audit_rows %}
             <tr>
               <td>{{ format_naive_utc_datetime(r.changed_at, display_tz, "%Y-%m-%d %H:%M") if r.changed_at else "—" }}</td>
-              <td>{{ r.changed_by_user.display_name if r.changed_by_user else "—" }}</td>
+              <td>{% if r.changed_by_user %}{{ r.changed_by_user.display_name }}{% else %}Система{% endif %}</td>
               <td>{{ r.field_name }}</td>
               <td class="muted" style="max-width:420px;vertical-align:top;">
                 {% if r.field_name == "details_json" %}

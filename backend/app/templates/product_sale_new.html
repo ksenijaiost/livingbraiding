@@ -13,22 +13,24 @@
       <h3>Клиент</h3>
       <div class="card" style="margin-top: 8px;">
         <input type="hidden" name="existing_client_id" id="existing_client_id" value="{{ fp.get('existing_client_id', '') }}" />
-        <div class="row" style="align-items: flex-end;">
+        <div id="sale_client_search_row" class="row" style="align-items: flex-end;">
           <div style="flex:1;">
             <label>Поиск клиента по имени или телефону</label>
             <input type="search" id="client_search_q" autocomplete="off" placeholder="Имя или цифры телефона (например, последние 4), подожди или нажми «Найти»" value="" />
           </div>
           <div>
-            <button type="button" class="secondary" onclick="clientSuggest()">Найти</button>
+            <button type="button" id="sale_client_find_btn" class="secondary" onclick="clientSuggest()">Найти</button>
           </div>
         </div>
         <ul id="client_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
-        <div id="selected_client_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not selected_client %}display:none;{% endif %}">
-          <p id="selected_client_line" style="margin:0;">
-            {% if selected_client %}
-              Выбрано: <strong>{{ selected_client.name }}</strong>{% if not selected_client.is_confirmed %} <span class="muted">(черновик)</span>{% endif %}
-            {% endif %}
-          </p>
+        <div id="sale_client_selected_panel" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
+            <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;">
+              <span style="font-weight:700;color:#065f46;">Выбран клиент</span>
+              <span id="sale_client_selected_name" style="font-weight:600;color:#047857;">{% if selected_client %}{{ selected_client.name }}{% if not selected_client.is_confirmed %} (черновик){% endif %}{% elif fp.get('existing_client_id') %}id {{ fp.get('existing_client_id') }}{% endif %}</span>
+            </div>
+            <button type="button" id="sale_client_change_btn" class="secondary" style="flex-shrink:0;">Изменить</button>
+          </div>
         </div>
       </div>
 
@@ -87,18 +89,24 @@
         <div id="block_kit" style="margin-top: 12px; display:none;">
           <h4 style="margin: 0 0 10px;">Комплект из наличия</h4>
           <input type="hidden" name="kit_id" id="kit_id" value="{{ fp.get('kit_id', '') }}" />
-          <div class="row" style="align-items: flex-end;">
+          <div id="sale_kit_search_row" class="row" style="align-items: flex-end;">
             <div style="flex:1;">
               <label>Поиск комплекта по артикулу/названию</label>
               <input type="search" id="kit_search_q" autocomplete="off" placeholder="Начни вводить и подожди или нажми «Найти»" value="" />
             </div>
             <div>
-              <button type="button" class="secondary" onclick="kitSuggest()">Найти</button>
+              <button type="button" id="sale_kit_find_btn" class="secondary" onclick="kitSuggest()">Найти</button>
             </div>
           </div>
           <ul id="kit_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
-          <div id="selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;display:none;">
-            <p id="selected_kit_line" style="margin:0;"></p>
+          <div id="sale_kit_selected_panel" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
+              <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;">
+                <span style="font-weight:700;color:#065f46;">Выбран комплект</span>
+                <span id="sale_kit_selected_name" style="font-weight:600;color:#047857;">{% if selected_kit_label %}{{ selected_kit_label }}{% elif fp.get('kit_id') %}id {{ fp.get('kit_id') }}{% endif %}</span>
+              </div>
+              <button type="button" id="sale_kit_change_btn" class="secondary" style="flex-shrink:0;">Изменить</button>
+            </div>
           </div>
 
           {% set km = (fp.get('kit_mode') or 'PIECES') %}
@@ -151,19 +159,40 @@
       });
     }
 
-    function renderSelectedClient(name, isDraft) {
-      const box = document.getElementById('selected_client_box');
-      const line = document.getElementById('selected_client_line');
-      box.style.display = 'block';
-      const draftNote = isDraft ? ' <span class="muted">(черновик)</span>' : '';
-      line.innerHTML = 'Выбрано: <strong>' + escapeHtml(name) + '</strong>' + draftNote;
+    function syncSaleClientUi() {
+      const cidEl = document.getElementById('existing_client_id');
+      const q = document.getElementById('client_search_q');
+      const findBtn = document.getElementById('sale_client_find_btn');
+      const row = document.getElementById('sale_client_search_row');
+      const panel = document.getElementById('sale_client_selected_panel');
+      const nameEl = document.getElementById('sale_client_selected_name');
+      if (!cidEl || !q || !findBtn || !row || !panel || !nameEl) return;
+      const cid = (cidEl.value || '').trim();
+      const has = !!cid;
+      q.disabled = has;
+      findBtn.disabled = has;
+      row.style.opacity = has ? '0.55' : '1';
+      panel.style.display = has ? 'block' : 'none';
+      if (!has) nameEl.textContent = '';
+    }
+    function clearSaleClientSelection() {
+      document.getElementById('existing_client_id').value = '';
+      document.getElementById('client_suggest_list').innerHTML = '';
+      const q = document.getElementById('client_search_q');
+      q.value = '';
+      q.focus();
+      syncSaleClientUi();
     }
     function selectClient(id, name, isDraft) {
       document.getElementById('existing_client_id').value = String(id);
-      renderSelectedClient(name, isDraft);
+      const nameEl = document.getElementById('sale_client_selected_name');
+      if (nameEl) nameEl.textContent = (name || '') + (isDraft ? ' (черновик)' : '');
       document.getElementById('client_suggest_list').innerHTML = '';
+      syncSaleClientUi();
     }
     async function clientSuggest() {
+      const qEl = document.getElementById('client_search_q');
+      if (qEl && qEl.disabled) return;
       const q = document.getElementById('client_search_q').value.trim();
       const res = await fetch('/master/clients/suggest?q=' + encodeURIComponent(q));
       if (!res.ok) return;
@@ -189,23 +218,50 @@
     }
     let suggestTimer = null;
     function scheduleSuggest() {
+      const qEl = document.getElementById('client_search_q');
+      if (qEl && qEl.disabled) return;
       clearTimeout(suggestTimer);
       suggestTimer = setTimeout(clientSuggest, 350);
     }
     document.getElementById('client_search_q').addEventListener('input', scheduleSuggest);
+    const saleClientChg = document.getElementById('sale_client_change_btn');
+    if (saleClientChg) saleClientChg.addEventListener('click', clearSaleClientSelection);
+    syncSaleClientUi();
 
-    function renderSelectedKit(label) {
-      const box = document.getElementById('selected_kit_box');
-      const line = document.getElementById('selected_kit_line');
-      box.style.display = 'block';
-      line.innerHTML = 'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
+    function syncSaleKitUi() {
+      const kidEl = document.getElementById('kit_id');
+      const q = document.getElementById('kit_search_q');
+      const findBtn = document.getElementById('sale_kit_find_btn');
+      const row = document.getElementById('sale_kit_search_row');
+      const panel = document.getElementById('sale_kit_selected_panel');
+      const nameEl = document.getElementById('sale_kit_selected_name');
+      if (!kidEl || !q || !findBtn || !row || !panel || !nameEl) return;
+      const kid = (kidEl.value || '').trim();
+      const has = !!kid;
+      q.disabled = has;
+      findBtn.disabled = has;
+      row.style.opacity = has ? '0.55' : '1';
+      panel.style.display = has ? 'block' : 'none';
+      if (!has) nameEl.textContent = '';
+    }
+    function clearSaleKitSelection() {
+      document.getElementById('kit_id').value = '';
+      document.getElementById('kit_suggest_list').innerHTML = '';
+      const q = document.getElementById('kit_search_q');
+      q.value = '';
+      q.focus();
+      syncSaleKitUi();
     }
     function selectKit(id, label) {
       document.getElementById('kit_id').value = String(id);
-      renderSelectedKit(label);
+      const nameEl = document.getElementById('sale_kit_selected_name');
+      if (nameEl) nameEl.textContent = label || '';
       document.getElementById('kit_suggest_list').innerHTML = '';
+      syncSaleKitUi();
     }
     async function kitSuggest() {
+      const qEl = document.getElementById('kit_search_q');
+      if (qEl && qEl.disabled) return;
       const q = document.getElementById('kit_search_q').value.trim();
       const res = await fetch('/master/kits/suggest?q=' + encodeURIComponent(q));
       if (!res.ok) return;
@@ -228,10 +284,15 @@
     }
     let kitTimer = null;
     function scheduleKitSuggest() {
+      const qEl = document.getElementById('kit_search_q');
+      if (qEl && qEl.disabled) return;
       clearTimeout(kitTimer);
       kitTimer = setTimeout(kitSuggest, 350);
     }
     document.getElementById('kit_search_q').addEventListener('input', scheduleKitSuggest);
+    const saleKitChg = document.getElementById('sale_kit_change_btn');
+    if (saleKitChg) saleKitChg.addEventListener('click', clearSaleKitSelection);
+    syncSaleKitUi();
 
     function syncKindUI() {
       const kind = (document.querySelector('input[name="kind"]:checked') || {}).value || 'MATERIAL';
@@ -243,6 +304,7 @@
       bk.style.display = (kind === 'KIT') ? 'block' : 'none';
       br.style.display = (kind === 'RUBBER') ? 'block' : 'none';
       bo.style.display = (kind === 'OTHER') ? 'block' : 'none';
+      if (kind === 'KIT' && typeof syncSaleKitUi === 'function') syncSaleKitUi();
     }
     for (const r of document.querySelectorAll('input[name="kind"]')) {
       r.addEventListener('change', syncKindUI);

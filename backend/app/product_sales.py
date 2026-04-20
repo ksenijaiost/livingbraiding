@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
@@ -29,6 +29,7 @@ from app.db.models import (
     BookingKind,
     Client,
     Kit,
+    KitReserve,
     MixComplexity,
     MixSource,
     PayrollFundSourceKind,
@@ -39,6 +40,8 @@ from app.db.models import (
     ServiceCategory,
     ServiceSubcategory,
     UserRole,
+    WorkForInventory,
+    WorkKind,
 )
 from app.product_sale_material import (
     finalize_material_sale_fields,
@@ -294,6 +297,40 @@ def _merge_product_sale_fp_from_booking(db: Session, b: Booking, fp: dict[str, s
         if md:
             fp["material_description"] = md
 
+    # Комплект из «работы с товарами» по этой брони (заказ + резерв и т.д.): в details брони kit_id может отсутствовать.
+    if (fp.get("kind") or "").strip().upper() == "KIT":
+        kid_raw = (fp.get("kit_id") or "").strip()
+        if not kid_raw.isdigit():
+            work = db.scalar(
+                select(WorkForInventory)
+                .where(
+                    WorkForInventory.booking_id == b.id,
+                    WorkForInventory.is_voided.is_(False),
+                    WorkForInventory.kind == WorkKind.KIT,
+                    WorkForInventory.created_kit_id.isnot(None),
+                )
+                .order_by(WorkForInventory.id.desc())
+                .limit(1)
+            )
+            if work and work.created_kit_id:
+                fp["kit_id"] = str(int(work.created_kit_id))
+        kid_raw = (fp.get("kit_id") or "").strip()
+        if kid_raw.isdigit() and not (fp.get("kit_pieces_sold") or "").strip().isdigit():
+            rid = int(kid_raw)
+            total_r = db.scalar(
+                select(func.coalesce(func.sum(KitReserve.pieces_reserved), 0)).where(
+                    KitReserve.kit_id == rid,
+                    KitReserve.reserved_for_client_id == b.client_id,
+                )
+            )
+            total_r = int(total_r or 0)
+            if total_r > 0:
+                fp["kit_pieces_sold"] = str(total_r)
+            else:
+                kit_row = db.get(Kit, rid)
+                if kit_row and int(kit_row.pieces_total or 0) > 0:
+                    fp["kit_pieces_sold"] = str(int(kit_row.pieces_total))
+
 
 def _material_services_meta_json(services: list[Service]) -> str:
     d: dict[str, dict[str, bool]] = {}
@@ -320,6 +357,12 @@ def _render_new(
     eid = (fp.get("existing_client_id") or "").strip()
     if eid.isdigit():
         selected_client = db.get(Client, int(eid))
+    selected_kit_label: str | None = None
+    kid = (fp.get("kit_id") or "").strip()
+    if kid.isdigit():
+        kobj = db.get(Kit, int(kid))
+        if kobj:
+            selected_kit_label = f"{kobj.sku} — {kobj.title}"
     default_date = (fp.get("performed_date") or "").strip() or date.today().isoformat()
     return templates.TemplateResponse(
         "product_sale_new.html",
@@ -329,6 +372,7 @@ def _render_new(
             error=error,
             fp=fp,
             selected_client=selected_client,
+            selected_kit_label=selected_kit_label,
             default_date=default_date,
             material_services=material_services,
             material_services_meta_json=_material_services_meta_json(material_services),
@@ -951,6 +995,12 @@ async def product_sale_new_post(
         db.rollback()
         return _fail(str(e))
     post_product_sale_studio_accrual(db, row, current_user.id)
+    bid_for_auto_complete = row.booking_id
     db.commit()
+    if bid_for_auto_complete:
+        from app.main import try_auto_complete_booking
+
+        try_auto_complete_booking(db, int(bid_for_auto_complete))
+        db.commit()
     return RedirectResponse(url="/sales/products?msg=saved", status_code=303)
 

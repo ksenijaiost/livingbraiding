@@ -946,8 +946,10 @@ async def work_new_post(
             profit_total_amount=profit_total,
         )
         bid_raw = (_g_str(form, "booking_id", "") or "").strip()
+        bid_for_auto_complete: int | None = None
         if bid_raw.isdigit():
             work.booking_id = int(bid_raw)
+            bid_for_auto_complete = int(bid_raw)
         db.add(work)
         db.flush()
 
@@ -1049,15 +1051,20 @@ async def work_new_post(
                     so += 1
 
             if scope == WorkScope.CUSTOM_ORDER and client_id:
+                pieces_reserved = int(kit.pieces_total)
                 db.add(
                     KitReserve(
                         kit_id=kit.id,
-                        pieces_reserved=int(kit.pieces_total),
+                        pieces_reserved=pieces_reserved,
                         reserved_at=datetime.utcnow(),
                         reserved_by_user_id=int(current_user.id),
                         reserved_for_client_id=int(client_id),
                         reserved_for_user_id=None,
                     )
+                )
+                # Как при ручном резерве в админке: свободный остаток уменьшается на объём резерва.
+                kit.pieces_available = max(
+                    0, int(kit.pieces_available or 0) - pieces_reserved
                 )
 
         staff_saved = list(
@@ -1067,6 +1074,11 @@ async def work_new_post(
         )
         post_work_accruals(db, work.id, staff_saved, current_user.id)
         db.commit()
+        if bid_for_auto_complete is not None:
+            from app.main import try_auto_complete_booking
+
+            try_auto_complete_booking(db, bid_for_auto_complete)
+            db.commit()
         return RedirectResponse(url="/sales/work?msg=saved", status_code=303)
     except ValueError as exc:
         masters = _list_masters_for_work_form(db)
