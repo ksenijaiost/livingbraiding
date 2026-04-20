@@ -8,6 +8,29 @@ from sqlalchemy.orm import Session
 from app.db.models import MixComplexity, MixSource, WorkKind, WorkScope
 from app.mix_rates import mix_complexity_rate_map
 
+# Подкатегория «Коррекция комплекта» в каталоге «Заказ»
+CORR_SVC_TRIM = "Стрижка (1шт)"
+CORR_SVC_WASH_WITH = "Стирка (с коррекцией)"
+CORR_SVC_WASH_WITHOUT = "Стирка (без коррекции)"
+CORR_SVC_HOURLY = "Почасовая коррекция заготовок (1 ч)"
+CORR_SVC_CIRCLE = "Одевание на круг"
+CORR_SVC_STEAM = "Отпаривание"
+
+
+def corr_wash_catalog_name(*, trim_qty: int, hourly_hours: float, hourly_avg: bool) -> str:
+    """Стирка в прайсе: «с коррекцией», если есть стрижка/часы/ориентир по часам; иначе «без коррекции»."""
+    if trim_qty > 0 or hourly_hours > 0 or hourly_avg:
+        return CORR_SVC_WASH_WITH
+    return CORR_SVC_WASH_WITHOUT
+
+
+def corr_hourly_pay_units(*, hourly_hours: float, hourly_avg: bool) -> float:
+    """Для ЗП/доп. расходов: при ориентире 1–4 ч без ввода часов берём 2.5 ч."""
+    h = max(0.0, float(hourly_hours))
+    if hourly_avg and h <= 0:
+        return 2.5
+    return h
+
 
 @dataclass(frozen=True)
 class WorkFinancials:
@@ -42,12 +65,11 @@ def compute_work_financials(
     rubber_qty: int,
     # correction
     corr_trim_qty: int,
+    corr_hourly_hours: float,
+    corr_hourly_avg: bool,
     corr_wash: bool,
     corr_circle: bool,
     corr_steam: bool,
-    corr_dread_qty: int,
-    corr_curl_qty: int,
-    corr_curl_dread_complexity: str | None,
 ) -> WorkFinancials:
     # Local imports to avoid circular deps with work_products.py
     from app.work_products import (  # noqa: WPS433
@@ -103,44 +125,45 @@ def compute_work_financials(
             if bonus <= 0:
                 bonus = 1.0
 
-        def _svc_sum(name: str, units: int, *, complexity_mul: float = 1.0) -> tuple[float, float, float]:
+        def _svc_sum(name: str, units: float) -> tuple[float, float, float]:
             row = corr_map.get(name) or {}
-            mp = float(row.get("master_pay") or 0.0) * float(units) * float(complexity_mul)
-            sp = float(row.get("studio_pay") or 0.0) * float(units) * float(complexity_mul)
-            fx = float(row.get("fixed_expense") or 0.0) * float(units)
+            u = max(0.0, float(units))
+            mp = float(row.get("master_pay") or 0.0) * u
+            sp = float(row.get("studio_pay") or 0.0) * u
+            fx = float(row.get("fixed_expense") or 0.0) * u
             return mp, sp, fx
 
         mp_total = 0.0
         sp_total = 0.0
         fx_total = 0.0
         if corr_trim_qty > 0:
-            mp, sp, fx = _svc_sum("Стрижка (1шт)", corr_trim_qty)
+            mp, sp, fx = _svc_sum(CORR_SVC_TRIM, float(corr_trim_qty))
+            mp_total += mp
+            sp_total += sp
+            fx_total += fx
+        hh_pay = corr_hourly_pay_units(hourly_hours=corr_hourly_hours, hourly_avg=corr_hourly_avg)
+        if hh_pay > 0:
+            mp, sp, fx = _svc_sum(CORR_SVC_HOURLY, hh_pay)
             mp_total += mp
             sp_total += sp
             fx_total += fx
         if corr_circle:
-            mp, sp, fx = _svc_sum("Одевание на круг", 1)
+            mp, sp, fx = _svc_sum(CORR_SVC_CIRCLE, 1)
             mp_total += mp
             sp_total += sp
             fx_total += fx
         if corr_wash:
-            mp, sp, fx = _svc_sum("Стирка", 1)
+            wash_nm = corr_wash_catalog_name(
+                trim_qty=int(corr_trim_qty),
+                hourly_hours=float(corr_hourly_hours),
+                hourly_avg=bool(corr_hourly_avg),
+            )
+            mp, sp, fx = _svc_sum(wash_nm, 1)
             mp_total += mp
             sp_total += sp
             fx_total += fx
         if corr_steam:
-            mp, sp, fx = _svc_sum("Отпаривание", 1)
-            mp_total += mp
-            sp_total += sp
-            fx_total += fx
-        cm_cd = 1.5 if corr_curl_dread_complexity == "HARD" else 1.0
-        if corr_dread_qty > 0:
-            mp, sp, fx = _svc_sum("Коррекция дреда (1шт)", corr_dread_qty, complexity_mul=cm_cd)
-            mp_total += mp
-            sp_total += sp
-            fx_total += fx
-        if corr_curl_qty > 0:
-            mp, sp, fx = _svc_sum("Коррекция кудрей (1шт)", corr_curl_qty, complexity_mul=cm_cd)
+            mp, sp, fx = _svc_sum(CORR_SVC_STEAM, 1)
             mp_total += mp
             sp_total += sp
             fx_total += fx

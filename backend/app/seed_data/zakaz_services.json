@@ -90,9 +90,14 @@
               "economics": { "master_pay": 100, "studio_pay": 0, "fixed_expense": 0, "is_per_unit": false }
             },
             {
-              "name": "Стирка",
+              "name": "Стирка (с коррекцией)",
               "price": { "from": 400 },
               "economics": { "master_pay": 200, "studio_pay": 100, "fixed_expense": 100, "is_per_unit": false }
+            },
+            {
+              "name": "Стирка (без коррекции)",
+              "price": { "from": 1200 },
+              "economics": { "master_pay": 200, "studio_pay": 900, "fixed_expense": 100, "is_per_unit": false }
             },
             {
               "name": "Отпаривание",
@@ -100,12 +105,25 @@
               "economics": { "master_pay": 100, "studio_pay": 100, "fixed_expense": 0, "is_per_unit": false }
             },
             {
+              "name": "Почасовая коррекция заготовок (1 ч)",
+              "price": { "from": 600 },
+              "economics": { "master_pay": 300, "studio_pay": 300, "fixed_expense": 0, "is_per_unit": true, "unit_label": "ч" }
+            },
+            {
+              "name": "Стирка",
+              "is_active": false,
+              "price": { "from": 400 },
+              "economics": { "master_pay": 200, "studio_pay": 100, "fixed_expense": 100, "is_per_unit": false }
+            },
+            {
               "name": "Коррекция дреда (1шт)",
+              "is_active": false,
               "price": { "from": 50 },
               "economics": { "master_pay": 40, "studio_pay": 10, "fixed_expense": 0, "is_per_unit": true, "unit_label": "шт" }
             },
             {
               "name": "Коррекция кудрей (1шт)",
+              "is_active": false,
               "price": { "from": 30 },
               "economics": { "master_pay": 20, "studio_pay": 10, "fixed_expense": 0, "is_per_unit": true, "unit_label": "шт" }
             },

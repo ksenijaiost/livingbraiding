@@ -92,7 +92,7 @@ def ensure_seed_data(db: Session) -> None:
     # Settings
     salon = db.get(Setting, "salon_cut_pct")
     if not salon:
-        db.add(Setting(key="salon_cut_pct", value="0.3"))
+        db.add(Setting(key="salon_cut_pct", value="0.5"))
 
     edit_days = db.get(Setting, "edit_window_days")
     if not edit_days:
@@ -620,9 +620,10 @@ def _ensure_zakaz_products_catalog(db: Session) -> None:
     corr_prices_overrides = {
         "Стрижка (1шт)": 5.0,
         "Одевание на круг": 100.0,
-        "Стирка": 400.0,
+        "Стирка (с коррекцией)": 400.0,
+        "Стирка (без коррекции)": 1200.0,
         "Отпаривание": 200.0,
-        # почасовая будет позже
+        "Почасовая коррекция заготовок (1 ч)": 600.0,
     }
     if cat:
         corr_sub = db.scalar(
@@ -862,7 +863,7 @@ def _ensure_demo_operational_data(db: Session) -> None:
             studio_fund_amount=300.0,
             cost_total=200.0,
             profit_before_split=5800.0,
-            salon_cut_pct_at_time=0.3,
+            salon_cut_pct_at_time=0.5,
             salon_profit=1740.0,
             masters_pool=4060.0,
         )

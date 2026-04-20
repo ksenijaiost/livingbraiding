@@ -164,23 +164,19 @@
               <input name="corr_trim_qty" type="number" step="1" min="0" value="{{ fp.get('corr_trim_qty','0') }}" />
             </div>
             <div>
-              <label>Коррекция дреда (1шт) — количество</label>
-              <input name="corr_dread_qty" type="number" step="1" min="0" value="{{ fp.get('corr_dread_qty','0') }}" />
+              <label>Почасовая коррекция заготовок, ч</label>
+              <input name="corr_hourly_hours" type="number" step="0.25" min="0" value="{{ fp.get('corr_hourly_hours','') }}" placeholder="0 или фактическое время" style="max-width:180px;" />
             </div>
           </div>
 
           <div class="row" style="margin-top: 10px;">
-            <div>
-              <label>Коррекция кудрей (1шт) — количество</label>
-              <input name="corr_curl_qty" type="number" step="1" min="0" value="{{ fp.get('corr_curl_qty','0') }}" />
+            <div style="flex:1; min-width:200px;">
+              <label>Описание комплекта</label>
+              <input name="corr_kit_description" type="text" maxlength="500" value="{{ fp.get('corr_kit_description','') }}" />
             </div>
             <div>
-              <div style="font-weight: 600; margin-bottom: 6px;">Сложность кудрей / дредов</div>
-              <div style="display: flex; flex-wrap: wrap; gap: 10px 16px;">
-                {% set cd = fp.get('corr_curl_dread_complexity') or 'NORMAL' %}
-                <label><input type="radio" name="corr_curl_dread_complexity" value="NORMAL" {% if cd == 'NORMAL' %}checked{% endif %} /> Обычная</label>
-                <label><input type="radio" name="corr_curl_dread_complexity" value="HARD" {% if cd == 'HARD' %}checked{% endif %} /> Сложная (×1.5)</label>
-              </div>
+              <label>Заготовок в комплекте (учёт)</label>
+              <input name="corr_kit_blanks_count" type="number" step="1" min="0" value="{{ fp.get('corr_kit_blanks_count','') }}" placeholder="для информации" />
             </div>
           </div>
 

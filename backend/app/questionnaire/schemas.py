@@ -62,24 +62,20 @@ class KitOwnExtra(BaseModel):
 class KitOwnCorrectionDetails(BaseModel):
     """Детали коррекции для своего комплекта («Новый визит»), как в работе «Коррекция комплекта»."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     trim_qty: int = Field(0, ge=0)
-    dread_qty: int = Field(0, ge=0)
-    curl_qty: int = Field(0, ge=0)
-    curl_dread_complexity: Literal["NORMAL", "HARD"] | None = None
+    hourly_hours: float = Field(0, ge=0)
+    kit_description: str = ""
+    kit_blanks_count: int | None = Field(default=None, ge=0)
     wash: bool = False
     circle: bool = False
     steam: bool = False
 
     @model_validator(mode="after")
-    def _validate_complexity(self):
+    def _validate_wash_circle(self):
         if self.wash and self.circle:
             raise ValueError("Если выбрана «Стирка», то «Одевание на круг» недоступно.")
-        if self.dread_qty <= 0 and self.curl_qty <= 0 and self.curl_dread_complexity is not None:
-            raise ValueError("Сложность задаётся только при коррекции кудрей и/или дредов.")
-        if (self.dread_qty > 0 or self.curl_qty > 0) and self.curl_dread_complexity is None:
-            raise ValueError("Укажите сложность кудрей/дредов.")
         return self
 
 

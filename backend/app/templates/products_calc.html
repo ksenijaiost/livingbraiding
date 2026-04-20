@@ -142,35 +142,26 @@
 
     <div id="correction_block" class="card" style="background:#f8fafc; margin-bottom: 12px; display:none;">
       <h3 style="margin-top:0;">Коррекция комплекта</h3>
-      <p class="muted" style="margin-top:-6px;">Поля не обязательны — можно оставить пустыми, если деталей нет.</p>
+      <p class="muted" style="margin-top:-6px;">Ориентир 1–4 ч — для диапазона цены клиенту (600–2400 ₽ только за почасовую позицию); в работе мастер укажет фактические часы.</p>
       <div class="row">
         <div>
           <label>Стрижка (1шт) — количество</label>
           <input name="corr_trim_qty" type="number" step="1" min="0" value="0" />
         </div>
         <div>
-          <label>Коррекция дреда (1шт) — количество</label>
-          <input name="corr_dread_qty" type="number" step="1" min="0" value="0" />
-        </div>
-      </div>
-      <div class="row" style="margin-top: 10px;">
-        <div>
-          <label>Коррекция кудрей (1шт) — количество</label>
-          <input name="corr_curl_qty" type="number" step="1" min="0" value="0" />
-        </div>
-        <div>
-          <div style="font-weight: 600; margin-bottom: 6px;">Сложность кудрей / дредов</div>
-          <div id="corr_curl_dread_complexity_wrap" style="display: flex; flex-wrap: wrap; gap: 10px 16px; opacity: 0.55; pointer-events: none;">
-            <label><input type="radio" name="corr_curl_dread_complexity" value="NORMAL" checked /> Обычная</label>
-            <label><input type="radio" name="corr_curl_dread_complexity" value="HARD" /> Сложная (×1.5)</label>
+          <label>Почасовая коррекция заготовок, ч</label>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <input name="corr_hourly_hours" type="number" step="0.25" min="0" value="" placeholder="часы" style="max-width:120px;" />
+            <button type="button" id="corr_avg_btn" class="secondary">В среднем</button>
           </div>
-          <div class="muted" style="font-size: 12px; margin-top: 6px;">Активируется, если указано количество для кудрей или дредов.</div>
+          <input type="checkbox" name="corr_hourly_avg" id="corr_hourly_avg" style="display:none;" />
+          <div class="muted" style="font-size: 12px; margin-top: 6px;" id="corr_avg_caption"></div>
         </div>
       </div>
       <div style="margin-top: 10px;">
-        <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_wash" /> Стирка</label>
+        <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_wash" id="calc_corr_wash" /> Стирка</label>
         <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_steam" /> Отпаривание</label>
-        <label style="display:block; margin-bottom: 0;"><input type="checkbox" name="corr_circle" /> Одевание на круг</label>
+        <label style="display:block; margin-bottom: 0;"><input type="checkbox" name="corr_circle" id="calc_corr_circle" /> Одевание на круг</label>
       </div>
     </div>
 
@@ -342,18 +333,29 @@
         });
       }
 
-      function syncCorrectionComplexityUI() {
-        var d = Math.max(0, parseInt(String((q('input[name="corr_dread_qty"]') || {}).value || '0'), 10) || 0);
-        var c = Math.max(0, parseInt(String((q('input[name="corr_curl_qty"]') || {}).value || '0'), 10) || 0);
-        var need = (d > 0) || (c > 0);
-        var wrap = document.getElementById('corr_curl_dread_complexity_wrap');
-        if (!wrap) return;
-        wrap.style.opacity = need ? '1' : '0.55';
-        wrap.style.pointerEvents = need ? 'auto' : 'none';
-        qa('input[name="corr_curl_dread_complexity"]').forEach(function (r) { r.disabled = !need; });
-        if (!need) {
-          var nrm = q('input[name="corr_curl_dread_complexity"][value="NORMAL"]');
-          if (nrm) nrm.checked = true;
+      function syncCalcCorrWashCircle() {
+        var w = document.getElementById('calc_corr_wash');
+        var c = document.getElementById('calc_corr_circle');
+        if (!w || !c) return;
+        if (w.checked) {
+          c.checked = false;
+          c.disabled = true;
+        } else {
+          c.disabled = false;
+        }
+      }
+      function syncCalcHourlyAvg() {
+        var h = q('input[name="corr_hourly_hours"]');
+        var avg = document.getElementById('corr_hourly_avg');
+        var cap = document.getElementById('corr_avg_caption');
+        if (!h || !avg) return;
+        if (avg.checked) {
+          h.value = '';
+          h.placeholder = 'ориентир';
+          if (cap) cap.textContent = 'Ориентир: от 1 до 4 ч (за почасовую позицию клиенту 600–2400 ₽).';
+        } else {
+          h.placeholder = 'часы';
+          if (cap) cap.textContent = '';
         }
       }
 
@@ -469,9 +471,12 @@
           rubber_attach_qty: parseInt(String((q('input[name="rubber_attach_qty"]') || {}).value || '1'), 10) || 1,
           rubber_braids_qty: parseInt(String((q('input[name="rubber_braids_qty"]') || {}).value || '1'), 10) || 1,
           corr_trim_qty: parseInt(String((q('input[name="corr_trim_qty"]') || {}).value || '0'), 10) || 0,
-          corr_dread_qty: parseInt(String((q('input[name="corr_dread_qty"]') || {}).value || '0'), 10) || 0,
-          corr_curl_qty: parseInt(String((q('input[name="corr_curl_qty"]') || {}).value || '0'), 10) || 0,
-          corr_curl_dread_complexity: radioVal('corr_curl_dread_complexity', 'NORMAL'),
+          corr_hourly_hours: (function () {
+            var el = q('input[name="corr_hourly_hours"]');
+            var s = el ? String(el.value || '').replace(',', '.').trim() : '';
+            return s ? (parseFloat(s) || 0) : 0;
+          })(),
+          corr_hourly_avg: !!(document.getElementById('corr_hourly_avg') || {}).checked,
           corr_wash: isChecked('input[name="corr_wash"]'),
           corr_steam: isChecked('input[name="corr_steam"]'),
           corr_circle: isChecked('input[name="corr_circle"]'),
@@ -557,7 +562,8 @@
           r.addEventListener('change', function () {
             syncKindUI();
             syncBookingUI();
-            syncCorrectionComplexityUI();
+            syncCalcCorrWashCircle();
+            syncCalcHourlyAvg();
             maybeRecalc();
           });
         });
@@ -579,9 +585,33 @@
           el.addEventListener('change', function () { syncRubberTypeFields(); syncBookingUI(); maybeRecalc(); });
           el.addEventListener('input', function () { syncRubberTypeFields(); maybeRecalc(); });
         });
-        qa('input[name="corr_trim_qty"], input[name="corr_dread_qty"], input[name="corr_curl_qty"], input[name="corr_curl_dread_complexity"], input[name="corr_wash"], input[name="corr_steam"], input[name="corr_circle"]').forEach(function (el) {
-          el.addEventListener('change', function () { syncCorrectionComplexityUI(); maybeRecalc(); });
-          el.addEventListener('input', function () { syncCorrectionComplexityUI(); maybeRecalc(); });
+        qa('input[name="corr_trim_qty"], input[name="corr_hourly_hours"], input[name="corr_steam"], input[name="corr_circle"]').forEach(function (el) {
+          el.addEventListener('change', function () {
+            if (el.name === 'corr_hourly_hours' && String(el.value || '').trim()) {
+              var ax = document.getElementById('corr_hourly_avg');
+              if (ax) ax.checked = false;
+              syncCalcHourlyAvg();
+            }
+            syncCalcCorrWashCircle();
+            maybeRecalc();
+          });
+          el.addEventListener('input', function () {
+            if (el.name === 'corr_hourly_hours' && String(el.value || '').trim()) {
+              var ax2 = document.getElementById('corr_hourly_avg');
+              if (ax2) ax2.checked = false;
+              syncCalcHourlyAvg();
+            }
+            maybeRecalc();
+          });
+        });
+        var cw = document.getElementById('calc_corr_wash');
+        if (cw) cw.addEventListener('change', function () { syncCalcCorrWashCircle(); maybeRecalc(); });
+        var ab = document.getElementById('corr_avg_btn');
+        if (ab) ab.addEventListener('click', function () {
+          var ax = document.getElementById('corr_hourly_avg');
+          if (ax) ax.checked = true;
+          syncCalcHourlyAvg();
+          maybeRecalc();
         });
 
         qa('input[name="booking_kind"]').forEach(function (el) {
@@ -632,7 +662,8 @@
       syncKindUI();
       syncMixUI();
       syncBookingUI();
-      syncCorrectionComplexityUI();
+      syncCalcCorrWashCircle();
+      syncCalcHourlyAvg();
       syncKitTypeUI();
     })();
   </script>

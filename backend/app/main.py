@@ -154,7 +154,14 @@ from app.kit_crud import (
 )
 from app.work_products import _kit_client_stock_price_total, _rubber_type_items, _zakaz_subcategory_services_map
 from app.work_products import _kit_se_items, _kit_de_items
-from app.work_products_compute import compute_work_financials
+from app.work_products_compute import (
+    CORR_SVC_HOURLY,
+    CORR_SVC_TRIM,
+    CORR_SVC_WASH_WITH,
+    compute_work_financials,
+    corr_hourly_pay_units,
+    corr_wash_catalog_name,
+)
 from app.zakaz_blanks import zakaz_blank_def_by_key
 from app import admin_studio_expenses as admin_studio_expenses_routes
 from app import product_sales as product_sales_routes
@@ -1331,12 +1338,11 @@ async def api_products_calc(
                 rubber_type="",
                 rubber_qty=1,
                 corr_trim_qty=0,
+                corr_hourly_hours=0.0,
+                corr_hourly_avg=False,
                 corr_wash=False,
                 corr_circle=False,
                 corr_steam=False,
-                corr_dread_qty=0,
-                corr_curl_qty=0,
-                corr_curl_dread_complexity=None,
             )
             try:
                 client_total = _kit_client_stock_price_total(
@@ -1399,6 +1405,11 @@ async def api_products_calc(
             }
 
         elif kind_raw == "KIT_CORRECTION":
+            tqty = max(0, _i("corr_trim_qty", 0))
+            hh_raw = max(0.0, _f("corr_hourly_hours", 0.0))
+            h_avg = _b("corr_hourly_avg")
+            if h_avg and hh_raw > 0:
+                h_avg = False
             fin = compute_work_financials(
                 db,
                 kind=WorkKind.KIT_CORRECTION,
@@ -1414,15 +1425,12 @@ async def api_products_calc(
                 grams_total=float(grams_total),
                 rubber_type="",
                 rubber_qty=1,
-                corr_trim_qty=max(0, _i("corr_trim_qty", 0)),
+                corr_trim_qty=tqty,
+                corr_hourly_hours=hh_raw,
+                corr_hourly_avg=h_avg,
                 corr_wash=_b("corr_wash"),
                 corr_circle=_b("corr_circle"),
                 corr_steam=_b("corr_steam"),
-                corr_dread_qty=max(0, _i("corr_dread_qty", 0)),
-                corr_curl_qty=max(0, _i("corr_curl_qty", 0)),
-                corr_curl_dread_complexity=str(
-                    payload.get("corr_curl_dread_complexity") or "NORMAL"
-                ),
             )
             corr_map = _zakaz_subcategory_services_map(db, "Коррекция комплекта")
 
@@ -1431,38 +1439,68 @@ async def api_products_calc(
                 v = row.get("client_price")
                 return float(v) if v is not None else 0.0
 
-            client_total = 0.0
+            wash_nm = corr_wash_catalog_name(
+                trim_qty=tqty, hourly_hours=hh_raw, hourly_avg=h_avg
+            )
+            wash_hint = ""
+            if _b("corr_wash"):
+                wash_hint = (
+                    "Стирка: выбран вариант «с коррекцией»."
+                    if wash_nm == CORR_SVC_WASH_WITH
+                    else "Стирка: выбран вариант «без коррекции»."
+                )
+
+            client_min = 0.0
+            client_max = 0.0
             any_price = False
-            tqty = max(0, _i("corr_trim_qty", 0))
             if tqty:
-                client_total += _cp("Стрижка (1шт)") * float(tqty)
+                p = _cp(CORR_SVC_TRIM) * float(tqty)
+                client_min += p
+                client_max += p
+                any_price = True
+            hpu = corr_hourly_pay_units(hourly_hours=hh_raw, hourly_avg=h_avg)
+            cp_h = _cp(CORR_SVC_HOURLY)
+            if h_avg and hh_raw <= 0 and cp_h > 0:
+                client_min += cp_h * 1.0
+                client_max += cp_h * 4.0
+                any_price = True
+            elif hpu > 0 and cp_h > 0:
+                both = cp_h * hpu
+                client_min += both
+                client_max += both
                 any_price = True
             if _b("corr_circle"):
-                client_total += _cp("Одевание на круг")
+                p = _cp("Одевание на круг")
+                client_min += p
+                client_max += p
                 any_price = True
             if _b("corr_wash"):
-                client_total += _cp("Стирка")
+                p = _cp(wash_nm)
+                client_min += p
+                client_max += p
                 any_price = True
             if _b("corr_steam"):
-                client_total += _cp("Отпаривание")
+                p = _cp("Отпаривание")
+                client_min += p
+                client_max += p
                 any_price = True
-            dqty = max(0, _i("corr_dread_qty", 0))
-            if dqty:
-                client_total += _cp("Коррекция дреда (1шт)") * float(dqty)
-                any_price = True
-            cqty = max(0, _i("corr_curl_qty", 0))
-            if cqty:
-                client_total += _cp("Коррекция кудрей (1шт)") * float(cqty)
-                any_price = True
-            quoted = f"{client_total:.0f}" if any_price and client_total > 0 else ""
-            client_hint = (
-                f"Цена для клиента (по прайсу): {client_total:.0f} ₽"
-                if any_price and client_total > 0
-                else "Цена для клиента: —"
-            )
-            if any_price and float(client_total or 0) > 0:
-                client_min = float(client_total)
-                client_max = float(client_total)
+
+            if any_price and client_min > 0:
+                suffix = (" " + wash_hint) if wash_hint else ""
+                if abs(client_min - client_max) < 0.0001:
+                    quoted = f"{client_min:.0f}"
+                    client_hint = f"Цена для клиента (по прайсу): {client_min:.0f} ₽.{suffix}"
+                else:
+                    quoted = f"{client_min:.0f}–{client_max:.0f}"
+                    client_hint = (
+                        f"Цена для клиента (по прайсу): {client_min:.0f}–{client_max:.0f} ₽.{suffix}"
+                    )
+            else:
+                quoted = ""
+                client_hint = (
+                    ("Цена для клиента: — " + wash_hint) if wash_hint else "Цена для клиента: —"
+                )
+
             svc_id = str(payload.get("visit_service_id") or "").strip()
             prefill_sale = {
                 "kind": BookingKind.PRODUCT_SALE.value,
@@ -1474,16 +1512,18 @@ async def api_products_calc(
                 "service_id": svc_id,
                 "visit_kit_mode": "OWN",
                 "visit_own_need_correction": "1",
-                "corr_trim_qty": str(max(0, _i("corr_trim_qty", 0))),
-                "corr_dread_qty": str(max(0, _i("corr_dread_qty", 0))),
-                "corr_curl_qty": str(max(0, _i("corr_curl_qty", 0))),
-                "corr_curl_dread_complexity": str(
-                    payload.get("corr_curl_dread_complexity") or "NORMAL"
-                ),
+                "corr_trim_qty": str(tqty),
+                "corr_hourly_hours": str(hh_raw) if hh_raw > 0 else "",
                 "corr_wash": "1" if _b("corr_wash") else "",
                 "corr_steam": "1" if _b("corr_steam") else "",
                 "corr_circle": "1" if _b("corr_circle") else "",
             }
+            if any_price:
+                client_min = float(client_min)
+                client_max = float(client_max)
+            else:
+                client_min = None
+                client_max = None
 
         else:
             rubber_type = str(payload.get("rubber_type") or "TAIL_ELASTIC").strip().upper()
@@ -1510,12 +1550,11 @@ async def api_products_calc(
                 rubber_type=rubber_type,
                 rubber_qty=int(qty),
                 corr_trim_qty=0,
+                corr_hourly_hours=0.0,
+                corr_hourly_avg=False,
                 corr_wash=False,
                 corr_circle=False,
                 corr_steam=False,
-                corr_dread_qty=0,
-                corr_curl_qty=0,
-                corr_curl_dread_complexity=None,
             )
             rub_map = _zakaz_subcategory_services_map(db, "Хвосты/резинки")
             svc_name = {
@@ -2895,9 +2934,9 @@ def _booking_work_new_query_params(db: Session, b: Booking, details: dict[str, A
             q["kind"] = WorkKind.KIT_CORRECTION.value
             for key in (
                 "corr_trim_qty",
-                "corr_dread_qty",
-                "corr_curl_qty",
-                "corr_curl_dread_complexity",
+                "corr_hourly_hours",
+                "corr_kit_description",
+                "corr_kit_blanks_count",
                 "corr_wash",
                 "corr_steam",
                 "corr_circle",
@@ -2980,9 +3019,9 @@ def _booking_details_from_form(fp: dict[str, str]) -> dict[str, object]:
         if str(fp.get("visit_own_need_correction") or "").lower() in ("1", "on", "true", "yes"):
             keys = keys + (
                 "corr_trim_qty",
-                "corr_dread_qty",
-                "corr_curl_qty",
-                "corr_curl_dread_complexity",
+                "corr_hourly_hours",
+                "corr_kit_description",
+                "corr_kit_blanks_count",
                 "corr_wash",
                 "corr_steam",
                 "corr_circle",
@@ -3195,9 +3234,9 @@ def admin_booking_new_get(
         "visit_extra_order_blanks_qty",
         "visit_extra_order_blanks_desc",
         "corr_trim_qty",
-        "corr_dread_qty",
-        "corr_curl_qty",
-        "corr_curl_dread_complexity",
+        "corr_hourly_hours",
+        "corr_kit_description",
+        "corr_kit_blanks_count",
         "corr_wash",
         "corr_steam",
         "corr_circle",
@@ -5215,7 +5254,7 @@ def admin_settings_page(
     db: Session = Depends(get_db),
 ):
     salon = db.get(Setting, "salon_cut_pct")
-    salon_cut_pct = salon.value if salon else "0.3"
+    salon_cut_pct = salon.value if salon else "0.5"
     edit_days = db.get(Setting, "edit_window_days")
     edit_window_days = edit_days.value if edit_days else "2"
     pk = db.get(MaterialPriceCurrent, MaterialType.KANEKALON)
@@ -5237,7 +5276,7 @@ def admin_settings_page(
             return default
 
     work_rates = {
-        "studio_share": _wr_float("studio_share", 0.30),
+        "studio_share": _wr_float("studio_share", 0.50),
         **mix_rates_for_admin_form(db),
         "custom_order_bonus_multiplier": _wr_float("custom_order_bonus_multiplier", 1.0),
     }
@@ -6263,7 +6302,7 @@ async def admin_settings_work_rates_save(
             raise ValueError(f"Некорректное число: {name}")
 
     try:
-        studio_share = _p("studio_share", 0.30)
+        studio_share = _p("studio_share", 0.50)
         if studio_share < 0 or studio_share > 1:
             raise ValueError("Доля студии должна быть в диапазоне 0..1.")
 
@@ -6283,7 +6322,7 @@ async def admin_settings_work_rates_save(
         # Re-render settings with error and open section
         # Reuse GET handler logic by collecting current values and overriding with submitted where possible.
         salon = db.get(Setting, "salon_cut_pct")
-        salon_cut_pct = salon.value if salon else "0.3"
+        salon_cut_pct = salon.value if salon else "0.5"
         edit_days = db.get(Setting, "edit_window_days")
         edit_window_days = edit_days.value if edit_days else "2"
         pk = db.get(MaterialPriceCurrent, MaterialType.KANEKALON)
@@ -6301,7 +6340,7 @@ async def admin_settings_work_rates_save(
                 return d
 
         work_rates = {
-            "studio_share": _safe("studio_share", 0.30),
+            "studio_share": _safe("studio_share", 0.50),
             "mix_light": _safe("mix_light", 0.5),
             "mix_standard": _safe("mix_standard", 1.0),
             "mix_kanek": _safe("mix_kanek", 1.5),

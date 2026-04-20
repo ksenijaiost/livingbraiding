@@ -65,9 +65,9 @@ _WORK_NEW_FP_KEYS = frozenset({
     "rubber_attach_qty",
     "rubber_braids_qty",
     "corr_trim_qty",
-    "corr_dread_qty",
-    "corr_curl_qty",
-    "corr_curl_dread_complexity",
+    "corr_hourly_hours",
+    "corr_kit_description",
+    "corr_kit_blanks_count",
     "corr_wash",
     "corr_steam",
     "corr_circle",
@@ -250,11 +250,11 @@ def _alloc_equal_shares_for_masters(db: Session, user_ids: list[int]) -> list[tu
 def _studio_share_snapshot(db: Session) -> float:
     r = db.scalar(select(WorkRate).where(WorkRate.key == "studio_share", WorkRate.is_active.is_(True)))
     if not r:
-        return 0.30
+        return 0.50
     try:
         return float(json.loads(r.value_json))
     except Exception:
-        return 0.30
+        return 0.50
 
 
 def _wr_float(db: Session, key: str, default: float) -> float:
@@ -339,8 +339,11 @@ def _zakaz_subcategory_services_map(
             meta = {}
         if not isinstance(meta, dict):
             meta = {}
+        cp = float(r.price) if r.price is not None else None
         out[r.name] = {
-            "client_price": float(r.price) if r.price is not None else None,
+            "client_price": cp,
+            "client_from": cp,
+            "client_to": cp,
             "master_pay": float(meta.get("master_pay")) if meta.get("master_pay") is not None else None,
             "studio_pay": float(meta.get("studio_pay")) if meta.get("studio_pay") is not None else None,
             "fixed_expense": float(meta.get("fixed_expense")) if meta.get("fixed_expense") is not None else None,
@@ -763,12 +766,10 @@ async def work_new_post(
         rubber_type = ""
         rubber_qty = 1
         corr_trim_qty = 0
+        corr_hourly_hours = 0.0
         corr_wash = False
         corr_circle = False
         corr_steam = False
-        corr_dread_qty = 0
-        corr_curl_qty = 0
-        corr_curl_dread_complexity: str | None = None
         # KIT: parse blanks + compute master/studio profit
         kit_totals: dict[str, int] = {}
         kit_by_staff: dict[int, dict[str, int]] = {}
@@ -849,44 +850,49 @@ async def work_new_post(
             alloc = [(current_user.id, 1.0)]
         elif kind == WorkKind.KIT_CORRECTION:
             corr_trim_qty = int(_g_float(form, "corr_trim_qty", 0))
+            corr_hourly_hours = max(0.0, _g_float(form, "corr_hourly_hours", 0.0))
             corr_wash = _g_bool(form, "corr_wash")
             corr_circle = _g_bool(form, "corr_circle")
             corr_steam = _g_bool(form, "corr_steam")
-            corr_dread_qty = int(_g_float(form, "corr_dread_qty", 0))
-            corr_curl_qty = int(_g_float(form, "corr_curl_qty", 0))
-            corr_cd_raw = (_g_str(form, "corr_curl_dread_complexity", "") or "").strip()
-            if corr_dread_qty <= 0 and corr_curl_qty <= 0:
-                corr_curl_dread_complexity = None
-            else:
-                if corr_cd_raw not in ("NORMAL", "HARD"):
-                    corr_cd_raw = "NORMAL"
-                corr_curl_dread_complexity = corr_cd_raw
+            corr_kit_description = (_g_str(form, "corr_kit_description", "") or "").strip() or None
+            raw_blanks = (_g_str(form, "corr_kit_blanks_count", "") or "").strip()
+            corr_kit_blanks_count: int | None = None
+            if raw_blanks:
+                try:
+                    corr_kit_blanks_count = int(float(raw_blanks.replace(",", ".")))
+                except ValueError:
+                    raise ValueError("«Количество заготовок в комплекте» — целое число.")
+                if corr_kit_blanks_count < 0:
+                    raise ValueError("«Количество заготовок в комплекте» не может быть отрицательным.")
 
             if corr_wash and corr_circle:
                 raise ValueError("Если выбрана «Стирка», то «Одевание на круг» выбирать нельзя (входит в стирку).")
 
-            if any(x < 0 for x in (corr_trim_qty, corr_dread_qty, corr_curl_qty)):
+            if corr_trim_qty < 0:
                 raise ValueError("Количество должно быть неотрицательным числом.")
 
+            has_note = bool(corr_kit_description) or (corr_kit_blanks_count is not None)
             if (
                 (corr_trim_qty <= 0)
+                and (corr_hourly_hours <= 0)
                 and (not corr_wash)
                 and (not corr_circle)
                 and (not corr_steam)
-                and (corr_dread_qty <= 0)
-                and (corr_curl_qty <= 0)
+                and (not has_note)
             ):
-                raise ValueError("Для «Коррекция комплекта» выберите хотя бы один пункт.")
+                raise ValueError("Для «Коррекция комплекта» укажите хотя бы одну операцию или комментарий/учёт заготовок.")
 
             details["correction"] = {
                 "trim_qty": corr_trim_qty,
+                "hourly_hours": float(corr_hourly_hours),
                 "wash": corr_wash,
                 "circle": corr_circle,
                 "steam": corr_steam,
-                "dread_qty": corr_dread_qty,
-                "curl_qty": corr_curl_qty,
-                "curl_dread_complexity": corr_curl_dread_complexity,
             }
+            if corr_kit_description:
+                details["correction"]["kit_description"] = corr_kit_description
+            if corr_kit_blanks_count is not None:
+                details["correction"]["kit_blanks_count"] = corr_kit_blanks_count
             alloc = [(current_user.id, 1.0)]
         else:
             alloc = [(current_user.id, 1.0)]
@@ -907,12 +913,11 @@ async def work_new_post(
             rubber_type=rubber_type,
             rubber_qty=rubber_qty,
             corr_trim_qty=corr_trim_qty,
+            corr_hourly_hours=float(corr_hourly_hours),
+            corr_hourly_avg=False,
             corr_wash=corr_wash,
             corr_circle=corr_circle,
             corr_steam=corr_steam,
-            corr_dread_qty=corr_dread_qty,
-            corr_curl_qty=corr_curl_qty,
-            corr_curl_dread_complexity=corr_curl_dread_complexity,
         )
         staff_master_profit = fin.staff_master_profit
         master_total = fin.master_total

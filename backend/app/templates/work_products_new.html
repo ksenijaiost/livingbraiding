@@ -142,7 +142,7 @@
 
       <div id="correction_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
         <h3 style="margin-top:0;">Коррекция комплекта</h3>
-        <p class="muted" style="margin-top:-6px;">Укажите количества и/или отметьте пункты. Если выбрана стирка — «одевание на круг» недоступно.</p>
+        <p class="muted" style="margin-top:-6px;">Поля необязательны. Если выбрана стирка — «одевание на круг» недоступно. Позиция стирки в прайсе: «с коррекцией» при стрижке и/или почасовой работе; иначе «без коррекции».</p>
 
         <div class="row">
           <div>
@@ -150,22 +150,19 @@
             <input name="corr_trim_qty" type="number" step="1" min="0" value="{{ fp.corr_trim_qty or 0 }}" />
           </div>
           <div>
-            <label>Коррекция дреда (1шт) — количество</label>
-            <input name="corr_dread_qty" type="number" step="1" min="0" value="{{ fp.corr_dread_qty or 0 }}" />
+            <label>Почасовая коррекция заготовок (кудри, дреды), ч</label>
+            <input name="corr_hourly_hours" type="number" step="0.25" min="0" value="{{ fp.corr_hourly_hours or '' }}" placeholder="0 или фактическое время" style="max-width:180px;" />
           </div>
         </div>
 
         <div class="row" style="margin-top: 10px;">
-          <div>
-            <label>Коррекция кудрей (1шт) — количество</label>
-            <input name="corr_curl_qty" type="number" step="1" min="0" value="{{ fp.corr_curl_qty or 0 }}" />
+          <div style="flex:1; min-width:220px;">
+            <label>Описание комплекта</label>
+            <input name="corr_kit_description" type="text" maxlength="500" value="{{ fp.get('corr_kit_description', '') or '' }}" placeholder="комментарий" />
           </div>
           <div>
-            <div style="font-weight: 600; margin-bottom: 6px;">Сложность кудрей / дредов</div>
-            <div id="corr_curl_dread_complexity_wrap" style="display: flex; flex-wrap: wrap; gap: 10px 16px;">
-              <label><input type="radio" name="corr_curl_dread_complexity" value="NORMAL" {% if (fp.corr_curl_dread_complexity or 'NORMAL') == 'NORMAL' %}checked{% endif %} /> Обычная</label>
-              <label><input type="radio" name="corr_curl_dread_complexity" value="HARD" {% if fp.corr_curl_dread_complexity == 'HARD' %}checked{% endif %} /> Сложная (×1.5)</label>
-            </div>
+            <label>Количество заготовок в комплекте</label>
+            <input name="corr_kit_blanks_count" type="number" step="1" min="0" value="{{ fp.get('corr_kit_blanks_count', '') or '' }}" placeholder="для информации" />
           </div>
         </div>
 
@@ -307,23 +304,6 @@
       if (!kind || !el) return;
       el.style.display = (kind.value === 'KIT_CORRECTION') ? 'block' : 'none';
       syncCorrectionRules();
-      syncCorrectionComplexity();
-    }
-    function syncCorrectionComplexity() {
-      var dreadQ = parseInt((document.querySelector('input[name="corr_dread_qty"]')||{}).value||'0',10) || 0;
-      var curlQ = parseInt((document.querySelector('input[name="corr_curl_qty"]')||{}).value||'0',10) || 0;
-      var active = dreadQ > 0 || curlQ > 0;
-      document.querySelectorAll('input[name="corr_curl_dread_complexity"]').forEach(function (r) {
-        r.disabled = !active;
-        if (!active) r.checked = false;
-      });
-      if (active) {
-        var any = document.querySelector('input[name="corr_curl_dread_complexity"]:checked');
-        if (!any) {
-          var n = document.querySelector('input[name="corr_curl_dread_complexity"][value="NORMAL"]');
-          if (n) n.checked = true;
-        }
-      }
     }
     function syncCorrectionRules() {
       var wash = document.getElementById('corr_wash');
@@ -470,33 +450,32 @@
       if (k === 'KIT_CORRECTION') {
         var mapc = (meta && meta.correction) ? meta.correction : {};
         function svcRow(nm) { return mapc[nm] || null; }
-        function mpSum(nm, units, cmul) {
+        function mpSum(nm, units) {
           var r = svcRow(nm);
           if (!r) return 0;
-          return (parseFloat(r.master_pay) || 0) * (units || 0) * (cmul || 1);
+          return (parseFloat(r.master_pay) || 0) * (parseFloat(units) || 0);
         }
         function fxSum(nm, units) {
           var r = svcRow(nm);
           if (!r) return 0;
-          return (parseFloat(r.fixed_expense) || 0) * (units || 0);
+          return (parseFloat(r.fixed_expense) || 0) * (parseFloat(units) || 0);
         }
         var trimQ = parseInt((document.querySelector('input[name="corr_trim_qty"]') || {}).value || '0', 10) || 0;
-        var dreadQ = parseInt((document.querySelector('input[name="corr_dread_qty"]') || {}).value || '0', 10) || 0;
-        var curlQ = parseInt((document.querySelector('input[name="corr_curl_qty"]') || {}).value || '0', 10) || 0;
+        var hhRaw = String((document.querySelector('input[name="corr_hourly_hours"]') || {}).value || '').replace(',', '.').trim();
+        var hh = hhRaw ? (parseFloat(hhRaw) || 0) : 0;
+        var hhPay = hh;
         var wash = (document.getElementById('corr_wash') || {}).checked;
         var circle = (document.getElementById('corr_circle') || {}).checked;
         var steam = (document.querySelector('input[name="corr_steam"]') || {}).checked;
-        var cdHard = (document.querySelector('input[name="corr_curl_dread_complexity"]:checked') || {}).value === 'HARD';
-        var cm = (dreadQ > 0 || curlQ > 0) && cdHard ? 1.5 : 1.0;
+        var washNm = (trimQ > 0 || hh > 0) ? 'Стирка (с коррекцией)' : 'Стирка (без коррекции)';
 
         var payT = 0;
         var fxT = 0;
-        if (trimQ > 0) { payT += mpSum('Стрижка (1шт)', trimQ, 1.0); fxT += fxSum('Стрижка (1шт)', trimQ); }
-        if (dreadQ > 0) { payT += mpSum('Коррекция дреда (1шт)', dreadQ, cm); fxT += fxSum('Коррекция дреда (1шт)', dreadQ); }
-        if (curlQ > 0) { payT += mpSum('Коррекция кудрей (1шт)', curlQ, cm); fxT += fxSum('Коррекция кудрей (1шт)', curlQ); }
-        if (wash) { payT += mpSum('Стирка', 1, 1.0); fxT += fxSum('Стирка', 1); }
-        if (steam) { payT += mpSum('Отпаривание', 1, 1.0); fxT += fxSum('Отпаривание', 1); }
-        if (circle) { payT += mpSum('Одевание на круг', 1, 1.0); fxT += fxSum('Одевание на круг', 1); }
+        if (trimQ > 0) { payT += mpSum('Стрижка (1шт)', trimQ); fxT += fxSum('Стрижка (1шт)', trimQ); }
+        if (hhPay > 0) { payT += mpSum('Почасовая коррекция заготовок (1 ч)', hhPay); fxT += fxSum('Почасовая коррекция заготовок (1 ч)', hhPay); }
+        if (wash) { payT += mpSum(washNm, 1); fxT += fxSum(washNm, 1); }
+        if (steam) { payT += mpSum('Отпаривание', 1); fxT += fxSum('Отпаривание', 1); }
+        if (circle) { payT += mpSum('Одевание на круг', 1); fxT += fxSum('Одевание на круг', 1); }
 
         var uid1 = st.currentUserId || 0;
         setPayLines([('ЗП «' + nameByUserId(st, uid1) + '»: ' + money2(payT * bonus) + ' ₽')]);
@@ -565,17 +544,17 @@
           if (hi != null) { sumHi += hi * units; any = true; }
         }
         var trimQ = parseInt((document.querySelector('input[name="corr_trim_qty"]')||{}).value||'0',10) || 0;
-        var dreadQ = parseInt((document.querySelector('input[name="corr_dread_qty"]')||{}).value||'0',10) || 0;
-        var curlQ = parseInt((document.querySelector('input[name="corr_curl_qty"]')||{}).value||'0',10) || 0;
+        var hhRaw = String((document.querySelector('input[name="corr_hourly_hours"]') || {}).value || '').replace(',', '.').trim();
+        var hh = hhRaw ? (parseFloat(hhRaw) || 0) : 0;
         var wash = (document.getElementById('corr_wash')||{}).checked;
         var circle = (document.getElementById('corr_circle')||{}).checked;
         var steam = (document.querySelector('input[name="corr_steam"]')||{}).checked;
-        var cdHard = (document.querySelector('input[name="corr_curl_dread_complexity"]:checked')||{}).value === 'HARD';
-        var cm = (dreadQ > 0 || curlQ > 0) && cdHard ? 1.5 : 1.0;
+        var washNm = (trimQ > 0 || hh > 0) ? 'Стирка (с коррекцией)' : 'Стирка (без коррекции)';
         if (trimQ > 0) add('Стрижка (1шт)', trimQ);
-        if (dreadQ > 0) add('Коррекция дреда (1шт)', dreadQ * cm);
-        if (curlQ > 0) add('Коррекция кудрей (1шт)', curlQ * cm);
-        if (wash) add('Стирка', 1);
+        var rowH = mapc['Почасовая коррекция заготовок (1 ч)'] || null;
+        var cph = rowH && rowH.client_from != null ? rowH.client_from : null;
+        if (hh > 0 && cph != null) { sumLo += cph * hh; sumHi += cph * hh; any = true; }
+        if (wash) add(washNm, 1);
         if (steam) add('Отпаривание', 1);
         if (circle) add('Одевание на круг', 1);
         if (any) {
@@ -738,7 +717,7 @@
     if (corrWash) corrWash.addEventListener('change', function () { syncCorrectionRules(); syncPriceHint(); syncWorkPreview(); });
     var corrCircle = document.getElementById('corr_circle');
     if (corrCircle) corrCircle.addEventListener('change', function(){ syncPriceHint(); syncWorkPreview(); });
-    document.querySelectorAll('input[name="corr_trim_qty"], input[name="corr_dread_qty"], input[name="corr_curl_qty"], input[name="corr_curl_dread_complexity"], input[name="corr_steam"], input[name="rubber_attach_qty"], input[name="rubber_braids_qty"], select[name="rubber_variant"], input[name="mix_complexity"], input[name="mix_source"]').forEach(function(el){ el.addEventListener('change', function(){ syncCorrectionComplexity(); syncPriceHint(); syncWorkPreview(); }); el.addEventListener('input', function(){ syncCorrectionComplexity(); syncPriceHint(); syncWorkPreview(); }); });
+    document.querySelectorAll('input[name="corr_trim_qty"], input[name="corr_hourly_hours"], input[name="corr_steam"], input[name="corr_kit_description"], input[name="corr_kit_blanks_count"], input[name="rubber_attach_qty"], input[name="rubber_braids_qty"], select[name="rubber_variant"], input[name="mix_complexity"], input[name="mix_source"]').forEach(function(el){ el.addEventListener('change', function(){ syncPriceHint(); syncWorkPreview(); }); el.addEventListener('input', function(){ syncPriceHint(); syncWorkPreview(); }); });
     document.querySelectorAll('input[name="kanekalon_grams"], input[name="kudri_grams"]').forEach(function (el) {
       el.addEventListener('change', function () { syncMixUI(); syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });
       el.addEventListener('input', function () { syncMixUI(); syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });

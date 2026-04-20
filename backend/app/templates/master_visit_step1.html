@@ -302,28 +302,25 @@
 
         <div id="own_correction_block" class="card" style="display: none; margin-top: 10px; background: #f8fafc;">
           <h4 style="margin: 0 0 8px;">Коррекция комплекта</h4>
-          <p class="muted" style="margin-top: -4px; font-size: 12px;">Укажите количества и/или отметьте пункты. Если выбрана стирка — «одевание на круг» недоступно.</p>
+          <p class="muted" style="margin-top: -4px; font-size: 12px;">Поля необязательны. Стирка в прайсе — «с коррекцией», если есть стрижка и/или почасовая работа.</p>
           <div class="row">
             <div>
               <label>Стрижка (1шт) — количество</label>
               <input name="own_corr_trim_qty" type="number" step="1" min="0" value="{{ fp.get('own_corr_trim_qty', '0') }}" />
             </div>
             <div>
-              <label>Коррекция дреда (1шт) — количество</label>
-              <input name="own_corr_dread_qty" type="number" step="1" min="0" value="{{ fp.get('own_corr_dread_qty', '0') }}" />
+              <label>Почасовая коррекция заготовок (кудри, дреды), ч</label>
+              <input name="own_corr_hourly_hours" type="number" step="0.25" min="0" value="{{ fp.get('own_corr_hourly_hours', '') }}" placeholder="0 или фактическое время" style="max-width:180px;" />
             </div>
           </div>
           <div class="row" style="margin-top: 10px;">
-            <div>
-              <label>Коррекция кудрей (1шт) — количество</label>
-              <input name="own_corr_curl_qty" type="number" step="1" min="0" value="{{ fp.get('own_corr_curl_qty', '0') }}" />
+            <div style="flex:1; min-width:220px;">
+              <label>Описание комплекта</label>
+              <input name="own_corr_kit_description" type="text" maxlength="500" value="{{ fp.get('own_corr_kit_description', '') }}" placeholder="комментарий" />
             </div>
             <div>
-              <div style="font-weight: 600; margin-bottom: 6px;">Сложность кудрей / дредов</div>
-              <div id="own_corr_curl_dread_complexity_wrap" style="display: flex; flex-wrap: wrap; gap: 10px 16px;">
-                <label><input type="radio" name="own_corr_curl_dread_complexity" value="NORMAL" {% if (fp.get('own_corr_curl_dread_complexity') or 'NORMAL') == 'NORMAL' %}checked{% endif %} /> Обычная</label>
-                <label><input type="radio" name="own_corr_curl_dread_complexity" value="HARD" {% if fp.get('own_corr_curl_dread_complexity') == 'HARD' %}checked{% endif %} /> Сложная (×1.5)</label>
-              </div>
+              <label>Количество заготовок в комплекте</label>
+              <input name="own_corr_kit_blanks_count" type="number" step="1" min="0" value="{{ fp.get('own_corr_kit_blanks_count', '') }}" placeholder="для информации" />
             </div>
           </div>
           <div style="margin-top: 10px;">
@@ -789,30 +786,24 @@
           const ownCorr = document.querySelector('input[name="own_correction"]');
           if (ownCorr && ownCorr.checked) {
             const trimQ = parseInt((document.querySelector('input[name="own_corr_trim_qty"]') || {}).value || '0', 10) || 0;
-            const dreadQ = parseInt((document.querySelector('input[name="own_corr_dread_qty"]') || {}).value || '0', 10) || 0;
-            const curlQ = parseInt((document.querySelector('input[name="own_corr_curl_qty"]') || {}).value || '0', 10) || 0;
+            const hhRaw = String((document.querySelector('input[name="own_corr_hourly_hours"]') || {}).value || '').replace(',', '.').trim();
+            const hh = hhRaw ? (parseFloat(hhRaw) || 0) : 0;
             const wash = (document.getElementById('own_corr_wash') || {}).checked;
             const circle = (document.getElementById('own_corr_circle') || {}).checked;
             const steam = (document.querySelector('input[name="own_corr_steam"]') || {}).checked;
+            const desc = String((document.querySelector('input[name="own_corr_kit_description"]') || {}).value || '').trim();
+            const kbRaw = String((document.querySelector('input[name="own_corr_kit_blanks_count"]') || {}).value || '').trim();
             if (wash && circle) {
               e.preventDefault();
               alert('Если выбрана «Стирка», то «Одевание на круг» выбирать нельзя.');
               return;
             }
             if (
-              trimQ <= 0 && !wash && !circle && !steam && dreadQ <= 0 && curlQ <= 0
+              trimQ <= 0 && hh <= 0 && !wash && !circle && !steam && !desc && !kbRaw
             ) {
               e.preventDefault();
-              alert('При отмеченной коррекции укажите хотя бы одну операцию.');
+              alert('При отмеченной коррекции заполните хотя бы одно поле или отметьте операцию.');
               return;
-            }
-            if (dreadQ > 0 || curlQ > 0) {
-              const cr = document.querySelector('input[name="own_corr_curl_dread_complexity"]:checked');
-              if (!cr) {
-                e.preventDefault();
-                alert('Выберите сложность кудрей / дредов.');
-                return;
-              }
             }
           }
           const ownEx = document.getElementById('own_extra_blanks');
@@ -1266,22 +1257,6 @@
         circle.disabled = false;
       }
     }
-    function syncOwnCorrComplexity() {
-      const dreadQ = parseInt((document.querySelector('input[name="own_corr_dread_qty"]') || {}).value || '0', 10) || 0;
-      const curlQ = parseInt((document.querySelector('input[name="own_corr_curl_qty"]') || {}).value || '0', 10) || 0;
-      const active = dreadQ > 0 || curlQ > 0;
-      document.querySelectorAll('input[name="own_corr_curl_dread_complexity"]').forEach((r) => {
-        r.disabled = !active;
-        if (!active) r.checked = false;
-      });
-      if (active) {
-        const any = document.querySelector('input[name="own_corr_curl_dread_complexity"]:checked');
-        if (!any) {
-          const n = document.querySelector('input[name="own_corr_curl_dread_complexity"][value="NORMAL"]');
-          if (n) n.checked = true;
-        }
-      }
-    }
     function ownCorrectionPanelSync() {
       const kk = document.querySelector('input[name="kit_kind"]:checked');
       const cb = document.getElementById('own_correction');
@@ -1291,7 +1266,6 @@
       panel.style.display = show ? 'block' : 'none';
       if (show) {
         syncOwnCorrWashCircle();
-        syncOwnCorrComplexity();
       }
     }
     function kitKind() {
@@ -1306,10 +1280,6 @@
     }
     const ownCorrWash = document.getElementById('own_corr_wash');
     if (ownCorrWash) ownCorrWash.addEventListener('change', function () { syncOwnCorrWashCircle(); });
-    document.querySelectorAll('input[name="own_corr_dread_qty"], input[name="own_corr_curl_qty"]').forEach((el) => {
-      el.addEventListener('input', syncOwnCorrComplexity);
-      el.addEventListener('change', syncOwnCorrComplexity);
-    });
 
     document.querySelectorAll('input[name="thermo_template_mode"]').forEach(function (el) {
       el.addEventListener('change', thermoModeUpdate);

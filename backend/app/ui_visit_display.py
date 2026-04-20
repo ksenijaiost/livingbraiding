@@ -244,18 +244,21 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
             cd = ow.get("correction_details")
             if ow.get("correction") and isinstance(cd, dict):
                 blocks.append(("Корр.: стрижка (шт)", _format_card_scalar(cd.get("trim_qty", 0))))
-                blocks.append(("Корр.: дреды (шт)", _format_card_scalar(cd.get("dread_qty", 0))))
-                blocks.append(("Корр.: кудри (шт)", _format_card_scalar(cd.get("curl_qty", 0))))
-                cx = cd.get("curl_dread_complexity")
-                cx_lbl = "—"
-                if cx == "HARD":
-                    cx_lbl = "Сложная"
-                elif cx == "NORMAL":
-                    cx_lbl = "Обычная"
-                blocks.append(("Корр.: сложность кудрей/дредов", cx_lbl))
+                hh = cd.get("hourly_hours", 0)
+                blocks.append(("Корр.: почасовая коррекция", _format_card_scalar(hh) + " ч"))
+                if cd.get("kit_description"):
+                    blocks.append(("Корр.: описание комплекта", str(cd.get("kit_description"))))
+                if cd.get("kit_blanks_count") is not None:
+                    blocks.append(
+                        ("Корр.: заготовок в комплекте (учёт)", _format_card_scalar(cd.get("kit_blanks_count")))
+                    )
                 blocks.append(("Корр.: стирка", "Да" if cd.get("wash") else "Нет"))
                 blocks.append(("Корр.: отпаривание", "Да" if cd.get("steam") else "Нет"))
                 blocks.append(("Корр.: одевание на круг", "Да" if cd.get("circle") else "Нет"))
+                if cd.get("dread_qty"):
+                    blocks.append(("Корр.: (архив) дреды (шт)", _format_card_scalar(cd.get("dread_qty"))))
+                if cd.get("curl_qty"):
+                    blocks.append(("Корр.: (архив) кудри (шт)", _format_card_scalar(cd.get("curl_qty"))))
             blocks.append(("Дополнительные заготовки", "Да" if ow.get("extra_blanks") else "Нет"))
             ex = ow.get("extra")
             if ex and isinstance(ex, dict):

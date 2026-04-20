@@ -1045,7 +1045,7 @@ class Visit(Base):
 
     cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     profit_before_split: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    salon_cut_pct_at_time: Mapped[float] = mapped_column(Float, default=0.3, nullable=False)
+    salon_cut_pct_at_time: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
     salon_profit: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     masters_pool: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 

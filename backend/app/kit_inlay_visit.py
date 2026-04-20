@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Callable, Literal
+from typing import Any, Callable
 
 from sqlalchemy import func, or_, select
 from starlette.datastructures import UploadFile
@@ -117,11 +117,11 @@ def service_requires_tail_block(service: Service) -> bool:
 def get_salon_cut_pct(db: Session) -> float:
     row = db.get(Setting, "salon_cut_pct")
     if not row:
-        return 0.3
+        return 0.5
     try:
         return float(row.value.replace(",", "."))
     except ValueError:
-        return 0.3
+        return 0.5
 
 
 def _materials_cost_and_snapshot(
@@ -323,6 +323,17 @@ def _parse_visit_client_discount_percent(g: Callable[[str, str], str]) -> int:
     return int(round(v))
 
 
+def _parse_optional_nonneg_int(g: Callable[[str, str], str], name: str) -> int | None:
+    raw = (g(name, "") or "").strip()
+    if not raw:
+        return None
+    try:
+        v = int(float(raw.replace(",", ".")))
+    except ValueError:
+        return None
+    return max(0, v)
+
+
 def parse_kit_inlay_form(
     form: Any, *, single_master_default_id: int | None = None
 ) -> KitInlayFormInput:
@@ -457,12 +468,12 @@ def parse_kit_inlay_form(
         own_extra_stock_use_entire=g_bool("own_extra_stock_use_entire"),
         own_extra_stock_blanks_used=g_int("own_extra_stock_blanks_used", 0),
         own_corr_trim_qty=g_int("own_corr_trim_qty", 0),
-        own_corr_dread_qty=g_int("own_corr_dread_qty", 0),
-        own_corr_curl_qty=g_int("own_corr_curl_qty", 0),
+        own_corr_hourly_hours=max(0.0, g_float("own_corr_hourly_hours", 0)),
+        own_corr_kit_description=g("own_corr_kit_description", ""),
+        own_corr_kit_blanks_count=_parse_optional_nonneg_int(g, "own_corr_kit_blanks_count"),
         own_corr_wash=g_bool("own_corr_wash"),
         own_corr_circle=g_bool("own_corr_circle"),
         own_corr_steam=g_bool("own_corr_steam"),
-        own_corr_curl_dread_complexity=g("own_corr_curl_dread_complexity"),
         visit_master_allocations=visit_master_allocations,
         questionnaire_raw=extract_questionnaire_raw_from_form(form),
         addon_sales_amount=max(0.0, g_float("addon_sales_amount", 0)),
@@ -512,12 +523,12 @@ class KitInlayFormInput:
     own_extra_stock_use_entire: bool
     own_extra_stock_blanks_used: int
     own_corr_trim_qty: int
-    own_corr_dread_qty: int
-    own_corr_curl_qty: int
+    own_corr_hourly_hours: float
+    own_corr_kit_description: str
+    own_corr_kit_blanks_count: int | None
     own_corr_wash: bool
     own_corr_circle: bool
     own_corr_steam: bool
-    own_corr_curl_dread_complexity: str
     visit_master_allocations: list[tuple[int, int]]
     questionnaire_raw: dict[str, str]
     addon_sales_amount: float
@@ -573,31 +584,21 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
             raise ValueError("Укажите происхождение своего комплекта")
         corr_details: KitOwnCorrectionDetails | None = None
         if inp.own_correction:
-            tq, dq, cq = inp.own_corr_trim_qty, inp.own_corr_dread_qty, inp.own_corr_curl_qty
             if inp.own_corr_wash and inp.own_corr_circle:
                 raise ValueError(
                     "Если выбрана «Стирка» (коррекция), то «Одевание на круг» выбирать нельзя (входит в стирку)."
                 )
-            if any(x < 0 for x in (tq, dq, cq)):
-                raise ValueError("Количество в блоке коррекции должно быть неотрицательным.")
-            if (
-                (tq <= 0)
-                and (not inp.own_corr_wash)
-                and (not inp.own_corr_circle)
-                and (not inp.own_corr_steam)
-                and (dq <= 0)
-                and (cq <= 0)
-            ):
-                raise ValueError("При отмеченной коррекции укажите хотя бы одну операцию.")
-            cxc: Literal["NORMAL", "HARD"] | None = None
-            if dq > 0 or cq > 0:
-                cr = (inp.own_corr_curl_dread_complexity or "").strip().upper()
-                cxc = "HARD" if cr == "HARD" else "NORMAL"
+            tq = max(0, int(inp.own_corr_trim_qty))
+            hh = max(0.0, float(inp.own_corr_hourly_hours))
+            desc = (inp.own_corr_kit_description or "").strip()
+            kb = inp.own_corr_kit_blanks_count
+            if kb is not None and kb < 0:
+                raise ValueError("«Количество заготовок в комплекте» не может быть отрицательным.")
             corr_details = KitOwnCorrectionDetails(
                 trim_qty=tq,
-                dread_qty=dq,
-                curl_qty=cq,
-                curl_dread_complexity=cxc,
+                hourly_hours=hh,
+                kit_description=desc,
+                kit_blanks_count=kb,
                 wash=inp.own_corr_wash,
                 circle=inp.own_corr_circle,
                 steam=inp.own_corr_steam,
