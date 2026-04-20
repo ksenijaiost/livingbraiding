@@ -93,10 +93,18 @@ def ensure_seed_data(db: Session) -> None:
     salon = db.get(Setting, "salon_cut_pct")
     if not salon:
         db.add(Setting(key="salon_cut_pct", value="0.5"))
+    elif (salon.updated_at is None) and (salon.updated_by_user_id is None) and (str(salon.value).strip() == "0.3"):
+        # One-time migration from old default (0.3) to the current default (0.5),
+        # but only if the setting was never edited by a user.
+        salon.value = "0.5"
 
     edit_days = db.get(Setting, "edit_window_days")
     if not edit_days:
         db.add(Setting(key="edit_window_days", value="2"))
+
+    audit_retention = db.get(Setting, "audit_retention_months")
+    if not audit_retention:
+        db.add(Setting(key="audit_retention_months", value="6"))
 
     tz = db.get(Setting, "display_timezone")
     if not tz:

@@ -19,10 +19,6 @@
         <input name="salon_cut_pct" value="{{ salon_cut_pct }}" />
       </div>
       <div style="margin-bottom: 12px;">
-        <label>Окно редактирования (дни)</label>
-        <input name="edit_window_days" type="number" step="1" min="0" value="{{ edit_window_days }}" />
-      </div>
-      <div style="margin-bottom: 12px;">
         <label>Канекалон, ₽ за 100 г</label>
         <input name="kanek_per_100g" type="number" step="0.01" min="0" value="{{ kanek_per_100g }}" />
       </div>
@@ -31,23 +27,17 @@
         <input name="kudri_per_100g" type="number" step="0.01" min="0" value="{{ kudri_per_100g }}" />
       </div>
       <div style="margin-bottom: 12px;">
-        <label>Часовой пояс (отображение времени)</label>
-        <select name="display_timezone">
-          {% for tz_id, tz_name in timezone_choices %}
-            <option value="{{ tz_id }}" {% if display_timezone == tz_id %}selected{% endif %}>{{ tz_name }} — {{ tz_id }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div style="margin-bottom: 12px;">
         <label>Максимум резервов на один комплект (1–20)</label>
         <input name="kit_max_reserves_per_kit" type="number" step="1" min="1" max="20" value="{{ kit_max_reserves_per_kit }}" />
       </div>
-      <button type="submit">Сохранить</button>
+      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+        <button type="submit">Сохранить</button>
+      </div>
     </form>
 
-    <hr style="border:0; border-top:1px solid #e5e7eb; margin: 16px 0;" />
+    <hr style="border:0; border-top:1px solid #e5e7eb; margin: 20px 0;" />
 
-    <details {% if work_rates_open %}open{% endif %}>
+    <details {% if work_rates_open %}open{% endif %} style="margin-top: 4px;">
       <summary style="cursor:pointer; font-weight: 600;">Коэффициенты расчётов</summary>
       <div class="card" style="background:#f8fafc; margin-top: 12px;">
         <p class="muted" style="margin-top:0;">
@@ -63,8 +53,41 @@
         {% endif %}
         <form method="post" action="/admin/settings/work-rates">
           <div style="margin-bottom: 12px;">
-            <label>Доля студии (0..1)</label>
-            <input name="studio_share" type="number" step="0.01" min="0" max="1" value="{{ work_rates.studio_share }}" />
+            <label style="margin-bottom: 6px;">Доля студии</label>
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+              <label style="display:flex; align-items:center; gap:8px; margin:0;">
+                <input id="studio_share_override" name="studio_share_override" type="checkbox" value="1" {% if work_rates.studio_share_override %}checked{% endif %} />
+                <span>Вручную (иначе = процент салона)</span>
+              </label>
+              <input
+                id="studio_share_input"
+                name="studio_share"
+                type="number"
+                step="0.01"
+                min="0"
+                max="1"
+                value="{{ work_rates.studio_share }}"
+                {% if not work_rates.studio_share_override %}disabled{% endif %}
+                style="width:100%; max-width: 10rem;"
+              />
+              <span class="muted" style="font-size:12px;">Текущий процент салона: {{ salon_cut_pct_float }}</span>
+            </div>
+            <script>
+              (function () {
+                var cb = document.getElementById("studio_share_override");
+                var inp = document.getElementById("studio_share_input");
+                if (!cb || !inp) return;
+                function sync() {
+                  inp.disabled = !cb.checked;
+                  if (!cb.checked) {
+                    // при выключении ручного режима оставляем поле визуально синхронным
+                    inp.value = "{{ salon_cut_pct_float }}";
+                  }
+                }
+                cb.addEventListener("change", sync);
+                sync();
+              })();
+            </script>
           </div>
           <div class="card" style="background:#eef2ff; border:1px solid #c7d2fe; margin-bottom: 12px; max-width: 28rem;">
             <div style="font-weight:600; margin-bottom:10px;">Смешка — ставки ₽/г по сложности</div>
@@ -103,6 +126,35 @@
         <p class="muted" style="font-size:12px; margin-bottom:0;">
           Ставки по SE/DE/коррекции и пороги добавим в следующем подшаге (6.3.2/6.3.3).
         </p>
+      </div>
+    </details>
+
+    <details style="margin-top: 16px;">
+      <summary style="cursor:pointer; font-weight: 600;">Системные настройки</summary>
+      <div class="card" style="background:#f8fafc; margin-top: 12px;">
+        <p class="muted" style="margin-top:0;">Эти параметры лучше менять только при необходимости.</p>
+        <form method="post" action="/admin/settings/system">
+          <div style="margin-bottom: 12px;">
+            <label>Окно редактирования (дни)</label>
+            <input name="edit_window_days" type="number" step="1" min="0" value="{{ edit_window_days }}" />
+          </div>
+          <div style="margin-bottom: 12px;">
+            <label>Хранить аудит (месяцев)</label>
+            <input name="audit_retention_months" type="number" step="1" min="1" max="36" value="{{ audit_retention_months }}" />
+            <div class="muted" style="font-size: 12px; margin-top: 6px;">
+              Записи аудита старше этого срока удаляются автоматически при старте приложения.
+            </div>
+          </div>
+          <div style="margin-bottom: 12px;">
+            <label>Часовой пояс (отображение времени)</label>
+            <select name="display_timezone">
+              {% for tz_id, tz_name in timezone_choices %}
+                <option value="{{ tz_id }}" {% if display_timezone == tz_id %}selected{% endif %}>{{ tz_name }} — {{ tz_id }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit">Сохранить системные настройки</button>
+        </form>
       </div>
     </details>
   </div>

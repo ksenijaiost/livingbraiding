@@ -181,6 +181,7 @@ from app.kit_inlay_visit import (
     validate_master_visit_step1,
 )
 from app.security import hash_password
+from app.audit_retention import purge_expired_audit_logs
 from app.seed import ensure_seed_data
 from sqlalchemy.exc import OperationalError
 from sqlalchemy import text
@@ -249,6 +250,7 @@ def _startup():
         except OperationalError:
             return
         ensure_seed_data(db)
+        purge_expired_audit_logs(db)
     finally:
         db.close()
 
@@ -5254,9 +5256,17 @@ def admin_settings_page(
     db: Session = Depends(get_db),
 ):
     salon = db.get(Setting, "salon_cut_pct")
-    salon_cut_pct = salon.value if salon else "0.5"
+    salon_cut_pct = (salon.value if salon and str(salon.value).strip() else "0.5")
+    try:
+        salon_cut_pct_float = float(str(salon_cut_pct).strip().replace(",", "."))
+    except ValueError:
+        salon_cut_pct_float = 0.5
     edit_days = db.get(Setting, "edit_window_days")
-    edit_window_days = edit_days.value if edit_days else "2"
+    edit_window_days = (edit_days.value if edit_days and str(edit_days.value).strip() else "2")
+    audit_retention_row = db.get(Setting, "audit_retention_months")
+    audit_retention_months = (
+        audit_retention_row.value if audit_retention_row and str(audit_retention_row.value).strip() else "6"
+    )
     pk = db.get(MaterialPriceCurrent, MaterialType.KANEKALON)
     pku = db.get(MaterialPriceCurrent, MaterialType.KUDRI)
     kanek_per_100 = str((pk.price_per_gram * 100) if pk else 400.0)
@@ -5275,8 +5285,24 @@ def admin_settings_page(
         except Exception:
             return default
 
+    def _wr_bool(key: str, default: bool) -> bool:
+        r = db.scalar(select(WorkRate).where(WorkRate.key == key, WorkRate.is_active.is_(True)))
+        if not r:
+            return default
+        try:
+            v = json.loads(r.value_json)
+            return bool(v)
+        except Exception:
+            return default
+
+    studio_share_override = _wr_bool("studio_share_override", False)
+    studio_share_effective = (
+        _wr_float("studio_share", salon_cut_pct_float) if studio_share_override else salon_cut_pct_float
+    )
+
     work_rates = {
-        "studio_share": _wr_float("studio_share", 0.50),
+        "studio_share": studio_share_effective,
+        "studio_share_override": studio_share_override,
         **mix_rates_for_admin_form(db),
         "custom_order_bonus_multiplier": _wr_float("custom_order_bonus_multiplier", 1.0),
     }
@@ -5287,7 +5313,9 @@ def admin_settings_page(
             request,
             current_user=current_user,
             salon_cut_pct=salon_cut_pct,
+            salon_cut_pct_float=salon_cut_pct_float,
             edit_window_days=edit_window_days,
+            audit_retention_months=audit_retention_months,
             kanek_per_100g=kanek_per_100,
             kudri_per_100g=kudri_per_100,
             display_timezone=display_tz,
@@ -6161,18 +6189,12 @@ async def admin_payroll_fund_payout(
 @app.post("/admin/settings")
 def admin_settings_save(
     salon_cut_pct: str = Form(...),
-    edit_window_days: str = Form(...),
     kanek_per_100g: str = Form(...),
     kudri_per_100g: str = Form(...),
-    display_timezone: str = Form(...),
     kit_max_reserves_per_kit: str = Form(...),
     current_user=Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    tz_raw = display_timezone.strip()
-    if tz_raw not in ALLOWED_TIMEZONE_IDS:
-        return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
-
     value = salon_cut_pct.strip().replace(",", ".")
     try:
         pct = float(value)
@@ -6202,29 +6224,6 @@ def admin_settings_save(
     )
 
     try:
-        days = int(edit_window_days.strip())
-    except ValueError:
-        days = -1
-    if days < 0 or days > 365:
-        return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
-    drow = db.get(Setting, "edit_window_days")
-    before_days = SimpleNamespace(value=(drow.value if drow else None))
-    if not drow:
-        drow = Setting(key="edit_window_days", value=str(days))
-        db.add(drow)
-    else:
-        drow.value = str(days)
-    drow.updated_at = now
-    drow.updated_by_user_id = current_user.id
-    write_audit_rows(
-        db,
-        log_model=SettingAuditLog,
-        entity_field="setting_key",
-        entity_id=drow.key,
-        changed_by_user_id=current_user.id,
-        changes=diff_fields(before_days, drow, ("value",)),
-    )
-    try:
         k100 = float(kanek_per_100g.strip().replace(",", "."))
         ku100 = float(kudri_per_100g.strip().replace(",", "."))
     except ValueError:
@@ -6237,27 +6236,9 @@ def admin_settings_save(
         mrow = db.get(MaterialPriceCurrent, mt)
         if not mrow:
             db.add(MaterialPriceCurrent(material_type=mt, price_per_gram=per_g, updated_at=now))
-    else:
-        mrow.price_per_gram = per_g
-        mrow.updated_at = now
-
-    tz_row = db.get(Setting, "display_timezone")
-    before_tz = SimpleNamespace(value=(tz_row.value if tz_row else None))
-    if not tz_row:
-        tz_row = Setting(key="display_timezone", value=tz_raw)
-        db.add(tz_row)
-    else:
-        tz_row.value = tz_raw
-    tz_row.updated_at = now
-    tz_row.updated_by_user_id = current_user.id
-    write_audit_rows(
-        db,
-        log_model=SettingAuditLog,
-        entity_field="setting_key",
-        entity_id=tz_row.key,
-        changed_by_user_id=current_user.id,
-        changes=diff_fields(before_tz, tz_row, ("value",)),
-    )
+        else:
+            mrow.price_per_gram = per_g
+            mrow.updated_at = now
 
     try:
         kmn = int(str(kit_max_reserves_per_kit).strip())
@@ -6287,6 +6268,90 @@ def admin_settings_save(
     return RedirectResponse(url="/admin/settings?saved=1", status_code=303)
 
 
+@app.post("/admin/settings/system")
+def admin_settings_system_save(
+    edit_window_days: str = Form(...),
+    audit_retention_months: str = Form(...),
+    display_timezone: str = Form(...),
+    current_user=Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    tz_raw = display_timezone.strip()
+    if tz_raw not in ALLOWED_TIMEZONE_IDS:
+        return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
+
+    now = datetime.utcnow()
+
+    try:
+        days = int(str(edit_window_days).strip())
+    except ValueError:
+        days = -1
+    if days < 0 or days > 365:
+        return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
+    drow = db.get(Setting, "edit_window_days")
+    before_days = SimpleNamespace(value=(drow.value if drow else None))
+    if not drow:
+        drow = Setting(key="edit_window_days", value=str(days))
+        db.add(drow)
+    else:
+        drow.value = str(days)
+    drow.updated_at = now
+    drow.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=SettingAuditLog,
+        entity_field="setting_key",
+        entity_id=drow.key,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before_days, drow, ("value",)),
+    )
+
+    try:
+        months = int(str(audit_retention_months).strip())
+    except ValueError:
+        months = -1
+    if months < 1 or months > 36:
+        return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
+    ar_row = db.get(Setting, "audit_retention_months")
+    before_ar = SimpleNamespace(value=(ar_row.value if ar_row else None))
+    if not ar_row:
+        ar_row = Setting(key="audit_retention_months", value=str(months))
+        db.add(ar_row)
+    else:
+        ar_row.value = str(months)
+    ar_row.updated_at = now
+    ar_row.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=SettingAuditLog,
+        entity_field="setting_key",
+        entity_id=ar_row.key,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before_ar, ar_row, ("value",)),
+    )
+
+    tz_row = db.get(Setting, "display_timezone")
+    before_tz = SimpleNamespace(value=(tz_row.value if tz_row else None))
+    if not tz_row:
+        tz_row = Setting(key="display_timezone", value=tz_raw)
+        db.add(tz_row)
+    else:
+        tz_row.value = tz_raw
+    tz_row.updated_at = now
+    tz_row.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=SettingAuditLog,
+        entity_field="setting_key",
+        entity_id=tz_row.key,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before_tz, tz_row, ("value",)),
+    )
+
+    db.commit()
+    return RedirectResponse(url="/admin/settings?saved=1", status_code=303)
+
+
 @app.post("/admin/settings/work-rates")
 async def admin_settings_work_rates_save(
     request: Request,
@@ -6302,12 +6367,27 @@ async def admin_settings_work_rates_save(
             raise ValueError(f"Некорректное число: {name}")
 
     try:
-        studio_share = _p("studio_share", 0.50)
+        salon = db.get(Setting, "salon_cut_pct")
+        salon_raw = (salon.value if salon else "0.5")
+        try:
+            salon_pct = float(str(salon_raw).strip().replace(",", "."))
+        except ValueError:
+            salon_pct = -1
+        if salon_pct < 0 or salon_pct > 1:
+            raise ValueError("Процент салона в настройках должен быть в диапазоне 0..1 (для привязки доли студии).")
+
+        override_raw = str(form.get("studio_share_override") or "").strip().lower()
+        studio_share_override = override_raw in ("1", "on", "true", "yes")
+        if studio_share_override:
+            studio_share = _p("studio_share", salon_pct)
+        else:
+            studio_share = salon_pct
         if studio_share < 0 or studio_share > 1:
             raise ValueError("Доля студии должна быть в диапазоне 0..1.")
 
-        payload: dict[str, float] = {
-            "studio_share": studio_share,
+        payload: dict[str, Any] = {
+            "studio_share": float(studio_share),
+            "studio_share_override": bool(studio_share_override),
             "mix_light": _p("mix_light", 0.5),
             "mix_standard": _p("mix_standard", 1.0),
             "mix_kanek": _p("mix_kanek", 1.5),
@@ -6316,15 +6396,23 @@ async def admin_settings_work_rates_save(
             "custom_order_bonus_multiplier": _p("custom_order_bonus_multiplier", 1.0),
         }
         for k, v in payload.items():
-            if v < 0:
+            if isinstance(v, (int, float)) and v < 0:
                 raise ValueError(f"Значение не может быть отрицательным: {k}")
     except ValueError as exc:
         # Re-render settings with error and open section
         # Reuse GET handler logic by collecting current values and overriding with submitted where possible.
         salon = db.get(Setting, "salon_cut_pct")
-        salon_cut_pct = salon.value if salon else "0.5"
+        salon_cut_pct = (salon.value if salon and str(salon.value).strip() else "0.5")
+        try:
+            salon_cut_pct_float = float(str(salon_cut_pct).strip().replace(",", "."))
+        except ValueError:
+            salon_cut_pct_float = 0.5
         edit_days = db.get(Setting, "edit_window_days")
-        edit_window_days = edit_days.value if edit_days else "2"
+        edit_window_days = (edit_days.value if edit_days and str(edit_days.value).strip() else "2")
+        audit_retention_row = db.get(Setting, "audit_retention_months")
+        audit_retention_months = (
+            audit_retention_row.value if audit_retention_row and str(audit_retention_row.value).strip() else "6"
+        )
         pk = db.get(MaterialPriceCurrent, MaterialType.KANEKALON)
         pku = db.get(MaterialPriceCurrent, MaterialType.KUDRI)
         kanek_per_100 = str((pk.price_per_gram * 100) if pk else 400.0)
@@ -6339,8 +6427,11 @@ async def admin_settings_work_rates_save(
             except ValueError:
                 return d
 
+        override_raw = str(form.get("studio_share_override") or "").strip().lower()
+        studio_share_override = override_raw in ("1", "on", "true", "yes")
         work_rates = {
-            "studio_share": _safe("studio_share", 0.50),
+            "studio_share_override": studio_share_override,
+            "studio_share": (_safe("studio_share", salon_cut_pct_float) if studio_share_override else salon_cut_pct_float),
             "mix_light": _safe("mix_light", 0.5),
             "mix_standard": _safe("mix_standard", 1.0),
             "mix_kanek": _safe("mix_kanek", 1.5),
@@ -6354,7 +6445,9 @@ async def admin_settings_work_rates_save(
                 request,
                 current_user=current_user,
                 salon_cut_pct=salon_cut_pct,
+                salon_cut_pct_float=salon_cut_pct_float,
                 edit_window_days=edit_window_days,
+                audit_retention_months=audit_retention_months,
                 kanek_per_100g=kanek_per_100,
                 kudri_per_100g=kudri_per_100,
                 display_timezone=display_tz,
