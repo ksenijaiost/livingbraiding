@@ -473,6 +473,18 @@ def product_sale_detail(
             .limit(200)
         ).all()
     )
+    linked_work_ids: list[int] = []
+    if sale.booking_id:
+        linked_work_ids = list(
+            db.scalars(
+                select(WorkForInventory.id)
+                .where(
+                    WorkForInventory.booking_id == int(sale.booking_id),
+                    WorkForInventory.is_voided.is_(False),
+                )
+                .order_by(WorkForInventory.id.asc())
+            ).all()
+        )
     return templates.TemplateResponse(
         "product_sale_detail.html",
         _ctx(
@@ -488,6 +500,7 @@ def product_sale_detail(
             material_mix_complexity_ru=ru_mix_complexity(
                 getattr(sale, "material_mix_complexity", None)
             ),
+            linked_work_ids=linked_work_ids,
         ),
     )
 

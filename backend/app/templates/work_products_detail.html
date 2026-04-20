@@ -70,6 +70,26 @@
             <div class="muted">{% if row.amount_from_client is not none %}{{ row.amount_from_client }} ₽{% else %}—{% endif %}</div>
           </div>
         </div>
+        {% if row.booking_id or linked_sale_ids %}
+          <div class="row" style="margin-top: 12px;">
+            {% if row.booking_id %}
+              <div>
+                <strong>Бронь</strong>
+                <div class="muted"><a href="/admin/bookings/{{ row.booking_id }}">#{{ row.booking_id }}</a></div>
+              </div>
+            {% endif %}
+            {% if linked_sale_ids %}
+              <div>
+                <strong>Продажа товара</strong>
+                <div class="muted">
+                  {% for sid in linked_sale_ids %}
+                    <a href="/sales/products/{{ sid }}">#{{ sid }}</a>{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                </div>
+              </div>
+            {% endif %}
+          </div>
+        {% endif %}
       </div>
 
       <div class="card" style="background:#f8fafc; margin-bottom: 12px;">

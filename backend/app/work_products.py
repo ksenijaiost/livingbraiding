@@ -1221,6 +1221,18 @@ def work_detail(
             .limit(200)
         ).all()
     )
+    linked_sale_ids: list[int] = []
+    if w.booking_id:
+        linked_sale_ids = list(
+            db.scalars(
+                select(ProductSale.id)
+                .where(
+                    ProductSale.booking_id == int(w.booking_id),
+                    ProductSale.is_voided.is_(False),
+                )
+                .order_by(ProductSale.id.asc())
+            ).all()
+        )
     return templates.TemplateResponse(
         "work_products_detail.html",
         _ctx(
@@ -1236,6 +1248,7 @@ def work_detail(
             edit_block_msg=edit_block_msg,
             audit_rows=audit_rows,
             msg=void_msg,
+            linked_sale_ids=linked_sale_ids,
         ),
     )
 
