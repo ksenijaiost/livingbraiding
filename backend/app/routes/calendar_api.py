@@ -29,6 +29,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime
 from app.display_time import get_display_timezone
+from app.forms_parse import parse_date_iso
 
 
 router = APIRouter()
@@ -115,7 +116,7 @@ def api_calendar_day(
     db: Session = Depends(get_db),
 ):
     try:
-        day = date.fromisoformat((d or "").strip())
+        day = parse_date_iso((d or "").strip(), field_name="d")
     except ValueError:
         raise HTTPException(status_code=400, detail="Некорректная дата")
 

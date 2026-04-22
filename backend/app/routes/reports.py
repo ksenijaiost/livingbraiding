@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.auth import AuthUser, require_role
 from app.db.models import ProductSaleKind, UserRole
 from app.db.session import get_db
+from app.forms_parse import parse_date_iso
 from app.operational_report import (
     build_operational_report,
     list_closed_payroll_periods,
@@ -35,8 +36,8 @@ def _admin_report_export_params(mode: str, d0: date, d1: date, selected_period_i
 
 def _report_detail_dates(df: str | None, dt: str | None, month_start: date, today: date) -> tuple[date, date]:
     try:
-        d0 = date.fromisoformat(df) if df else month_start
-        d1 = date.fromisoformat(dt) if dt else today
+        d0 = parse_date_iso(df, field_name="df") if df else month_start
+        d1 = parse_date_iso(dt, field_name="dt") if dt else today
     except ValueError:
         d0, d1 = month_start, today
     if d1 < d0:
