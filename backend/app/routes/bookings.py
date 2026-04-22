@@ -1,0 +1,1552 @@
+from __future__ import annotations
+
+import json
+import re
+from collections import defaultdict
+from datetime import date, datetime, timedelta
+from types import SimpleNamespace
+from typing import Any
+from urllib.parse import quote, urlencode
+from zoneinfo import ZoneInfo
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from sqlalchemy import and_, case, exists, func, or_, select
+from sqlalchemy.orm import Session, selectinload
+
+from app.audit import FieldChange, diff_fields, write_audit_rows
+from app.auth import AuthUser, require_role
+from app.client_validation import format_created_by_label, strip_or_none
+from app.db.models import (
+    Booking,
+    BookingAuditLog,
+    BookingKind,
+    BookingMaster,
+    BookingStaff,
+    BookingStaffKind,
+    BookingStatus,
+    Client,
+    Kit,
+    KitAuditLog,
+    KitReserve,
+    ProductSale,
+    ProductSaleKind,
+    User,
+    UserRole,
+    Visit,
+    VisitMaster,
+    WorkForInventory,
+    WorkForInventoryStaff,
+    WorkKind,
+    WorkScope,
+    Service,
+    ServiceSubcategory,
+)
+from app.db.session import get_db
+from app.display_time import get_display_timezone
+from app.kit_inlay_visit import get_kit_max_reserves_per_kit, kit_reserve_slots_used
+from app.user_roles import select_users_with_any_role, select_users_with_role
+from app.work_products import _rubber_type_items
+from app.kit_inlay_visit import list_master_visit_services_catalog
+from app.webui import templates, ctx as _ctx
+
+
+router = APIRouter()
+
+
+def _booking_kind_label(k: str) -> str:
+    if k == BookingKind.VISIT.value:
+        return "Визит (услуга)"
+    if k == BookingKind.PRODUCT_SALE.value:
+        return "Продажа (без услуги)"
+    return k
+
+
+def _booking_status_label(s: str) -> str:
+    if s == BookingStatus.ACTIVE.value:
+        return "активна"
+    if s == BookingStatus.DONE.value:
+        return "✅ выполнена"
+    if s == BookingStatus.CANCELLED.value:
+        return "❌ отменена"
+    return s
+
+
+def _product_kind_label(k: str | None) -> str:
+    if not k:
+        return "—"
+    return {
+        ProductSaleKind.MATERIAL.value: "Материал",
+        ProductSaleKind.KIT.value: "Комплект",
+        ProductSaleKind.RUBBER.value: "Хвост/резинка",
+        ProductSaleKind.OTHER.value: "Другое",
+    }.get(k, k)
+
+
+def _canonical_booking_details_json(raw: str | None) -> str | None:
+    """Стабильное строковое представление JSON для сравнения в аудите (порядок ключей не важен)."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    try:
+        data = json.loads(s)
+        if isinstance(data, dict):
+            return json.dumps(data, ensure_ascii=False, sort_keys=True)
+        return s
+    except Exception:
+        return s
+
+
+def _audit_user_names(db: Session, user_ids: list[int]) -> str:
+    ids = sorted(set([int(x) for x in user_ids if int(x) > 0]))
+    if not ids:
+        return "—"
+    rows = list(db.scalars(select(User).where(User.id.in_(ids))).all())
+    by_id = {int(u.id): (u.display_name or f"#{u.id}") for u in rows}
+    out = [by_id.get(i, f"#{i}") for i in ids]
+    return ", ".join(out) if out else "—"
+
+
+def _parse_ids_csv(raw: str | None) -> list[int]:
+    if not raw:
+        return []
+    out: list[int] = []
+    for p in str(raw).replace(" ", "").split(","):
+        if not p:
+            continue
+        if p.isdigit():
+            out.append(int(p))
+    return sorted(set([i for i in out if i > 0]))
+
+
+def _pretty_user_ids_csv(db: Session, raw: str | None) -> str:
+    ids = _parse_ids_csv(raw)
+    return _audit_user_names(db, ids)
+
+
+def _audit_sale_order_masters_label(db: Session, booking_id: int) -> str:
+    staff = list(
+        db.scalars(
+            select(BookingStaff).where(
+                BookingStaff.booking_id == booking_id,
+                BookingStaff.kind.in_([BookingStaffKind.SALE_KIT_ORDER, BookingStaffKind.SALE_RUBBER_ORDER]),
+            )
+        ).all()
+    )
+    kit_ids = [int(r.user_id) for r in staff if r.kind == BookingStaffKind.SALE_KIT_ORDER]
+    rub_ids = [int(r.user_id) for r in staff if r.kind == BookingStaffKind.SALE_RUBBER_ORDER]
+    parts: list[str] = []
+    if kit_ids:
+        parts.append(f"Комплект: {_audit_user_names(db, kit_ids)}")
+    if rub_ids:
+        parts.append(f"Хвост/резинка: {_audit_user_names(db, rub_ids)}")
+    return "; ".join(parts) if parts else "—"
+
+
+def _booking_details_audit_changes(db: Session, before_raw: str | None, after_raw: str | None) -> list[FieldChange]:
+    """В аудит пишем изменения по ключам details_json (а не весь JSON)."""
+
+    def _load(s: str | None) -> dict[str, Any]:
+        if not s:
+            return {}
+        try:
+            d = json.loads(s)
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    before = _load(before_raw)
+    after = _load(after_raw)
+    keys = sorted(set(list(before.keys()) + list(after.keys())))
+    out: list[FieldChange] = []
+    for k in keys:
+        a = before.get(k)
+        b = after.get(k)
+        if a == b:
+            continue
+        if k == "sale_kit_order_master_ids":
+            out.append(
+                FieldChange(
+                    field_name=str(k),
+                    old_value=_pretty_user_ids_csv(db, str(a) if a is not None else None),
+                    new_value=_pretty_user_ids_csv(db, str(b) if b is not None else None),
+                )
+            )
+            continue
+        if k in ("sale_kit_order_master_ids", "sale_rubber_order_master_id"):
+            continue
+        out.append(FieldChange(field_name=str(k), old_value=None if a is None else str(a), new_value=None if b is None else str(b)))
+    return out
+
+
+def _refresh_sale_order_master_ids_in_fp(db: Session, *, booking_id: int, fp: dict[str, str]) -> None:
+    """Держим sale_*_master_ids в fp синхронно с booking_staff (источник истины для назначений)."""
+    staff = list(
+        db.scalars(
+            select(BookingStaff).where(
+                BookingStaff.booking_id == booking_id,
+                BookingStaff.kind.in_([BookingStaffKind.SALE_KIT_ORDER, BookingStaffKind.SALE_RUBBER_ORDER]),
+            )
+        ).all()
+    )
+    kit_ids = sorted(
+        set([int(r.user_id) for r in staff if r.kind == BookingStaffKind.SALE_KIT_ORDER and int(r.user_id) > 0])
+    )
+    rub_id = next(
+        (int(r.user_id) for r in staff if r.kind == BookingStaffKind.SALE_RUBBER_ORDER and int(r.user_id) > 0),
+        None,
+    )
+    if kit_ids:
+        fp["sale_kit_order_master_ids"] = ",".join([str(i) for i in kit_ids])
+    else:
+        fp.pop("sale_kit_order_master_ids", None)
+    if rub_id:
+        fp["sale_rubber_order_master_id"] = str(rub_id)
+    else:
+        fp.pop("sale_rubber_order_master_id", None)
+
+
+def _utc_naive_to_local(dt: datetime | None, tz_name: str) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        utc_dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    else:
+        utc_dt = dt.astimezone(ZoneInfo("UTC"))
+    return utc_dt.astimezone(ZoneInfo(tz_name)).replace(tzinfo=None)
+
+
+def _local_naive_to_utc_naive(dt: datetime, tz_name: str) -> datetime:
+    local_dt = dt.replace(tzinfo=ZoneInfo(tz_name))
+    return local_dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
+def _parse_planned_booking_datetime(fp: dict[str, str], tz_name: str) -> datetime:
+    date_raw = str(fp.get("planned_date") or "").strip()
+    time_raw = str(fp.get("planned_time") or "").strip()
+    if not date_raw:
+        raise ValueError("planned_date required")
+    d = datetime.strptime(date_raw, "%Y-%m-%d")
+    d = d.replace(second=0, microsecond=0)
+    if time_raw:
+        parts = time_raw.replace(".", ":").split(":")
+        try:
+            h = int(parts[0])
+            m = int(parts[1]) if len(parts) > 1 else 0
+            d = d.replace(hour=h % 24, minute=min(max(m, 0), 59))
+        except (ValueError, IndexError):
+            d = d.replace(hour=0, minute=0)
+    else:
+        d = d.replace(hour=0, minute=0)
+    return _local_naive_to_utc_naive(d, tz_name).replace(second=0, microsecond=0)
+
+
+def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, str], list[int]]:
+    tz = get_display_timezone(db)
+    local_dt = _utc_naive_to_local(b.planned_date, tz) if b.planned_date else None
+    fp: dict[str, str] = {
+        "client_id": str(b.client_id),
+        "planned_date": local_dt.date().isoformat() if local_dt else "",
+        "planned_time": local_dt.strftime("%H:%M") if local_dt else "",
+        "kind": b.kind.value if b.kind else BookingKind.VISIT.value,
+        "quoted_price_text": b.quoted_price_text or "",
+        "deposit_amount": "" if b.deposit_amount is None else str(int(b.deposit_amount)),
+        "comment": b.comment or "",
+    }
+    if b.kind == BookingKind.VISIT:
+        fp["service_id"] = str(b.planned_service_id or "")
+        if b.planned_service_id:
+            svc = db.get(Service, b.planned_service_id)
+            if svc:
+                sub = db.get(ServiceSubcategory, svc.subcategory_id)
+                if sub:
+                    fp["service_subcategory_id"] = str(sub.id)
+                    fp["service_category_id"] = str(sub.category_id)
+    elif b.kind == BookingKind.PRODUCT_SALE:
+        fp["product_kind"] = b.planned_product_kind or ""
+    if b.details_json:
+        try:
+            d = json.loads(b.details_json)
+            if isinstance(d, dict):
+                for k, v in d.items():
+                    if v is None:
+                        continue
+                    fp[str(k)] = str(v) if not isinstance(v, bool) else ("1" if v else "")
+        except Exception:
+            pass
+    master_ids = [bm.master_id for bm in (b.masters or [])]
+    return fp, master_ids
+
+
+def _booking_details_flag(v: Any) -> bool:
+    return str(v or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def booking_linked_need_work(b: Booking, details: dict[str, Any]) -> bool:
+    if b.kind == BookingKind.VISIT:
+        mode = str(details.get("visit_kit_mode") or "").strip().upper()
+        if mode == "ORDER":
+            return True
+        if mode == "OWN" and _booking_details_flag(details.get("visit_own_need_correction")):
+            return True
+        return False
+    if b.kind == BookingKind.PRODUCT_SALE:
+        pk = (b.planned_product_kind or "").strip().upper()
+        if pk == "KIT" and str(details.get("sale_kit_mode") or "").strip().upper() == "ORDER":
+            return True
+        if pk == "RUBBER" and str(details.get("sale_rubber_mode") or "").strip().upper() == "ORDER":
+            return True
+    return False
+
+
+def booking_linked_need_visit(b: Booking) -> bool:
+    return b.kind == BookingKind.VISIT
+
+
+def booking_linked_need_sale(b: Booking) -> bool:
+    return b.kind == BookingKind.PRODUCT_SALE
+
+
+def try_auto_complete_booking(db: Session, booking_id: int) -> None:
+    b = db.get(Booking, booking_id)
+    if not b or b.status != BookingStatus.ACTIVE:
+        return
+    details: dict[str, Any] = {}
+    if b.details_json:
+        try:
+            raw = json.loads(b.details_json or "{}")
+            if isinstance(raw, dict):
+                details = raw
+        except Exception:
+            pass
+    if booking_linked_need_work(b, details):
+        wid = db.scalar(
+            select(WorkForInventory.id).where(
+                WorkForInventory.booking_id == booking_id,
+                WorkForInventory.is_voided.is_(False),
+            ).limit(1)
+        )
+        if wid is None:
+            return
+    if booking_linked_need_visit(b):
+        vid = db.scalar(
+            select(Visit.id).where(
+                Visit.booking_id == booking_id,
+                Visit.is_cancelled.is_(False),
+            ).limit(1)
+        )
+        if vid is None:
+            return
+    if booking_linked_need_sale(b):
+        sid = db.scalar(
+            select(ProductSale.id).where(
+                ProductSale.booking_id == booking_id,
+                ProductSale.is_voided.is_(False),
+            ).limit(1)
+        )
+        if sid is None:
+            return
+    old_status = b.status
+    b.status = BookingStatus.DONE
+    b.updated_at = datetime.utcnow()
+    b.updated_by_user_id = None
+    write_audit_rows(
+        db,
+        log_model=BookingAuditLog,
+        entity_field="booking_id",
+        entity_id=b.id,
+        changed_by_user_id=None,
+        changes=[
+            FieldChange("status", _booking_status_label(old_status.value), _booking_status_label(BookingStatus.DONE.value))
+        ],
+    )
+
+
+def _amount_hint_from_booking(b: Booking) -> str:
+    if b.deposit_amount is not None and int(b.deposit_amount) > 0:
+        return str(int(b.deposit_amount))
+    raw = (b.quoted_price_text or "").strip()
+    if not raw:
+        return ""
+    m = re.search(r"(\d[\d\s]{2,})", raw)
+    if not m:
+        return ""
+    digits = re.sub(r"\D", "", m.group(1))
+    return digits if digits else ""
+
+
+def _prefill_visit_stock_kit_from_booking(db: Session, b: Booking, form_prefill: dict[str, str]) -> None:
+    vs = (form_prefill.get("visit_stock_kit_id") or "").strip()
+    if vs.isdigit() and not (form_prefill.get("stock_kit_id") or "").strip():
+        form_prefill["stock_kit_id"] = vs
+    vp = (form_prefill.get("visit_stock_kit_pieces") or "").strip()
+    if vp.isdigit() and not (form_prefill.get("stock_blanks_used") or "").strip():
+        form_prefill["stock_blanks_used"] = vp
+    if (form_prefill.get("stock_kit_id") or "").strip().isdigit():
+        return
+    if b.kind != BookingKind.VISIT:
+        return
+    work = db.scalar(
+        select(WorkForInventory)
+        .where(
+            WorkForInventory.booking_id == b.id,
+            WorkForInventory.is_voided.is_(False),
+            WorkForInventory.kind == WorkKind.KIT,
+            WorkForInventory.created_kit_id.isnot(None),
+        )
+        .order_by(WorkForInventory.id.desc())
+        .limit(1)
+    )
+    if not work or not work.created_kit_id:
+        return
+    kid = int(work.created_kit_id)
+    form_prefill["stock_kit_id"] = str(kid)
+    if (form_prefill.get("stock_blanks_used") or "").strip().isdigit():
+        return
+    total_r = db.scalar(
+        select(func.coalesce(func.sum(KitReserve.pieces_reserved), 0)).where(
+            KitReserve.kit_id == kid,
+            KitReserve.reserved_for_client_id == b.client_id,
+        )
+    )
+    total_r = int(total_r or 0)
+    if total_r > 0:
+        form_prefill["stock_blanks_used"] = str(total_r)
+    else:
+        kit = db.get(Kit, kid)
+        if kit and int(kit.pieces_total or 0) > 0:
+            form_prefill["stock_blanks_used"] = str(int(kit.pieces_total))
+
+
+def _booking_work_new_query_params(db: Session, b: Booking, details: dict[str, Any]) -> dict[str, str]:
+    q: dict[str, str] = {"booking_id": str(b.id), "client_id": str(b.client_id)}
+    tz = get_display_timezone(db)
+    local = _utc_naive_to_local(b.planned_date, tz) if b.planned_date else None
+    if local:
+        q["performed_date"] = local.date().isoformat()
+    parts: list[str] = [f"бронь #{b.id}"]
+    if b.kind == BookingKind.VISIT:
+        mode = str(details.get("visit_kit_mode") or "").strip().upper()
+        if mode == "ORDER":
+            q["scope"] = WorkScope.CUSTOM_ORDER.value
+            q["kind"] = WorkKind.KIT.value
+            qb = str(details.get("visit_order_blanks_qty") or "").strip()
+            if qb:
+                parts.append(f"заказ заготовок: {qb} шт")
+            qd = str(details.get("visit_order_blanks_desc") or "").strip()
+            if qd:
+                parts.append(qd[:400])
+        elif mode == "OWN" and _booking_details_flag(details.get("visit_own_need_correction")):
+            q["scope"] = WorkScope.CUSTOM_ORDER.value
+            q["kind"] = WorkKind.KIT_CORRECTION.value
+            for key in (
+                "corr_trim_qty",
+                "corr_hourly_hours",
+                "corr_kit_description",
+                "corr_kit_blanks_count",
+                "corr_wash",
+                "corr_steam",
+                "corr_circle",
+            ):
+                val = details.get(key)
+                if val is None or str(val).strip() == "":
+                    continue
+                if str(key).startswith("corr_") and str(val).strip() in ("0", "0.0"):
+                    continue
+                q[key] = str(val)
+    elif b.kind == BookingKind.PRODUCT_SALE:
+        pk = (b.planned_product_kind or "").strip().upper()
+        if pk == "KIT" and str(details.get("sale_kit_mode") or "").strip().upper() == "ORDER":
+            q["scope"] = WorkScope.CUSTOM_ORDER.value
+            q["kind"] = WorkKind.KIT.value
+            qb = str(details.get("sale_order_blanks_qty") or "").strip()
+            if qb:
+                parts.append(f"заказ заготовок: {qb} шт")
+            qd = str(details.get("sale_order_blanks_desc") or "").strip()
+            if qd:
+                parts.append(qd[:400])
+        elif pk == "RUBBER" and str(details.get("sale_rubber_mode") or "").strip().upper() == "ORDER":
+            q["scope"] = WorkScope.CUSTOM_ORDER.value
+            q["kind"] = WorkKind.RUBBER.value
+            rt = str(details.get("sale_rubber_type") or "").strip()
+            if rt:
+                q["rubber_type"] = rt
+            aq = str(details.get("sale_rubber_attach_qty") or "").strip()
+            if aq:
+                q["rubber_attach_qty"] = aq
+            bq = str(details.get("sale_rubber_braids_qty") or "").strip()
+            if bq:
+                q["rubber_braids_qty"] = bq
+    hint = _amount_hint_from_booking(b)
+    if hint:
+        q["amount_from_client"] = hint
+    comment = "; ".join(parts)
+    if b.comment:
+        comment = f"{comment}\n{b.comment}" if comment else str(b.comment)
+    if comment:
+        q["comment"] = comment[:900]
+    return q
+
+
+def _booking_details_from_form(fp: dict[str, str]) -> dict[str, object]:
+    kind_raw = str(fp.get("kind") or "").strip() or BookingKind.VISIT.value
+    product_kind = str(fp.get("product_kind") or "").strip()
+    checkbox_keys = (
+        "corr_wash",
+        "corr_steam",
+        "corr_circle",
+        "visit_own_need_correction",
+        "visit_own_need_extra_blanks",
+    )
+    d: dict[str, object] = {}
+    keys: tuple[str, ...]
+    calc_keys = ("calc_product_min", "calc_product_max", "calc_service_min", "calc_service_max")
+    if kind_raw == BookingKind.VISIT.value:
+        keys = (
+            "visit_kit_mode",
+            "visit_stock_kit_id",
+            "visit_stock_kit_pieces",
+            "visit_own_need_correction",
+            "visit_own_need_extra_blanks",
+            "visit_extra_blanks_mode",
+            "visit_extra_stock_kit_id",
+            "visit_extra_stock_kit_pieces",
+            "visit_order_blanks_qty",
+            "visit_order_blanks_desc",
+            "visit_extra_order_blanks_qty",
+            "visit_extra_order_blanks_desc",
+        ) + calc_keys
+        if str(fp.get("visit_own_need_correction") or "").lower() in ("1", "on", "true", "yes"):
+            keys = keys + (
+                "corr_trim_qty",
+                "corr_hourly_hours",
+                "corr_kit_description",
+                "corr_kit_blanks_count",
+                "corr_wash",
+                "corr_steam",
+                "corr_circle",
+            )
+    else:
+        keys = ("product_kind",) + calc_keys
+        if product_kind == "KIT":
+            keys = keys + (
+                "sale_kit_mode",
+                "sale_stock_kit_id",
+                "sale_stock_kit_pieces",
+                "sale_kit_order_master_ids",
+                "sale_order_blanks_qty",
+                "sale_order_blanks_desc",
+            )
+        elif product_kind == "RUBBER":
+            keys = keys + (
+                "sale_rubber_mode",
+                "sale_rubber_order_master_id",
+                "sale_rubber_type",
+                "sale_rubber_attach_qty",
+                "sale_rubber_braids_qty",
+                "sale_rubber_desc",
+            )
+        else:
+            keys = keys + ("sale_rubber_desc",)
+
+    for key in keys:
+        if key not in fp:
+            continue
+        v = fp.get(key)
+        if v is None:
+            continue
+        if key in checkbox_keys:
+            d[key] = "1" if str(v).lower() in ("1", "on", "true", "yes") else ""
+        else:
+            sv = str(v).strip()
+            if sv == "":
+                continue
+            if key.startswith("corr_") and sv in ("0", "0.0"):
+                continue
+            d[key] = sv
+    return {k: v for k, v in d.items() if not (isinstance(v, str) and str(v).strip() == "")}
+
+
+def _sync_booking_staff_rows_for_sale(db: Session, *, booking_id: int, fp: dict[str, str], form_raw) -> None:
+    for r in list(
+        db.scalars(
+            select(BookingStaff).where(
+                BookingStaff.booking_id == booking_id,
+                BookingStaff.kind.in_([BookingStaffKind.SALE_KIT_ORDER, BookingStaffKind.SALE_RUBBER_ORDER]),
+            )
+        ).all()
+    ):
+        db.delete(r)
+    db.flush()
+
+    if (fp.get("product_kind") or "") == "KIT" and (fp.get("sale_kit_mode") or "") == "ORDER":
+        ids: list[int] = []
+        for v in form_raw.getlist("sale_kit_order_master_on"):
+            try:
+                ids.append(int(v))
+            except Exception:
+                pass
+        ids = sorted(set([i for i in ids if i > 0]))
+        for uid in ids:
+            if db.get(User, uid) is None:
+                continue
+            db.add(BookingStaff(booking_id=booking_id, user_id=uid, kind=BookingStaffKind.SALE_KIT_ORDER))
+        fp["sale_kit_order_master_ids"] = ",".join([str(i) for i in ids])
+
+    if (fp.get("product_kind") or "") == "RUBBER" and (fp.get("sale_rubber_mode") or "") == "ORDER":
+        raw = str(fp.get("sale_rubber_order_master_id") or "").strip()
+        if raw.isdigit():
+            uid = int(raw)
+            if db.get(User, uid) is not None:
+                db.add(BookingStaff(booking_id=booking_id, user_id=uid, kind=BookingStaffKind.SALE_RUBBER_ORDER))
+    db.flush()
+
+
+def _apply_booking_auto_reserves(db: Session, *, booking_client_id: int, fp: dict[str, str], changed_by_user_id: int) -> None:
+    def _reserve_kit(kit_id_raw: str | None, pieces_field: str | None) -> None:
+        if not kit_id_raw:
+            return
+        kit_id_raw = str(kit_id_raw).strip()
+        if not kit_id_raw.isdigit():
+            return
+        kit = db.get(Kit, int(kit_id_raw))
+        if not kit:
+            return
+        avail = int(kit.pieces_available or 0)
+        if avail <= 0:
+            return
+        if kit_reserve_slots_used(db, kit.id) >= get_kit_max_reserves_per_kit(db):
+            return
+        pq = str(fp.get(pieces_field) or "").strip() if pieces_field else ""
+        qty = int(pq) if pq.isdigit() else avail
+        qty = max(1, min(qty, avail))
+        before = SimpleNamespace(pieces_available=kit.pieces_available)
+        kit.pieces_available = avail - qty
+        kit.updated_at = datetime.utcnow()
+        kit.updated_by_user_id = changed_by_user_id
+        db.add(
+            KitReserve(
+                kit_id=kit.id,
+                pieces_reserved=qty,
+                reserved_at=datetime.utcnow(),
+                reserved_by_user_id=changed_by_user_id,
+                reserved_for_client_id=booking_client_id,
+                reserved_for_user_id=None,
+            )
+        )
+        write_audit_rows(
+            db,
+            log_model=KitAuditLog,
+            entity_field="kit_id",
+            entity_id=kit.id,
+            changed_by_user_id=changed_by_user_id,
+            changes=diff_fields(before, kit, ("pieces_available",)),
+        )
+
+    if (fp.get("visit_kit_mode") or "") == "IN_STOCK":
+        _reserve_kit(fp.get("visit_stock_kit_id"), "visit_stock_kit_pieces")
+    if (fp.get("visit_kit_mode") or "") == "OWN" and (fp.get("visit_own_need_extra_blanks") or ""):
+        if (fp.get("visit_extra_blanks_mode") or "") == "IN_STOCK":
+            _reserve_kit(fp.get("visit_extra_stock_kit_id"), "visit_extra_stock_kit_pieces")
+    if (fp.get("product_kind") or "") == "KIT" and (fp.get("sale_kit_mode") or "") == "IN_STOCK":
+        _reserve_kit(fp.get("sale_stock_kit_id"), "sale_stock_kit_pieces")
+
+
+def _masters_for_visit_form(db: Session) -> list[User]:
+    return list(db.scalars(select_users_with_role(UserRole.MASTER).order_by(User.display_name.asc(), User.username.asc())).all())
+
+
+@router.get("/admin/bookings/new", response_class=HTMLResponse)
+def admin_booking_new_get(
+    request: Request,
+    client_id: int | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    selected_client = db.get(Client, client_id) if client_id else None
+    masters = _masters_for_visit_form(db)
+    service_catalog = list_master_visit_services_catalog(db)
+    staff_users = list(db.scalars(select_users_with_any_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)).all())
+    fp: dict[str, str] = {"planned_date": date.today().isoformat(), "planned_time": ""}
+    allow = {
+        "kind",
+        "service_id",
+        "product_kind",
+        "visit_kit_mode",
+        "visit_stock_kit_id",
+        "visit_stock_kit_pieces",
+        "visit_own_need_correction",
+        "visit_own_need_extra_blanks",
+        "visit_extra_blanks_mode",
+        "visit_extra_stock_kit_id",
+        "visit_extra_stock_kit_pieces",
+        "visit_order_blanks_qty",
+        "visit_order_blanks_desc",
+        "visit_extra_order_blanks_qty",
+        "visit_extra_order_blanks_desc",
+        "corr_trim_qty",
+        "corr_hourly_hours",
+        "corr_kit_description",
+        "corr_kit_blanks_count",
+        "corr_wash",
+        "corr_steam",
+        "corr_circle",
+        "sale_kit_mode",
+        "sale_stock_kit_id",
+        "sale_stock_kit_pieces",
+        "sale_kit_order_master_ids",
+        "sale_order_blanks_qty",
+        "sale_order_blanks_desc",
+        "sale_rubber_mode",
+        "sale_rubber_order_master_id",
+        "sale_rubber_type",
+        "sale_rubber_attach_qty",
+        "sale_rubber_braids_qty",
+        "sale_rubber_desc",
+        "quoted_price_text",
+        "deposit_amount",
+        "comment",
+        "calc_product_min",
+        "calc_product_max",
+        "calc_service_min",
+        "calc_service_max",
+        "planned_date",
+        "planned_time",
+    }
+    for k, v in request.query_params.items():
+        if k in allow and v is not None:
+            fp[k] = str(v)
+    return templates.TemplateResponse(
+        "admin_booking_form.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            error=None,
+            is_new=True,
+            booking=None,
+            selected_client=selected_client,
+            masters=masters,
+            staff_users=staff_users,
+            after_reserve=str(request.url),
+            service_catalog=service_catalog,
+            kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+            product_kind_options=[k.value for k in ProductSaleKind],
+            rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+            fp=fp,
+            booking_master_on_ids=[],
+        ),
+    )
+
+
+@router.post("/admin/bookings/new")
+async def admin_booking_new_post(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form_raw = await request.form()
+    fp = {k: form_raw.get(k) for k in form_raw.keys()}
+
+    client_id_raw = str(fp.get("client_id") or "").strip()
+    kind_raw = str(fp.get("kind") or "").strip() or BookingKind.VISIT.value
+    quoted_price_text = strip_or_none(str(fp.get("quoted_price_text") or ""), 120)
+    deposit_raw = str(fp.get("deposit_amount") or "").strip()
+    comment = strip_or_none(str(fp.get("comment") or "")) or None
+
+    err: str | None = None
+    client: Client | None = None
+    planned_date: datetime | None = None
+    deposit_amount: int | None = None
+    planned_service_id: int | None = None
+    planned_product_kind: str | None = None
+
+    if not client_id_raw.isdigit():
+        err = "Выберите клиента."
+    else:
+        client = db.get(Client, int(client_id_raw))
+        if client is None:
+            err = "Клиент не найден."
+
+    if not err:
+        try:
+            tz = get_display_timezone(db)
+            planned_date = _parse_planned_booking_datetime(fp, tz)
+        except Exception:
+            err = "Укажите дату и время брони."
+
+    if not err:
+        if kind_raw not in (BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value):
+            err = "Некорректный тип брони."
+
+    if not err and deposit_raw:
+        try:
+            deposit_amount = int(float(deposit_raw))
+            if deposit_amount < 0:
+                raise ValueError()
+        except Exception:
+            err = "Предоплата должна быть числом."
+
+    if not err and kind_raw == BookingKind.VISIT.value:
+        svc_raw = str(fp.get("service_id") or "").strip()
+        if not svc_raw.isdigit():
+            err = "Выберите услугу для брони визита."
+        else:
+            planned_service_id = int(svc_raw)
+            if db.get(Service, planned_service_id) is None:
+                err = "Услуга не найдена."
+
+    if not err and kind_raw == BookingKind.PRODUCT_SALE.value:
+        pk = str(fp.get("product_kind") or "").strip()
+        if pk not in [k.value for k in ProductSaleKind]:
+            err = "Выберите тип продажи."
+        else:
+            planned_product_kind = pk
+            if pk == ProductSaleKind.KIT.value and (fp.get("sale_kit_mode") or "") == "ORDER":
+                if len(form_raw.getlist("sale_kit_order_master_on")) == 0:
+                    err = "Выберите хотя бы одного мастера для заказа комплекта."
+            if pk == ProductSaleKind.RUBBER.value and (fp.get("sale_rubber_mode") or "") == "ORDER":
+                raw_mid = str(fp.get("sale_rubber_order_master_id") or "").strip()
+                if not raw_mid.isdigit():
+                    err = "Выберите мастера для заказа хвоста/резинки."
+
+    masters = _masters_for_visit_form(db)
+    service_catalog = list_master_visit_services_catalog(db)
+    staff_users = list(db.scalars(select_users_with_any_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)).all())
+
+    if err:
+        return templates.TemplateResponse(
+            "admin_booking_form.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                error=err,
+                is_new=True,
+                booking=None,
+                selected_client=client,
+                masters=masters,
+                staff_users=staff_users,
+                after_reserve=str(request.url),
+                service_catalog=service_catalog,
+                kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                product_kind_options=[k.value for k in ProductSaleKind],
+                rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+                fp=fp,
+                booking_master_on_ids=[],
+            ),
+            status_code=400,
+        )
+
+    assert client is not None and planned_date is not None
+    booking = Booking(
+        created_by_user_id=current_user.id,
+        client_id=client.id,
+        planned_date=planned_date,
+        kind=BookingKind(kind_raw),
+        status=BookingStatus.ACTIVE,
+        quoted_price_text=quoted_price_text,
+        deposit_amount=deposit_amount,
+        comment=comment,
+        planned_service_id=planned_service_id,
+        planned_product_kind=planned_product_kind,
+        details_json=json.dumps(_booking_details_from_form(fp), ensure_ascii=False),
+    )
+    db.add(booking)
+    db.flush()
+
+    if kind_raw == BookingKind.VISIT.value:
+        on_ids: list[int] = []
+        for v in form_raw.getlist("booking_master_on"):
+            try:
+                on_ids.append(int(v))
+            except Exception:
+                pass
+        on_ids = sorted(set([i for i in on_ids if i > 0]))
+        for mid in on_ids:
+            if db.get(User, mid) is None:
+                continue
+            db.add(BookingMaster(booking_id=booking.id, master_id=mid))
+
+    _sync_booking_staff_rows_for_sale(db, booking_id=booking.id, fp=fp, form_raw=form_raw)
+    _apply_booking_auto_reserves(db, booking_client_id=booking.client_id, fp=fp, changed_by_user_id=current_user.id)
+    _refresh_sale_order_master_ids_in_fp(db, booking_id=booking.id, fp=fp)
+    booking.details_json = json.dumps(_booking_details_from_form(fp), ensure_ascii=False)
+    db.commit()
+    return RedirectResponse(url=f"/admin/bookings/{booking.id}", status_code=303)
+
+
+@router.get("/admin/bookings/{booking_id}", response_class=HTMLResponse)
+def admin_booking_detail(
+    request: Request,
+    booking_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    b = db.scalar(
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(
+            selectinload(Booking.client),
+            selectinload(Booking.created_by_user),
+            selectinload(Booking.updated_by_user),
+            selectinload(Booking.cancelled_by_user),
+            selectinload(Booking.planned_service).selectinload(Service.subcategory),
+            selectinload(Booking.masters).selectinload(BookingMaster.master),
+        )
+    )
+    if b is None:
+        raise HTTPException(status_code=404, detail="Бронь не найдена")
+
+    linked_visit_id = db.scalar(select(Visit.id).where(Visit.booking_id == booking_id).limit(1))
+    linked_sale_id = db.scalar(select(ProductSale.id).where(ProductSale.booking_id == booking_id).limit(1))
+    linked_work_id = db.scalar(select(WorkForInventory.id).where(WorkForInventory.booking_id == booking_id).limit(1))
+
+    sale_staff = list(
+        db.scalars(
+            select(BookingStaff).where(BookingStaff.booking_id == booking_id).options(selectinload(BookingStaff.user))
+        ).all()
+    )
+    sale_kit_order_users = [
+        (r.user.display_name if r.user else f"#{r.user_id}") for r in sale_staff if r.kind == BookingStaffKind.SALE_KIT_ORDER
+    ]
+    sale_rubber_order_users = [
+        (r.user.display_name if r.user else f"#{r.user_id}") for r in sale_staff if r.kind == BookingStaffKind.SALE_RUBBER_ORDER
+    ]
+
+    audit_rows = list(
+        db.scalars(
+            select(BookingAuditLog)
+            .options(selectinload(BookingAuditLog.changed_by_user))
+            .where(BookingAuditLog.booking_id == booking_id)
+            .order_by(BookingAuditLog.changed_at.desc(), BookingAuditLog.id.desc())
+            .limit(200)
+        ).all()
+    )
+    display_tz = get_display_timezone(db)
+    details: dict[str, Any] = {}
+    if b.details_json:
+        try:
+            raw = json.loads(b.details_json)
+            if isinstance(raw, dict):
+                details = raw
+        except Exception:
+            details = {}
+
+    calc_product_min = str(details.get("calc_product_min") or "").strip()
+    calc_product_max = str(details.get("calc_product_max") or "").strip()
+    calc_service_min = str(details.get("calc_service_min") or "").strip()
+    calc_service_max = str(details.get("calc_service_max") or "").strip()
+    if (not calc_service_min and not calc_service_max) and b.planned_service:
+        lo, hi = None, None
+        try:
+            svc = b.planned_service
+            vals = [(svc.price_junior_from, svc.price_junior_to), (svc.price_middle_from, svc.price_middle_to), (svc.price_senior_from, svc.price_senior_to)]
+            lows: list[float] = []
+            highs: list[float] = []
+            for fr, to in vals:
+                if fr is not None:
+                    lows.append(float(fr))
+                if to is not None:
+                    highs.append(float(to))
+            if not highs and lows:
+                highs = list(lows)
+            if not lows and highs:
+                lows = list(highs)
+            lo = min(lows) if lows else None
+            hi = max(highs) if highs else None
+        except Exception:
+            lo, hi = None, None
+        if lo is not None or hi is not None:
+            calc_service_min = "" if lo is None else f"{float(lo):.0f}"
+            calc_service_max = "" if hi is None else f"{float(hi):.0f}"
+
+    need_work = booking_linked_need_work(b, details)
+    need_visit = booking_linked_need_visit(b)
+    need_sale = booking_linked_need_sale(b)
+    visit_blocked = need_visit and not linked_visit_id and need_work and not linked_work_id
+    sale_blocked = need_sale and not linked_sale_id and need_work and not linked_work_id
+
+    work_create_url = ""
+    if need_work and not linked_work_id:
+        work_q = _booking_work_new_query_params(db, b, details)
+        work_create_url = "/sales/work/new?" + urlencode(work_q, quote_via=quote)
+    visit_create_url = f"/master/visit/new?booking_id={b.id}" if need_visit and not linked_visit_id else ""
+    sale_create_url = f"/sales/products/new?booking_id={b.id}" if need_sale and not linked_sale_id else ""
+    booking_can_create_master_records = current_user.role == UserRole.MASTER
+    booking_link_master_only_title = (
+        "Создание работы и визита доступно только под активной ролью «Мастер». "
+        "Выберите роль мастера при входе или попросите мастера создать запись."
+    )
+    return templates.TemplateResponse(
+        "admin_booking_detail.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            booking=b,
+            kind_label=_booking_kind_label(b.kind.value),
+            status_label=_booking_status_label(b.status.value),
+            product_kind_label=_product_kind_label(b.planned_product_kind),
+            booking_can_create_master_records=booking_can_create_master_records,
+            booking_link_master_only_title=booking_link_master_only_title,
+            linked_visit_id=linked_visit_id,
+            linked_sale_id=linked_sale_id,
+            linked_work_id=linked_work_id,
+            audit_rows=audit_rows,
+            display_tz=display_tz,
+            sale_kit_order_users=sale_kit_order_users,
+            sale_rubber_order_users=sale_rubber_order_users,
+            details=details,
+            calc_product_min=calc_product_min,
+            calc_product_max=calc_product_max,
+            calc_service_min=calc_service_min,
+            calc_service_max=calc_service_max,
+            need_work=need_work,
+            need_visit=need_visit,
+            need_sale=need_sale,
+            visit_blocked=visit_blocked,
+            sale_blocked=sale_blocked,
+            work_create_url=work_create_url,
+            visit_create_url=visit_create_url,
+            sale_create_url=sale_create_url,
+        ),
+    )
+
+
+@router.get("/admin/bookings/{booking_id}/edit", response_class=HTMLResponse)
+def admin_booking_edit_get(
+    request: Request,
+    booking_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    b = db.scalar(select(Booking).where(Booking.id == booking_id).options(selectinload(Booking.masters)))
+    if b is None:
+        raise HTTPException(status_code=404, detail="Бронь не найдена")
+    selected_client = db.get(Client, b.client_id)
+    masters = _masters_for_visit_form(db)
+    service_catalog = list_master_visit_services_catalog(db)
+    staff_users = list(db.scalars(select_users_with_any_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)).all())
+    fp, master_ids = _booking_form_prefill_from_db(db, b)
+    return templates.TemplateResponse(
+        "admin_booking_form.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            error=None,
+            is_new=False,
+            booking=b,
+            selected_client=selected_client,
+            masters=masters,
+            staff_users=staff_users,
+            after_reserve=str(request.url),
+            service_catalog=service_catalog,
+            kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+            product_kind_options=[k.value for k in ProductSaleKind],
+            rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+            fp=fp,
+            booking_master_on_ids=master_ids,
+        ),
+    )
+
+
+@router.post("/admin/bookings/{booking_id}/edit")
+async def admin_booking_edit_post(
+    request: Request,
+    booking_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    b = db.scalar(select(Booking).where(Booking.id == booking_id).options(selectinload(Booking.masters)))
+    if b is None:
+        raise HTTPException(status_code=404, detail="Бронь не найдена")
+    form_raw = await request.form()
+    fp = {k: form_raw.get(k) for k in form_raw.keys()}
+
+    client_id_raw = str(fp.get("client_id") or "").strip()
+    kind_raw = str(fp.get("kind") or "").strip() or BookingKind.VISIT.value
+    quoted_price_text = strip_or_none(str(fp.get("quoted_price_text") or ""), 120)
+    deposit_raw = str(fp.get("deposit_amount") or "").strip()
+    comment = strip_or_none(str(fp.get("comment") or "")) or None
+
+    err: str | None = None
+    client = None
+    planned_date = None
+    deposit_amount: int | None = None
+    planned_service_id: int | None = None
+    planned_product_kind: str | None = None
+
+    if not client_id_raw.isdigit():
+        err = "Выберите клиента."
+    else:
+        client = db.get(Client, int(client_id_raw))
+        if client is None:
+            err = "Клиент не найден."
+
+    if not err:
+        try:
+            tz = get_display_timezone(db)
+            planned_date = _parse_planned_booking_datetime(fp, tz)
+        except Exception:
+            err = "Укажите дату и время брони."
+
+    if not err:
+        if kind_raw not in (BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value):
+            err = "Некорректный тип брони."
+
+    if not err and deposit_raw:
+        try:
+            deposit_amount = int(float(deposit_raw))
+            if deposit_amount < 0:
+                raise ValueError()
+        except Exception:
+            err = "Предоплата должна быть числом."
+
+    if not err and kind_raw == BookingKind.VISIT.value:
+        svc_raw = str(fp.get("service_id") or "").strip()
+        if not svc_raw.isdigit():
+            err = "Выберите услугу для брони визита."
+        else:
+            planned_service_id = int(svc_raw)
+            if db.get(Service, planned_service_id) is None:
+                err = "Услуга не найдена."
+
+    if not err and kind_raw == BookingKind.PRODUCT_SALE.value:
+        pk = str(fp.get("product_kind") or "").strip()
+        if pk not in [k.value for k in ProductSaleKind]:
+            err = "Выберите тип продажи."
+        else:
+            planned_product_kind = pk
+            if pk == ProductSaleKind.KIT.value and (fp.get("sale_kit_mode") or "") == "ORDER":
+                if len(form_raw.getlist("sale_kit_order_master_on")) == 0:
+                    err = "Выберите хотя бы одного мастера для заказа комплекта."
+            if pk == ProductSaleKind.RUBBER.value and (fp.get("sale_rubber_mode") or "") == "ORDER":
+                raw_mid = str(fp.get("sale_rubber_order_master_id") or "").strip()
+                if not raw_mid.isdigit():
+                    err = "Выберите мастера для заказа хвоста/резинки."
+
+    masters = _masters_for_visit_form(db)
+    service_catalog = list_master_visit_services_catalog(db)
+    staff_users = list(db.scalars(select_users_with_any_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)).all())
+    selected_client = client
+    on_ids: list[int] = []
+    if kind_raw == BookingKind.VISIT.value:
+        for v in form_raw.getlist("booking_master_on"):
+            try:
+                on_ids.append(int(v))
+            except Exception:
+                pass
+        on_ids = sorted(set([i for i in on_ids if i > 0]))
+
+    if err:
+        return templates.TemplateResponse(
+            "admin_booking_form.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                error=err,
+                is_new=False,
+                booking=b,
+                selected_client=selected_client,
+                masters=masters,
+                staff_users=staff_users,
+                after_reserve=str(request.url),
+                service_catalog=service_catalog,
+                kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                product_kind_options=[k.value for k in ProductSaleKind],
+                rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+                fp=fp,
+                booking_master_on_ids=on_ids,
+            ),
+            status_code=400,
+        )
+
+    assert client is not None and planned_date is not None
+    before_visit_master_ids = [int(bm.master_id) for bm in (b.masters or [])]
+    before_visit_masters = _audit_user_names(db, before_visit_master_ids)
+    before_sale_staff = _audit_sale_order_masters_label(db, b.id)
+    before_details_json = b.details_json
+    before = SimpleNamespace(
+        client_id=b.client_id,
+        planned_date=b.planned_date.replace(second=0, microsecond=0) if b.planned_date else None,
+        kind=b.kind,
+        status=b.status,
+        quoted_price_text=b.quoted_price_text,
+        deposit_amount=b.deposit_amount,
+        comment=b.comment,
+        planned_service_id=b.planned_service_id,
+        planned_product_kind=b.planned_product_kind,
+        details_json=_canonical_booking_details_json(b.details_json),
+        cancelled_reason=b.cancelled_reason,
+    )
+    b.client_id = client.id
+    b.planned_date = planned_date
+    b.kind = BookingKind(kind_raw)
+    b.quoted_price_text = quoted_price_text
+    b.deposit_amount = deposit_amount
+    b.comment = comment
+    b.planned_service_id = planned_service_id
+    b.planned_product_kind = planned_product_kind
+    b.details_json = json.dumps(_booking_details_from_form(fp), ensure_ascii=False)
+    b.updated_at = datetime.utcnow()
+    b.updated_by_user_id = current_user.id
+
+    for bm in list(b.masters or []):
+        db.delete(bm)
+    if kind_raw == BookingKind.VISIT.value:
+        for mid in on_ids:
+            if db.get(User, mid) is None:
+                continue
+            db.add(BookingMaster(booking_id=b.id, master_id=mid))
+
+    _sync_booking_staff_rows_for_sale(db, booking_id=b.id, fp=fp, form_raw=form_raw)
+    _apply_booking_auto_reserves(db, booking_client_id=b.client_id, fp=fp, changed_by_user_id=current_user.id)
+    _refresh_sale_order_master_ids_in_fp(db, booking_id=b.id, fp=fp)
+    b.details_json = json.dumps(_booking_details_from_form(fp), ensure_ascii=False)
+    after_details_json = b.details_json
+    after_visit_masters = _audit_user_names(db, on_ids if kind_raw == BookingKind.VISIT.value else [])
+    after_sale_staff = _audit_sale_order_masters_label(db, b.id)
+    after_audit = SimpleNamespace(
+        client_id=b.client_id,
+        planned_date=b.planned_date.replace(second=0, microsecond=0) if b.planned_date else None,
+        kind=b.kind,
+        status=b.status,
+        quoted_price_text=b.quoted_price_text,
+        deposit_amount=b.deposit_amount,
+        comment=b.comment,
+        planned_service_id=b.planned_service_id,
+        planned_product_kind=b.planned_product_kind,
+        details_json=_canonical_booking_details_json(b.details_json),
+        cancelled_reason=b.cancelled_reason,
+    )
+    write_audit_rows(
+        db,
+        log_model=BookingAuditLog,
+        entity_field="booking_id",
+        entity_id=b.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(
+            before,
+            after_audit,
+            (
+                "client_id",
+                "planned_date",
+                "kind",
+                "status",
+                "quoted_price_text",
+                "deposit_amount",
+                "comment",
+                "planned_service_id",
+                "planned_product_kind",
+                "cancelled_reason",
+            ),
+        ),
+    )
+    write_audit_rows(
+        db,
+        log_model=BookingAuditLog,
+        entity_field="booking_id",
+        entity_id=b.id,
+        changed_by_user_id=current_user.id,
+        changes=_booking_details_audit_changes(db, before_details_json, after_details_json),
+    )
+    write_audit_rows(
+        db,
+        log_model=BookingAuditLog,
+        entity_field="booking_id",
+        entity_id=b.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(
+            SimpleNamespace(visit_masters=before_visit_masters, sale_order_masters=before_sale_staff),
+            SimpleNamespace(visit_masters=after_visit_masters, sale_order_masters=after_sale_staff),
+            ("visit_masters", "sale_order_masters"),
+        ),
+    )
+    db.commit()
+    return RedirectResponse(url=f"/admin/bookings/{b.id}", status_code=303)
+
+
+@router.get("/admin/bookings", response_class=HTMLResponse)
+def admin_bookings(
+    request: Request,
+    show: str | None = None,
+    mine: str | None = Query(None),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    show_mode = (show or "").strip().lower() or "active"
+    mine_raw = (mine or "").strip().lower()
+    can_manage = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    has_admin_roles = UserRole.ADMIN in current_user.roles or UserRole.ADMIN_SUPER in current_user.roles
+    if has_admin_roles:
+        bookings_mine_only = mine_raw in ("1", "true", "yes", "only")
+    else:
+        bookings_mine_only = mine_raw in ("1", "true", "yes", "only")
+        if mine_raw not in ("0", "false", "no", "all"):
+            bookings_mine_only = True
+
+    stmt = select(Booking).options(selectinload(Booking.client)).order_by(Booking.planned_date.asc(), Booking.id.asc()).limit(1000)
+    if show_mode != "all":
+        stmt = stmt.where(Booking.status == BookingStatus.ACTIVE)
+    if bookings_mine_only:
+        stmt = stmt.where(
+            or_(
+                exists(select(1).where(and_(BookingMaster.booking_id == Booking.id, BookingMaster.master_id == current_user.id))),
+                exists(select(1).where(and_(BookingStaff.booking_id == Booking.id, BookingStaff.user_id == current_user.id))),
+            )
+        )
+    rows = list(db.scalars(stmt).all())
+    display_tz = get_display_timezone(db)
+    return templates.TemplateResponse(
+        "admin_bookings.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            rows=rows,
+            show_mode="all" if show_mode == "all" else "active",
+            display_tz=display_tz,
+            can_manage=can_manage,
+            bookings_mine_only=bookings_mine_only,
+        ),
+    )
+
+
+@router.post("/admin/bookings/{booking_id}/cancel")
+def admin_booking_cancel(
+    booking_id: int,
+    reason: str | None = Form(None),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    b = db.get(Booking, booking_id)
+    if b is None:
+        raise HTTPException(status_code=404, detail="Бронь не найдена")
+    if b.status != BookingStatus.ACTIVE:
+        return RedirectResponse(url=f"/admin/bookings/{booking_id}", status_code=303)
+    reason_norm = (reason or "").strip()
+    if not reason_norm:
+        return RedirectResponse(url=f"/admin/bookings/{booking_id}?err=reason", status_code=303)
+    before = SimpleNamespace(status=b.status, cancelled_at=b.cancelled_at, cancelled_by_user_id=b.cancelled_by_user_id, cancelled_reason=b.cancelled_reason)
+    b.status = BookingStatus.CANCELLED
+    b.cancelled_at = datetime.utcnow()
+    b.cancelled_by_user_id = current_user.id
+    b.cancelled_reason = reason_norm[:2000]
+    b.updated_at = datetime.utcnow()
+    b.updated_by_user_id = current_user.id
+    db.commit()
+    write_audit_rows(
+        db,
+        log_model=BookingAuditLog,
+        entity_field="booking_id",
+        entity_id=b.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before, b, ("status", "cancelled_at", "cancelled_by_user_id", "cancelled_reason")),
+    )
+    db.commit()
+    return RedirectResponse(url=f"/admin/bookings/{booking_id}", status_code=303)
+
+
+@router.post("/admin/bookings/{booking_id}/mark-done")
+def admin_booking_mark_done(
+    booking_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    b = db.get(Booking, booking_id)
+    if b is None:
+        raise HTTPException(status_code=404, detail="Бронь не найдена")
+    if b.status != BookingStatus.ACTIVE:
+        return RedirectResponse(url=f"/admin/bookings/{booking_id}", status_code=303)
+    old_status = b.status
+    b.status = BookingStatus.DONE
+    b.updated_at = datetime.utcnow()
+    b.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=BookingAuditLog,
+        entity_field="booking_id",
+        entity_id=b.id,
+        changed_by_user_id=current_user.id,
+        changes=[FieldChange("status", _booking_status_label(old_status.value), _booking_status_label(BookingStatus.DONE.value))],
+    )
+    db.commit()
+    return RedirectResponse(url=f"/admin/bookings/{booking_id}", status_code=303)
+
+
+def _product_sale_activity_label(sale: ProductSale) -> str:
+    k = sale.kind
+    if k == ProductSaleKind.KIT:
+        return "Продажа: комплект"
+    if k == ProductSaleKind.RUBBER:
+        return "Продажа: хвост/резинка"
+    if k == ProductSaleKind.MATERIAL:
+        return "Продажа: материал"
+    if k == ProductSaleKind.OTHER:
+        return "Продажа: другое"
+    return "Продажа"
+
+
+def _work_activity_label(w: WorkForInventory) -> str:
+    scope = "В наличие" if w.scope == WorkScope.IN_STOCK else "На заказ"
+    kind_map = {
+        WorkKind.KIT: "комплект/заготовки",
+        WorkKind.MIX: "смешка",
+        WorkKind.RUBBER: "хвосты/резинки",
+        WorkKind.KIT_CORRECTION: "коррекция комплекта",
+        WorkKind.HAIR_EXT_PREP: "подготовка к наращиванию",
+    }
+    kind_l = kind_map.get(w.kind, w.kind.value)
+    return f"Работа: {kind_l} ({scope})"
+
+
+def _master_activity_archive_row_id(row: dict[str, Any]) -> int:
+    if row["kind"] == "visit":
+        return row["visit"].id
+    if row["kind"] == "work":
+        return row["work"].id
+    return row["sale"].id
+
+
+def master_activity_archive(db: Session, master_id: int, *, days: int = 30, max_rows: int = 50) -> tuple[list[dict[str, Any]], bool]:
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    items: list[dict[str, Any]] = []
+
+    visits = list(
+        db.scalars(
+            select(Visit)
+            .where(
+                Visit.performed_date >= cutoff,
+                Visit.is_cancelled.is_(False),
+                or_(
+                    Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == master_id)),
+                    Visit.mix_bonus_master_id == master_id,
+                ),
+            )
+            .options(selectinload(Visit.client), selectinload(Visit.services))
+        ).all()
+    )
+    for v in visits:
+        svc_l = sorted(v.services, key=lambda s: s.id)[0].service_name if v.services else "Визит"
+        items.append({"kind": "visit", "sort_at": v.performed_date, "visit": v, "label": svc_l, "client": v.client})
+
+    works = list(
+        db.scalars(
+            select(WorkForInventory)
+            .where(
+                WorkForInventory.created_at >= cutoff,
+                WorkForInventory.is_voided.is_(False),
+                or_(
+                    WorkForInventory.created_by_user_id == master_id,
+                    WorkForInventory.id.in_(select(WorkForInventoryStaff.work_id).where(WorkForInventoryStaff.user_id == master_id)),
+                ),
+            )
+            .options(selectinload(WorkForInventory.client), selectinload(WorkForInventory.staff_rows).selectinload(WorkForInventoryStaff.user))
+        ).all()
+    )
+    for w in works:
+        items.append({"kind": "work", "sort_at": w.created_at, "work": w, "label": _work_activity_label(w), "client": w.client})
+
+    staff_on_booking = exists(select(1).where(BookingStaff.booking_id == ProductSale.booking_id, BookingStaff.user_id == master_id))
+    sales = list(
+        db.scalars(
+            select(ProductSale)
+            .where(
+                ProductSale.performed_date >= cutoff,
+                ProductSale.is_voided.is_(False),
+                or_(
+                    ProductSale.created_by_user_id == master_id,
+                    ProductSale.material_mix_bonus_user_id == master_id,
+                    staff_on_booking,
+                ),
+            )
+            .options(selectinload(ProductSale.client))
+        ).all()
+    )
+    for s in sales:
+        items.append({"kind": "sale", "sort_at": s.performed_date, "sale": s, "label": _product_sale_activity_label(s), "client": s.client})
+
+    items.sort(key=lambda r: (r["sort_at"], str(r["kind"]), _master_activity_archive_row_id(r)), reverse=True)
+    truncated = len(items) > max_rows
+    return items[:max_rows], truncated
+
+
+@router.get("/master/bookings", response_class=HTMLResponse)
+def master_bookings(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    visit_ids = list(
+        db.scalars(
+            select(Booking.id)
+            .join(BookingMaster, BookingMaster.booking_id == Booking.id)
+            .where(Booking.status == BookingStatus.ACTIVE, BookingMaster.master_id == current_user.id)
+        ).all()
+    )
+    sale_ids = list(
+        db.scalars(
+            select(Booking.id)
+            .join(BookingStaff, BookingStaff.booking_id == Booking.id)
+            .where(Booking.status == BookingStatus.ACTIVE, BookingStaff.user_id == current_user.id)
+        ).all()
+    )
+    ids = sorted(set([int(x) for x in (visit_ids + sale_ids) if x is not None]))
+    display_tz = get_display_timezone(db)
+
+    def _sale_order_label(b: Booking) -> str:
+        try:
+            d = json.loads(b.details_json or "{}")
+        except Exception:
+            d = {}
+        if not isinstance(d, dict):
+            d = {}
+        pk = (b.planned_product_kind or "").strip()
+        if pk == ProductSaleKind.KIT.value:
+            if (d.get("sale_kit_mode") or "") == "ORDER":
+                return "Заказ: комплект"
+            return "Продажа: комплект (из наличия)"
+        if pk == ProductSaleKind.RUBBER.value:
+            if (d.get("sale_rubber_mode") or "") == "ORDER":
+                return "Заказ: хвост/резинка"
+            return "Продажа: хвост/резинка (из наличия)"
+        if pk == ProductSaleKind.MATERIAL.value:
+            return "Продажа: материал"
+        if pk == ProductSaleKind.OTHER.value:
+            return "Продажа: другое"
+        return "Продажа"
+
+    rows: list[dict[str, object]] = []
+    if ids:
+        stmt = (
+            select(Booking)
+            .where(Booking.id.in_(ids))
+            .options(selectinload(Booking.client), selectinload(Booking.planned_service).selectinload(Service.subcategory))
+            .order_by(Booking.planned_date.asc(), Booking.id.asc())
+        )
+        bookings = list(db.scalars(stmt).all())
+        for b in bookings:
+            if b.kind == BookingKind.VISIT:
+                if b.planned_service:
+                    label = f"{b.planned_service.subcategory.name} — {b.planned_service.name}"
+                else:
+                    label = "Визит"
+            else:
+                label = _sale_order_label(b)
+            rows.append({"booking": b, "label": label})
+    archive_days = 30
+    archive_cap = 50
+    archive_rows, archive_truncated = master_activity_archive(db, current_user.id, days=archive_days, max_rows=archive_cap)
+    return templates.TemplateResponse(
+        "master_bookings.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            rows=rows,
+            display_tz=display_tz,
+            archive_rows=archive_rows,
+            archive_days=archive_days,
+            archive_cap=archive_cap,
+            archive_truncated=archive_truncated,
+        ),
+    )
+

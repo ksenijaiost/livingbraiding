@@ -1080,7 +1080,7 @@ async def work_new_post(
         post_work_accruals(db, work.id, staff_saved, current_user.id)
         db.commit()
         if bid_for_auto_complete is not None:
-            from app.main import try_auto_complete_booking
+            from app.routes.bookings import try_auto_complete_booking
 
             try_auto_complete_booking(db, bid_for_auto_complete)
             db.commit()

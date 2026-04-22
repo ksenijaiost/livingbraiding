@@ -1011,7 +1011,7 @@ async def product_sale_new_post(
     bid_for_auto_complete = row.booking_id
     db.commit()
     if bid_for_auto_complete:
-        from app.main import try_auto_complete_booking
+        from app.routes.bookings import try_auto_complete_booking
 
         try_auto_complete_booking(db, int(bid_for_auto_complete))
         db.commit()
