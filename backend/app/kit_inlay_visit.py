@@ -41,6 +41,7 @@ from app.db.models import (
 )
 from app.client_validation import client_has_any_contact, strip_or_none
 from app.mix_rates import mix_complexity_rate_for
+from app.forms_parse import parse_bool, parse_date_iso, parse_float
 
 
 def get_kit_max_reserves_per_kit(db: Session) -> int:
@@ -119,7 +120,7 @@ def get_salon_cut_pct(db: Session) -> float:
     if not row:
         return 0.5
     try:
-        return float(row.value.replace(",", "."))
+        return parse_float(row.value, default=0.5, field_name="salon_cut_pct")
     except ValueError:
         return 0.5
 
@@ -309,11 +310,11 @@ def _resolve_visit_master_allocations(
 def _parse_visit_client_discount_percent(g: Callable[[str, str], str]) -> int:
     """Целые 0–100; пусто = 0. g — функция имя→строка как в parse_kit_inlay_form."""
 
-    raw = (g("client_discount_percent", "") or "").replace(",", ".").strip()
+    raw = (g("client_discount_percent", "") or "").strip()
     if not raw:
         return 0
     try:
-        v = float(raw)
+        v = parse_float(raw, field_name="client_discount_percent")
     except ValueError:
         raise ValueError("Скидка клиенту: укажите целое число процентов от 0 до 100.")
     if v < 0 or v > 100:
@@ -328,7 +329,7 @@ def _parse_optional_nonneg_int(g: Callable[[str, str], str], name: str) -> int |
     if not raw:
         return None
     try:
-        v = int(float(raw.replace(",", ".")))
+        v = int(parse_float(raw, field_name=name))
     except ValueError:
         return None
     return max(0, v)
@@ -354,14 +355,20 @@ def parse_kit_inlay_form(
         return str(v).strip()
 
     def g_int(name: str, default: int = 0) -> int:
+        raw = g(name, "").strip()
+        if not raw:
+            return default
         try:
-            return int(g(name, str(default)) or default)
+            return int(parse_float(raw, field_name=name))
         except ValueError:
             return default
 
     def g_float(name: str, default: float = 0.0) -> float:
+        raw = g(name, "").strip()
+        if not raw:
+            return default
         try:
-            return float((g(name, str(default)) or str(default)).replace(",", "."))
+            return parse_float(raw, default=default, field_name=name)
         except ValueError:
             return default
 
@@ -371,8 +378,8 @@ def parse_kit_inlay_form(
             return False
         if isinstance(v, UploadFile):
             return False
-        s = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
-        return s.lower() in ("on", "true", "1", "yes")
+        s = v.decode() if isinstance(v, (bytes, bytearray)) else v
+        return parse_bool(s)
 
     kanekalon_grams = g_float("kanekalon_grams", 0)
     kudri_grams = g_float("kudri_grams", 0)
@@ -416,7 +423,7 @@ def parse_kit_inlay_form(
 
     pd_raw = g("performed_date", "")
     try:
-        performed_date = date.fromisoformat(pd_raw) if pd_raw else date.today()
+        performed_date = parse_date_iso(pd_raw, field_name="performed_date") if pd_raw else date.today()
     except ValueError:
         performed_date = date.today()
 

@@ -24,6 +24,7 @@ from app.client_validation import (
     source_extra_option_for_form,
     strip_or_none,
 )
+from app.forms_parse import parse_bool
 from app.db.models import (
     Booking,
     BookingMaster,
@@ -234,7 +235,7 @@ async def admin_client_new_post(
         source=source_parsed,
         source_other=strip_or_none(source_other, 200),
         comment=strip_or_none(comment) or None,
-        is_confirmed=False if mark_draft == "1" else True,
+        is_confirmed=(not parse_bool(mark_draft)),
         birth_day=birth_day,
         birth_month=birth_month,
         birth_year=birth_year,
@@ -305,7 +306,7 @@ async def admin_client_edit_post(
         if k == "is_confirmed":
             continue
         form[k] = str(form_raw.get(k) or "")
-    form["is_confirmed"] = "1" if "1" in map(str, form_raw.getlist("is_confirmed")) else "0"
+    form["is_confirmed"] = "1" if any(parse_bool(v) for v in form_raw.getlist("is_confirmed")) else "0"
 
     name = (str(form.get("name") or "")).strip()
     phone = str(form.get("phone") or "")

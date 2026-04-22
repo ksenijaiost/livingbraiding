@@ -48,6 +48,7 @@ from app.db.session import get_db
 from app.user_roles import select_users_with_role, user_has_role
 from app.kit_inlay_visit import _materials_cost_and_snapshot
 from app.work_products_compute import compute_work_financials
+from app.forms_parse import parse_bool, parse_date_iso, parse_float, parse_int
 
 _WORK_NEW_FP_KEYS = frozenset({
     "booking_id",
@@ -121,8 +122,11 @@ def _g_str(form: Any, name: str, default: str = "") -> str:
 
 
 def _g_float(form: Any, name: str, default: float = 0.0) -> float:
+    s = _g_str(form, name, "")
+    if not s:
+        return default
     try:
-        return float((_g_str(form, name, str(default)) or str(default)).replace(",", "."))
+        return parse_float(s, default=default, field_name=name)
     except ValueError:
         return default
 
@@ -131,8 +135,8 @@ def _g_bool(form: Any, name: str) -> bool:
     v = form.get(name)
     if v is None or isinstance(v, UploadFile):
         return False
-    s = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
-    return s.lower() in ("on", "true", "1", "yes")
+    s = v.decode() if isinstance(v, (bytes, bytearray)) else v
+    return parse_bool(s)
 
 
 def _list_masters_for_work_form(db: Session) -> list[User]:
@@ -637,12 +641,20 @@ def work_new_get(
     fp: dict[str, str] = {}
     selected_client = None
     cid = str(request.query_params.get("client_id") or "").strip()
-    if cid.isdigit():
-        fp["client_id"] = cid
-        selected_client = db.get(Client, int(cid))
+    try:
+        cid_i = parse_int(cid, min=1, field_name="client_id") if cid else 0
+    except ValueError:
+        cid_i = 0
+    if cid_i > 0:
+        fp["client_id"] = str(cid_i)
+        selected_client = db.get(Client, cid_i)
     bid = str(request.query_params.get("booking_id") or "").strip()
-    if bid.isdigit():
-        fp["booking_id"] = bid
+    try:
+        bid_i = parse_int(bid, min=1, field_name="booking_id") if bid else 0
+    except ValueError:
+        bid_i = 0
+    if bid_i > 0:
+        fp["booking_id"] = str(bid_i)
     for key in _WORK_NEW_FP_KEYS:
         v = request.query_params.get(key)
         if v is not None and str(v).strip() != "":
@@ -687,7 +699,7 @@ async def work_new_post(
     try:
         pd_raw = (_g_str(form, "performed_date", "") or "").strip()
         try:
-            performed_dt = datetime.combine(date.fromisoformat(pd_raw), datetime.min.time())
+            performed_dt = datetime.combine(parse_date_iso(pd_raw, field_name="performed_date"), datetime.min.time())
         except ValueError:
             raise ValueError("Некорректная дата работы.")
         ensure_event_date_in_open_payroll_period(db, performed_dt)
@@ -707,15 +719,17 @@ async def work_new_post(
         amount_from_client: int | None = None
         if scope == WorkScope.CUSTOM_ORDER:
             cid_raw = (_g_str(form, "client_id", "") or "").strip()
-            if not cid_raw.isdigit():
+            try:
+                client_id = parse_int(cid_raw, min=1, field_name="client_id")
+            except ValueError:
                 raise ValueError("Для режима «на заказ» выберите клиента.")
-            client_id = int(cid_raw)
             if not db.get(Client, client_id):
                 raise ValueError("Клиент не найден.")
             afc_raw = (_g_str(form, "amount_from_client", "") or "").strip()
             if afc_raw:
                 try:
-                    amount_from_client = int(float(afc_raw.replace(",", ".")))
+                    afc = parse_float(afc_raw, min=0.0, field_name="amount_from_client")
+                    amount_from_client = int(afc)
                 except ValueError:
                     raise ValueError("Сумма от клиента должна быть числом.")
                 if amount_from_client < 0:
@@ -859,7 +873,7 @@ async def work_new_post(
             corr_kit_blanks_count: int | None = None
             if raw_blanks:
                 try:
-                    corr_kit_blanks_count = int(float(raw_blanks.replace(",", ".")))
+                    corr_kit_blanks_count = int(parse_float(raw_blanks, min=0.0, field_name="corr_kit_blanks_count"))
                 except ValueError:
                     raise ValueError("«Количество заготовок в комплекте» — целое число.")
                 if corr_kit_blanks_count < 0:
@@ -952,9 +966,13 @@ async def work_new_post(
         )
         bid_raw = (_g_str(form, "booking_id", "") or "").strip()
         bid_for_auto_complete: int | None = None
-        if bid_raw.isdigit():
-            work.booking_id = int(bid_raw)
-            bid_for_auto_complete = int(bid_raw)
+        try:
+            bid_i = parse_int(bid_raw, min=1, field_name="booking_id") if bid_raw else 0
+        except ValueError:
+            bid_i = 0
+        if bid_i > 0:
+            work.booking_id = bid_i
+            bid_for_auto_complete = bid_i
         db.add(work)
         db.flush()
 
@@ -1393,18 +1411,18 @@ async def work_edit_save(
 
     def _p_float(name: str, default: float) -> float:
         try:
-            return float(str(form.get(name) or str(default)).strip().replace(",", "."))
-        except ValueError:
-            raise ValueError(f"Некорректное число: {name}")
+            return parse_float(form.get(name), default=default, field_name=name)
+        except ValueError as e:
+            raise ValueError(f"Некорректное число: {name}") from e
 
     def _p_int_opt(name: str) -> int | None:
         raw = (str(form.get(name) or "")).strip()
         if not raw:
             return None
         try:
-            v = int(float(raw.replace(",", ".")))
-        except ValueError:
-            raise ValueError(f"Некорректное число: {name}")
+            v = int(parse_float(raw, field_name=name))
+        except ValueError as e:
+            raise ValueError(f"Некорректное число: {name}") from e
         if v < 0:
             raise ValueError(f"Значение не может быть отрицательным: {name}")
         return v

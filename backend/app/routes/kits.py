@@ -24,6 +24,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime, get_display_timezone, timezone_label
+from app.forms_parse import parse_bool, parse_int
 from app.kit_crud import (
     apply_kit_admin_form,
     calc_kit_stock_price_total_from_composition,
@@ -52,9 +53,11 @@ router = APIRouter()
 
 def _kit_stock_label_from_form(db: Session, form_map: dict[str, str], field: str) -> str | None:
     raw = (form_map.get(field) or "").strip()
-    if not raw.isdigit():
+    try:
+        kid = parse_int(raw, min=1, field_name=field)
+    except ValueError:
         return None
-    k = db.get(Kit, int(raw))
+    k = db.get(Kit, kid)
     if not k:
         return None
     return f"{k.sku} — {k.title} (остаток {k.pieces_available})"
@@ -62,9 +65,11 @@ def _kit_stock_label_from_form(db: Session, form_map: dict[str, str], field: str
 
 def _kit_reserve_hint_from_form(db: Session, form_map: dict[str, str], field: str) -> str | None:
     raw = (form_map.get(field) or "").strip()
-    if not raw.isdigit():
+    try:
+        rid = parse_int(raw, min=1, field_name=field)
+    except ValueError:
         return None
-    return kit_reserve_hint_by_id(db, int(raw))
+    return kit_reserve_hint_by_id(db, rid)
 
 
 def _kit_reserve_redirect_base(kit_id: int, form: Any) -> str:
@@ -522,8 +527,10 @@ async def admin_kit_reserve_post(
             if isinstance(v, UploadFile):
                 continue
             s = str(v).strip()
-            if s.isdigit():
-                ids.append(int(s))
+            try:
+                ids.append(parse_int(s, min=1, field_name="reserve_id"))
+            except ValueError:
+                continue
         ids = list(dict.fromkeys(ids))
         if not ids:
             return _err("Отметьте хотя бы один резерв.")
@@ -553,8 +560,12 @@ async def admin_kit_reserve_post(
 
     if action == "clear":
         rid_raw = str(form.get("reserve_id") or "").strip()
-        if rid_raw.isdigit():
-            row = db.get(KitReserve, int(rid_raw))
+        try:
+            rid = parse_int(rid_raw, min=1, field_name="reserve_id")
+        except ValueError:
+            rid = 0
+        if rid > 0:
+            row = db.get(KitReserve, rid)
             if not row or row.kit_id != kit.id:
                 return _err("Строка резерва не найдена.")
             if current_user.role == UserRole.MASTER and row.reserved_by_user_id != current_user.id:
@@ -576,7 +587,7 @@ async def admin_kit_reserve_post(
             return RedirectResponse(url=redirect_base + "?msg=cleared", status_code=303)
         return _err("Укажите один резерв или отметьте строки в форме «Снять».")
 
-    reserve_full = str(form.get("reserve_full") or "").lower() in ("1", "on", "yes", "true")
+    reserve_full = parse_bool(form.get("reserve_full"))
     qty_raw = str(form.get("reserve_pieces") or "").strip()
     if reserve_full and qty_raw:
         return _err("Выберите либо «весь остаток», либо укажите количество заготовок.")
@@ -592,18 +603,24 @@ async def admin_kit_reserve_post(
         qty = avail
     else:
         try:
-            qty = int(qty_raw)
+            qty = parse_int(qty_raw, min=1, field_name="reserve_pieces")
         except ValueError:
             return _err("Некорректное количество заготовок.")
-        if qty < 1:
-            return _err("Количество должно быть не меньше 1.")
     if qty > avail:
         return _err(f"Нельзя зарезервировать больше свободного остатка ({avail}).")
 
     cid_raw = str(form.get("reserved_for_client_id") or "").strip()
     uid_raw = str(form.get("reserved_for_user_id") or "").strip()
-    cid = int(cid_raw) if cid_raw.isdigit() else None
-    uid = int(uid_raw) if uid_raw.isdigit() else None
+    cid: int | None
+    uid: int | None
+    try:
+        cid = parse_int(cid_raw, min=1, field_name="reserved_for_client_id")
+    except ValueError:
+        cid = None
+    try:
+        uid = parse_int(uid_raw, min=1, field_name="reserved_for_user_id")
+    except ValueError:
+        uid = None
     if cid is None and uid is None:
         return _err("Укажите клиента и/или сотрудника для резерва.")
     if cid is not None:

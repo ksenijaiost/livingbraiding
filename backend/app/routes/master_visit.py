@@ -30,6 +30,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.display_time import get_display_timezone
+from app.forms_parse import parse_int
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
     get_salon_cut_pct,
@@ -70,9 +71,11 @@ def _masters_for_visit_form(db: Session) -> list[User]:
 
 def _kit_stock_label_from_form(db: Session, form_map: dict[str, str], field: str) -> str | None:
     raw = (form_map.get(field) or "").strip()
-    if not raw.isdigit():
+    try:
+        kid = parse_int(raw, min=1, field_name=field)
+    except ValueError:
         return None
-    k = db.get(Kit, int(raw))
+    k = db.get(Kit, kid)
     if not k:
         return None
     return f"{k.sku} — {k.title} (остаток {k.pieces_available})"
@@ -80,9 +83,11 @@ def _kit_stock_label_from_form(db: Session, form_map: dict[str, str], field: str
 
 def _kit_reserve_hint_from_form(db: Session, form_map: dict[str, str], field: str) -> str | None:
     raw = (form_map.get(field) or "").strip()
-    if not raw.isdigit():
+    try:
+        kid = parse_int(raw, min=1, field_name=field)
+    except ValueError:
         return None
-    return kit_reserve_hint_by_id(db, int(raw))
+    return kit_reserve_hint_by_id(db, kid)
 
 
 def _amount_hint_from_booking(b: Booking) -> str:
@@ -100,13 +105,24 @@ def _amount_hint_from_booking(b: Booking) -> str:
 
 def _prefill_visit_stock_kit_from_booking(db: Session, b: Booking, form_prefill: dict[str, str]) -> None:
     vs = (form_prefill.get("visit_stock_kit_id") or "").strip()
-    if vs.isdigit() and not (form_prefill.get("stock_kit_id") or "").strip():
-        form_prefill["stock_kit_id"] = vs
+    try:
+        vs_int = parse_int(vs, min=1, field_name="visit_stock_kit_id")
+    except ValueError:
+        vs_int = 0
+    if vs_int > 0 and not (form_prefill.get("stock_kit_id") or "").strip():
+        form_prefill["stock_kit_id"] = str(vs_int)
     vp = (form_prefill.get("visit_stock_kit_pieces") or "").strip()
-    if vp.isdigit() and not (form_prefill.get("stock_blanks_used") or "").strip():
-        form_prefill["stock_blanks_used"] = vp
-    if (form_prefill.get("stock_kit_id") or "").strip().isdigit():
+    try:
+        vp_int = parse_int(vp, min=1, field_name="visit_stock_kit_pieces")
+    except ValueError:
+        vp_int = 0
+    if vp_int > 0 and not (form_prefill.get("stock_blanks_used") or "").strip():
+        form_prefill["stock_blanks_used"] = str(vp_int)
+    try:
+        _ = parse_int((form_prefill.get("stock_kit_id") or "").strip(), min=1, field_name="stock_kit_id")
         return
+    except ValueError:
+        pass
     if b.kind != BookingKind.VISIT:
         return
     work = db.scalar(
@@ -124,8 +140,11 @@ def _prefill_visit_stock_kit_from_booking(db: Session, b: Booking, form_prefill:
         return
     kid = int(work.created_kit_id)
     form_prefill["stock_kit_id"] = str(kid)
-    if (form_prefill.get("stock_blanks_used") or "").strip().isdigit():
+    try:
+        _ = parse_int((form_prefill.get("stock_blanks_used") or "").strip(), min=1, field_name="stock_blanks_used")
         return
+    except ValueError:
+        pass
     total_r = db.scalar(
         select(func.coalesce(func.sum(KitReserve.pieces_reserved), 0)).where(
             KitReserve.kit_id == kid,
@@ -201,8 +220,11 @@ def master_visit_new_get(
     db: Session = Depends(get_db),
 ):
     saved_draft_client = False
-    if saved and saved.isdigit():
-        vid = int(saved)
+    try:
+        vid = parse_int(saved, min=1, field_name="saved") if saved else 0
+    except ValueError:
+        vid = 0
+    if vid > 0:
         v = db.scalar(select(Visit).where(Visit.id == vid).options(selectinload(Visit.client)))
         if v and v.client and not v.client.is_confirmed:
             saved_draft_client = True
@@ -265,8 +287,11 @@ async def master_visit_new_post(
             created_by_label=format_created_by_label(current_user),
         )
         bid_raw = str(form.get("booking_id") or "").strip()
-        if bid_raw.isdigit():
-            bid_int = int(bid_raw)
+        try:
+            bid_int = parse_int(bid_raw, min=1, field_name="booking_id")
+        except ValueError:
+            bid_int = 0
+        if bid_int > 0:
             try:
                 visit.booking_id = bid_int
                 db.commit()
@@ -280,8 +305,12 @@ async def master_visit_new_post(
         fp.update(collect_thermo_prefill_from_form(form))
         selected_client = None
         eid = (fp.get("existing_client_id") or "").strip()
-        if eid.isdigit():
-            selected_client = db.get(Client, int(eid))
+        try:
+            eid_int = parse_int(eid, min=1, field_name="existing_client_id")
+        except ValueError:
+            eid_int = 0
+        if eid_int > 0:
+            selected_client = db.get(Client, eid_int)
         return _master_visit_step1_template_response(
             request,
             current_user=current_user,

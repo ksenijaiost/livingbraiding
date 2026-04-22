@@ -61,6 +61,7 @@ from app.visit_edit_policy import (
     within_edit_window,
 )
 from app.ru_labels import ru_user_role
+from app.forms_parse import parse_date_iso, parse_float, parse_int, parse_optional_float
 
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_user_role"] = ru_user_role
@@ -140,7 +141,7 @@ def _g_int(form: Any, name: str, default: int = 0) -> int:
     if not s:
         return default
     try:
-        return int(float(s.replace(",", ".")))
+        return int(parse_float(s, field_name=name))
     except ValueError:
         return default
 
@@ -150,7 +151,7 @@ def _g_float(form: Any, name: str, default: float = 0.0) -> float:
     if not s:
         return default
     try:
-        return float(s.replace(",", "."))
+        return parse_float(s, field_name=name)
     except ValueError:
         return default
 
@@ -160,7 +161,7 @@ def _g_optional_float(form: Any, name: str) -> float | None:
     if not s:
         return None
     try:
-        return float(s.replace(",", "."))
+        return parse_optional_float(s, field_name=name)
     except ValueError:
         return None
 
@@ -173,7 +174,10 @@ def _apply_material_from_form(
     current_user: AuthUser,
 ) -> None:
     sid_raw = _g_str(form, "material_service_id")
-    service_id = int(sid_raw) if sid_raw.isdigit() else None
+    try:
+        service_id = parse_int(sid_raw, min=1, field_name="material_service_id")
+    except ValueError:
+        service_id = None
     if service_id and service_id not in allowed_material_ids:
         raise ValueError("Недопустимая услуга «Продажа материала».")
     sale.material_service_id = service_id
@@ -277,17 +281,30 @@ def _merge_product_sale_fp_from_booking(db: Session, b: Booking, fp: dict[str, s
         if desc:
             fp["rubber_description"] = desc
         rv = str(details.get("sale_rubber_price_override") or "").strip()
-        if rv.isdigit():
-            fp["rubber_price_override"] = rv
+        if rv:
+            try:
+                rv_i = parse_int(rv, min=0, field_name="sale_rubber_price_override")
+            except ValueError:
+                rv_i = None
+            if rv_i is not None:
+                fp["rubber_price_override"] = str(rv_i)
     elif k == "KIT":
         sm = str(details.get("sale_kit_mode") or "").strip().upper()
         if sm == "IN_STOCK":
             sk = str(details.get("sale_stock_kit_id") or "").strip()
-            if sk.isdigit():
-                fp["kit_id"] = sk
+            try:
+                sk_i = parse_int(sk, min=1, field_name="sale_stock_kit_id") if sk else 0
+            except ValueError:
+                sk_i = 0
+            if sk_i > 0:
+                fp["kit_id"] = str(sk_i)
             sp = str(details.get("sale_stock_kit_pieces") or "").strip()
-            if sp.isdigit():
-                fp["kit_pieces_sold"] = sp
+            try:
+                sp_i = parse_int(sp, min=0, field_name="sale_stock_kit_pieces") if sp else 0
+            except ValueError:
+                sp_i = 0
+            if sp_i > 0:
+                fp["kit_pieces_sold"] = str(sp_i)
     elif k == "OTHER":
         od = str(details.get("sale_rubber_desc") or "").strip()
         if od:
@@ -300,7 +317,11 @@ def _merge_product_sale_fp_from_booking(db: Session, b: Booking, fp: dict[str, s
     # Комплект из «работы с товарами» по этой брони (заказ + резерв и т.д.): в details брони kit_id может отсутствовать.
     if (fp.get("kind") or "").strip().upper() == "KIT":
         kid_raw = (fp.get("kit_id") or "").strip()
-        if not kid_raw.isdigit():
+        try:
+            kid_i = parse_int(kid_raw, min=1, field_name="kit_id") if kid_raw else 0
+        except ValueError:
+            kid_i = 0
+        if kid_i <= 0:
             work = db.scalar(
                 select(WorkForInventory)
                 .where(
@@ -315,8 +336,11 @@ def _merge_product_sale_fp_from_booking(db: Session, b: Booking, fp: dict[str, s
             if work and work.created_kit_id:
                 fp["kit_id"] = str(int(work.created_kit_id))
         kid_raw = (fp.get("kit_id") or "").strip()
-        if kid_raw.isdigit() and not (fp.get("kit_pieces_sold") or "").strip().isdigit():
-            rid = int(kid_raw)
+        try:
+            rid = parse_int(kid_raw, min=1, field_name="kit_id") if kid_raw else 0
+        except ValueError:
+            rid = 0
+        if rid > 0 and not (fp.get("kit_pieces_sold") or "").strip().isdigit():
             total_r = db.scalar(
                 select(func.coalesce(func.sum(KitReserve.pieces_reserved), 0)).where(
                     KitReserve.kit_id == rid,
@@ -355,12 +379,20 @@ def _render_new(
     material_services = _prodazha_materiala_services(db)
     selected_client = None
     eid = (fp.get("existing_client_id") or "").strip()
-    if eid.isdigit():
-        selected_client = db.get(Client, int(eid))
+    try:
+        eid_i = parse_int(eid, min=1, field_name="existing_client_id") if eid else 0
+    except ValueError:
+        eid_i = 0
+    if eid_i > 0:
+        selected_client = db.get(Client, eid_i)
     selected_kit_label: str | None = None
     kid = (fp.get("kit_id") or "").strip()
-    if kid.isdigit():
-        kobj = db.get(Kit, int(kid))
+    try:
+        kid_i = parse_int(kid, min=1, field_name="kit_id") if kid else 0
+    except ValueError:
+        kid_i = 0
+    if kid_i > 0:
+        kobj = db.get(Kit, kid_i)
         if kobj:
             selected_kit_label = f"{kobj.sku} — {kobj.title}"
     default_date = (fp.get("performed_date") or "").strip() or date.today().isoformat()
@@ -416,12 +448,20 @@ def product_sale_new_get(
 ):
     fp: dict[str, str] = {}
     cid = str(request.query_params.get("client_id") or "").strip()
-    if cid.isdigit():
-        fp["existing_client_id"] = cid
+    try:
+        cid_i = parse_int(cid, min=1, field_name="client_id") if cid else 0
+    except ValueError:
+        cid_i = 0
+    if cid_i > 0:
+        fp["existing_client_id"] = str(cid_i)
     bid = str(request.query_params.get("booking_id") or "").strip()
-    if bid.isdigit():
-        fp["booking_id"] = bid
-        b = db.scalar(select(Booking).where(Booking.id == int(bid)))
+    try:
+        bid_i = parse_int(bid, min=1, field_name="booking_id") if bid else 0
+    except ValueError:
+        bid_i = 0
+    if bid_i > 0:
+        fp["booking_id"] = str(bid_i)
+        b = db.scalar(select(Booking).where(Booking.id == bid_i))
         if b:
             _merge_product_sale_fp_from_booking(db, b, fp)
     return _render_new(request, current_user, db, fp=fp)
@@ -648,15 +688,19 @@ async def product_sale_edit_save(
     allowed_material_ids = {s.id for s in material_services}
 
     cid_raw = _g_str(form, "existing_client_id")
-    if not cid_raw.isdigit():
+    try:
+        cid = parse_int(cid_raw, min=1, field_name="existing_client_id")
+    except ValueError:
+        cid = 0
+    if cid <= 0:
         return _render_new(request, current_user, db, error="Выберите клиента из базы.", fp={})
-    client = db.get(Client, int(cid_raw))
+    client = db.get(Client, cid)
     if not client:
         return _render_new(request, current_user, db, error="Клиент не найден.", fp={})
 
     pd_raw = _g_str(form, "performed_date") or date.today().isoformat()
     try:
-        performed = datetime.combine(date.fromisoformat(pd_raw), datetime.min.time())
+        performed = datetime.combine(parse_date_iso(pd_raw, field_name="performed_date"), datetime.min.time())
     except ValueError:
         return _render_new(request, current_user, db, error="Некорректная дата.", fp={})
     try:
@@ -717,9 +761,13 @@ async def product_sale_edit_save(
 
     elif kind == ProductSaleKind.KIT:
         kid_raw = _g_str(form, "kit_id")
-        if not kid_raw.isdigit():
+        try:
+            kid = parse_int(kid_raw, min=1, field_name="kit_id")
+        except ValueError:
+            kid = 0
+        if kid <= 0:
             raise ValueError("Выберите комплект из наличия.")
-        kit = db.get(Kit, int(kid_raw))
+        kit = db.get(Kit, kid)
         if not kit:
             raise ValueError("Комплект не найден.")
         if kit.stock_price_total is None or float(kit.stock_price_total) <= 0:
@@ -898,15 +946,19 @@ async def product_sale_new_post(
         return _render_new(request, current_user, db, error=msg, fp=fp)
 
     cid_raw = fp["existing_client_id"]
-    if not cid_raw.isdigit():
+    try:
+        cid = parse_int(cid_raw, min=1, field_name="existing_client_id")
+    except ValueError:
+        cid = 0
+    if cid <= 0:
         return _fail("Выберите клиента из базы.")
-    client = db.get(Client, int(cid_raw))
+    client = db.get(Client, cid)
     if not client:
         return _fail("Клиент не найден.")
 
     pd_raw = fp["performed_date"]
     try:
-        performed = datetime.combine(date.fromisoformat(pd_raw), datetime.min.time())
+        performed = datetime.combine(parse_date_iso(pd_raw, field_name="performed_date"), datetime.min.time())
     except ValueError:
         return _fail("Некорректная дата.")
     try:
@@ -932,8 +984,12 @@ async def product_sale_new_post(
         kind=kind,
     )
     bid_raw = (_g_str(form, "booking_id") or "").strip()
-    if bid_raw.isdigit():
-        row.booking_id = int(bid_raw)
+    try:
+        bid = parse_int(bid_raw, min=1, field_name="booking_id") if bid_raw else 0
+    except ValueError:
+        bid = 0
+    if bid > 0:
+        row.booking_id = bid
 
     if kind == ProductSaleKind.MATERIAL:
         try:
@@ -943,9 +999,13 @@ async def product_sale_new_post(
 
     elif kind == ProductSaleKind.KIT:
         kid_raw = (fp["kit_id"] or "").strip()
-        if not kid_raw.isdigit():
+        try:
+            kid = parse_int(kid_raw, min=1, field_name="kit_id")
+        except ValueError:
+            kid = 0
+        if kid <= 0:
             return _fail("Выберите комплект из наличия.")
-        kit = db.get(Kit, int(kid_raw))
+        kit = db.get(Kit, kid)
         if not kit:
             return _fail("Комплект не найден.")
         if kit.stock_price_total is None or float(kit.stock_price_total) <= 0:

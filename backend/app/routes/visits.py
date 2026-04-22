@@ -22,6 +22,7 @@ from app.db.models import (
 )
 from app.payroll_fund import storno_source_accruals
 from app.payroll_fund import PayrollFundSourceKind
+from app.forms_parse import parse_bool, parse_int
 from app.ui_visit_display import (
     build_service_human_display,
     kit_usages_empty_explanation,
@@ -235,11 +236,11 @@ async def admin_visit_change_client(
     form = await request.form()
     raw = form.get("new_client_id")
     try:
-        new_cid = int(str(raw).strip())
-    except (TypeError, ValueError):
+        new_cid = parse_int(raw, min=1, field_name="new_client_id")
+    except ValueError:
         return RedirectResponse(url=f"/visits/{visit_id}?client_err=bad_id", status_code=303)
 
-    confirm_late = str(form.get("confirm_late") or "").lower() in ("1", "on", "true", "yes")
+    confirm_late = parse_bool(form.get("confirm_late"))
     if policy.super_outside_window and not confirm_late:
         return RedirectResponse(url=f"/visits/{visit_id}?client_err=need_confirm", status_code=303)
 

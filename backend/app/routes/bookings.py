@@ -44,6 +44,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.display_time import get_display_timezone
+from app.forms_parse import parse_bool, parse_float, parse_int
 from app.kit_inlay_visit import get_kit_max_reserves_per_kit, kit_reserve_slots_used
 from app.user_roles import select_users_with_any_role, select_users_with_role
 from app.work_products import _rubber_type_items
@@ -116,8 +117,10 @@ def _parse_ids_csv(raw: str | None) -> list[int]:
     for p in str(raw).replace(" ", "").split(","):
         if not p:
             continue
-        if p.isdigit():
-            out.append(int(p))
+        try:
+            out.append(parse_int(p, min=1, field_name="ids_csv"))
+        except ValueError:
+            continue
     return sorted(set([i for i in out if i > 0]))
 
 
@@ -518,7 +521,7 @@ def _booking_details_from_form(fp: dict[str, str]) -> dict[str, object]:
             "visit_extra_order_blanks_qty",
             "visit_extra_order_blanks_desc",
         ) + calc_keys
-        if str(fp.get("visit_own_need_correction") or "").lower() in ("1", "on", "true", "yes"):
+        if parse_bool(fp.get("visit_own_need_correction")):
             keys = keys + (
                 "corr_trim_qty",
                 "corr_hourly_hours",
@@ -558,7 +561,7 @@ def _booking_details_from_form(fp: dict[str, str]) -> dict[str, object]:
         if v is None:
             continue
         if key in checkbox_keys:
-            d[key] = "1" if str(v).lower() in ("1", "on", "true", "yes") else ""
+            d[key] = "1" if parse_bool(v) else ""
         else:
             sv = str(v).strip()
             if sv == "":
@@ -585,7 +588,7 @@ def _sync_booking_staff_rows_for_sale(db: Session, *, booking_id: int, fp: dict[
         ids: list[int] = []
         for v in form_raw.getlist("sale_kit_order_master_on"):
             try:
-                ids.append(int(v))
+                ids.append(parse_int(v, min=1, field_name="sale_kit_order_master_on"))
             except Exception:
                 pass
         ids = sorted(set([i for i in ids if i > 0]))
@@ -597,10 +600,12 @@ def _sync_booking_staff_rows_for_sale(db: Session, *, booking_id: int, fp: dict[
 
     if (fp.get("product_kind") or "") == "RUBBER" and (fp.get("sale_rubber_mode") or "") == "ORDER":
         raw = str(fp.get("sale_rubber_order_master_id") or "").strip()
-        if raw.isdigit():
-            uid = int(raw)
-            if db.get(User, uid) is not None:
-                db.add(BookingStaff(booking_id=booking_id, user_id=uid, kind=BookingStaffKind.SALE_RUBBER_ORDER))
+        try:
+            uid = parse_int(raw, min=1, field_name="sale_rubber_order_master_id")
+        except ValueError:
+            uid = 0
+        if uid > 0 and db.get(User, uid) is not None:
+            db.add(BookingStaff(booking_id=booking_id, user_id=uid, kind=BookingStaffKind.SALE_RUBBER_ORDER))
     db.flush()
 
 
@@ -609,9 +614,11 @@ def _apply_booking_auto_reserves(db: Session, *, booking_client_id: int, fp: dic
         if not kit_id_raw:
             return
         kit_id_raw = str(kit_id_raw).strip()
-        if not kit_id_raw.isdigit():
+        try:
+            kit_id = parse_int(kit_id_raw, min=1, field_name="kit_id")
+        except ValueError:
             return
-        kit = db.get(Kit, int(kit_id_raw))
+        kit = db.get(Kit, kit_id)
         if not kit:
             return
         avail = int(kit.pieces_available or 0)
@@ -620,7 +627,10 @@ def _apply_booking_auto_reserves(db: Session, *, booking_client_id: int, fp: dic
         if kit_reserve_slots_used(db, kit.id) >= get_kit_max_reserves_per_kit(db):
             return
         pq = str(fp.get(pieces_field) or "").strip() if pieces_field else ""
-        qty = int(pq) if pq.isdigit() else avail
+        try:
+            qty = parse_int(pq, min=1, field_name="reserve_pieces") if pq else avail
+        except ValueError:
+            qty = avail
         qty = max(1, min(qty, avail))
         before = SimpleNamespace(pieces_available=kit.pieces_available)
         kit.pieces_available = avail - qty
@@ -762,10 +772,14 @@ async def admin_booking_new_post(
     planned_service_id: int | None = None
     planned_product_kind: str | None = None
 
-    if not client_id_raw.isdigit():
+    try:
+        client_id = parse_int(client_id_raw, min=1, field_name="client_id")
+    except ValueError:
+        client_id = 0
+    if client_id <= 0:
         err = "Выберите клиента."
     else:
-        client = db.get(Client, int(client_id_raw))
+        client = db.get(Client, client_id)
         if client is None:
             err = "Клиент не найден."
 
@@ -782,18 +796,20 @@ async def admin_booking_new_post(
 
     if not err and deposit_raw:
         try:
-            deposit_amount = int(float(deposit_raw))
-            if deposit_amount < 0:
-                raise ValueError()
+            dep = parse_float(deposit_raw, min=0.0, field_name="deposit_amount")
+            deposit_amount = int(dep)
         except Exception:
             err = "Предоплата должна быть числом."
 
     if not err and kind_raw == BookingKind.VISIT.value:
         svc_raw = str(fp.get("service_id") or "").strip()
-        if not svc_raw.isdigit():
+        try:
+            planned_service_id = parse_int(svc_raw, min=1, field_name="service_id")
+        except ValueError:
+            planned_service_id = None
+        if planned_service_id is None:
             err = "Выберите услугу для брони визита."
         else:
-            planned_service_id = int(svc_raw)
             if db.get(Service, planned_service_id) is None:
                 err = "Услуга не найдена."
 
@@ -808,7 +824,9 @@ async def admin_booking_new_post(
                     err = "Выберите хотя бы одного мастера для заказа комплекта."
             if pk == ProductSaleKind.RUBBER.value and (fp.get("sale_rubber_mode") or "") == "ORDER":
                 raw_mid = str(fp.get("sale_rubber_order_master_id") or "").strip()
-                if not raw_mid.isdigit():
+                try:
+                    _ = parse_int(raw_mid, min=1, field_name="sale_rubber_order_master_id")
+                except ValueError:
                     err = "Выберите мастера для заказа хвоста/резинки."
 
     masters = _masters_for_visit_form(db)
@@ -859,7 +877,7 @@ async def admin_booking_new_post(
         on_ids: list[int] = []
         for v in form_raw.getlist("booking_master_on"):
             try:
-                on_ids.append(int(v))
+                on_ids.append(parse_int(v, min=1, field_name="booking_master_on"))
             except Exception:
                 pass
         on_ids = sorted(set([i for i in on_ids if i > 0]))
@@ -1076,10 +1094,14 @@ async def admin_booking_edit_post(
     planned_service_id: int | None = None
     planned_product_kind: str | None = None
 
-    if not client_id_raw.isdigit():
+    try:
+        client_id = parse_int(client_id_raw, min=1, field_name="client_id")
+    except ValueError:
+        client_id = 0
+    if client_id <= 0:
         err = "Выберите клиента."
     else:
-        client = db.get(Client, int(client_id_raw))
+        client = db.get(Client, client_id)
         if client is None:
             err = "Клиент не найден."
 
@@ -1096,18 +1118,20 @@ async def admin_booking_edit_post(
 
     if not err and deposit_raw:
         try:
-            deposit_amount = int(float(deposit_raw))
-            if deposit_amount < 0:
-                raise ValueError()
+            dep = parse_float(deposit_raw, min=0.0, field_name="deposit_amount")
+            deposit_amount = int(dep)
         except Exception:
             err = "Предоплата должна быть числом."
 
     if not err and kind_raw == BookingKind.VISIT.value:
         svc_raw = str(fp.get("service_id") or "").strip()
-        if not svc_raw.isdigit():
+        try:
+            planned_service_id = parse_int(svc_raw, min=1, field_name="service_id")
+        except ValueError:
+            planned_service_id = None
+        if planned_service_id is None:
             err = "Выберите услугу для брони визита."
         else:
-            planned_service_id = int(svc_raw)
             if db.get(Service, planned_service_id) is None:
                 err = "Услуга не найдена."
 
@@ -1122,7 +1146,9 @@ async def admin_booking_edit_post(
                     err = "Выберите хотя бы одного мастера для заказа комплекта."
             if pk == ProductSaleKind.RUBBER.value and (fp.get("sale_rubber_mode") or "") == "ORDER":
                 raw_mid = str(fp.get("sale_rubber_order_master_id") or "").strip()
-                if not raw_mid.isdigit():
+                try:
+                    _ = parse_int(raw_mid, min=1, field_name="sale_rubber_order_master_id")
+                except ValueError:
                     err = "Выберите мастера для заказа хвоста/резинки."
 
     masters = _masters_for_visit_form(db)
@@ -1133,7 +1159,7 @@ async def admin_booking_edit_post(
     if kind_raw == BookingKind.VISIT.value:
         for v in form_raw.getlist("booking_master_on"):
             try:
-                on_ids.append(int(v))
+                on_ids.append(parse_int(v, min=1, field_name="booking_master_on"))
             except Exception:
                 pass
         on_ids = sorted(set([i for i in on_ids if i > 0]))
