@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth import AuthUser, require_role
 from app.db.models import CatalogProduct, Service, ServiceCategory, ServiceSubcategory, UserRole
 from app.db.session import get_db
+from app.forms_parse import parse_bool, parse_optional_float
 from app.ru_labels import format_price_integer_rub
 from app.webui import templates, ctx as _ctx
 
@@ -172,12 +173,9 @@ async def products_catalog_row_edit(
         return RedirectResponse(url=f"/products-catalog?{urlencode({'category': category, message_key: value})}", status_code=303)
 
     try:
-        raw_price = str(form.get("price") or "").strip()
-        raw_master_pay = str(form.get("master_pay") or "").strip()
-        raw_fixed_expense = str(form.get("fixed_expense") or "").strip()
-        price = None if not raw_price else float(raw_price.replace(",", "."))
-        master_pay = None if not raw_master_pay else float(raw_master_pay.replace(",", "."))
-        fixed_expense = None if not raw_fixed_expense else float(raw_fixed_expense.replace(",", "."))
+        price = parse_optional_float(form.get("price"), field_name="price")
+        master_pay = parse_optional_float(form.get("master_pay"), field_name="master_pay")
+        fixed_expense = parse_optional_float(form.get("fixed_expense"), field_name="fixed_expense")
     except ValueError:
         return _redirect("err", "bad_price")
 
@@ -190,10 +188,10 @@ async def products_catalog_row_edit(
     row.price = price
     meta["master_pay"] = master_pay
     meta["fixed_expense"] = fixed_expense
-    meta["is_used_in_kit_form"] = str(form.get("is_used_in_kit_form") or "").strip().lower() in ("1", "true", "on", "yes")
-    meta["ignore_in_calc"] = str(form.get("ignore_in_calc") or "").strip().lower() in ("1", "true", "on", "yes")
-    meta["is_bu"] = str(form.get("is_bu") or "").strip().lower() in ("1", "true", "on", "yes")
-    row.is_active = str(form.get("is_active") or "").strip().lower() in ("1", "true", "on", "yes")
+    meta["is_used_in_kit_form"] = parse_bool(form.get("is_used_in_kit_form"))
+    meta["ignore_in_calc"] = parse_bool(form.get("ignore_in_calc"))
+    meta["is_bu"] = parse_bool(form.get("is_bu"))
+    row.is_active = parse_bool(form.get("is_active"))
     row.meta_json = json.dumps(meta, ensure_ascii=False)
     db.commit()
     return _redirect("msg", "saved")
@@ -217,12 +215,9 @@ async def products_catalog_row_new(
         return _redirect("err", "empty")
 
     try:
-        raw_price = str(form.get("price") or "").strip()
-        raw_master_pay = str(form.get("master_pay") or "").strip()
-        raw_fixed_expense = str(form.get("fixed_expense") or "").strip()
-        price = None if not raw_price else float(raw_price.replace(",", "."))
-        master_pay = None if not raw_master_pay else float(raw_master_pay.replace(",", "."))
-        fixed_expense = None if not raw_fixed_expense else float(raw_fixed_expense.replace(",", "."))
+        price = parse_optional_float(form.get("price"), field_name="price")
+        master_pay = parse_optional_float(form.get("master_pay"), field_name="master_pay")
+        fixed_expense = parse_optional_float(form.get("fixed_expense"), field_name="fixed_expense")
     except ValueError:
         return _redirect("err", "bad_price")
 
@@ -245,9 +240,9 @@ async def products_catalog_row_new(
     meta = {
         "master_pay": master_pay,
         "fixed_expense": fixed_expense,
-        "is_used_in_kit_form": str(form.get("is_used_in_kit_form") or "").strip().lower() in ("1", "true", "on", "yes"),
-        "ignore_in_calc": str(form.get("ignore_in_calc") or "").strip().lower() in ("1", "true", "on", "yes"),
-        "is_bu": str(form.get("is_bu") or "").strip().lower() in ("1", "true", "on", "yes"),
+        "is_used_in_kit_form": parse_bool(form.get("is_used_in_kit_form")),
+        "ignore_in_calc": parse_bool(form.get("ignore_in_calc")),
+        "is_bu": parse_bool(form.get("is_bu")),
     }
     db.add(
         CatalogProduct(
@@ -257,7 +252,7 @@ async def products_catalog_row_new(
             price=price,
             meta_json=json.dumps(meta, ensure_ascii=False),
             sort_order=int(max_sort or 0) + 1,
-            is_active=str(form.get("is_active") or "").strip().lower() in ("1", "true", "on", "yes"),
+            is_active=parse_bool(form.get("is_active")),
         )
     )
     db.commit()

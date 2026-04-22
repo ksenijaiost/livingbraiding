@@ -19,6 +19,7 @@ from app.db.models import (
     UserRoleAssignment,
 )
 from app.db.session import get_db
+from app.forms_parse import parse_bool
 from app.security import hash_password
 from app.user_roles import (
     get_roles_for_user,
@@ -45,8 +46,7 @@ def _roles_from_staff_form(form: Any) -> list[UserRole]:
         v = form.get(key)
         if v is None or isinstance(v, UploadFile):
             continue
-        s = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
-        if s.strip().lower() in ("1", "on", "true", "yes"):
+        if parse_bool(v.decode() if isinstance(v, (bytes, bytearray)) else v):
             roles.append(role)
     return roles
 
@@ -244,7 +244,7 @@ async def admin_settings_staff_edit_post(
     if u.id == current_user.id:
         new_active = True
     else:
-        new_active = str(form.get("is_active") or "").strip().lower() in ("1", "on", "true", "yes")
+        new_active = parse_bool(form.get("is_active"))
 
     def _form_err(msg: str):
         audit_rows = list(

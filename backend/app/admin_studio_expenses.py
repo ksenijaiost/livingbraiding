@@ -24,6 +24,7 @@ from app.db.models import (
     UserRole,
 )
 from app.db.session import get_db
+from app.forms_parse import parse_date_iso, parse_float, parse_int
 from app.payroll_fund import replace_studio_expense_ledger, studio_fund_balance
 from app.visit_edit_policy import is_in_closed_payroll_period
 from app.ru_labels import ru_user_role
@@ -53,17 +54,18 @@ def _parse_expense_date(raw: str) -> datetime | None:
     if not s:
         return None
     try:
-        return datetime.combine(date.fromisoformat(s), datetime.min.time())
+        d = parse_date_iso(s, field_name="expense_date")
     except ValueError:
         return None
+    return datetime.combine(d, datetime.min.time())
 
 
 def _parse_amount(raw: str) -> float | None:
-    s = (raw or "").strip().replace(",", ".")
+    s = (raw or "").strip()
     if not s:
         return None
     try:
-        return float(s)
+        return parse_float(s, field_name="amount")
     except ValueError:
         return None
 
@@ -229,10 +231,11 @@ async def studio_expense_new(
     if not ok:
         return RedirectResponse(url="/admin/expenses?new=1&msg=closed_period", status_code=303)
 
-    sid_raw = _g_str(form, "subcategory_id")
-    if not sid_raw.isdigit():
+    try:
+        sid = parse_int(_g_str(form, "subcategory_id"), min=1, field_name="subcategory_id")
+    except ValueError:
         return RedirectResponse(url="/admin/expenses?new=1&msg=subcat", status_code=303)
-    sub = db.get(StudioExpenseSubcategory, int(sid_raw))
+    sub = db.get(StudioExpenseSubcategory, sid)
     if not sub or not sub.is_active:
         return RedirectResponse(url="/admin/expenses?new=1&msg=subcat", status_code=303)
 
@@ -265,8 +268,12 @@ async def studio_expense_new(
         params.append("date_from=" + df)
     if dt:
         params.append("date_to=" + dt)
-    if fc.isdigit() and int(fc) > 0:
-        params.append("category_id=" + fc)
+    if fc:
+        try:
+            cid = parse_int(fc, min=1, field_name="category_id")
+            params.append("category_id=" + str(cid))
+        except ValueError:
+            pass
     return RedirectResponse(url="/admin/expenses?" + "&".join(params), status_code=303)
 
 
@@ -293,10 +300,11 @@ async def studio_expense_save(
     if not ok_new:
         return RedirectResponse(url=f"/admin/expenses?edit={expense_id}&msg=closed_period", status_code=303)
 
-    sid_raw = _g_str(form, "subcategory_id")
-    if not sid_raw.isdigit():
+    try:
+        sid = parse_int(_g_str(form, "subcategory_id"), min=1, field_name="subcategory_id")
+    except ValueError:
         return RedirectResponse(url=f"/admin/expenses?edit={expense_id}&msg=subcat", status_code=303)
-    sub = db.get(StudioExpenseSubcategory, int(sid_raw))
+    sub = db.get(StudioExpenseSubcategory, sid)
     if not sub or not sub.is_active:
         return RedirectResponse(url=f"/admin/expenses?edit={expense_id}&msg=subcat", status_code=303)
 
@@ -337,8 +345,12 @@ async def studio_expense_save(
         params.append("date_from=" + df)
     if dt:
         params.append("date_to=" + dt)
-    if fc.isdigit() and int(fc) > 0:
-        params.append("category_id=" + fc)
+    if fc:
+        try:
+            cid = parse_int(fc, min=1, field_name="category_id")
+            params.append("category_id=" + str(cid))
+        except ValueError:
+            pass
     params.append("msg=updated")
     return RedirectResponse(url="/admin/expenses?" + "&".join(params), status_code=303)
 

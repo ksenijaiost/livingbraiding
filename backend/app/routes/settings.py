@@ -22,6 +22,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.display_time import ALLOWED_TIMEZONES, ALLOWED_TIMEZONE_IDS, get_display_timezone
+from app.forms_parse import parse_bool, parse_float, parse_int
 from app.mix_rates import mix_rates_for_admin_form
 from app.audit import diff_fields, write_audit_rows
 from app.webui import templates, ctx as _ctx
@@ -122,12 +123,12 @@ def admin_settings_save(
     current_user=Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    value = salon_cut_pct.strip().replace(",", ".")
     try:
-        pct = float(value)
+        pct = parse_float(salon_cut_pct, min=0.0, max=1.0, field_name="salon_cut_pct")
+        k100 = parse_float(kanek_per_100g, min=0.0, field_name="kanek_per_100g")
+        ku100 = parse_float(kudri_per_100g, min=0.0, field_name="kudri_per_100g")
+        kmn = parse_int(kit_max_reserves_per_kit, min=1, max=20, field_name="kit_max_reserves_per_kit")
     except ValueError:
-        pct = -1
-    if pct < 0 or pct > 1:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
 
     now = datetime.utcnow()
@@ -150,14 +151,6 @@ def admin_settings_save(
         changes=diff_fields(before_salon, row, ("value",)),
     )
 
-    try:
-        k100 = float(kanek_per_100g.strip().replace(",", "."))
-        ku100 = float(kudri_per_100g.strip().replace(",", "."))
-    except ValueError:
-        return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
-    if k100 < 0 or ku100 < 0:
-        return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
-
     for mt, per100 in ((MaterialType.KANEKALON, k100), (MaterialType.KUDRI, ku100)):
         per_g = per100 / 100.0
         mrow = db.get(MaterialPriceCurrent, mt)
@@ -167,12 +160,6 @@ def admin_settings_save(
             mrow.price_per_gram = per_g
             mrow.updated_at = now
 
-    try:
-        kmn = int(str(kit_max_reserves_per_kit).strip())
-    except ValueError:
-        kmn = -1
-    if kmn < 1 or kmn > 20:
-        return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
     kr_row = db.get(Setting, "kit_max_reserves_per_kit")
     before_kr = SimpleNamespace(value=(kr_row.value if kr_row else None))
     if not kr_row:
@@ -210,10 +197,8 @@ def admin_settings_system_save(
     now = datetime.utcnow()
 
     try:
-        days = int(str(edit_window_days).strip())
+        days = parse_int(edit_window_days, min=0, max=365, field_name="edit_window_days")
     except ValueError:
-        days = -1
-    if days < 0 or days > 365:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
     drow = db.get(Setting, "edit_window_days")
     before_days = SimpleNamespace(value=(drow.value if drow else None))
@@ -234,10 +219,8 @@ def admin_settings_system_save(
     )
 
     try:
-        months = int(str(audit_retention_months).strip())
+        months = parse_int(audit_retention_months, min=1, max=36, field_name="audit_retention_months")
     except ValueError:
-        months = -1
-    if months < 1 or months > 36:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
     ar_row = db.get(Setting, "audit_retention_months")
     before_ar = SimpleNamespace(value=(ar_row.value if ar_row else None))
@@ -287,12 +270,6 @@ async def admin_settings_work_rates_save(
 ):
     form = await request.form()
 
-    def _p(name: str, default: float = 0.0) -> float:
-        try:
-            return float(str(form.get(name) or str(default)).strip().replace(",", "."))
-        except ValueError:
-            raise ValueError(f"Некорректное число: {name}")
-
     try:
         salon = db.get(Setting, "salon_cut_pct")
         salon_raw = (salon.value if salon else "0.5")
@@ -303,28 +280,33 @@ async def admin_settings_work_rates_save(
         if salon_pct < 0 or salon_pct > 1:
             raise ValueError("Процент салона в настройках должен быть в диапазоне 0..1 (для привязки доли студии).")
 
-        override_raw = str(form.get("studio_share_override") or "").strip().lower()
-        studio_share_override = override_raw in ("1", "on", "true", "yes")
+        studio_share_override = parse_bool(form.get("studio_share_override"))
         if studio_share_override:
-            studio_share = _p("studio_share", salon_pct)
+            studio_share = parse_float(
+                form.get("studio_share"),
+                default=float(salon_pct),
+                min=0.0,
+                max=1.0,
+                field_name="studio_share",
+            )
         else:
-            studio_share = salon_pct
-        if studio_share < 0 or studio_share > 1:
-            raise ValueError("Доля студии должна быть в диапазоне 0..1.")
+            studio_share = float(salon_pct)
 
         payload: dict[str, Any] = {
             "studio_share": float(studio_share),
             "studio_share_override": bool(studio_share_override),
-            "mix_light": _p("mix_light", 0.5),
-            "mix_standard": _p("mix_standard", 1.0),
-            "mix_kanek": _p("mix_kanek", 1.5),
-            "mix_thermo": _p("mix_thermo", 2.0),
-            "mix_length": _p("mix_length", 2.5),
-            "custom_order_bonus_multiplier": _p("custom_order_bonus_multiplier", 1.0),
+            "mix_light": parse_float(form.get("mix_light"), default=0.5, min=0.0, field_name="mix_light"),
+            "mix_standard": parse_float(form.get("mix_standard"), default=1.0, min=0.0, field_name="mix_standard"),
+            "mix_kanek": parse_float(form.get("mix_kanek"), default=1.5, min=0.0, field_name="mix_kanek"),
+            "mix_thermo": parse_float(form.get("mix_thermo"), default=2.0, min=0.0, field_name="mix_thermo"),
+            "mix_length": parse_float(form.get("mix_length"), default=2.5, min=0.0, field_name="mix_length"),
+            "custom_order_bonus_multiplier": parse_float(
+                form.get("custom_order_bonus_multiplier"),
+                default=1.0,
+                min=0.0,
+                field_name="custom_order_bonus_multiplier",
+            ),
         }
-        for k, v in payload.items():
-            if isinstance(v, (int, float)) and v < 0:
-                raise ValueError(f"Значение не может быть отрицательным: {k}")
     except ValueError as exc:
         salon = db.get(Setting, "salon_cut_pct")
         salon_cut_pct = (salon.value if salon and str(salon.value).strip() else "0.5")

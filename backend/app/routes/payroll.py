@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.auth import AuthUser, require_role
 from app.db.models import PayrollPeriod, User, UserRole
 from app.db.session import get_db
+from app.forms_parse import parse_date_iso, parse_float, parse_int
 from app.payroll_fund import (
     PayrollFundPayoutPaymentKind,
     PayrollFundSide,
@@ -101,7 +102,7 @@ async def admin_payroll_periods_close(
     if not raw:
         return RedirectResponse(url="/admin/payroll-periods?err=empty_po", status_code=303)
     try:
-        d_to = date.fromisoformat(raw)
+        d_to = parse_date_iso(raw, field_name="date_to")
     except ValueError:
         return RedirectResponse(url="/admin/payroll-periods?err=bad_date", status_code=303)
 
@@ -188,16 +189,15 @@ async def admin_payroll_fund_payout(
         side = PayrollFundSide(side_raw)
     except ValueError:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_side", status_code=303)
-    amount_raw = str(form.get("amount") or "").strip().replace(",", ".")
     try:
-        amount = float(amount_raw)
+        amount = parse_float(form.get("amount"), field_name="amount")
     except ValueError:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_amount", status_code=303)
     comment = str(form.get("comment") or "").strip()
-    raw_uid = str(form.get("user_id") or "").strip()
-    if not raw_uid.isdigit():
+    try:
+        user_id = parse_int(form.get("user_id"), min=1, field_name="user_id")
+    except ValueError:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
-    user_id = int(raw_uid)
     if db.get(User, user_id) is None:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
     if not user_has_any_role(db, user_id, UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
