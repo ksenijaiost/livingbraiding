@@ -28,6 +28,7 @@ from app.db.models import (
     WorkForInventoryAuditLog,
     WorkRateAuditLog,
 )
+from app.setting_keys import AUDIT_RETENTION_MONTHS
 
 DEFAULT_AUDIT_RETENTION_MONTHS = 6
 
@@ -84,7 +85,7 @@ def purge_expired_audit_logs(db: Session, *, months: int | None = None) -> int:
             except ValueError:
                 months = DEFAULT_AUDIT_RETENTION_MONTHS
         else:
-            row = db.get(Setting, "audit_retention_months")
+            row = db.get(Setting, AUDIT_RETENTION_MONTHS)
             try:
                 months = int(str(row.value).strip()) if row and row.value is not None else DEFAULT_AUDIT_RETENTION_MONTHS
             except ValueError:

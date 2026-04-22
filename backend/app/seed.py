@@ -67,6 +67,13 @@ from app.seed_catalog_snjatie_ukhod import ensure_snjatie_ukhod_catalogs
 from app.payroll_fund import sync_operational_payroll_postings
 from app.product_sale_material import finalize_material_sale_fields
 from app.seed_studio_expenses_catalog import ensure_studio_expense_catalog
+from app.setting_keys import (
+    AUDIT_RETENTION_MONTHS,
+    DISPLAY_TIMEZONE,
+    EDIT_WINDOW_DAYS,
+    KIT_MAX_RESERVES_PER_KIT,
+    SALON_CUT_PCT,
+)
 from app.zakaz_blanks import zakaz_blank_defs
 
 
@@ -90,29 +97,29 @@ def _ensure_demo_user_role_assignments(db: Session) -> None:
 
 def ensure_seed_data(db: Session) -> None:
     # Settings
-    salon = db.get(Setting, "salon_cut_pct")
+    salon = db.get(Setting, SALON_CUT_PCT)
     if not salon:
-        db.add(Setting(key="salon_cut_pct", value="0.5"))
+        db.add(Setting(key=SALON_CUT_PCT, value="0.5"))
     elif (salon.updated_at is None) and (salon.updated_by_user_id is None) and (str(salon.value).strip() == "0.3"):
         # One-time migration from old default (0.3) to the current default (0.5),
         # but only if the setting was never edited by a user.
         salon.value = "0.5"
 
-    edit_days = db.get(Setting, "edit_window_days")
+    edit_days = db.get(Setting, EDIT_WINDOW_DAYS)
     if not edit_days:
-        db.add(Setting(key="edit_window_days", value="2"))
+        db.add(Setting(key=EDIT_WINDOW_DAYS, value="2"))
 
-    audit_retention = db.get(Setting, "audit_retention_months")
+    audit_retention = db.get(Setting, AUDIT_RETENTION_MONTHS)
     if not audit_retention:
-        db.add(Setting(key="audit_retention_months", value="6"))
+        db.add(Setting(key=AUDIT_RETENTION_MONTHS, value="6"))
 
-    tz = db.get(Setting, "display_timezone")
+    tz = db.get(Setting, DISPLAY_TIMEZONE)
     if not tz:
-        db.add(Setting(key="display_timezone", value="Asia/Novosibirsk"))
+        db.add(Setting(key=DISPLAY_TIMEZONE, value="Asia/Novosibirsk"))
 
-    kit_mx = db.get(Setting, "kit_max_reserves_per_kit")
+    kit_mx = db.get(Setting, KIT_MAX_RESERVES_PER_KIT)
     if not kit_mx:
-        db.add(Setting(key="kit_max_reserves_per_kit", value="3"))
+        db.add(Setting(key=KIT_MAX_RESERVES_PER_KIT, value="3"))
 
     # Default material prices: ₽ за 100 г → ₽/г (админ может поменять в настройках)
     defaults = {

@@ -10,10 +10,11 @@ from sqlalchemy.orm import Session
 
 from app.auth import AuthUser
 from app.db.models import PayrollPeriod, Setting, UserRole, Visit
+from app.setting_keys import EDIT_WINDOW_DAYS
 
 
 def edit_window_days(db: Session) -> int:
-    row = db.get(Setting, "edit_window_days")
+    row = db.get(Setting, EDIT_WINDOW_DAYS)
     if not row or not (row.value or "").strip():
         return 2
     try:

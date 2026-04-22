@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.db.models import Setting
+from app.setting_keys import DISPLAY_TIMEZONE
 
 # На сервере визиты/reserved_at пишутся через datetime.utcnow() (naive = UTC).
 DEFAULT_DISPLAY_TIMEZONE = "Asia/Novosibirsk"
@@ -25,7 +26,7 @@ ALLOWED_TIMEZONE_IDS = frozenset(t[0] for t in ALLOWED_TIMEZONES)
 
 
 def get_display_timezone(db: Session) -> str:
-    row = db.get(Setting, "display_timezone")
+    row = db.get(Setting, DISPLAY_TIMEZONE)
     v = (row.value if row else "").strip()
     if v in ALLOWED_TIMEZONE_IDS:
         return v

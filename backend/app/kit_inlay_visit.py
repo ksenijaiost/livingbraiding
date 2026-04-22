@@ -42,10 +42,11 @@ from app.db.models import (
 from app.client_validation import client_has_any_contact, strip_or_none
 from app.mix_rates import mix_complexity_rate_for
 from app.forms_parse import parse_bool, parse_date_iso, parse_float
+from app.setting_keys import KIT_MAX_RESERVES_PER_KIT, SALON_CUT_PCT
 
 
 def get_kit_max_reserves_per_kit(db: Session) -> int:
-    row = db.get(Setting, "kit_max_reserves_per_kit")
+    row = db.get(Setting, KIT_MAX_RESERVES_PER_KIT)
     raw = (row.value if row else "3").strip()
     try:
         n = int(raw)
@@ -116,7 +117,7 @@ def service_requires_tail_block(service: Service) -> bool:
 
 
 def get_salon_cut_pct(db: Session) -> float:
-    row = db.get(Setting, "salon_cut_pct")
+    row = db.get(Setting, SALON_CUT_PCT)
     if not row:
         return 0.5
     try:

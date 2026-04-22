@@ -25,6 +25,13 @@ from app.display_time import ALLOWED_TIMEZONES, ALLOWED_TIMEZONE_IDS, get_displa
 from app.forms_parse import parse_bool, parse_float, parse_int
 from app.mix_rates import mix_rates_for_admin_form
 from app.audit import diff_fields, write_audit_rows
+from app.setting_keys import (
+    AUDIT_RETENTION_MONTHS,
+    DISPLAY_TIMEZONE,
+    EDIT_WINDOW_DAYS,
+    KIT_MAX_RESERVES_PER_KIT,
+    SALON_CUT_PCT,
+)
 from app.webui import templates, ctx as _ctx
 
 
@@ -38,15 +45,15 @@ def admin_settings_page(
     current_user=Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    salon = db.get(Setting, "salon_cut_pct")
+    salon = db.get(Setting, SALON_CUT_PCT)
     salon_cut_pct = (salon.value if salon and str(salon.value).strip() else "0.5")
     try:
         salon_cut_pct_float = float(str(salon_cut_pct).strip().replace(",", "."))
     except ValueError:
         salon_cut_pct_float = 0.5
-    edit_days = db.get(Setting, "edit_window_days")
+    edit_days = db.get(Setting, EDIT_WINDOW_DAYS)
     edit_window_days = (edit_days.value if edit_days and str(edit_days.value).strip() else "2")
-    audit_retention_row = db.get(Setting, "audit_retention_months")
+    audit_retention_row = db.get(Setting, AUDIT_RETENTION_MONTHS)
     audit_retention_months = (
         audit_retention_row.value if audit_retention_row and str(audit_retention_row.value).strip() else "6"
     )
@@ -55,7 +62,7 @@ def admin_settings_page(
     kanek_per_100 = str((pk.price_per_gram * 100) if pk else 400.0)
     kudri_per_100 = str((pku.price_per_gram * 100) if pku else 800.0)
     display_tz = get_display_timezone(db)
-    kit_max_row = db.get(Setting, "kit_max_reserves_per_kit")
+    kit_max_row = db.get(Setting, KIT_MAX_RESERVES_PER_KIT)
     kit_max_reserves_per_kit = kit_max_row.value if kit_max_row else "3"
 
     def _wr_float(key: str, default: float) -> float:
@@ -133,10 +140,10 @@ def admin_settings_save(
 
     now = datetime.utcnow()
 
-    row = db.get(Setting, "salon_cut_pct")
+    row = db.get(Setting, SALON_CUT_PCT)
     before_salon = SimpleNamespace(value=(row.value if row else None))
     if not row:
-        row = Setting(key="salon_cut_pct", value=str(pct))
+        row = Setting(key=SALON_CUT_PCT, value=str(pct))
         db.add(row)
     else:
         row.value = str(pct)
@@ -160,10 +167,10 @@ def admin_settings_save(
             mrow.price_per_gram = per_g
             mrow.updated_at = now
 
-    kr_row = db.get(Setting, "kit_max_reserves_per_kit")
+    kr_row = db.get(Setting, KIT_MAX_RESERVES_PER_KIT)
     before_kr = SimpleNamespace(value=(kr_row.value if kr_row else None))
     if not kr_row:
-        kr_row = Setting(key="kit_max_reserves_per_kit", value=str(kmn))
+        kr_row = Setting(key=KIT_MAX_RESERVES_PER_KIT, value=str(kmn))
         db.add(kr_row)
     else:
         kr_row.value = str(kmn)
@@ -200,10 +207,10 @@ def admin_settings_system_save(
         days = parse_int(edit_window_days, min=0, max=365, field_name="edit_window_days")
     except ValueError:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
-    drow = db.get(Setting, "edit_window_days")
+    drow = db.get(Setting, EDIT_WINDOW_DAYS)
     before_days = SimpleNamespace(value=(drow.value if drow else None))
     if not drow:
-        drow = Setting(key="edit_window_days", value=str(days))
+        drow = Setting(key=EDIT_WINDOW_DAYS, value=str(days))
         db.add(drow)
     else:
         drow.value = str(days)
@@ -222,10 +229,10 @@ def admin_settings_system_save(
         months = parse_int(audit_retention_months, min=1, max=36, field_name="audit_retention_months")
     except ValueError:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
-    ar_row = db.get(Setting, "audit_retention_months")
+    ar_row = db.get(Setting, AUDIT_RETENTION_MONTHS)
     before_ar = SimpleNamespace(value=(ar_row.value if ar_row else None))
     if not ar_row:
-        ar_row = Setting(key="audit_retention_months", value=str(months))
+        ar_row = Setting(key=AUDIT_RETENTION_MONTHS, value=str(months))
         db.add(ar_row)
     else:
         ar_row.value = str(months)
@@ -240,10 +247,10 @@ def admin_settings_system_save(
         changes=diff_fields(before_ar, ar_row, ("value",)),
     )
 
-    tz_row = db.get(Setting, "display_timezone")
+    tz_row = db.get(Setting, DISPLAY_TIMEZONE)
     before_tz = SimpleNamespace(value=(tz_row.value if tz_row else None))
     if not tz_row:
-        tz_row = Setting(key="display_timezone", value=tz_raw)
+        tz_row = Setting(key=DISPLAY_TIMEZONE, value=tz_raw)
         db.add(tz_row)
     else:
         tz_row.value = tz_raw
@@ -271,7 +278,7 @@ async def admin_settings_work_rates_save(
     form = await request.form()
 
     try:
-        salon = db.get(Setting, "salon_cut_pct")
+        salon = db.get(Setting, SALON_CUT_PCT)
         salon_raw = (salon.value if salon else "0.5")
         try:
             salon_pct = float(str(salon_raw).strip().replace(",", "."))
@@ -308,15 +315,15 @@ async def admin_settings_work_rates_save(
             ),
         }
     except ValueError as exc:
-        salon = db.get(Setting, "salon_cut_pct")
+        salon = db.get(Setting, SALON_CUT_PCT)
         salon_cut_pct = (salon.value if salon and str(salon.value).strip() else "0.5")
         try:
             salon_cut_pct_float = float(str(salon_cut_pct).strip().replace(",", "."))
         except ValueError:
             salon_cut_pct_float = 0.5
-        edit_days = db.get(Setting, "edit_window_days")
+        edit_days = db.get(Setting, EDIT_WINDOW_DAYS)
         edit_window_days = (edit_days.value if edit_days and str(edit_days.value).strip() else "2")
-        audit_retention_row = db.get(Setting, "audit_retention_months")
+        audit_retention_row = db.get(Setting, AUDIT_RETENTION_MONTHS)
         audit_retention_months = (
             audit_retention_row.value if audit_retention_row and str(audit_retention_row.value).strip() else "6"
         )
@@ -325,7 +332,7 @@ async def admin_settings_work_rates_save(
         kanek_per_100 = str((pk.price_per_gram * 100) if pk else 400.0)
         kudri_per_100 = str((pku.price_per_gram * 100) if pku else 800.0)
         display_tz = get_display_timezone(db)
-        km_row = db.get(Setting, "kit_max_reserves_per_kit")
+        km_row = db.get(Setting, KIT_MAX_RESERVES_PER_KIT)
         kit_max_reserves_per_kit_val = km_row.value if km_row else "3"
 
         def _safe(name: str, d: float) -> float:
