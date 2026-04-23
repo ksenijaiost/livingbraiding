@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import MixComplexity, MixSource, WorkKind, WorkScope
 from app.mix_rates import mix_complexity_rate_map
+from app.work_rate_keys import CUSTOM_ORDER_BONUS_MULTIPLIER
 
 # Подкатегория «Коррекция комплекта» в каталоге «Заказ»
 CORR_SVC_TRIM = "Стрижка (1шт)"
@@ -110,7 +111,7 @@ def compute_work_financials(
         units = int(rubber_qty) if is_per_unit else 1
         bonus = 1.0
         if scope == WorkScope.CUSTOM_ORDER:
-            bonus = max(0.0, _wr_float(db, "custom_order_bonus_multiplier", 1.0))
+            bonus = max(0.0, _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0))
             if bonus <= 0:
                 bonus = 1.0
         staff_master_profit[current_user_id] = float(mp) * float(units) * bonus
@@ -121,7 +122,7 @@ def compute_work_financials(
         corr_map = _zakaz_subcategory_services_map(db, "Коррекция комплекта")
         bonus = 1.0
         if scope == WorkScope.CUSTOM_ORDER:
-            bonus = max(0.0, _wr_float(db, "custom_order_bonus_multiplier", 1.0))
+            bonus = max(0.0, _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0))
             if bonus <= 0:
                 bonus = 1.0
 

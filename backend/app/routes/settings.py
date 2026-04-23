@@ -32,6 +32,16 @@ from app.setting_keys import (
     KIT_MAX_RESERVES_PER_KIT,
     SALON_CUT_PCT,
 )
+from app.work_rate_keys import (
+    CUSTOM_ORDER_BONUS_MULTIPLIER,
+    MIX_KANEK,
+    MIX_LENGTH,
+    MIX_LIGHT,
+    MIX_STANDARD,
+    MIX_THERMO,
+    STUDIO_SHARE,
+    STUDIO_SHARE_OVERRIDE,
+)
 from app.webui import templates, ctx as _ctx
 
 
@@ -85,16 +95,16 @@ def admin_settings_page(
         except Exception:
             return default
 
-    studio_share_override = _wr_bool("studio_share_override", False)
+    studio_share_override = _wr_bool(STUDIO_SHARE_OVERRIDE, False)
     studio_share_effective = (
-        _wr_float("studio_share", salon_cut_pct_float) if studio_share_override else salon_cut_pct_float
+        _wr_float(STUDIO_SHARE, salon_cut_pct_float) if studio_share_override else salon_cut_pct_float
     )
 
     work_rates = {
-        "studio_share": studio_share_effective,
-        "studio_share_override": studio_share_override,
+        STUDIO_SHARE: studio_share_effective,
+        STUDIO_SHARE_OVERRIDE: studio_share_override,
         **mix_rates_for_admin_form(db),
-        "custom_order_bonus_multiplier": _wr_float("custom_order_bonus_multiplier", 1.0),
+        CUSTOM_ORDER_BONUS_MULTIPLIER: _wr_float(CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0),
     }
 
     return templates.TemplateResponse(
@@ -294,24 +304,24 @@ async def admin_settings_work_rates_save(
                 default=float(salon_pct),
                 min=0.0,
                 max=1.0,
-                field_name="studio_share",
+                field_name=STUDIO_SHARE,
             )
         else:
             studio_share = float(salon_pct)
 
         payload: dict[str, Any] = {
-            "studio_share": float(studio_share),
-            "studio_share_override": bool(studio_share_override),
-            "mix_light": parse_float(form.get("mix_light"), default=0.5, min=0.0, field_name="mix_light"),
-            "mix_standard": parse_float(form.get("mix_standard"), default=1.0, min=0.0, field_name="mix_standard"),
-            "mix_kanek": parse_float(form.get("mix_kanek"), default=1.5, min=0.0, field_name="mix_kanek"),
-            "mix_thermo": parse_float(form.get("mix_thermo"), default=2.0, min=0.0, field_name="mix_thermo"),
-            "mix_length": parse_float(form.get("mix_length"), default=2.5, min=0.0, field_name="mix_length"),
-            "custom_order_bonus_multiplier": parse_float(
+            STUDIO_SHARE: float(studio_share),
+            STUDIO_SHARE_OVERRIDE: bool(studio_share_override),
+            MIX_LIGHT: parse_float(form.get("mix_light"), default=0.5, min=0.0, field_name=MIX_LIGHT),
+            MIX_STANDARD: parse_float(form.get("mix_standard"), default=1.0, min=0.0, field_name=MIX_STANDARD),
+            MIX_KANEK: parse_float(form.get("mix_kanek"), default=1.5, min=0.0, field_name=MIX_KANEK),
+            MIX_THERMO: parse_float(form.get("mix_thermo"), default=2.0, min=0.0, field_name=MIX_THERMO),
+            MIX_LENGTH: parse_float(form.get("mix_length"), default=2.5, min=0.0, field_name=MIX_LENGTH),
+            CUSTOM_ORDER_BONUS_MULTIPLIER: parse_float(
                 form.get("custom_order_bonus_multiplier"),
                 default=1.0,
                 min=0.0,
-                field_name="custom_order_bonus_multiplier",
+                field_name=CUSTOM_ORDER_BONUS_MULTIPLIER,
             ),
         }
     except ValueError as exc:
@@ -335,23 +345,25 @@ async def admin_settings_work_rates_save(
         km_row = db.get(Setting, KIT_MAX_RESERVES_PER_KIT)
         kit_max_reserves_per_kit_val = km_row.value if km_row else "3"
 
-        def _safe(name: str, d: float) -> float:
-            try:
-                return float(str(form.get(name) or str(d)).strip().replace(",", "."))
-            except ValueError:
-                return d
-
-        override_raw = str(form.get("studio_share_override") or "").strip().lower()
-        studio_share_override = override_raw in ("1", "on", "true", "yes")
+        studio_share_override = parse_bool(form.get("studio_share_override"))
         work_rates = {
-            "studio_share_override": studio_share_override,
-            "studio_share": (_safe("studio_share", salon_cut_pct_float) if studio_share_override else salon_cut_pct_float),
-            "mix_light": _safe("mix_light", 0.5),
-            "mix_standard": _safe("mix_standard", 1.0),
-            "mix_kanek": _safe("mix_kanek", 1.5),
-            "mix_thermo": _safe("mix_thermo", 2.0),
-            "mix_length": _safe("mix_length", 2.5),
-            "custom_order_bonus_multiplier": _safe("custom_order_bonus_multiplier", 1.0),
+            STUDIO_SHARE_OVERRIDE: bool(studio_share_override),
+            STUDIO_SHARE: (
+                parse_float(form.get("studio_share"), default=salon_cut_pct_float, min=0.0, max=1.0, field_name=STUDIO_SHARE)
+                if studio_share_override
+                else float(salon_cut_pct_float)
+            ),
+            MIX_LIGHT: parse_float(form.get("mix_light"), default=0.5, min=0.0, field_name=MIX_LIGHT),
+            MIX_STANDARD: parse_float(form.get("mix_standard"), default=1.0, min=0.0, field_name=MIX_STANDARD),
+            MIX_KANEK: parse_float(form.get("mix_kanek"), default=1.5, min=0.0, field_name=MIX_KANEK),
+            MIX_THERMO: parse_float(form.get("mix_thermo"), default=2.0, min=0.0, field_name=MIX_THERMO),
+            MIX_LENGTH: parse_float(form.get("mix_length"), default=2.5, min=0.0, field_name=MIX_LENGTH),
+            CUSTOM_ORDER_BONUS_MULTIPLIER: parse_float(
+                form.get("custom_order_bonus_multiplier"),
+                default=1.0,
+                min=0.0,
+                field_name=CUSTOM_ORDER_BONUS_MULTIPLIER,
+            ),
         }
         return templates.TemplateResponse(
             "admin_settings.html",

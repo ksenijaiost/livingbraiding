@@ -49,6 +49,7 @@ from app.user_roles import select_users_with_role, user_has_role
 from app.kit_inlay_visit import _materials_cost_and_snapshot
 from app.work_products_compute import compute_work_financials
 from app.forms_parse import parse_bool, parse_date_iso, parse_float, parse_int
+from app.work_rate_keys import CUSTOM_ORDER_BONUS_MULTIPLIER, STUDIO_SHARE
 
 _WORK_NEW_FP_KEYS = frozenset({
     "booking_id",
@@ -252,7 +253,7 @@ def _alloc_equal_shares_for_masters(db: Session, user_ids: list[int]) -> list[tu
 
 
 def _studio_share_snapshot(db: Session) -> float:
-    r = db.scalar(select(WorkRate).where(WorkRate.key == "studio_share", WorkRate.is_active.is_(True)))
+    r = db.scalar(select(WorkRate).where(WorkRate.key == STUDIO_SHARE, WorkRate.is_active.is_(True)))
     if not r:
         return 0.50
     try:
@@ -663,7 +664,7 @@ def work_new_get(
     work_price_meta = {
         "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
         "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
-        "customOrderBonus": _wr_float(db, "custom_order_bonus_multiplier", 1.0),
+        "customOrderBonus": _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0),
         "mixRates": mix_rates_meta_json_dict(db),
     }
     return templates.TemplateResponse(
@@ -1108,7 +1109,7 @@ async def work_new_post(
         work_price_meta = {
             "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
             "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
-            "customOrderBonus": _wr_float(db, "custom_order_bonus_multiplier", 1.0),
+            "customOrderBonus": _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0),
             "mixRates": mix_rates_meta_json_dict(db),
         }
         kit_master_on_ids = _read_kit_master_on_ids(form)

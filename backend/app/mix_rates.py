@@ -8,6 +8,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import MixComplexity, WorkRate
+from app.work_rate_keys import (
+    MIX_HARD_LEGACY,
+    MIX_KANEK,
+    MIX_LENGTH,
+    MIX_LIGHT,
+    MIX_MEDIUM_LEGACY,
+    MIX_SIMPLE_LEGACY,
+    MIX_STANDARD,
+    MIX_THERMO,
+)
 
 
 def read_work_rate_float(db: Session, key: str) -> float | None:
@@ -34,11 +44,11 @@ def mix_complexity_rate_map(db: Session) -> dict[MixComplexity, float]:
         return default
 
     return {
-        MixComplexity.LIGHT: one("mix_light", 0.5),
-        MixComplexity.STANDARD: one("mix_standard", 1.0, "mix_simple"),
-        MixComplexity.KANEK: one("mix_kanek", 1.5, "mix_medium"),
-        MixComplexity.THERMO: one("mix_thermo", 2.0, "mix_hard"),
-        MixComplexity.LENGTH: one("mix_length", 2.5),
+        MixComplexity.LIGHT: one(MIX_LIGHT, 0.5),
+        MixComplexity.STANDARD: one(MIX_STANDARD, 1.0, MIX_SIMPLE_LEGACY),
+        MixComplexity.KANEK: one(MIX_KANEK, 1.5, MIX_MEDIUM_LEGACY),
+        MixComplexity.THERMO: one(MIX_THERMO, 2.0, MIX_HARD_LEGACY),
+        MixComplexity.LENGTH: one(MIX_LENGTH, 2.5),
     }
 
 
@@ -52,11 +62,11 @@ def mix_rates_for_admin_form(db: Session) -> dict[str, float]:
     """Пять полей для шаблона настроек (уже с подмесом легаси-ключей)."""
     m = mix_complexity_rate_map(db)
     return {
-        "mix_light": m[MixComplexity.LIGHT],
-        "mix_standard": m[MixComplexity.STANDARD],
-        "mix_kanek": m[MixComplexity.KANEK],
-        "mix_thermo": m[MixComplexity.THERMO],
-        "mix_length": m[MixComplexity.LENGTH],
+        MIX_LIGHT: m[MixComplexity.LIGHT],
+        MIX_STANDARD: m[MixComplexity.STANDARD],
+        MIX_KANEK: m[MixComplexity.KANEK],
+        MIX_THERMO: m[MixComplexity.THERMO],
+        MIX_LENGTH: m[MixComplexity.LENGTH],
     }
 
 
