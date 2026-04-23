@@ -121,7 +121,7 @@ def get_salon_cut_pct(db: Session) -> float:
     if not row:
         return 0.5
     try:
-        return parse_float(row.value, default=0.5, field_name="salon_cut_pct")
+        return parse_float(row.value, default=0.5, field_name=SALON_CUT_PCT)
     except ValueError:
         return 0.5
 

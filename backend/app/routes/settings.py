@@ -141,10 +141,10 @@ def admin_settings_save(
     db: Session = Depends(get_db),
 ):
     try:
-        pct = parse_float(salon_cut_pct, min=0.0, max=1.0, field_name="salon_cut_pct")
+        pct = parse_float(salon_cut_pct, min=0.0, max=1.0, field_name=SALON_CUT_PCT)
         k100 = parse_float(kanek_per_100g, min=0.0, field_name="kanek_per_100g")
         ku100 = parse_float(kudri_per_100g, min=0.0, field_name="kudri_per_100g")
-        kmn = parse_int(kit_max_reserves_per_kit, min=1, max=20, field_name="kit_max_reserves_per_kit")
+        kmn = parse_int(kit_max_reserves_per_kit, min=1, max=20, field_name=KIT_MAX_RESERVES_PER_KIT)
     except ValueError:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
 
@@ -214,7 +214,7 @@ def admin_settings_system_save(
     now = datetime.utcnow()
 
     try:
-        days = parse_int(edit_window_days, min=0, max=365, field_name="edit_window_days")
+        days = parse_int(edit_window_days, min=0, max=365, field_name=EDIT_WINDOW_DAYS)
     except ValueError:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
     drow = db.get(Setting, EDIT_WINDOW_DAYS)
@@ -236,7 +236,7 @@ def admin_settings_system_save(
     )
 
     try:
-        months = parse_int(audit_retention_months, min=1, max=36, field_name="audit_retention_months")
+        months = parse_int(audit_retention_months, min=1, max=36, field_name=AUDIT_RETENTION_MONTHS)
     except ValueError:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
     ar_row = db.get(Setting, AUDIT_RETENTION_MONTHS)
@@ -297,10 +297,10 @@ async def admin_settings_work_rates_save(
         if salon_pct < 0 or salon_pct > 1:
             raise ValueError("Процент салона в настройках должен быть в диапазоне 0..1 (для привязки доли студии).")
 
-        studio_share_override = parse_bool(form.get("studio_share_override"))
+        studio_share_override = parse_bool(form.get(STUDIO_SHARE_OVERRIDE))
         if studio_share_override:
             studio_share = parse_float(
-                form.get("studio_share"),
+                form.get(STUDIO_SHARE),
                 default=float(salon_pct),
                 min=0.0,
                 max=1.0,
@@ -312,13 +312,13 @@ async def admin_settings_work_rates_save(
         payload: dict[str, Any] = {
             STUDIO_SHARE: float(studio_share),
             STUDIO_SHARE_OVERRIDE: bool(studio_share_override),
-            MIX_LIGHT: parse_float(form.get("mix_light"), default=0.5, min=0.0, field_name=MIX_LIGHT),
-            MIX_STANDARD: parse_float(form.get("mix_standard"), default=1.0, min=0.0, field_name=MIX_STANDARD),
-            MIX_KANEK: parse_float(form.get("mix_kanek"), default=1.5, min=0.0, field_name=MIX_KANEK),
-            MIX_THERMO: parse_float(form.get("mix_thermo"), default=2.0, min=0.0, field_name=MIX_THERMO),
-            MIX_LENGTH: parse_float(form.get("mix_length"), default=2.5, min=0.0, field_name=MIX_LENGTH),
+            MIX_LIGHT: parse_float(form.get(MIX_LIGHT), default=0.5, min=0.0, field_name=MIX_LIGHT),
+            MIX_STANDARD: parse_float(form.get(MIX_STANDARD), default=1.0, min=0.0, field_name=MIX_STANDARD),
+            MIX_KANEK: parse_float(form.get(MIX_KANEK), default=1.5, min=0.0, field_name=MIX_KANEK),
+            MIX_THERMO: parse_float(form.get(MIX_THERMO), default=2.0, min=0.0, field_name=MIX_THERMO),
+            MIX_LENGTH: parse_float(form.get(MIX_LENGTH), default=2.5, min=0.0, field_name=MIX_LENGTH),
             CUSTOM_ORDER_BONUS_MULTIPLIER: parse_float(
-                form.get("custom_order_bonus_multiplier"),
+                form.get(CUSTOM_ORDER_BONUS_MULTIPLIER),
                 default=1.0,
                 min=0.0,
                 field_name=CUSTOM_ORDER_BONUS_MULTIPLIER,
@@ -345,21 +345,21 @@ async def admin_settings_work_rates_save(
         km_row = db.get(Setting, KIT_MAX_RESERVES_PER_KIT)
         kit_max_reserves_per_kit_val = km_row.value if km_row else "3"
 
-        studio_share_override = parse_bool(form.get("studio_share_override"))
+        studio_share_override = parse_bool(form.get(STUDIO_SHARE_OVERRIDE))
         work_rates = {
             STUDIO_SHARE_OVERRIDE: bool(studio_share_override),
             STUDIO_SHARE: (
-                parse_float(form.get("studio_share"), default=salon_cut_pct_float, min=0.0, max=1.0, field_name=STUDIO_SHARE)
+                parse_float(form.get(STUDIO_SHARE), default=salon_cut_pct_float, min=0.0, max=1.0, field_name=STUDIO_SHARE)
                 if studio_share_override
                 else float(salon_cut_pct_float)
             ),
-            MIX_LIGHT: parse_float(form.get("mix_light"), default=0.5, min=0.0, field_name=MIX_LIGHT),
-            MIX_STANDARD: parse_float(form.get("mix_standard"), default=1.0, min=0.0, field_name=MIX_STANDARD),
-            MIX_KANEK: parse_float(form.get("mix_kanek"), default=1.5, min=0.0, field_name=MIX_KANEK),
-            MIX_THERMO: parse_float(form.get("mix_thermo"), default=2.0, min=0.0, field_name=MIX_THERMO),
-            MIX_LENGTH: parse_float(form.get("mix_length"), default=2.5, min=0.0, field_name=MIX_LENGTH),
+            MIX_LIGHT: parse_float(form.get(MIX_LIGHT), default=0.5, min=0.0, field_name=MIX_LIGHT),
+            MIX_STANDARD: parse_float(form.get(MIX_STANDARD), default=1.0, min=0.0, field_name=MIX_STANDARD),
+            MIX_KANEK: parse_float(form.get(MIX_KANEK), default=1.5, min=0.0, field_name=MIX_KANEK),
+            MIX_THERMO: parse_float(form.get(MIX_THERMO), default=2.0, min=0.0, field_name=MIX_THERMO),
+            MIX_LENGTH: parse_float(form.get(MIX_LENGTH), default=2.5, min=0.0, field_name=MIX_LENGTH),
             CUSTOM_ORDER_BONUS_MULTIPLIER: parse_float(
-                form.get("custom_order_bonus_multiplier"),
+                form.get(CUSTOM_ORDER_BONUS_MULTIPLIER),
                 default=1.0,
                 min=0.0,
                 field_name=CUSTOM_ORDER_BONUS_MULTIPLIER,
