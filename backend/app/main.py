@@ -10,6 +10,7 @@ HTTP-роуты — в `app/routes/`.
 import os
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
@@ -24,6 +25,7 @@ from app import product_sales as product_sales_routes
 from app import work_products as work_products_routes
 
 app = FastAPI(title="livingbraiding")
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(admin_service_catalog_router)
 app.include_router(admin_questionnaire_fields_router)
 app.include_router(admin_studio_expenses_routes.router)
