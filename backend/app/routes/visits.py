@@ -37,8 +37,25 @@ from app.webui import templates, ctx as _ctx
 router = APIRouter()
 
 
-@router.get("/visits", response_class=HTMLResponse)
+def _redirect_admin_visits_to_canon(request: Request, *, visit_id: int | None = None) -> RedirectResponse:
+    """Старые URL под /admin/visits → канон /visits (GET, постоянный редирект)."""
+    if visit_id is None:
+        new_path = "/visits"
+    else:
+        new_path = f"/visits/{int(visit_id)}"
+    target = str(request.url.replace(path=new_path))
+    return RedirectResponse(url=target, status_code=308)
+
+
 @router.get("/admin/visits", response_class=HTMLResponse)
+def admin_visits_legacy_redirect(
+    request: Request,
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+):
+    return _redirect_admin_visits_to_canon(request)
+
+
+@router.get("/visits", response_class=HTMLResponse)
 def admin_visits(
     request: Request,
     mine: str | None = Query(None),
@@ -68,8 +85,16 @@ def admin_visits(
     )
 
 
-@router.get("/visits/{visit_id}", response_class=HTMLResponse)
 @router.get("/admin/visits/{visit_id}", response_class=HTMLResponse)
+def admin_visit_detail_legacy_redirect(
+    visit_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+):
+    return _redirect_admin_visits_to_canon(request, visit_id=visit_id)
+
+
+@router.get("/visits/{visit_id}", response_class=HTMLResponse)
 def admin_visit_detail(
     visit_id: int,
     request: Request,
@@ -173,6 +198,7 @@ def _visit_cancel_revert_stock(db: Session, visit: Visit) -> tuple[bool, str]:
     return True, ""
 
 
+@router.post("/visits/{visit_id}/cancel")
 @router.post("/admin/visits/{visit_id}/cancel")
 async def admin_visit_cancel(
     visit_id: int,
@@ -218,6 +244,7 @@ async def admin_visit_cancel(
     return RedirectResponse(url=f"/visits/{visit_id}?msg=cancelled", status_code=303)
 
 
+@router.post("/visits/{visit_id}/client")
 @router.post("/admin/visits/{visit_id}/client")
 async def admin_visit_change_client(
     visit_id: int,
