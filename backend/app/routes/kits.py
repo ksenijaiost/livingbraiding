@@ -48,7 +48,22 @@ from app.user_roles import select_users_with_any_role, user_has_any_role
 from app.webui import templates, ctx as _ctx
 
 
-router = APIRouter()
+router = APIRouter(prefix="/kits", tags=["kits"])
+# GET-алиас под старые закладки/ссылки: /admin/kits/... -> 308 -> /kits/...
+legacy_kits_admin_router = APIRouter(prefix="/admin/kits", tags=["kits-legacy"])
+master_kits_router = APIRouter(prefix="/master/kits", tags=["kits-master"])
+
+
+def _redirect_admin_kits_to_canon(request: Request, *, suffix: str = "") -> RedirectResponse:
+    suf = (suffix or "").strip()
+    if suf and not suf.startswith("/"):
+        suf = f"/{suf}"
+    new_path = f"/kits{suf}"
+    return RedirectResponse(url=str(request.url.replace(path=new_path)), status_code=308)
+
+
+_KITS_STAFF = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
+_KITS_ADMIN = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER))
 
 
 def _kit_stock_label_from_form(db: Session, form_map: dict[str, str], field: str) -> str | None:
@@ -75,8 +90,8 @@ def _kit_reserve_hint_from_form(db: Session, form_map: dict[str, str], field: st
 def _kit_reserve_redirect_base(kit_id: int, form: Any) -> str:
     ar = str(form.get("after_reserve") or "list").strip()
     if ar == "detail":
-        return f"/admin/kits/{kit_id}"
-    return "/admin/kits"
+        return f"/kits/{kit_id}"
+    return "/kits"
 
 
 def _staff_users_for_reserve(db: Session) -> list[User]:
@@ -128,7 +143,7 @@ def _kit_clear_modal_items(kit: Kit, display_tz: str) -> list[dict[str, Any]]:
     return out
 
 
-@router.get("/master/kits/suggest")
+@master_kits_router.get("/suggest")
 def master_kits_suggest(
     q: str = "",
     current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
@@ -137,7 +152,7 @@ def master_kits_suggest(
     return JSONResponse({"kits": suggest_kits_for_stock(db, q)})
 
 
-@router.get("/admin/kits", response_class=HTMLResponse)
+@router.get("", response_class=HTMLResponse)
 def admin_kits_list(
     request: Request,
     msg: str | None = None,
@@ -181,7 +196,7 @@ def admin_kits_list(
     )
 
 
-@router.get("/admin/kits/new", response_class=HTMLResponse)
+@router.get("/new", response_class=HTMLResponse)
 def admin_kit_new_get(
     request: Request,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
@@ -195,7 +210,7 @@ def admin_kit_new_get(
             is_new=True,
             kit=None,
             fp={"kit_author_ids": [], "discount_percent": "0"},
-            form_action="/admin/kits/new",
+            form_action="/kits/new",
             error=None,
             staff_for_kit_authors=list_masters_for_kit_author_pick(db),
             computed_stock_price_total=None,
@@ -204,7 +219,8 @@ def admin_kit_new_get(
     )
 
 
-@router.post("/admin/kits/new")
+@router.post("/new")
+@legacy_kits_admin_router.post("/new")
 async def admin_kit_new_post(
     request: Request,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
@@ -222,7 +238,7 @@ async def admin_kit_new_post(
         db.flush()
         sync_kit_authors(db, kit, form)
         db.commit()
-        return RedirectResponse(url=f"/admin/kits/{kit.id}?msg=created", status_code=303)
+        return RedirectResponse(url=f"/kits/{kit.id}?msg=created", status_code=303)
     except ValueError as exc:
         return templates.TemplateResponse(
             "admin_kit_form.html",
@@ -232,7 +248,7 @@ async def admin_kit_new_post(
                 is_new=True,
                 kit=None,
                 fp=kit_new_error_prefill(form),
-                form_action="/admin/kits/new",
+                form_action="/kits/new",
                 error=str(exc),
                 staff_for_kit_authors=list_masters_for_kit_author_pick(db),
                 computed_stock_price_total=None,
@@ -242,7 +258,7 @@ async def admin_kit_new_post(
         )
 
 
-@router.get("/admin/kits/{kit_id}", response_class=HTMLResponse)
+@router.get("/{kit_id}", response_class=HTMLResponse)
 def admin_kit_detail(
     request: Request,
     kit_id: int,
@@ -295,7 +311,7 @@ def admin_kit_detail(
     )
 
 
-@router.get("/admin/kits/{kit_id}/edit", response_class=HTMLResponse)
+@router.get("/{kit_id}/edit", response_class=HTMLResponse)
 def admin_kit_edit_get(
     request: Request,
     kit_id: int,
@@ -314,7 +330,7 @@ def admin_kit_edit_get(
             is_new=False,
             kit=kit,
             fp=kit_to_form_prefill(kit),
-            form_action=f"/admin/kits/{kit_id}/edit",
+            form_action=f"/kits/{kit_id}/edit",
             error=None,
             staff_for_kit_authors=list_masters_for_kit_author_pick(db),
             computed_stock_price_total=computed_price,
@@ -323,7 +339,8 @@ def admin_kit_edit_get(
     )
 
 
-@router.post("/admin/kits/{kit_id}/discount")
+@router.post("/{kit_id}/discount")
+@legacy_kits_admin_router.post("/{kit_id}/discount")
 async def admin_kit_discount_post(
     kit_id: int,
     request: Request,
@@ -332,7 +349,7 @@ async def admin_kit_discount_post(
 ):
     kit = db.get(Kit, kit_id)
     if not kit:
-        return RedirectResponse(url="/admin/kits?err=" + quote("Комплект не найден", safe=""), status_code=303)
+        return RedirectResponse(url="/kits?err=" + quote("Комплект не найден", safe=""), status_code=303)
     form = await request.form()
     try:
         discount = parse_discount_percent_from_form(form)
@@ -340,8 +357,8 @@ async def admin_kit_discount_post(
         err_q = quote(str(exc), safe="")
         red = str(form.get("redirect_to") or "").strip().lower()
         if red == "detail":
-            return RedirectResponse(url=f"/admin/kits/{kit_id}?err={err_q}", status_code=303)
-        return RedirectResponse(url="/admin/kits?err=" + err_q, status_code=303)
+            return RedirectResponse(url=f"/kits/{kit_id}?err={err_q}", status_code=303)
+        return RedirectResponse(url="/kits?err=" + err_q, status_code=303)
     price = float(kit.stock_price_total or 0.0)
     red = str(form.get("redirect_to") or "").strip().lower()
     err_no_cost = "Чтобы задать скидку, сначала укажите себестоимость комплекта в карточке (редактирование)."
@@ -350,8 +367,8 @@ async def admin_kit_discount_post(
         if discount > 0:
             err_q = quote(err_no_cost, safe="")
             if red == "detail":
-                return RedirectResponse(url=f"/admin/kits/{kit_id}?err={err_q}", status_code=303)
-            return RedirectResponse(url="/admin/kits?err=" + err_q, status_code=303)
+                return RedirectResponse(url=f"/kits/{kit_id}?err={err_q}", status_code=303)
+            return RedirectResponse(url="/kits?err=" + err_q, status_code=303)
         before = SimpleNamespace(discount_percent=kit.discount_percent)
         kit.discount_percent = 0
         kit.updated_at = datetime.utcnow()
@@ -366,8 +383,8 @@ async def admin_kit_discount_post(
         )
         db.commit()
         if red == "detail":
-            return RedirectResponse(url=f"/admin/kits/{kit_id}?msg=saved", status_code=303)
-        return RedirectResponse(url="/admin/kits?msg=saved", status_code=303)
+            return RedirectResponse(url=f"/kits/{kit_id}?msg=saved", status_code=303)
+        return RedirectResponse(url="/kits?msg=saved", status_code=303)
     cost = float(ct)
     max_pct = max_kit_discount_percent_allowed(price, cost) if price > 0 else 0
     if price > 0 and discount > max_pct:
@@ -376,8 +393,8 @@ async def admin_kit_discount_post(
             safe="",
         )
         if red == "detail":
-            return RedirectResponse(url=f"/admin/kits/{kit_id}?err={err_q}", status_code=303)
-        return RedirectResponse(url="/admin/kits?err=" + err_q, status_code=303)
+            return RedirectResponse(url=f"/kits/{kit_id}?err={err_q}", status_code=303)
+        return RedirectResponse(url="/kits?err=" + err_q, status_code=303)
     before = SimpleNamespace(discount_percent=kit.discount_percent)
     kit.discount_percent = discount
     kit.updated_at = datetime.utcnow()
@@ -392,11 +409,12 @@ async def admin_kit_discount_post(
     )
     db.commit()
     if red == "detail":
-        return RedirectResponse(url=f"/admin/kits/{kit_id}?msg=saved", status_code=303)
-    return RedirectResponse(url="/admin/kits?msg=saved", status_code=303)
+        return RedirectResponse(url=f"/kits/{kit_id}?msg=saved", status_code=303)
+    return RedirectResponse(url="/kits?msg=saved", status_code=303)
 
 
-@router.post("/admin/kits/{kit_id}/edit")
+@router.post("/{kit_id}/edit")
+@legacy_kits_admin_router.post("/{kit_id}/edit")
 async def admin_kit_edit_post(
     kit_id: int,
     request: Request,
@@ -477,7 +495,7 @@ async def admin_kit_edit_post(
             changes=ch,
         )
         db.commit()
-        return RedirectResponse(url=f"/admin/kits/{kit_id}?msg=saved", status_code=303)
+        return RedirectResponse(url=f"/kits/{kit_id}?msg=saved", status_code=303)
     except ValueError as exc:
         fp = kit_edit_error_prefill(form)
         computed_price, computed_missing = calc_kit_stock_price_total_from_composition(db, kit)
@@ -489,7 +507,7 @@ async def admin_kit_edit_post(
                 is_new=False,
                 kit=kit,
                 fp=fp,
-                form_action=f"/admin/kits/{kit_id}/edit",
+                form_action=f"/kits/{kit_id}/edit",
                 error=str(exc),
                 staff_for_kit_authors=list_masters_for_kit_author_pick(db),
                 computed_stock_price_total=computed_price,
@@ -499,7 +517,8 @@ async def admin_kit_edit_post(
         )
 
 
-@router.post("/admin/kits/{kit_id}/reserve")
+@router.post("/{kit_id}/reserve")
+@legacy_kits_admin_router.post("/{kit_id}/reserve")
 async def admin_kit_reserve_post(
     kit_id: int,
     request: Request,
@@ -508,7 +527,7 @@ async def admin_kit_reserve_post(
 ):
     kit = db.scalar(select(Kit).options(selectinload(Kit.reserves)).where(Kit.id == kit_id))
     if not kit:
-        return RedirectResponse(url="/admin/kits?err=" + quote("Комплект не найден", safe=""), status_code=303)
+        return RedirectResponse(url="/kits?err=" + quote("Комплект не найден", safe=""), status_code=303)
 
     form = await request.form()
     redirect_base = _kit_reserve_redirect_base(kit_id, form)
@@ -655,4 +674,41 @@ async def admin_kit_reserve_post(
     )
     db.commit()
     return RedirectResponse(url=redirect_base + "?msg=reserved", status_code=303)
+
+
+# --- Старые GET-URL: /admin/kits/... -> 308 -> /kits/... (query сохраняется) ---
+
+
+@legacy_kits_admin_router.get("/{kit_id}/edit", response_class=HTMLResponse)
+def admin_kit_edit_get_legacy_redirect(
+    kit_id: int,
+    request: Request,
+    current_user: AuthUser = _KITS_ADMIN,
+):
+    return _redirect_admin_kits_to_canon(request, suffix=f"/{int(kit_id)}/edit")
+
+
+@legacy_kits_admin_router.get("/{kit_id}", response_class=HTMLResponse)
+def admin_kit_detail_legacy_redirect(
+    kit_id: int,
+    request: Request,
+    current_user: AuthUser = _KITS_STAFF,
+):
+    return _redirect_admin_kits_to_canon(request, suffix=f"/{int(kit_id)}")
+
+
+@legacy_kits_admin_router.get("/new", response_class=HTMLResponse)
+def admin_kit_new_get_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _KITS_ADMIN,
+):
+    return _redirect_admin_kits_to_canon(request, suffix="/new")
+
+
+@legacy_kits_admin_router.get("", response_class=HTMLResponse)
+def admin_kits_list_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _KITS_STAFF,
+):
+    return _redirect_admin_kits_to_canon(request)
 

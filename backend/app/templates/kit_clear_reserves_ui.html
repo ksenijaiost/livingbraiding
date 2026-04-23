@@ -21,7 +21,7 @@
         return;
       }
       var form = document.getElementById('clear_reserves_form');
-      form.action = '/admin/kits/' + kitId + '/reserve';
+      form.action = '/kits/' + kitId + '/reserve';
       document.getElementById('clear_reserves_sku').textContent = sku || '';
       document.getElementById('clear_reserves_after').value = after || 'list';
       var box = document.getElementById('clear_reserves_checkboxes');

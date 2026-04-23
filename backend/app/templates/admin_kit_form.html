@@ -2,7 +2,7 @@
 {% block content %}
   <div class="card">
     <h2 style="margin-top: 0;">{% if is_new %}Новый комплект{% else %}Редактирование: {{ kit.sku }}{% endif %}</h2>
-    <p><a href="/admin/kits">← К списку комплектов</a>{% if not is_new %} · <a href="/admin/kits/{{ kit.id }}">Карточка</a>{% endif %}</p>
+    <p><a href="/kits">← К списку комплектов</a>{% if not is_new %} · <a href="/kits/{{ kit.id }}">Карточка</a>{% endif %}</p>
 
     {% if error %}
       <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
@@ -14,7 +14,7 @@
 
       <p style="margin-top: 16px;">
         <button type="submit">{% if is_new %}Создать{% else %}Сохранить{% endif %}</button>
-        <a href="{% if is_new %}/admin/kits{% else %}/admin/kits/{{ kit.id }}{% endif %}"><button type="button" class="secondary">Отмена</button></a>
+        <a href="{% if is_new %}/kits{% else %}/kits/{{ kit.id }}{% endif %}"><button type="button" class="secondary">Отмена</button></a>
       </p>
     </form>
   </div>

@@ -4,7 +4,7 @@
   {% set slots_full = kit_reserve_slots_used >= kit_max_reserves %}
   {% set can_open_reserve = kit.pieces_available > 0 and not slots_full %}
   <div class="card">
-    <p><a href="/admin/kits">← К списку комплектов</a></p>
+    <p><a href="/kits">← К списку комплектов</a></p>
 
     {% if msg == "reserved" %}
       <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Резерв сохранён.</p>
@@ -52,7 +52,7 @@
         {% endif %}
       </div>
       {% if is_admin_kit %}
-        <a href="/admin/kits/{{ kit.id }}/edit"><button type="button">Редактировать</button></a>
+        <a href="/kits/{{ kit.id }}/edit"><button type="button">Редактировать</button></a>
       {% endif %}
     </div>
 
@@ -148,7 +148,7 @@
       <dt class="muted">Скидка (всего), %</dt>
       <dd style="margin:0;">
         {% if is_admin_kit %}
-          <form method="post" action="/admin/kits/{{ kit.id }}/discount" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <form method="post" action="/kits/{{ kit.id }}/discount" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <input type="hidden" name="redirect_to" value="detail" />
             <input name="discount_percent" type="text" inputmode="numeric" pattern="[0-9]*" value="{{ kit.discount_percent }}" style="width:5rem;" />
             <button type="submit" class="secondary" style="padding:2px 10px;">Сохранить скидку</button>
@@ -201,7 +201,7 @@
                   <td class="muted">{{ format_naive_utc_datetime(r.reserved_at, display_tz) }}</td>
                   <td style="white-space:nowrap;">
                     {% if is_admin_kit or r.reserved_by_user_id == current_user.id %}
-                      <form method="post" action="/admin/kits/{{ kit.id }}/reserve" style="display:inline;margin:0;" onsubmit="return confirm('Снять этот резерв?');">
+                      <form method="post" action="/kits/{{ kit.id }}/reserve" style="display:inline;margin:0;" onsubmit="return confirm('Снять этот резерв?');">
                         <input type="hidden" name="action" value="clear" />
                         <input type="hidden" name="reserve_id" value="{{ r.id }}" />
                         <input type="hidden" name="after_reserve" value="detail" />

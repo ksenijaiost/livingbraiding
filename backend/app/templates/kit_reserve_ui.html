@@ -116,7 +116,7 @@
       overlay.style.display = 'flex';
       overlay.style.pointerEvents = 'auto';
       document.getElementById('reserve_sku_label').textContent = sku;
-      document.getElementById('reserve_form').action = '/admin/kits/' + kitId + '/reserve';
+      document.getElementById('reserve_form').action = '/kits/' + kitId + '/reserve';
       document.getElementById('reserve_client_q').value = '';
       document.getElementById('reserve_client_list').innerHTML = '';
       document.getElementById('reserve_full_cb').checked = false;

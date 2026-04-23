@@ -5,7 +5,7 @@
     <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
       <h2 style="margin-top: 0;">Комплекты</h2>
       {% if is_admin_kit %}
-        <a href="/admin/kits/new"><button type="button">Новый комплект</button></a>
+        <a href="/kits/new"><button type="button">Новый комплект</button></a>
       {% endif %}
     </div>
     <p class="muted">Склад: артикулы и остатки. Резерв — кто и для кого (клиент и/или сотрудник); время и автор фиксируются автоматически.</p>
@@ -45,7 +45,7 @@
               {% if missing_price %}
                 <span title="Не задана цена продажи — списание в визите/продаже недоступно" style="margin-right:4px;">⚠️</span>
               {% endif %}
-              <a href="/admin/kits/{{ k.id }}"><strong>{{ k.sku }}</strong></a>
+              <a href="/kits/{{ k.id }}"><strong>{{ k.sku }}</strong></a>
             </td>
             <td>{{ k.title }}</td>
             <td class="muted">
@@ -63,7 +63,7 @@
             </td>
             <td style="white-space:nowrap;">
               {% if is_admin_kit %}
-                <form method="post" action="/admin/kits/{{ k.id }}/discount" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                <form method="post" action="/kits/{{ k.id }}/discount" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                   <input type="hidden" name="redirect_to" value="list" />
                   <input name="discount_percent" type="text" inputmode="numeric" pattern="[0-9]*" value="{{ k.discount_percent }}" style="width:4rem;" />
                   <button type="submit" class="secondary" style="padding:2px 8px;">Ок</button>
@@ -119,7 +119,7 @@
               {% if k.is_reserved and not is_admin_kit %}
                 {% for r in k.reserves %}
                   {% if r.reserved_by_user_id == current_user.id %}
-                    <form method="post" action="/admin/kits/{{ k.id }}/reserve" style="margin:0;" onsubmit="return confirm('Снять ваш резерв ({{ r.pieces_reserved }} шт.)?');">
+                    <form method="post" action="/kits/{{ k.id }}/reserve" style="margin:0;" onsubmit="return confirm('Снять ваш резерв ({{ r.pieces_reserved }} шт.)?');">
                       <input type="hidden" name="action" value="clear" />
                       <input type="hidden" name="reserve_id" value="{{ r.id }}" />
                       <input type="hidden" name="after_reserve" value="list" />
