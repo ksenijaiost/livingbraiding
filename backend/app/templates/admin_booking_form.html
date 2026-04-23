@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="card" style="max-width: 980px;">
+  <div class="card lb-card-max-980" data-lb-booking-form="1">
     <p class="muted" style="margin-top:0;"><a href="/clients">← К клиентам</a></p>
     <h2 style="margin-top:0;">{% if is_new %}Новая бронь{% else %}Редактирование брони{% endif %}</h2>
 
@@ -26,7 +26,7 @@
             <input id="client_search_q" type="search" placeholder="имя или контакт" autocomplete="off" style="width:100%;box-sizing:border-box;" />
           </div>
           <div style="align-self:flex-end;padding-top:1.4rem;">
-            <button type="button" id="booking_client_find_btn" class="secondary" onclick="clientSuggest()" style="white-space:nowrap;">Найти</button>
+            <button type="button" id="booking_client_find_btn" class="secondary" style="white-space:nowrap;">Найти</button>
           </div>
         </div>
         <ul id="client_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0;"></ul>
@@ -55,8 +55,8 @@
         <div>
           <label>Тип *</label>
           <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
-            <label><input type="radio" name="kind" value="VISIT" {% if (fp.get('kind') or 'VISIT') == 'VISIT' %}checked{% endif %} onchange="syncKind()" /> Визит (услуга)</label>
-            <label><input type="radio" name="kind" value="PRODUCT_SALE" {% if fp.get('kind') == 'PRODUCT_SALE' %}checked{% endif %} onchange="syncKind()" /> Продажа (без услуги)</label>
+            <label><input type="radio" name="kind" value="VISIT" {% if (fp.get('kind') or 'VISIT') == 'VISIT' %}checked{% endif %} /> Визит (услуга)</label>
+            <label><input type="radio" name="kind" value="PRODUCT_SALE" {% if fp.get('kind') == 'PRODUCT_SALE' %}checked{% endif %} /> Продажа (без услуги)</label>
           </div>
         </div>
       </div>
@@ -67,7 +67,7 @@
           <div class="row">
             <div>
               <label>Категория</label>
-              <select id="service_category_id" name="service_category_id" onchange="serviceCatalogOnCategory()" style="width: 100%; box-sizing: border-box;">
+              <select id="service_category_id" name="service_category_id" style="width: 100%; box-sizing: border-box;">
                 {% for c in service_catalog %}
                   <option value="{{ c.id }}">{{ c.name }}</option>
                 {% endfor %}
@@ -75,7 +75,7 @@
             </div>
             <div id="service_subcategory_wrap">
               <label>Подкатегория</label>
-              <select id="service_subcategory_id" name="service_subcategory_id" onchange="serviceCatalogOnSubcategory()" style="width: 100%; box-sizing: border-box;"></select>
+              <select id="service_subcategory_id" name="service_subcategory_id" style="width: 100%; box-sizing: border-box;"></select>
             </div>
           </div>
           <div style="margin-top: 12px;">
@@ -105,9 +105,9 @@
           <h3 style="margin-top:0;">Комплект</h3>
           <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
             {% set kit_mode = fp.get('visit_kit_mode') or 'IN_STOCK' %}
-            <label><input type="radio" name="visit_kit_mode" value="IN_STOCK" {% if kit_mode == 'IN_STOCK' %}checked{% endif %} onchange="syncVisitKitMode()" /> Из наличия</label>
-            <label><input type="radio" name="visit_kit_mode" value="OWN" {% if kit_mode == 'OWN' %}checked{% endif %} onchange="syncVisitKitMode()" /> Свой</label>
-            <label><input type="radio" name="visit_kit_mode" value="ORDER" {% if kit_mode == 'ORDER' %}checked{% endif %} onchange="syncVisitKitMode()" /> Заказ</label>
+            <label><input type="radio" name="visit_kit_mode" value="IN_STOCK" {% if kit_mode == 'IN_STOCK' %}checked{% endif %} /> Из наличия</label>
+            <label><input type="radio" name="visit_kit_mode" value="OWN" {% if kit_mode == 'OWN' %}checked{% endif %} /> Свой</label>
+            <label><input type="radio" name="visit_kit_mode" value="ORDER" {% if kit_mode == 'ORDER' %}checked{% endif %} /> Заказ</label>
           </div>
 
           <div id="visit_kit_stock_block" style="margin-top: 12px; display:none;">
@@ -131,11 +131,11 @@
 
           <div id="visit_kit_own_block" style="margin-top: 12px; display:none;">
             <label style="display:block; margin-bottom: 6px;">
-              <input type="checkbox" name="visit_own_need_correction" {% if fp.get('visit_own_need_correction') %}checked{% endif %} onchange="syncOwnKitExtras()" />
+              <input type="checkbox" name="visit_own_need_correction" {% if fp.get('visit_own_need_correction') %}checked{% endif %} />
               Нужна коррекция
             </label>
             <label style="display:block; margin-bottom: 0;">
-              <input type="checkbox" name="visit_own_need_extra_blanks" {% if fp.get('visit_own_need_extra_blanks') %}checked{% endif %} onchange="syncOwnKitExtras()" />
+              <input type="checkbox" name="visit_own_need_extra_blanks" {% if fp.get('visit_own_need_extra_blanks') %}checked{% endif %} />
               Нужны доп. заготовки
             </label>
           </div>
@@ -191,8 +191,8 @@
           <h3 style="margin-top:0;">Доп. заготовки</h3>
           {% set extra_mode = fp.get('visit_extra_blanks_mode') or 'IN_STOCK' %}
           <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
-            <label><input type="radio" name="visit_extra_blanks_mode" value="IN_STOCK" {% if extra_mode == 'IN_STOCK' %}checked{% endif %} onchange="syncExtraBlanksMode()" /> Из наличия</label>
-            <label><input type="radio" name="visit_extra_blanks_mode" value="ORDER" {% if extra_mode == 'ORDER' %}checked{% endif %} onchange="syncExtraBlanksMode()" /> На заказ</label>
+            <label><input type="radio" name="visit_extra_blanks_mode" value="IN_STOCK" {% if extra_mode == 'IN_STOCK' %}checked{% endif %} /> Из наличия</label>
+            <label><input type="radio" name="visit_extra_blanks_mode" value="ORDER" {% if extra_mode == 'ORDER' %}checked{% endif %} /> На заказ</label>
           </div>
 
           <div id="visit_extra_stock_block" style="margin-top: 12px; display:none;">
@@ -236,10 +236,10 @@
             <label>Тип продажи *</label>
             {% set pk = fp.get('product_kind') or '' %}
             <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
-              <label><input type="radio" name="product_kind" value="MATERIAL" {% if pk == 'MATERIAL' %}checked{% endif %} onchange="syncSaleKind()" /> Материал</label>
-              <label><input type="radio" name="product_kind" value="KIT" {% if pk == 'KIT' %}checked{% endif %} onchange="syncSaleKind()" /> Комплект</label>
-              <label><input type="radio" name="product_kind" value="RUBBER" {% if pk == 'RUBBER' %}checked{% endif %} onchange="syncSaleKind()" /> Хвост/резинка</label>
-              <label><input type="radio" name="product_kind" value="OTHER" {% if pk == 'OTHER' %}checked{% endif %} onchange="syncSaleKind()" /> Другое</label>
+              <label><input type="radio" name="product_kind" value="MATERIAL" {% if pk == 'MATERIAL' %}checked{% endif %} /> Материал</label>
+              <label><input type="radio" name="product_kind" value="KIT" {% if pk == 'KIT' %}checked{% endif %} /> Комплект</label>
+              <label><input type="radio" name="product_kind" value="RUBBER" {% if pk == 'RUBBER' %}checked{% endif %} /> Хвост/резинка</label>
+              <label><input type="radio" name="product_kind" value="OTHER" {% if pk == 'OTHER' %}checked{% endif %} /> Другое</label>
             </div>
           </div>
 
@@ -247,8 +247,8 @@
             <h4 style="margin: 0 0 10px;">Комплект</h4>
             {% set skm = fp.get('sale_kit_mode') or 'IN_STOCK' %}
             <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
-              <label><input type="radio" name="sale_kit_mode" value="IN_STOCK" {% if skm == 'IN_STOCK' %}checked{% endif %} onchange="syncSaleKitMode()" /> Из наличия</label>
-              <label><input type="radio" name="sale_kit_mode" value="ORDER" {% if skm == 'ORDER' %}checked{% endif %} onchange="syncSaleKitMode()" /> На заказ</label>
+              <label><input type="radio" name="sale_kit_mode" value="IN_STOCK" {% if skm == 'IN_STOCK' %}checked{% endif %} /> Из наличия</label>
+              <label><input type="radio" name="sale_kit_mode" value="ORDER" {% if skm == 'ORDER' %}checked{% endif %} /> На заказ</label>
             </div>
 
             <div id="sale_kit_stock_block" style="margin-top: 12px; display:none;">
@@ -304,8 +304,8 @@
             <h4 style="margin: 0 0 10px;">Хвост/резинка</h4>
             {% set rmode = fp.get('sale_rubber_mode') or 'IN_STOCK' %}
             <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
-              <label><input type="radio" name="sale_rubber_mode" value="IN_STOCK" {% if rmode == 'IN_STOCK' %}checked{% endif %} onchange="syncSaleRubberMode()" /> Из наличия</label>
-              <label><input type="radio" name="sale_rubber_mode" value="ORDER" {% if rmode == 'ORDER' %}checked{% endif %} onchange="syncSaleRubberMode()" /> На заказ</label>
+              <label><input type="radio" name="sale_rubber_mode" value="IN_STOCK" {% if rmode == 'IN_STOCK' %}checked{% endif %} /> Из наличия</label>
+              <label><input type="radio" name="sale_rubber_mode" value="ORDER" {% if rmode == 'ORDER' %}checked{% endif %} /> На заказ</label>
             </div>
 
             <div id="sale_rubber_order_master_block" style="margin-top: 12px; display:none;">
@@ -326,7 +326,7 @@
             <div style="margin-top: 6px;">
               {% for t in rubber_types %}
                 <label style="display:block; margin-bottom: 6px;">
-                  <input type="radio" name="sale_rubber_type" value="{{ t.value }}" {% if rt == t.value %}checked{% endif %} onchange="syncSaleRubberTypeFields()" />
+                  <input type="radio" name="sale_rubber_type" value="{{ t.value }}" {% if rt == t.value %}checked{% endif %} />
                   {{ t.label }}
                 </label>
               {% endfor %}
@@ -375,342 +375,9 @@
     </form>
   </div>
 
-  <script>
-    function escapeHtml(s) {
-      return String(s).replace(/[&<>"']/g, function (c) {
-        return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
-      });
-    }
-    function syncBookingClientUi() {
-      const cidEl = document.getElementById('client_id');
-      const q = document.getElementById('client_search_q');
-      const findBtn = document.getElementById('booking_client_find_btn');
-      const row = document.getElementById('booking_client_search_row');
-      const panel = document.getElementById('booking_client_selected_panel');
-      const nameEl = document.getElementById('booking_client_selected_name');
-      if (!cidEl || !q || !findBtn || !row || !panel || !nameEl) return;
-      const cid = (cidEl.value || '').trim();
-      const has = !!cid;
-      q.disabled = has;
-      findBtn.disabled = has;
-      row.style.opacity = has ? '0.55' : '1';
-      panel.style.display = has ? 'block' : 'none';
-      if (!has) nameEl.textContent = '';
-    }
-    function clearBookingClientSelection() {
-      document.getElementById('client_id').value = '';
-      document.getElementById('client_suggest_list').innerHTML = '';
-      const q = document.getElementById('client_search_q');
-      q.value = '';
-      q.focus();
-      syncBookingClientUi();
-    }
-    function selectClient(id, name, isDraft) {
-      document.getElementById('client_id').value = String(id);
-      const nameEl = document.getElementById('booking_client_selected_name');
-      if (nameEl) nameEl.textContent = (name || '') + (isDraft ? ' (черновик)' : '');
-      document.getElementById('client_suggest_list').innerHTML = '';
-      syncBookingClientUi();
-    }
-    async function clientSuggest() {
-      const qEl = document.getElementById('client_search_q');
-      if (qEl && qEl.disabled) return;
-      const q = document.getElementById('client_search_q').value.trim();
-      const res = await fetch('/clients/suggest?q=' + encodeURIComponent(q));
-      if (!res.ok) return;
-      const data = await res.json();
-      const ul = document.getElementById('client_suggest_list');
-      ul.innerHTML = '';
-      for (const c of data.clients || []) {
-        const li = document.createElement('li');
-        li.style.marginBottom = '8px';
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'secondary';
-        b.textContent = c.name + (c.is_draft ? ' (черновик)' : '');
-        b.onclick = function () { selectClient(c.id, c.name, c.is_draft); };
-        const hint = document.createElement('span');
-        hint.className = 'muted';
-        hint.style.marginLeft = '8px';
-        hint.textContent = c.hint || '';
-        li.appendChild(b);
-        li.appendChild(hint);
-        ul.appendChild(li);
-      }
-    }
-    let suggestTimer = null;
-    function scheduleSuggest() {
-      const qEl = document.getElementById('client_search_q');
-      if (qEl && qEl.disabled) return;
-      clearTimeout(suggestTimer);
-      suggestTimer = setTimeout(clientSuggest, 350);
-    }
-    document.getElementById('client_search_q').addEventListener('input', scheduleSuggest);
-    const bookingClientChg = document.getElementById('booking_client_change_btn');
-    if (bookingClientChg) bookingClientChg.addEventListener('click', clearBookingClientSelection);
-    syncBookingClientUi();
-
-    function getKindValue() {
-      const el = document.querySelector('input[name="kind"]:checked');
-      return el ? el.value : 'VISIT';
-    }
-    function syncKind() {
-      const k = getKindValue();
-      document.getElementById('kind_visit_block').style.display = (k === 'VISIT') ? 'block' : 'none';
-      document.getElementById('kind_sale_block').style.display = (k === 'PRODUCT_SALE') ? 'block' : 'none';
-      // Make required fields conditional
-      const svc = document.getElementById('service_id');
-      const pk = document.querySelector('select[name="product_kind"]');
-      if (svc) svc.required = (k === 'VISIT');
-      if (pk) pk.required = false;
-      document.querySelectorAll('input[name="product_kind"]').forEach(function(r){
-        r.required = (k === 'PRODUCT_SALE');
-      });
-    }
-
-    function getVisitKitMode() {
-      const el = document.querySelector('input[name="visit_kit_mode"]:checked');
-      return el ? el.value : 'IN_STOCK';
-    }
-    function syncVisitKitMode() {
-      const kitCard = document.getElementById('visit_kit_card');
-      if (!kitCard || kitCard.style.display === 'none') return;
-      const m = getVisitKitMode();
-      document.getElementById('visit_kit_stock_block').style.display = (m === 'IN_STOCK') ? 'block' : 'none';
-      document.getElementById('visit_kit_own_block').style.display = (m === 'OWN') ? 'block' : 'none';
-      document.getElementById('visit_kit_order_block').style.display = (m === 'ORDER') ? 'block' : 'none';
-      syncOwnKitExtras();
-    }
-    function syncOwnKitExtras() {
-      const m = getVisitKitMode();
-      const needCorr = (document.querySelector('input[name="visit_own_need_correction"]')||{}).checked;
-      const needExtra = (document.querySelector('input[name="visit_own_need_extra_blanks"]')||{}).checked;
-      document.getElementById('visit_correction_block').style.display = (m === 'OWN' && needCorr) ? 'block' : 'none';
-      document.getElementById('visit_extra_blanks_block').style.display = (m === 'OWN' && needExtra) ? 'block' : 'none';
-      syncExtraBlanksMode();
-    }
-    function getExtraBlanksMode() {
-      const el = document.querySelector('input[name="visit_extra_blanks_mode"]:checked');
-      return el ? el.value : 'IN_STOCK';
-    }
-    function syncExtraBlanksMode() {
-      const show = (document.getElementById('visit_extra_blanks_block').style.display !== 'none');
-      const m = getExtraBlanksMode();
-      document.getElementById('visit_extra_stock_block').style.display = (show && m === 'IN_STOCK') ? 'block' : 'none';
-      document.getElementById('visit_extra_order_block').style.display = (show && m === 'ORDER') ? 'block' : 'none';
-    }
-
-    function getSaleKind() {
-      const el = document.querySelector('input[name="product_kind"]:checked');
-      return el ? el.value : '';
-    }
-    function syncSaleKind() {
-      const k = getSaleKind();
-      document.getElementById('sale_kit_block').style.display = (k === 'KIT') ? 'block' : 'none';
-      document.getElementById('sale_rubber_block').style.display = (k === 'RUBBER') ? 'block' : 'none';
-      syncSaleKitMode();
-      syncSaleRubberTypeFields();
-      syncSaleRubberMode();
-    }
-
-    function getSaleRubberType() {
-      const el = document.querySelector('input[name="sale_rubber_type"]:checked');
-      return el ? el.value : '';
-    }
-    function syncSaleRubberTypeFields() {
-      const show = (document.getElementById('sale_rubber_block').style.display !== 'none');
-      const t = getSaleRubberType();
-      const a = document.getElementById('sale_rubber_attach_qty_block');
-      const b = document.getElementById('sale_rubber_braids_qty_block');
-      if (!a || !b) return;
-      a.style.display = (show && t === 'TAIL_ELASTIC') ? 'block' : 'none';
-      b.style.display = (show && t === 'BRAIDS_ELASTIC') ? 'block' : 'none';
-    }
-    function getSaleKitMode() {
-      const el = document.querySelector('input[name="sale_kit_mode"]:checked');
-      return el ? el.value : 'IN_STOCK';
-    }
-    function syncSaleKitMode() {
-      const show = (document.getElementById('sale_kit_block').style.display !== 'none');
-      const m = getSaleKitMode();
-      document.getElementById('sale_kit_stock_block').style.display = (show && m === 'IN_STOCK') ? 'block' : 'none';
-      document.getElementById('sale_kit_order_block').style.display = (show && m === 'ORDER') ? 'block' : 'none';
-    }
-
-    function getSaleRubberMode() {
-      const el = document.querySelector('input[name="sale_rubber_mode"]:checked');
-      return el ? el.value : 'IN_STOCK';
-    }
-    function syncSaleRubberMode() {
-      const show = (document.getElementById('sale_rubber_block').style.display !== 'none');
-      const m = getSaleRubberMode();
-      const block = document.getElementById('sale_rubber_order_master_block');
-      if (!block) return;
-      block.style.display = (show && m === 'ORDER') ? 'block' : 'none';
-      // require master only for ORDER
-      document.querySelectorAll('input[name="sale_rubber_order_master_id"]').forEach(function(r){
-        r.required = (show && m === 'ORDER');
-      });
-    }
-
-    async function kitSuggest(q, ulId, onPick) {
-      const res = await fetch('/master/kits/suggest?q=' + encodeURIComponent(q||''));
-      if (!res.ok) return;
-      const data = await res.json();
-      const ul = document.getElementById(ulId);
-      ul.innerHTML = '';
-      for (const k of data.kits || []) {
-        const li = document.createElement('li');
-        li.style.marginBottom = '8px';
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'secondary';
-        b.textContent = (k.sku || ('#'+k.id)) + ' — ' + (k.title || '');
-        b.onclick = function () { onPick(k); };
-        li.appendChild(b);
-        ul.appendChild(li);
-      }
-    }
-    function bindKitSuggest(inputId, ulId, onPick) {
-      let t = null;
-      const inp = document.getElementById(inputId);
-      if (!inp) return;
-      inp.addEventListener('input', function(){
-        clearTimeout(t);
-        t = setTimeout(function(){ kitSuggest(inp.value.trim(), ulId, onPick); }, 350);
-      });
-    }
-    function setSelectedKit(hiddenId, boxId, lineId, reserveBtnId, kit) {
-      document.getElementById(hiddenId).value = String(kit.id);
-      const box = document.getElementById(boxId);
-      const line = document.getElementById(lineId);
-      box.style.display = 'block';
-      line.innerHTML = 'Выбрано: <strong>' + escapeHtml((kit.sku||'#'+kit.id) + ' — ' + (kit.title||'')) + '</strong>';
-      // reserveBtnId is legacy (we reserve automatically on save)
-    }
-
-    const serviceCatalog = {{ service_catalog|tojson }};
-    const serviceMetaById = {};
-    for (const c of (serviceCatalog || [])) {
-      for (const sc of (c.subcategories || [])) {
-        for (const s of (sc.services || [])) {
-          serviceMetaById[s.id] = { requiresKit: !!s.requires_kit_block };
-        }
-      }
-    }
-    function serviceCatalogOnCategory() {
-      const catSel = document.getElementById('service_category_id');
-      const subSel = document.getElementById('service_subcategory_id');
-      const svcSel = document.getElementById('service_id');
-      subSel.innerHTML = '';
-      svcSel.innerHTML = '';
-      const catId = parseInt(catSel.value || '0', 10) || 0;
-      const cat = (serviceCatalog || []).find(c => c.id === catId) || (serviceCatalog || [])[0];
-      const subs = (cat && cat.subcategories) ? cat.subcategories : [];
-      for (const sc of subs) {
-        const opt = document.createElement('option');
-        opt.value = String(sc.id);
-        opt.textContent = sc.name;
-        subSel.appendChild(opt);
-      }
-      serviceCatalogOnSubcategory();
-    }
-    function serviceCatalogOnSubcategory() {
-      const catSel = document.getElementById('service_category_id');
-      const subSel = document.getElementById('service_subcategory_id');
-      const svcSel = document.getElementById('service_id');
-      svcSel.innerHTML = '';
-      const catId = parseInt(catSel.value || '0', 10) || 0;
-      const subId = parseInt(subSel.value || '0', 10) || 0;
-      const cat = (serviceCatalog || []).find(c => c.id === catId) || (serviceCatalog || [])[0];
-      const subs = (cat && cat.subcategories) ? cat.subcategories : [];
-      const sc = subs.find(s => s.id === subId) || subs[0];
-      const svcs = (sc && sc.services) ? sc.services : [];
-      for (const s of svcs) {
-        const opt = document.createElement('option');
-        opt.value = String(s.id);
-        opt.textContent = s.name;
-        svcSel.appendChild(opt);
-      }
-      updateVisitKitVisibility();
-    }
-
-    function updateVisitKitVisibility() {
-      const svcSel = document.getElementById('service_id');
-      const kitCard = document.getElementById('visit_kit_card');
-      if (!svcSel || !kitCard) return;
-      const svcId = parseInt(svcSel.value || '0', 10) || 0;
-      const meta = serviceMetaById[svcId];
-      const needsKit = meta && meta.requiresKit;
-      kitCard.style.display = needsKit ? 'block' : 'none';
-      if (needsKit) {
-        syncVisitKitMode();
-      } else {
-        document.getElementById('visit_kit_stock_block').style.display = 'none';
-        document.getElementById('visit_kit_own_block').style.display = 'none';
-        document.getElementById('visit_kit_order_block').style.display = 'none';
-        document.getElementById('visit_correction_block').style.display = 'none';
-        document.getElementById('visit_extra_blanks_block').style.display = 'none';
-      }
-    }
-
-    function setServiceSelections(catId, subId, svcId) {
-      const catSel = document.getElementById('service_category_id');
-      const subSel = document.getElementById('service_subcategory_id');
-      const svcSel = document.getElementById('service_id');
-      if (!catSel || !subSel || !svcSel) return;
-      let cid = catId;
-      let sid = subId;
-      let vid = svcId;
-      // If only service_id is provided (calculator prefill), locate its category/subcategory.
-      if ((!cid || !sid) && vid) {
-        for (const c of (serviceCatalog || [])) {
-          for (const sc of (c.subcategories || [])) {
-            for (const s of (sc.services || [])) {
-              if (parseInt(String(s.id||0), 10) === parseInt(String(vid||0), 10)) {
-                cid = c.id;
-                sid = sc.id;
-                break;
-              }
-            }
-            if (cid && sid) break;
-          }
-          if (cid && sid) break;
-        }
-      }
-      if (cid) catSel.value = String(cid);
-      serviceCatalogOnCategory();
-      if (sid) subSel.value = String(sid);
-      serviceCatalogOnSubcategory();
-      if (vid) svcSel.value = String(vid);
-      updateVisitKitVisibility();
-    }
-
-    // init
-    syncKind();
-    serviceCatalogOnCategory();
-    syncVisitKitMode();
-    syncSaleKind();
-    updateVisitKitVisibility();
-    bindKitSuggest('visit_kit_search_q', 'visit_kit_suggest_list', function(k){
-      setSelectedKit('visit_stock_kit_id','visit_selected_kit_box','visit_selected_kit_line','visit_kit_reserve_btn',k);
-      document.getElementById('visit_kit_suggest_list').innerHTML = '';
-    });
-    bindKitSuggest('visit_extra_kit_search_q', 'visit_extra_kit_suggest_list', function(k){
-      setSelectedKit('visit_extra_stock_kit_id','visit_extra_selected_kit_box','visit_extra_selected_kit_line','visit_extra_kit_reserve_btn',k);
-      document.getElementById('visit_extra_kit_suggest_list').innerHTML = '';
-    });
-    bindKitSuggest('sale_kit_search_q', 'sale_kit_suggest_list', function(k){
-      setSelectedKit('sale_stock_kit_id','sale_selected_kit_box','sale_selected_kit_line','sale_kit_reserve_btn',k);
-      document.getElementById('sale_kit_suggest_list').innerHTML = '';
-    });
-    // restore selection (edit / validation error)
-    const initialCatId = parseInt({{ (fp.get('service_category_id') or 0)|int }} || 0);
-    const initialSubId = parseInt({{ (fp.get('service_subcategory_id') or 0)|int }} || 0);
-    const initialSvcId = parseInt({{ (fp.get('service_id') or 0)|int }} || 0);
-    if (initialCatId || initialSubId || initialSvcId) {
-      setServiceSelections(initialCatId, initialSubId, initialSvcId);
-    }
+  <script type="application/json" id="lb-booking-service-catalog-json">{{ service_catalog|tojson }}</script>
+  <script type="application/json" id="lb-booking-initial-service-json">
+    {{ {'category_id': (fp.get('service_category_id') or 0)|int, 'subcategory_id': (fp.get('service_subcategory_id') or 0)|int, 'service_id': (fp.get('service_id') or 0)|int } | tojson }}
   </script>
 
   {# Резерв комплекта делается автоматически при сохранении брони #}

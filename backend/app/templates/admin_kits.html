@@ -2,8 +2,8 @@
 {% block content %}
   {% set is_admin_kit = current_user.role.value in ['ADMIN', 'ADMIN_SUPER'] %}
   <div class="card">
-    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-      <h2 style="margin-top: 0;">Комплекты</h2>
+    <div class="lb-flex-between-center">
+      <h2 class="lb-mt-0">Комплекты</h2>
       {% if is_admin_kit %}
         <a href="/kits/new"><button type="button">Новый комплект</button></a>
       {% endif %}
@@ -11,14 +11,14 @@
     <p class="muted">Склад: артикулы и остатки. Резерв — кто и для кого (клиент и/или сотрудник); время и автор фиксируются автоматически.</p>
 
     {% if msg == "reserved" %}
-      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Резерв сохранён.</p>
+      <p class="lb-flash lb-flash-ok">Резерв сохранён.</p>
     {% elif msg == "cleared" %}
-      <p style="background:#dbeafe;border:1px solid #93c5fd;color:#1e40af;padding:10px 12px;border-radius:8px;">Резерв снят.</p>
+      <p class="lb-flash lb-flash-info">Резерв снят.</p>
     {% elif msg == "created" %}
-      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Комплект создан.</p>
+      <p class="lb-flash lb-flash-ok">Комплект создан.</p>
     {% endif %}
     {% if err %}
-      <div class="error" style="margin-bottom: 12px;">{{ err }}</div>
+      <div class="error lb-mb-12">{{ err }}</div>
     {% endif %}
 
     <table>
@@ -41,9 +41,9 @@
           {% set slots_full = slots_u >= kit_max_reserves %}
           {% set can_open_reserve = k.pieces_available > 0 and not slots_full %}
           <tr>
-            <td style="white-space:nowrap;">
+            <td class="lb-nowrap">
               {% if missing_price %}
-                <span title="Не задана цена продажи — списание в визите/продаже недоступно" style="margin-right:4px;">⚠️</span>
+                <span title="Не задана цена продажи — списание в визите/продаже недоступно" class="lb-icon-warn-mr4">⚠️</span>
               {% endif %}
               <a href="/kits/{{ k.id }}"><strong>{{ k.sku }}</strong></a>
             </td>
@@ -61,22 +61,22 @@
                 —
               {% endif %}
             </td>
-            <td style="white-space:nowrap;">
+            <td class="lb-nowrap">
               {% if is_admin_kit %}
-                <form method="post" action="/kits/{{ k.id }}/discount" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                <form method="post" action="/kits/{{ k.id }}/discount" class="lb-inline-flex-wrap-gap-6">
                   <input type="hidden" name="redirect_to" value="list" />
-                  <input name="discount_percent" type="text" inputmode="numeric" pattern="[0-9]*" value="{{ k.discount_percent }}" style="width:4rem;" />
-                  <button type="submit" class="secondary" style="padding:2px 8px;">Ок</button>
+                  <input name="discount_percent" type="text" inputmode="numeric" pattern="[0-9]*" value="{{ k.discount_percent }}" class="lb-w-4rem" />
+                  <button type="submit" class="secondary lb-btn-compact-2x8">Ок</button>
                 </form>
               {% else %}
                 {{ k.discount_percent }}%
               {% endif %}
             </td>
             <td>{{ k.pieces_available }} / {{ k.pieces_total }}</td>
-            <td style="font-size:13px;">
+            <td class="lb-font-13">
               {% if k.is_reserved %}
                 <span
-                  style="display:inline-block;padding:2px 8px;border-radius:6px;background:#fef3c7;border:1px solid #fbbf24;font-size:12px;cursor:default;"
+                  class="lb-reserve-chip"
                   title="{{ row.reserve_tooltip }}"
                 >{{ slots_u }} / {{ kit_max_reserves }}</span>
               {% else %}
@@ -84,12 +84,13 @@
               {% endif %}
             </td>
             <td style="vertical-align:top;">
-              <div style="display:flex;flex-direction:column;gap:6px;align-items:stretch;width:fit-content;max-width:100%;">
+              <div class="lb-actions-col">
               {% if can_open_reserve %}
                 <button
                   type="button"
-                  class="js-reserve-open{% if k.is_reserved %} secondary{% endif %}"
+                  class="js-reserve-open{% if k.is_reserved %} secondary{% endif %} lb-btn-wrap-center"
                   data-kit-id="{{ k.id }}"
+                  data-action-url="/kits/{{ k.id }}/reserve"
                   data-sku="{{ k.sku|e }}"
                   data-free="{{ k.pieces_available }}"
                   data-slots="{{ slots_u }}"
@@ -97,24 +98,22 @@
                   data-client-id=""
                   data-user-id=""
                   data-client-name=""
-                  style="white-space:normal;text-align:center;"
                 >
                   {% if k.is_reserved %}Добавить резерв{% else %}Зарезервировать{% endif %}
                 </button>
               {% elif k.pieces_available > 0 and slots_full %}
                 <button
                   type="button"
-                  class="secondary kit-btn-disabled js-reserve-limit-full"
+                  class="secondary kit-btn-disabled js-reserve-limit-full lb-btn-wrap-center"
                   aria-disabled="true"
                   title="Достигнут лимит резервов ({{ kit_max_reserves }}). Снимите резерв кнопкой «Снять»."
-                  style="white-space:normal;text-align:center;"
                 >
                   {% if k.is_reserved %}Добавить резерв (лимит){% else %}Зарезервировать (лимит){% endif %}
                 </button>
               {% endif %}
               {% if k.is_reserved and is_admin_kit %}
-                <script type="application/json" id="clear-reserves-payload-{{ k.id }}" style="display:none">{{ row.clear_modal_items_json|safe }}</script>
-                <button type="button" class="secondary js-clear-reserves-open" data-kit-id="{{ k.id }}" data-sku="{{ k.sku|e }}" data-after="list" style="white-space:normal;">Снять</button>
+                <script type="application/json" id="clear-reserves-payload-{{ k.id }}" class="lb-hidden">{{ row.clear_modal_items_json|safe }}</script>
+                <button type="button" class="secondary js-clear-reserves-open lb-btn-wrap-center" data-kit-id="{{ k.id }}" data-action-url="/kits/{{ k.id }}/reserve" data-sku="{{ k.sku|e }}" data-after="list">Снять</button>
               {% endif %}
               {% if k.is_reserved and not is_admin_kit %}
                 {% for r in k.reserves %}
@@ -123,7 +122,7 @@
                       <input type="hidden" name="action" value="clear" />
                       <input type="hidden" name="reserve_id" value="{{ r.id }}" />
                       <input type="hidden" name="after_reserve" value="list" />
-                      <button type="submit" class="secondary" style="width:100%;white-space:normal;">Снять {{ r.pieces_reserved }} шт.</button>
+                      <button type="submit" class="secondary lb-btn-wrap-center" style="width:100%;">Снять {{ r.pieces_reserved }} шт.</button>
                     </form>
                   {% endif %}
                 {% endfor %}

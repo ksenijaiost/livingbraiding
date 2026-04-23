@@ -26,6 +26,7 @@
             type="button"
             class="js-reserve-open{% if kit.is_reserved %} secondary{% endif %}"
             data-kit-id="{{ kit.id }}"
+            data-action-url="/kits/{{ kit.id }}/reserve"
             data-sku="{{ kit.sku|e }}"
             data-free="{{ kit.pieces_available }}"
             data-slots="{{ kit_reserve_slots_used }}"
@@ -48,7 +49,7 @@
         {% endif %}
         {% if kit.is_reserved and is_admin_kit %}
           <script type="application/json" id="clear-reserves-payload-{{ kit.id }}" style="display:none">{{ clear_modal_items_json|safe }}</script>
-          <button type="button" class="secondary js-clear-reserves-open" data-kit-id="{{ kit.id }}" data-sku="{{ kit.sku|e }}" data-after="detail">Снять</button>
+          <button type="button" class="secondary js-clear-reserves-open" data-kit-id="{{ kit.id }}" data-action-url="/kits/{{ kit.id }}/reserve" data-sku="{{ kit.sku|e }}" data-after="detail">Снять</button>
         {% endif %}
       </div>
       {% if is_admin_kit %}

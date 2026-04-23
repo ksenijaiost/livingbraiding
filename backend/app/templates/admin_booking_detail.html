@@ -1,30 +1,30 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="card" style="max-width: 980px;">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 12px; flex-wrap: wrap;">
+  <div class="card lb-card-max-980">
+    <div class="lb-flex-between">
       <div>
-        <p class="muted" style="margin-top:0;">
+        <p class="muted lb-mt-0">
           <a href="/clients/{{ booking.client.id }}">← К клиенту</a>
-          <span class="muted" style="margin: 0 6px;">·</span>
+          <span class="muted lb-dot-sep">·</span>
           <a href="/bookings">← Бронь (список)</a>
         </p>
-        <h2 style="margin:0;">Бронь #{{ booking.id }}</h2>
+        <h2 class="lb-m-0">Бронь #{{ booking.id }}</h2>
       </div>
 
       {% if current_user and (current_user.role.value in ["ADMIN", "ADMIN_SUPER"]) %}
-        <div style="display:flex; gap: 10px; flex-wrap: wrap; justify-content:flex-end;">
-          <form method="get" action="/bookings/{{ booking.id }}/edit" style="margin:0;">
+        <div class="lb-row-center-gap" style="justify-content:flex-end;">
+          <form method="get" action="/bookings/{{ booking.id }}/edit" class="lb-m-0">
             <button type="submit">Изменить</button>
           </form>
           {% if current_user.role.value == "ADMIN_SUPER" and booking.status.value == "ACTIVE" %}
-            <form method="post" action="/bookings/{{ booking.id }}/mark-done" style="margin:0;"
-                  onsubmit="return confirm('Отметить бронь выполненной?');">
+            <form method="post" action="/bookings/{{ booking.id }}/mark-done" class="lb-m-0"
+                  data-lb-confirm="Отметить бронь выполненной?">
               <button class="secondary" type="submit">Выполнено</button>
             </form>
           {% endif %}
           {% if booking.status.value == "ACTIVE" %}
-            <form method="post" action="/bookings/{{ booking.id }}/cancel" style="margin:0;"
-                  onsubmit="const r = prompt('Причина отмены брони:'); if(!r){ return false; } this.reason.value = r; return true;">
+            <form method="post" action="/bookings/{{ booking.id }}/cancel" class="lb-m-0"
+                  data-lb-prompt-input="reason" data-lb-prompt-text="Причина отмены брони:">
               <input type="hidden" name="reason" value="" />
               <button class="secondary" type="submit">Отменить</button>
             </form>
@@ -34,17 +34,17 @@
     </div>
 
     {% if request.query_params.get('err') == 'reason' %}
-      <p style="background:#fee2e2;border:1px solid #fecaca;color:#991b1b;padding:10px 12px;border-radius:8px;">
+      <p class="lb-flash" style="background:#fee2e2;border-color:#fecaca;color:#991b1b;">
         Укажите причину отмены.
       </p>
     {% endif %}
 
-    <div class="card" style="background:#f8fafc;">
-      <p style="margin:6px 0;"><strong>Клиент</strong>: <a href="/clients/{{ booking.client.id }}">{{ booking.client.name }}</a></p>
-      <p style="margin:6px 0;"><strong>Дата и время записи</strong>: {{ format_naive_utc_datetime(booking.planned_date, display_tz) }} ({{ timezone_label(display_tz) }})</p>
-      <p style="margin:6px 0;"><strong>Тип</strong>: {{ kind_label }}</p>
-      <p style="margin:6px 0;"><strong>Статус</strong>: {{ status_label }}</p>
-      <p style="margin:6px 0;"><strong>Создание</strong>:
+    <div class="card lb-card-bg-subtle">
+      <p class="lb-my-6"><strong>Клиент</strong>: <a href="/clients/{{ booking.client.id }}">{{ booking.client.name }}</a></p>
+      <p class="lb-my-6"><strong>Дата и время записи</strong>: {{ format_naive_utc_datetime(booking.planned_date, display_tz) }} ({{ timezone_label(display_tz) }})</p>
+      <p class="lb-my-6"><strong>Тип</strong>: {{ kind_label }}</p>
+      <p class="lb-my-6"><strong>Статус</strong>: {{ status_label }}</p>
+      <p class="lb-my-6"><strong>Создание</strong>:
         {% if booking.created_by_user %}
           {{ booking.created_by_user.display_name }} ({{ ru_user_role(booking.created_by_user.role) }}) · {{ format_naive_utc_datetime(booking.created_at, display_tz) }}
         {% else %}
@@ -52,22 +52,22 @@
         {% endif %}
       </p>
       {% if booking.status.value == "CANCELLED" and booking.cancelled_reason %}
-        <p style="margin:6px 0;"><strong>Причина отмены</strong>: {{ booking.cancelled_reason }}</p>
+        <p class="lb-my-6"><strong>Причина отмены</strong>: {{ booking.cancelled_reason }}</p>
       {% endif %}
     </div>
 
-    <h3 style="margin-top: 18px;">Связанные записи</h3>
+    <h3 class="lb-mt-18">Связанные записи</h3>
     {% if not booking_can_create_master_records and (need_work or need_visit) %}
-      <p class="muted" style="font-size:13px;margin:-4px 0 10px;max-width:720px;">
+      <p class="muted lb-font-13 lb-mt-neg-4 lb-max-720" style="margin-bottom:10px;">
         Создание работы с товарами и визита по брони доступно только под активной ролью «Мастер» (кнопки «Создать» ниже неактивны для администратора).
       </p>
     {% endif %}
     {% set wait_work_title = "Сначала создайте работу с товарами по этой брони." %}
-    <table style="width:100%; max-width: 720px; border-collapse: collapse; margin-top: 8px;">
+    <table class="lb-table-compact lb-max-720" style="margin-top:8px;">
       <tbody>
-        <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 8px 10px 8px 0; vertical-align: middle; white-space: nowrap;"><strong>Работа с товарами</strong></td>
-          <td style="padding: 8px 10px; vertical-align: middle;">
+        <tr class="lb-table-compact-row">
+          <td class="lb-td-pad-left0 lb-va-mid lb-nowrap"><strong>Работа с товарами</strong></td>
+          <td class="lb-td-pad-mid lb-va-mid">
             {% if linked_work_id %}
               <a href="/sales/work/{{ linked_work_id }}">№{{ linked_work_id }}</a>
             {% elif need_work %}
@@ -76,23 +76,23 @@
               <span class="muted">—</span>
             {% endif %}
           </td>
-          <td style="padding: 8px 0 8px 10px; vertical-align: middle; text-align: right; white-space: nowrap;">
+          <td class="lb-td-pad-right0 lb-va-mid lb-text-right lb-nowrap">
             {% if not need_work %}
               <span class="muted">—</span>
             {% elif linked_work_id %}
               <a href="/sales/work/{{ linked_work_id }}"><button type="button" class="secondary">Открыть</button></a>
             {% elif not booking_can_create_master_records %}
-              <span title="{{ booking_link_master_only_title }}" style="cursor: help;">
-                <button type="button" class="secondary" disabled style="opacity: 0.45; cursor: not-allowed;">Создать</button>
+              <span title="{{ booking_link_master_only_title }}" class="lb-cursor-help">
+                <button type="button" class="secondary lb-btn-disabled" disabled>Создать</button>
               </span>
             {% else %}
               <a href="{{ work_create_url }}"><button type="button" class="secondary">Создать</button></a>
             {% endif %}
           </td>
         </tr>
-        <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 8px 10px 8px 0; vertical-align: middle; white-space: nowrap;"><strong>Визит</strong></td>
-          <td style="padding: 8px 10px; vertical-align: middle;">
+        <tr class="lb-table-compact-row">
+          <td class="lb-td-pad-left0 lb-va-mid lb-nowrap"><strong>Визит</strong></td>
+          <td class="lb-td-pad-mid lb-va-mid">
             {% if linked_visit_id %}
               <a href="/visits/{{ linked_visit_id }}">№{{ linked_visit_id }}</a>
             {% elif need_visit %}
@@ -101,18 +101,18 @@
               <span class="muted">—</span>
             {% endif %}
           </td>
-          <td style="padding: 8px 0 8px 10px; vertical-align: middle; text-align: right; white-space: nowrap;">
+          <td class="lb-td-pad-right0 lb-va-mid lb-text-right lb-nowrap">
             {% if not need_visit %}
               <span class="muted">—</span>
             {% elif linked_visit_id %}
               <a href="/visits/{{ linked_visit_id }}"><button type="button" class="secondary">Открыть</button></a>
             {% elif visit_blocked %}
-              <span title="{{ wait_work_title }}" style="cursor: help;">
-                <button type="button" class="secondary" disabled style="opacity: 0.45; cursor: not-allowed;">Создать</button>
+              <span title="{{ wait_work_title }}" class="lb-cursor-help">
+                <button type="button" class="secondary lb-btn-disabled" disabled>Создать</button>
               </span>
             {% elif not booking_can_create_master_records %}
-              <span title="{{ booking_link_master_only_title }}" style="cursor: help;">
-                <button type="button" class="secondary" disabled style="opacity: 0.45; cursor: not-allowed;">Создать</button>
+              <span title="{{ booking_link_master_only_title }}" class="lb-cursor-help">
+                <button type="button" class="secondary lb-btn-disabled" disabled>Создать</button>
               </span>
             {% else %}
               <a href="{{ visit_create_url }}"><button type="button" class="secondary">Создать</button></a>
@@ -120,8 +120,8 @@
           </td>
         </tr>
         <tr>
-          <td style="padding: 8px 10px 8px 0; vertical-align: middle; white-space: nowrap;"><strong>Продажа</strong></td>
-          <td style="padding: 8px 10px; vertical-align: middle;">
+          <td class="lb-td-pad-left0 lb-va-mid lb-nowrap"><strong>Продажа</strong></td>
+          <td class="lb-td-pad-mid lb-va-mid">
             {% if linked_sale_id %}
               <a href="/sales/products/{{ linked_sale_id }}">№{{ linked_sale_id }}</a>
             {% elif need_sale %}
@@ -130,14 +130,14 @@
               <span class="muted">—</span>
             {% endif %}
           </td>
-          <td style="padding: 8px 0 8px 10px; vertical-align: middle; text-align: right; white-space: nowrap;">
+          <td class="lb-td-pad-right0 lb-va-mid lb-text-right lb-nowrap">
             {% if not need_sale %}
               <span class="muted">—</span>
             {% elif linked_sale_id %}
               <a href="/sales/products/{{ linked_sale_id }}"><button type="button" class="secondary">Открыть</button></a>
             {% elif sale_blocked %}
-              <span title="{{ wait_work_title }}" style="cursor: help;">
-                <button type="button" class="secondary" disabled style="opacity: 0.45; cursor: not-allowed;">Создать</button>
+              <span title="{{ wait_work_title }}" class="lb-cursor-help">
+                <button type="button" class="secondary lb-btn-disabled" disabled>Создать</button>
               </span>
             {% else %}
               <a href="{{ sale_create_url }}"><button type="button" class="secondary">Создать</button></a>
@@ -148,7 +148,7 @@
     </table>
 
     {% if booking.kind.value == "VISIT" %}
-      <h3 style="margin-top: 18px;">Параметры визита</h3>
+      <h3 class="lb-mt-18">Параметры визита</h3>
       <p style="margin:6px 0;"><strong>Услуга</strong>:
         {% if booking.planned_service %}
           {{ booking.planned_service.subcategory.name }} — {{ booking.planned_service.name }}
@@ -167,8 +167,8 @@
       </p>
 
       {% if details %}
-        <div class="card" style="margin-top:10px;background:#f8fafc;">
-          <div class="muted" style="font-size:12px;margin-bottom:6px;">Детали из брони (префилл)</div>
+        <div class="card lb-card-bg-subtle lb-mt-12">
+          <div class="muted lb-font-12 lb-mb-6">Детали из брони (префилл)</div>
           {% if details.get('visit_kit_mode') %}
             {% set _km = (details.get('visit_kit_mode') or '') %}
             <p style="margin:6px 0;"><strong>Комплект</strong>:
@@ -180,7 +180,7 @@
               {% if details.get('visit_order_blanks_qty') %}{{ details.get('visit_order_blanks_qty') }} шт{% endif %}
             </p>
             {% if details.get('visit_order_blanks_desc') %}
-              <p class="muted" style="margin:6px 0; white-space: pre-wrap;">{{ details.get('visit_order_blanks_desc') }}</p>
+              <p class="muted lb-my-6" style="white-space: pre-wrap;">{{ details.get('visit_order_blanks_desc') }}</p>
             {% endif %}
           {% endif %}
           {% if details.get('visit_own_need_correction') %}
@@ -189,7 +189,7 @@
         </div>
       {% endif %}
     {% else %}
-      <h3 style="margin-top: 18px;">Параметры продажи</h3>
+      <h3 class="lb-mt-18">Параметры продажи</h3>
       <p style="margin:6px 0;"><strong>Тип продажи</strong>: {{ product_kind_label }}</p>
       {% if sale_kit_order_users and (sale_kit_order_users|length > 0) %}
         <p style="margin:6px 0;"><strong>Назначенные мастера (заказ комплекта)</strong>: {{ sale_kit_order_users|join(", ") }}</p>
@@ -199,8 +199,8 @@
       {% endif %}
 
       {% if details %}
-        <div class="card" style="margin-top:10px;background:#f8fafc;">
-          <div class="muted" style="font-size:12px;margin-bottom:6px;">Детали из брони (префилл)</div>
+        <div class="card lb-card-bg-subtle lb-mt-12">
+          <div class="muted lb-font-12 lb-mb-6">Детали из брони (префилл)</div>
           {% if details.get('product_kind') %}
             {% set _pk = (details.get('product_kind') or '')|trim|upper %}
             <p style="margin:6px 0;"><strong>Тип товара</strong>:
@@ -231,8 +231,8 @@
       {% endif %}
     {% endif %}
 
-    <h3 style="margin-top: 18px;">Условия</h3>
-    <p style="margin:6px 0;"><strong>Озвученная сумма</strong>: {{ booking.quoted_price_text or "—" }}</p>
+    <h3 class="lb-mt-18">Условия</h3>
+    <p class="lb-my-6"><strong>Озвученная сумма</strong>: {{ booking.quoted_price_text or "—" }}</p>
     {% set _pmin = (calc_product_min or '') %}
     {% set _pmax = (calc_product_max or '') %}
     {% set _smin = (calc_service_min or '') %}
@@ -251,10 +251,10 @@
         <span class="muted">—</span>
       {% endif %}
     </p>
-    <p style="margin:6px 0;"><strong>Предоплата</strong>: {% if booking.deposit_amount is not none %}{{ booking.deposit_amount }} &#8381;{% else %}—{% endif %}</p>
+    <p class="lb-my-6"><strong>Предоплата</strong>: {% if booking.deposit_amount is not none %}{{ booking.deposit_amount }} &#8381;{% else %}—{% endif %}</p>
     {% if booking.comment %}
-      <div class="card" style="margin-top:10px;background:#f8fafc;">
-        <p class="muted" style="margin:0;white-space:pre-wrap;">{{ booking.comment }}</p>
+      <div class="card lb-card-bg-subtle lb-mt-12">
+        <p class="muted lb-m-0" style="white-space:pre-wrap;">{{ booking.comment }}</p>
       </div>
     {% endif %}
 
@@ -278,16 +278,16 @@
               <td>{{ format_naive_utc_datetime(r.changed_at, display_tz, "%Y-%m-%d %H:%M") if r.changed_at else "—" }}</td>
               <td>{% if r.changed_by_user %}{{ r.changed_by_user.display_name }}{% else %}Система{% endif %}</td>
               <td>{{ r.field_name }}</td>
-              <td class="muted" style="max-width:420px;vertical-align:top;">
+              <td class="muted lb-max-420" style="vertical-align:top;">
                 {% if r.field_name == "details_json" %}
-                  <pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.35;background:#f8fafc;padding:8px;border-radius:6px;border:1px solid #e2e8f0;">{{ r.old_value | pretty_json }}</pre>
+                  <pre class="lb-pre-json">{{ r.old_value | pretty_json }}</pre>
                 {% else %}
                   {{ r.old_value or "—" }}
                 {% endif %}
               </td>
-              <td style="max-width:420px;vertical-align:top;">
+              <td class="lb-max-420" style="vertical-align:top;">
                 {% if r.field_name == "details_json" %}
-                  <pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.35;background:#f8fafc;padding:8px;border-radius:6px;border:1px solid #e2e8f0;">{{ r.new_value | pretty_json }}</pre>
+                  <pre class="lb-pre-json">{{ r.new_value | pretty_json }}</pre>
                 {% else %}
                   {{ r.new_value or "—" }}
                 {% endif %}

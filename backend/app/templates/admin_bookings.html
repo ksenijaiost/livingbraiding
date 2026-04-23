@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
   <div class="card">
-    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-      <h2 style="margin-top:0;">Брони</h2>
+    <div class="lb-flex-between-center">
+      <h2 class="lb-mt-0">Брони</h2>
       {% if can_manage %}
         <a href="/bookings/new"><button type="button" class="secondary">Новая бронь</button></a>
       {% endif %}
@@ -23,7 +23,7 @@
           <label><input type="radio" name="mine" value="0" {% if not bookings_mine_only %}checked{% endif %} /> Все</label>
         </div>
         {% if current_user.role.value == "MASTER" %}
-          <div class="muted" style="font-size:12px;margin-top:6px;">По умолчанию показываются «мои»: где вы указаны мастером или ответственным по брони.</div>
+          <div class="muted lb-font-12 lb-mt-4">По умолчанию показываются «мои»: где вы указаны мастером или ответственным по брони.</div>
         {% endif %}
       </div>
       <div style="align-self:end;">
@@ -57,12 +57,12 @@
                 {% if b.status.value == "DONE" %}✅ выполнена{% endif %}
                 {% if b.status.value == "CANCELLED" %}❌ отменена{% endif %}
               </td>
-              <td style="white-space:nowrap;">
+              <td class="lb-nowrap">
                 <a href="/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
                 {% if can_manage %}
                   <a href="/bookings/{{ b.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
                   {% if b.status.value == "ACTIVE" %}
-                    <form method="post" action="/bookings/{{ b.id }}/cancel" style="display:inline; margin:0;" onsubmit="var r = prompt('Причина отмены'); if(!r) return false; this.querySelector('input[name=reason]').value = r; return confirm('Отменить бронь?');">
+                    <form method="post" action="/bookings/{{ b.id }}/cancel" style="display:inline; margin:0;" data-lb-confirm="Отменить бронь?" data-lb-prompt-input="reason" data-lb-prompt-text="Причина отмены">
                       <input type="hidden" name="reason" value="" />
                       <button type="submit" class="secondary">Отменить</button>
                     </form>

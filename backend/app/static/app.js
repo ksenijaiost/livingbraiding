@@ -26,6 +26,10 @@ function lbInitStudioShareOverride() {
 document.addEventListener("DOMContentLoaded", function () {
   lbInitStudioShareOverride();
   initProductsCalc();
+  initAdminBookingForm();
+  initKitReserveUI();
+  initKitClearReservesUI();
+  initLbFormGuards();
 });
 
 function initProductsCalc() {
@@ -459,5 +463,769 @@ function initProductsCalc() {
   syncCalcCorrWashCircle();
   syncCalcHourlyAvg();
   syncKitTypeUI();
+}
+
+function initAdminBookingForm() {
+  var root = document.querySelector("[data-lb-booking-form]");
+  if (!root) return;
+  if (root.dataset.lbInited === "1") return;
+  root.dataset.lbInited = "1";
+
+  function byId(id) { return document.getElementById(id); }
+  function qa(sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel)); }
+  function radioVal(name, def) {
+    var el = document.querySelector('input[name="' + name + '"]:checked');
+    return el ? el.value : def;
+  }
+  function jsonById(id, fallback) {
+    var el = document.getElementById(id);
+    if (!el) return fallback;
+    try { return JSON.parse(String(el.textContent || "").trim() || "null") ?? fallback; } catch (e) { return fallback; }
+  }
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+    });
+  }
+
+  // --- Client suggest ---
+  var suggestTimer = null;
+
+  function syncBookingClientUi() {
+    var cidEl = byId("client_id");
+    var q = byId("client_search_q");
+    var findBtn = byId("booking_client_find_btn");
+    var row = byId("booking_client_search_row");
+    var panel = byId("booking_client_selected_panel");
+    var nameEl = byId("booking_client_selected_name");
+    if (!cidEl || !q || !findBtn || !row || !panel || !nameEl) return;
+    var cid = String(cidEl.value || "").trim();
+    var has = !!cid;
+    q.disabled = has;
+    findBtn.disabled = has;
+    row.style.opacity = has ? "0.55" : "1";
+    panel.style.display = has ? "block" : "none";
+    if (!has) nameEl.textContent = "";
+  }
+
+  function clearBookingClientSelection() {
+    var cid = byId("client_id");
+    if (cid) cid.value = "";
+    var ul = byId("client_suggest_list");
+    if (ul) ul.innerHTML = "";
+    var q = byId("client_search_q");
+    if (q) { q.value = ""; q.focus(); }
+    syncBookingClientUi();
+  }
+
+  function selectClient(id, name, isDraft) {
+    var cid = byId("client_id");
+    if (cid) cid.value = String(id);
+    var nameEl = byId("booking_client_selected_name");
+    if (nameEl) nameEl.textContent = (name || "") + (isDraft ? " (черновик)" : "");
+    var ul = byId("client_suggest_list");
+    if (ul) ul.innerHTML = "";
+    syncBookingClientUi();
+  }
+
+  async function clientSuggest() {
+    var qEl = byId("client_search_q");
+    if (qEl && qEl.disabled) return;
+    var q = qEl ? qEl.value.trim() : "";
+    var res = await fetch("/clients/suggest?q=" + encodeURIComponent(q));
+    if (!res.ok) return;
+    var data = {};
+    try { data = await res.json(); } catch (e) { data = {}; }
+    var ul = byId("client_suggest_list");
+    if (!ul) return;
+    ul.innerHTML = "";
+    (data.clients || []).forEach(function (c) {
+      var li = document.createElement("li");
+      li.style.marginBottom = "8px";
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "secondary";
+      b.textContent = c.name + (c.is_draft ? " (черновик)" : "");
+      b.addEventListener("click", function () { selectClient(c.id, c.name, c.is_draft); });
+      var hint = document.createElement("span");
+      hint.className = "muted";
+      hint.style.marginLeft = "8px";
+      hint.textContent = c.hint || "";
+      li.appendChild(b);
+      li.appendChild(hint);
+      ul.appendChild(li);
+    });
+  }
+
+  function scheduleSuggest() {
+    var qEl = byId("client_search_q");
+    if (qEl && qEl.disabled) return;
+    clearTimeout(suggestTimer);
+    suggestTimer = setTimeout(clientSuggest, 350);
+  }
+
+  // --- Kind / blocks ---
+  function syncKind() {
+    var k = radioVal("kind", "VISIT");
+    var vb = byId("kind_visit_block");
+    var sb = byId("kind_sale_block");
+    if (vb) vb.style.display = (k === "VISIT") ? "block" : "none";
+    if (sb) sb.style.display = (k === "PRODUCT_SALE") ? "block" : "none";
+    // Make required fields conditional
+    var svc = byId("service_id");
+    if (svc) svc.required = (k === "VISIT");
+    qa('input[name="product_kind"]').forEach(function (r) {
+      r.required = (k === "PRODUCT_SALE");
+    });
+  }
+
+  // --- Visit kit mode / own extras / extra blanks ---
+  function getVisitKitMode() { return radioVal("visit_kit_mode", "IN_STOCK"); }
+
+  function getExtraBlanksMode() { return radioVal("visit_extra_blanks_mode", "IN_STOCK"); }
+
+  function syncExtraBlanksMode() {
+    var show = (byId("visit_extra_blanks_block") || {}).style && (byId("visit_extra_blanks_block").style.display !== "none");
+    var m = getExtraBlanksMode();
+    var stock = byId("visit_extra_stock_block");
+    var order = byId("visit_extra_order_block");
+    if (stock) stock.style.display = (show && m === "IN_STOCK") ? "block" : "none";
+    if (order) order.style.display = (show && m === "ORDER") ? "block" : "none";
+  }
+
+  function syncOwnKitExtras() {
+    var m = getVisitKitMode();
+    var needCorr = !!(document.querySelector('input[name="visit_own_need_correction"]') || {}).checked;
+    var needExtra = !!(document.querySelector('input[name="visit_own_need_extra_blanks"]') || {}).checked;
+    var corr = byId("visit_correction_block");
+    var extra = byId("visit_extra_blanks_block");
+    if (corr) corr.style.display = (m === "OWN" && needCorr) ? "block" : "none";
+    if (extra) extra.style.display = (m === "OWN" && needExtra) ? "block" : "none";
+    syncExtraBlanksMode();
+  }
+
+  function syncVisitKitMode() {
+    var kitCard = byId("visit_kit_card");
+    if (!kitCard || kitCard.style.display === "none") return;
+    var m = getVisitKitMode();
+    var stock = byId("visit_kit_stock_block");
+    var own = byId("visit_kit_own_block");
+    var order = byId("visit_kit_order_block");
+    if (stock) stock.style.display = (m === "IN_STOCK") ? "block" : "none";
+    if (own) own.style.display = (m === "OWN") ? "block" : "none";
+    if (order) order.style.display = (m === "ORDER") ? "block" : "none";
+    syncOwnKitExtras();
+  }
+
+  // --- Sale kind / modes ---
+  function getSaleKind() { return radioVal("product_kind", ""); }
+  function getSaleRubberType() { return radioVal("sale_rubber_type", ""); }
+  function getSaleKitMode() { return radioVal("sale_kit_mode", "IN_STOCK"); }
+  function getSaleRubberMode() { return radioVal("sale_rubber_mode", "IN_STOCK"); }
+
+  function syncSaleKitMode() {
+    var show = (byId("sale_kit_block") || {}).style && (byId("sale_kit_block").style.display !== "none");
+    var m = getSaleKitMode();
+    var stock = byId("sale_kit_stock_block");
+    var order = byId("sale_kit_order_block");
+    if (stock) stock.style.display = (show && m === "IN_STOCK") ? "block" : "none";
+    if (order) order.style.display = (show && m === "ORDER") ? "block" : "none";
+  }
+
+  function syncSaleRubberTypeFields() {
+    var show = (byId("sale_rubber_block") || {}).style && (byId("sale_rubber_block").style.display !== "none");
+    var t = getSaleRubberType();
+    var a = byId("sale_rubber_attach_qty_block");
+    var b = byId("sale_rubber_braids_qty_block");
+    if (a) a.style.display = (show && t === "TAIL_ELASTIC") ? "block" : "none";
+    if (b) b.style.display = (show && t === "BRAIDS_ELASTIC") ? "block" : "none";
+  }
+
+  function syncSaleRubberMode() {
+    var show = (byId("sale_rubber_block") || {}).style && (byId("sale_rubber_block").style.display !== "none");
+    var m = getSaleRubberMode();
+    var block = byId("sale_rubber_order_master_block");
+    if (block) block.style.display = (show && m === "ORDER") ? "block" : "none";
+    qa('input[name="sale_rubber_order_master_id"]').forEach(function (r) {
+      r.required = (show && m === "ORDER");
+    });
+  }
+
+  function syncSaleKind() {
+    var k = getSaleKind();
+    var kb = byId("sale_kit_block");
+    var rb = byId("sale_rubber_block");
+    if (kb) kb.style.display = (k === "KIT") ? "block" : "none";
+    if (rb) rb.style.display = (k === "RUBBER") ? "block" : "none";
+    syncSaleKitMode();
+    syncSaleRubberTypeFields();
+    syncSaleRubberMode();
+  }
+
+  // --- Service catalog (category/subcategory/service) ---
+  var serviceCatalog = jsonById("lb-booking-service-catalog-json", []);
+  var serviceMetaById = {};
+  (serviceCatalog || []).forEach(function (c) {
+    (c.subcategories || []).forEach(function (sc) {
+      (sc.services || []).forEach(function (s) {
+        serviceMetaById[s.id] = { requiresKit: !!s.requires_kit_block };
+      });
+    });
+  });
+
+  function serviceCatalogOnCategory() {
+    var catSel = byId("service_category_id");
+    var subSel = byId("service_subcategory_id");
+    var svcSel = byId("service_id");
+    if (!catSel || !subSel || !svcSel) return;
+    subSel.innerHTML = "";
+    svcSel.innerHTML = "";
+    var catId = parseInt(catSel.value || "0", 10) || 0;
+    var cat = (serviceCatalog || []).find(function (c) { return c.id === catId; }) || (serviceCatalog || [])[0];
+    var subs = (cat && cat.subcategories) ? cat.subcategories : [];
+    (subs || []).forEach(function (sc) {
+      var opt = document.createElement("option");
+      opt.value = String(sc.id);
+      opt.textContent = sc.name;
+      subSel.appendChild(opt);
+    });
+    serviceCatalogOnSubcategory();
+  }
+
+  function serviceCatalogOnSubcategory() {
+    var catSel = byId("service_category_id");
+    var subSel = byId("service_subcategory_id");
+    var svcSel = byId("service_id");
+    if (!catSel || !subSel || !svcSel) return;
+    svcSel.innerHTML = "";
+    var catId = parseInt(catSel.value || "0", 10) || 0;
+    var subId = parseInt(subSel.value || "0", 10) || 0;
+    var cat = (serviceCatalog || []).find(function (c) { return c.id === catId; }) || (serviceCatalog || [])[0];
+    var subs = (cat && cat.subcategories) ? cat.subcategories : [];
+    var sc = (subs || []).find(function (s) { return s.id === subId; }) || (subs || [])[0];
+    var svcs = (sc && sc.services) ? sc.services : [];
+    (svcs || []).forEach(function (s) {
+      var opt = document.createElement("option");
+      opt.value = String(s.id);
+      opt.textContent = s.name;
+      svcSel.appendChild(opt);
+    });
+    updateVisitKitVisibility();
+  }
+
+  function updateVisitKitVisibility() {
+    var svcSel = byId("service_id");
+    var kitCard = byId("visit_kit_card");
+    if (!svcSel || !kitCard) return;
+    var svcId = parseInt(svcSel.value || "0", 10) || 0;
+    var meta = serviceMetaById[svcId];
+    var needsKit = meta && meta.requiresKit;
+    kitCard.style.display = needsKit ? "block" : "none";
+    if (needsKit) {
+      syncVisitKitMode();
+    } else {
+      var ids = ["visit_kit_stock_block", "visit_kit_own_block", "visit_kit_order_block", "visit_correction_block", "visit_extra_blanks_block"];
+      ids.forEach(function (id) { var el = byId(id); if (el) el.style.display = "none"; });
+    }
+  }
+
+  function setServiceSelections(catId, subId, svcId) {
+    var catSel = byId("service_category_id");
+    var subSel = byId("service_subcategory_id");
+    var svcSel = byId("service_id");
+    if (!catSel || !subSel || !svcSel) return;
+    var cid = catId;
+    var sid = subId;
+    var vid = svcId;
+    if ((!cid || !sid) && vid) {
+      (serviceCatalog || []).some(function (c) {
+        return (c.subcategories || []).some(function (sc) {
+          return (sc.services || []).some(function (s) {
+            if (parseInt(String(s.id || 0), 10) === parseInt(String(vid || 0), 10)) {
+              cid = c.id;
+              sid = sc.id;
+              return true;
+            }
+            return false;
+          });
+        });
+      });
+    }
+    if (cid) catSel.value = String(cid);
+    serviceCatalogOnCategory();
+    if (sid) subSel.value = String(sid);
+    serviceCatalogOnSubcategory();
+    if (vid) svcSel.value = String(vid);
+    updateVisitKitVisibility();
+  }
+
+  // --- Kit suggest ---
+  async function kitSuggest(q, ulId, onPick) {
+    var res = await fetch("/master/kits/suggest?q=" + encodeURIComponent(q || ""));
+    if (!res.ok) return;
+    var data = {};
+    try { data = await res.json(); } catch (e) { data = {}; }
+    var ul = byId(ulId);
+    if (!ul) return;
+    ul.innerHTML = "";
+    (data.kits || []).forEach(function (k) {
+      var li = document.createElement("li");
+      li.style.marginBottom = "8px";
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "secondary";
+      b.textContent = (k.sku || ("#" + k.id)) + " — " + (k.title || "");
+      b.addEventListener("click", function () { onPick(k); });
+      li.appendChild(b);
+      ul.appendChild(li);
+    });
+  }
+
+  function bindKitSuggest(inputId, ulId, onPick) {
+    var t = null;
+    var inp = byId(inputId);
+    if (!inp) return;
+    inp.addEventListener("input", function () {
+      clearTimeout(t);
+      t = setTimeout(function () { kitSuggest(inp.value.trim(), ulId, onPick); }, 350);
+    });
+  }
+
+  function setSelectedKit(hiddenId, boxId, lineId, kit) {
+    var hid = byId(hiddenId);
+    if (hid) hid.value = String(kit.id);
+    var box = byId(boxId);
+    var line = byId(lineId);
+    if (box) box.style.display = "block";
+    if (line) line.innerHTML = 'Выбрано: <strong>' + escapeHtml((kit.sku || ("#" + kit.id)) + " — " + (kit.title || "")) + "</strong>";
+  }
+
+  // --- Bind listeners ---
+  var qEl = byId("client_search_q");
+  if (qEl) qEl.addEventListener("input", scheduleSuggest);
+  var findBtn = byId("booking_client_find_btn");
+  if (findBtn) findBtn.addEventListener("click", clientSuggest);
+  var chgBtn = byId("booking_client_change_btn");
+  if (chgBtn) chgBtn.addEventListener("click", clearBookingClientSelection);
+  syncBookingClientUi();
+
+  qa('input[name="kind"]').forEach(function (r) { r.addEventListener("change", syncKind); });
+
+  var catSel = byId("service_category_id");
+  if (catSel) catSel.addEventListener("change", serviceCatalogOnCategory);
+  var subSel = byId("service_subcategory_id");
+  if (subSel) subSel.addEventListener("change", serviceCatalogOnSubcategory);
+  var svcSel = byId("service_id");
+  if (svcSel) svcSel.addEventListener("change", updateVisitKitVisibility);
+
+  qa('input[name="visit_kit_mode"]').forEach(function (r) { r.addEventListener("change", syncVisitKitMode); });
+  var ownC = document.querySelector('input[name="visit_own_need_correction"]');
+  if (ownC) ownC.addEventListener("change", syncOwnKitExtras);
+  var ownE = document.querySelector('input[name="visit_own_need_extra_blanks"]');
+  if (ownE) ownE.addEventListener("change", syncOwnKitExtras);
+  qa('input[name="visit_extra_blanks_mode"]').forEach(function (r) { r.addEventListener("change", syncExtraBlanksMode); });
+
+  qa('input[name="product_kind"]').forEach(function (r) { r.addEventListener("change", syncSaleKind); });
+  qa('input[name="sale_kit_mode"]').forEach(function (r) { r.addEventListener("change", syncSaleKitMode); });
+  qa('input[name="sale_rubber_mode"]').forEach(function (r) { r.addEventListener("change", syncSaleRubberMode); });
+  qa('input[name="sale_rubber_type"]').forEach(function (r) { r.addEventListener("change", syncSaleRubberTypeFields); });
+
+  bindKitSuggest("visit_kit_search_q", "visit_kit_suggest_list", function (k) {
+    setSelectedKit("visit_stock_kit_id", "visit_selected_kit_box", "visit_selected_kit_line", k);
+    var ul = byId("visit_kit_suggest_list");
+    if (ul) ul.innerHTML = "";
+  });
+  bindKitSuggest("visit_extra_kit_search_q", "visit_extra_kit_suggest_list", function (k) {
+    setSelectedKit("visit_extra_stock_kit_id", "visit_extra_selected_kit_box", "visit_extra_selected_kit_line", k);
+    var ul = byId("visit_extra_kit_suggest_list");
+    if (ul) ul.innerHTML = "";
+  });
+  bindKitSuggest("sale_kit_search_q", "sale_kit_suggest_list", function (k) {
+    setSelectedKit("sale_stock_kit_id", "sale_selected_kit_box", "sale_selected_kit_line", k);
+    var ul = byId("sale_kit_suggest_list");
+    if (ul) ul.innerHTML = "";
+  });
+
+  // --- init ---
+  syncKind();
+  serviceCatalogOnCategory();
+  syncVisitKitMode();
+  syncSaleKind();
+  updateVisitKitVisibility();
+
+  var initSel = jsonById("lb-booking-initial-service-json", { category_id: 0, subcategory_id: 0, service_id: 0 });
+  var initialCatId = parseInt(String(initSel.category_id || "0"), 10) || 0;
+  var initialSubId = parseInt(String(initSel.subcategory_id || "0"), 10) || 0;
+  var initialSvcId = parseInt(String(initSel.service_id || "0"), 10) || 0;
+  if (initialCatId || initialSubId || initialSvcId) {
+    setServiceSelections(initialCatId, initialSubId, initialSvcId);
+  }
+}
+
+function initLbFormGuards() {
+  document.querySelectorAll("form[data-lb-confirm]").forEach(function (f) {
+    f.addEventListener("submit", function (e) {
+      var msg = f.getAttribute("data-lb-confirm") || "";
+      if (msg && !window.confirm(msg)) {
+        e.preventDefault();
+        return;
+      }
+    });
+  });
+
+  document.querySelectorAll("form[data-lb-prompt-input]").forEach(function (f) {
+    f.addEventListener("submit", function (e) {
+      var promptText = f.getAttribute("data-lb-prompt-text") || "Введите значение:";
+      var inputName = f.getAttribute("data-lb-prompt-input") || "";
+      if (!inputName) return;
+      var safeName = String(inputName).replace(/"/g, '\\"');
+      var inp = f.querySelector('input[name="' + safeName + '"]');
+      if (!inp) return;
+      var r = window.prompt(promptText);
+      if (!r) {
+        e.preventDefault();
+        return;
+      }
+      inp.value = r;
+    });
+  });
+}
+
+function initKitReserveUI() {
+  var overlay = document.querySelector("[data-lb-kit-reserve]");
+  if (!overlay) return;
+  if (overlay.dataset.lbInited === "1") return;
+  overlay.dataset.lbInited = "1";
+
+  function escapeHtml(s) {
+    var d = document.createElement("div");
+    d.textContent = String(s == null ? "" : s);
+    return d.innerHTML;
+  }
+
+  var reserveTimer = null;
+  var reserveFreeAvail = 0;
+  var reserveSlotsUsed = 0;
+  var reserveMaxSlots = 3;
+
+  function qid(id) { return document.getElementById(id); }
+
+  function syncReserveQtyDisabled() {
+    var cb = qid("reserve_full_cb");
+    var inp = qid("reserve_pieces_inp");
+    var block = qid("reserve_qty_block");
+    if (!cb || !inp || !block) return;
+    var full = cb.checked;
+    inp.disabled = full;
+    block.style.opacity = full ? "0.55" : "1";
+    if (full) inp.value = "";
+  }
+
+  function syncReserveClientUi() {
+    var cidEl = qid("reserve_client_id");
+    var q = qid("reserve_client_q");
+    var findBtn = qid("reserve_client_find_btn");
+    var row = qid("reserve_client_search_row");
+    var panel = qid("reserve_client_selected_panel");
+    var nameEl = qid("reserve_client_selected_name");
+    if (!cidEl || !q || !findBtn || !row || !panel || !nameEl) return;
+    var cid = String(cidEl.value || "").trim();
+    var has = !!cid;
+    q.disabled = has;
+    findBtn.disabled = has;
+    row.style.opacity = has ? "0.55" : "1";
+    panel.style.display = has ? "block" : "none";
+    if (!has) nameEl.textContent = "";
+  }
+
+  function closeReserveModal() {
+    overlay.style.display = "none";
+    overlay.style.pointerEvents = "none";
+  }
+
+  function openReserveModal(btn) {
+    var kitId = parseInt(btn.getAttribute("data-kit-id") || "0", 10);
+    var sku = btn.getAttribute("data-sku") || "";
+    var freeAvail = btn.getAttribute("data-free") || "0";
+    var slotsUsed = btn.getAttribute("data-slots") || "0";
+    var maxSlots = btn.getAttribute("data-max") || "3";
+    var rawC = btn.getAttribute("data-client-id") || "";
+    var rawU = btn.getAttribute("data-user-id") || "";
+    var cname = btn.getAttribute("data-client-name") || "";
+    var actionUrl = btn.getAttribute("data-action-url") || "";
+
+    reserveFreeAvail = parseInt(String(freeAvail || "0"), 10) || 0;
+    reserveSlotsUsed = parseInt(String(slotsUsed || "0"), 10) || 0;
+    reserveMaxSlots = parseInt(String(maxSlots || "3"), 10) || 3;
+
+    if (reserveFreeAvail <= 0) {
+      alert("Нет свободного остатка для резерва.");
+      return;
+    }
+    if (reserveSlotsUsed >= reserveMaxSlots) {
+      alert("Достигнут лимит резервов на этот комплект (" + reserveMaxSlots + "). Сначала снимите резерв.");
+      return;
+    }
+    if (!actionUrl) {
+      actionUrl = "/kits/" + kitId + "/reserve";
+    }
+
+    overlay.style.display = "flex";
+    overlay.style.pointerEvents = "auto";
+
+    qid("reserve_sku_label").textContent = sku;
+    qid("reserve_form").action = actionUrl;
+    qid("reserve_client_q").value = "";
+    qid("reserve_client_list").innerHTML = "";
+    qid("reserve_full_cb").checked = false;
+    qid("reserve_pieces_inp").value = "";
+    syncReserveQtyDisabled();
+    qid("reserve_stock_hint").textContent =
+      "Свободно сейчас: " + reserveFreeAvail + " шт. Резервов у комплекта: " + reserveSlotsUsed + " / " + reserveMaxSlots + ".";
+
+    var cid = rawC ? String(parseInt(rawC, 10) || "") : "";
+    qid("reserve_client_id").value = cid;
+    var nameEl = qid("reserve_client_selected_name");
+    if (cname) nameEl.textContent = cname;
+    else if (cid) nameEl.textContent = "id " + cid;
+    else nameEl.textContent = "";
+
+    var sel = qid("reserve_user_select");
+    sel.value = rawU ? String(parseInt(rawU, 10) || "") : "";
+
+    syncReserveClientUi();
+    if (!cid) {
+      setTimeout(function () { qid("reserve_client_q").focus(); }, 0);
+    }
+  }
+
+  function selectReserveClient(id, name) {
+    qid("reserve_client_id").value = String(id);
+    qid("reserve_client_selected_name").textContent = name;
+    qid("reserve_client_list").innerHTML = "";
+    qid("reserve_client_q").value = "";
+    syncReserveClientUi();
+  }
+
+  function clearReserveClientSelection() {
+    qid("reserve_client_id").value = "";
+    qid("reserve_client_selected_name").textContent = "";
+    qid("reserve_client_list").innerHTML = "";
+    syncReserveClientUi();
+    var q = qid("reserve_client_q");
+    q.value = "";
+    q.focus();
+  }
+
+  async function reserveClientSuggest() {
+    var qEl = qid("reserve_client_q");
+    if (!qEl || qEl.disabled) return;
+    var needle = qEl.value.trim();
+    var res = await fetch("/master/clients/suggest?q=" + encodeURIComponent(needle));
+    if (!res.ok) return;
+    var data = await res.json();
+    var ul = qid("reserve_client_list");
+    ul.innerHTML = "";
+    (data.clients || []).forEach(function (c) {
+      var li = document.createElement("li");
+      li.style.marginBottom = "6px";
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "secondary";
+      b.textContent = c.name + (c.is_draft ? " (черновик)" : "");
+      b.addEventListener("click", function () { selectReserveClient(c.id, c.name); });
+      li.appendChild(b);
+      ul.appendChild(li);
+    });
+  }
+
+  function scheduleReserveClientSuggest() {
+    var qEl = qid("reserve_client_q");
+    if (!qEl || qEl.disabled) return;
+    clearTimeout(reserveTimer);
+    reserveTimer = setTimeout(reserveClientSuggest, 350);
+  }
+
+  // backdrop click
+  overlay.addEventListener("click", function (e) {
+    if (e.target === overlay) closeReserveModal();
+  });
+
+  var inner = overlay.querySelector("[data-lb-kit-reserve-inner]");
+  if (inner) {
+    inner.addEventListener("click", function (e) { e.stopPropagation(); });
+  }
+
+  var chg = qid("reserve_client_change_btn");
+  if (chg) chg.addEventListener("click", clearReserveClientSelection);
+  var cb = qid("reserve_full_cb");
+  if (cb) cb.addEventListener("change", syncReserveQtyDisabled);
+  var rcq = qid("reserve_client_q");
+  if (rcq) rcq.addEventListener("input", scheduleReserveClientSuggest);
+  var findBtn = qid("reserve_client_find_btn");
+  if (findBtn) findBtn.addEventListener("click", reserveClientSuggest);
+  var cancelBtn = qid("reserve_cancel_btn");
+  if (cancelBtn) cancelBtn.addEventListener("click", closeReserveModal);
+
+  document.querySelectorAll(".js-reserve-open").forEach(function (btn) {
+    btn.addEventListener("click", function () { openReserveModal(btn); });
+  });
+  document.querySelectorAll(".js-reserve-limit-full").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var t = btn.getAttribute("title");
+      alert(t || "Достигнут лимит резервов на этот комплект.");
+    });
+  });
+
+  var rf = qid("reserve_form");
+  if (rf) {
+    rf.addEventListener("submit", function (e) {
+      var fa = parseInt(String(reserveFreeAvail || "0"), 10) || 0;
+      var su = parseInt(String(reserveSlotsUsed || "0"), 10) || 0;
+      var mx = parseInt(String(reserveMaxSlots || "3"), 10) || 3;
+      if (fa <= 0) {
+        e.preventDefault();
+        alert("Нет свободного остатка для резерва.");
+        return;
+      }
+      if (su >= mx) {
+        e.preventDefault();
+        alert("Достигнут лимит резервов на этот комплект (" + mx + ").");
+        return;
+      }
+      var full = qid("reserve_full_cb").checked;
+      var pq = String(qid("reserve_pieces_inp").value || "").trim();
+      if (full && pq) {
+        e.preventDefault();
+        alert("Выберите либо «весь остаток», либо укажите количество.");
+        return;
+      }
+      if (!full && !pq) {
+        e.preventDefault();
+        alert("Укажите «весь остаток» или количество заготовок.");
+        return;
+      }
+      if (!full) {
+        var qn = parseInt(String(pq || "0"), 10) || 0;
+        if (qn <= 0) {
+          e.preventDefault();
+          alert("Некорректное количество заготовок.");
+          return;
+        }
+        if (qn > fa) {
+          e.preventDefault();
+          alert("Нельзя зарезервировать больше свободного остатка (" + fa + ").");
+          return;
+        }
+      }
+      var cid = String(qid("reserve_client_id").value || "").trim();
+      var uid = String(qid("reserve_user_select").value || "").trim();
+      if (!cid && !uid) {
+        e.preventDefault();
+        alert("Укажите клиента и/или сотрудника для резерва.");
+        return;
+      }
+    });
+  }
+}
+
+function initKitClearReservesUI() {
+  var overlay = document.querySelector("[data-lb-kit-clear]");
+  if (!overlay) return;
+  if (overlay.dataset.lbInited === "1") return;
+  overlay.dataset.lbInited = "1";
+
+  function qid(id) { return document.getElementById(id); }
+
+  function closeClearReservesModal() {
+    overlay.style.display = "none";
+    overlay.style.pointerEvents = "none";
+  }
+
+  function openClearReservesModal(btn, items) {
+    if (!items || !items.length) {
+      alert("Нет резервов для снятия.");
+      return;
+    }
+    var kitId = parseInt(btn.getAttribute("data-kit-id") || "0", 10);
+    var sku = btn.getAttribute("data-sku") || "";
+    var after = btn.getAttribute("data-after") || "list";
+    var actionUrl = btn.getAttribute("data-action-url") || ("/kits/" + kitId + "/reserve");
+
+    var form = qid("clear_reserves_form");
+    form.action = actionUrl;
+    qid("clear_reserves_sku").textContent = sku || "";
+    qid("clear_reserves_after").value = after || "list";
+    var box = qid("clear_reserves_checkboxes");
+    box.innerHTML = "";
+
+    items.forEach(function (item) {
+      var wrap = document.createElement("label");
+      wrap.style.cssText = "display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;padding:10px;border-radius:8px;border:1px solid #e5e7eb;cursor:pointer;";
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.name = "reserve_id";
+      cb.value = String(item.id);
+      cb.style.marginTop = "4px";
+      var right = document.createElement("div");
+      var line1 = document.createElement("div");
+      var strong = document.createElement("strong");
+      strong.textContent = item.pieces + " шт.";
+      line1.appendChild(strong);
+      line1.appendChild(document.createTextNode(" — "));
+      var tspan = document.createElement("span");
+      tspan.textContent = item.target || "—";
+      line1.appendChild(tspan);
+      var line2 = document.createElement("div");
+      line2.className = "muted";
+      line2.style.fontSize = "12px";
+      line2.style.marginTop = "4px";
+      line2.textContent = (item.when || "") + " · " + (item.author || "");
+      right.appendChild(line1);
+      right.appendChild(line2);
+      wrap.appendChild(cb);
+      wrap.appendChild(right);
+      box.appendChild(wrap);
+    });
+
+    overlay.style.display = "flex";
+    overlay.style.pointerEvents = "auto";
+  }
+
+  overlay.addEventListener("click", function (e) {
+    if (e.target === overlay) closeClearReservesModal();
+  });
+  var inner = overlay.querySelector("[data-lb-kit-clear-inner]");
+  if (inner) {
+    inner.addEventListener("click", function (e) { e.stopPropagation(); });
+  }
+  var cancelBtn = qid("clear_reserves_cancel_btn");
+  if (cancelBtn) cancelBtn.addEventListener("click", closeClearReservesModal);
+
+  document.querySelectorAll(".js-clear-reserves-open").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var kitId = parseInt(btn.getAttribute("data-kit-id") || "0", 10);
+      var el = document.getElementById("clear-reserves-payload-" + kitId);
+      if (!el) return;
+      var items;
+      try {
+        items = JSON.parse(el.textContent.trim());
+      } catch (e) {
+        return;
+      }
+      openClearReservesModal(btn, items);
+    });
+  });
+
+  var cf = qid("clear_reserves_form");
+  if (cf) {
+    cf.addEventListener("submit", function (e) {
+      var n = document.querySelectorAll('#clear_reserves_checkboxes input[type="checkbox"]:checked').length;
+      if (!n) {
+        e.preventDefault();
+        alert("Отметьте хотя бы один резерв.");
+      }
+    });
+  }
 }
 
