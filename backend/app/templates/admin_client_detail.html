@@ -12,7 +12,7 @@
   </style>
 
   <div class="card">
-    <p class="muted" style="margin-top:0;"><a href="/admin/clients">← К списку клиентов</a></p>
+    <p class="muted" style="margin-top:0;"><a href="/clients">← К списку клиентов</a></p>
 
     {% if confirmed_banner %}
       <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">
@@ -31,9 +31,9 @@
       {% if show_admin_actions %}
         <div class="client-detail-actions">
           <a href="/admin/bookings/new?client_id={{ client.id }}"><button type="button" class="secondary">Бронь</button></a>
-          <a href="/admin/clients/{{ client.id }}/edit"><button type="button">Изменить</button></a>
+          <a href="/clients/{{ client.id }}/edit"><button type="button">Изменить</button></a>
           {% if not client.is_confirmed %}
-            <form method="post" action="/admin/clients/{{ client.id }}/confirm" style="margin:0;">
+            <form method="post" action="/clients/{{ client.id }}/confirm" style="margin:0;">
               <button type="submit" class="secondary">Подтвердить без редактирования</button>
             </form>
           {% endif %}

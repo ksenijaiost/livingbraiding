@@ -25,7 +25,7 @@
             <tr>
               <td><a href="/admin/bookings/{{ b.id }}">#{{ b.id }}</a></td>
               <td>{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</td>
-              <td><a href="/admin/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
+              <td><a href="/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
               <td>{{ row.label }}</td>
               <td style="white-space:nowrap;">
                 <a href="/admin/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
@@ -80,7 +80,7 @@
               <td>{{ row.label }}</td>
               <td>
                 {% if row.client %}
-                  <a href="/admin/clients/{{ row.client.id }}">{{ row.client.name }}</a>
+                  <a href="/clients/{{ row.client.id }}">{{ row.client.name }}</a>
                 {% else %}
                   <span class="muted">—</span>
                 {% endif %}

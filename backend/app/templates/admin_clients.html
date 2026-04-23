@@ -4,7 +4,7 @@
     <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
       <h2 style="margin-top: 0;">Клиенты</h2>
       {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
-        <a href="/admin/clients/new"><button type="button">Новый клиент</button></a>
+        <a href="/clients/new"><button type="button">Новый клиент</button></a>
       {% endif %}
     </div>
 
@@ -19,7 +19,7 @@
       </p>
     {% endif %}
 
-    <form method="get" action="/admin/clients" class="row" style="margin-bottom: 12px;">
+    <form method="get" action="/clients" class="row" style="margin-bottom: 12px;">
       <div>
         <label>Поиск</label>
         <input name="q" value="{{ q or '' }}" placeholder="имя или контакт" />
@@ -42,9 +42,9 @@
       <tbody>
         {% for row in rows %}
           <tr>
-            <td><a href="/admin/clients/{{ row.id }}">{{ row.id }}</a></td>
+            <td><a href="/clients/{{ row.id }}">{{ row.id }}</a></td>
             <td>
-              <a href="/admin/clients/{{ row.id }}">{{ row.name }}</a>
+              <a href="/clients/{{ row.id }}">{{ row.name }}</a>
               {% if row.has_active_booking %}
                 <span title="Есть активная бронь">📝</span>
               {% endif %}

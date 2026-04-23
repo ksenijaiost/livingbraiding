@@ -4,7 +4,7 @@
     <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 12px; flex-wrap: wrap;">
       <div>
         <p class="muted" style="margin-top:0;">
-          <a href="/admin/clients/{{ booking.client.id }}">← К клиенту</a>
+          <a href="/clients/{{ booking.client.id }}">← К клиенту</a>
           <span class="muted" style="margin: 0 6px;">·</span>
           <a href="/admin/bookings">← Бронь (список)</a>
         </p>
@@ -40,7 +40,7 @@
     {% endif %}
 
     <div class="card" style="background:#f8fafc;">
-      <p style="margin:6px 0;"><strong>Клиент</strong>: <a href="/admin/clients/{{ booking.client.id }}">{{ booking.client.name }}</a></p>
+      <p style="margin:6px 0;"><strong>Клиент</strong>: <a href="/clients/{{ booking.client.id }}">{{ booking.client.name }}</a></p>
       <p style="margin:6px 0;"><strong>Дата и время записи</strong>: {{ format_naive_utc_datetime(booking.planned_date, display_tz) }} ({{ timezone_label(display_tz) }})</p>
       <p style="margin:6px 0;"><strong>Тип</strong>: {{ kind_label }}</p>
       <p style="margin:6px 0;"><strong>Статус</strong>: {{ status_label }}</p>

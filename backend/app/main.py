@@ -33,8 +33,12 @@ from app.routes.visits import router as visits_router  # noqa: E402
 app.include_router(visits_router)
 from app.routes.settings import router as settings_router  # noqa: E402
 app.include_router(settings_router)
-from app.routes.clients import router as clients_router  # noqa: E402
+from app.routes.clients import (  # noqa: E402
+    legacy_clients_admin_router,
+    router as clients_router,
+)
 app.include_router(clients_router)
+app.include_router(legacy_clients_admin_router)
 from app.routes.bookings import router as bookings_router  # noqa: E402
 app.include_router(bookings_router)
 from app.routes.kits import (  # noqa: E402

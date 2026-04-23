@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
   <div class="card" style="max-width: 980px;">
-    <p class="muted" style="margin-top:0;"><a href="/admin/clients">← К клиентам</a></p>
+    <p class="muted" style="margin-top:0;"><a href="/clients">← К клиентам</a></p>
     <h2 style="margin-top:0;">{% if is_new %}Новая бронь{% else %}Редактирование брони{% endif %}</h2>
 
     {% if error %}
@@ -416,7 +416,7 @@
       const qEl = document.getElementById('client_search_q');
       if (qEl && qEl.disabled) return;
       const q = document.getElementById('client_search_q').value.trim();
-      const res = await fetch('/admin/clients/suggest?q=' + encodeURIComponent(q));
+      const res = await fetch('/clients/suggest?q=' + encodeURIComponent(q));
       if (!res.ok) return;
       const data = await res.json();
       const ul = document.getElementById('client_suggest_list');

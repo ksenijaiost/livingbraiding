@@ -45,7 +45,7 @@
 
     <h3>Клиент</h3>
     <p>
-      <strong><a href="/admin/clients/{{ visit.client_id }}">{{ visit.client.name }}</a></strong>
+      <strong><a href="/clients/{{ visit.client_id }}">{{ visit.client.name }}</a></strong>
     </p>
     <p class="muted">
       Свой: {% if visit.client_type.value == 'SELF' %}да{% else %}нет{% endif %}

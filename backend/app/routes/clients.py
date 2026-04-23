@@ -43,7 +43,21 @@ from app.ui_visit_display import visit_services_catalog_line
 from app.webui import templates, ctx as _ctx
 
 
-router = APIRouter()
+router = APIRouter(prefix="/clients", tags=["clients"])
+# GET-алиас: /admin/clients/... -> 308 -> /clients/...
+legacy_clients_admin_router = APIRouter(prefix="/admin/clients", tags=["clients-legacy"])
+
+
+def _redirect_admin_clients_to_canon(request: Request, *, suffix: str = "") -> RedirectResponse:
+    suf = (suffix or "").strip()
+    if suf and not suf.startswith("/"):
+        suf = f"/{suf}"
+    new_path = f"/clients{suf}"
+    return RedirectResponse(url=str(request.url.replace(path=new_path)), status_code=308)
+
+
+_CLIENTS_STAFF = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER))
+_CLIENTS_ADMINS = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER))
 
 
 def _admin_client_form_page(
@@ -65,7 +79,7 @@ def _admin_client_form_page(
             request,
             current_user=current_user,
             is_new=is_new,
-            form_action="/admin/clients/new" if is_new else f"/admin/clients/{client_id}/edit",
+            form_action="/clients/new" if is_new else f"/clients/{client_id}/edit",
             page_heading="Новый клиент" if is_new else "Редактирование клиента",
             submit_label="Создать" if is_new else "Сохранить",
             age_options=CLIENT_AGE_GROUP_OPTIONS,
@@ -79,7 +93,7 @@ def _admin_client_form_page(
     )
 
 
-@router.get("/admin/clients", response_class=HTMLResponse)
+@router.get("", response_class=HTMLResponse)
 def admin_clients(
     request: Request,
     q: str | None = None,
@@ -157,7 +171,7 @@ def admin_clients(
     )
 
 
-@router.get("/admin/clients/new", response_class=HTMLResponse)
+@router.get("/new", response_class=HTMLResponse)
 def admin_client_new_get(
     request: Request,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
@@ -171,7 +185,8 @@ def admin_client_new_get(
     )
 
 
-@router.post("/admin/clients/new")
+@router.post("/new")
+@legacy_clients_admin_router.post("/new")
 async def admin_client_new_post(
     request: Request,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
@@ -244,10 +259,10 @@ async def admin_client_new_post(
     db.add(client)
     db.commit()
     db.refresh(client)
-    return RedirectResponse(url=f"/admin/clients/{client.id}?created=1", status_code=303)
+    return RedirectResponse(url=f"/clients/{client.id}?created=1", status_code=303)
 
 
-@router.get("/admin/clients/{client_id}/edit", response_class=HTMLResponse)
+@router.get("/{client_id}/edit", response_class=HTMLResponse)
 def admin_client_edit_get(
     request: Request,
     client_id: int,
@@ -269,7 +284,8 @@ def admin_client_edit_get(
     )
 
 
-@router.post("/admin/clients/{client_id}/edit")
+@router.post("/{client_id}/edit")
+@legacy_clients_admin_router.post("/{client_id}/edit")
 async def admin_client_edit_post(
     request: Request,
     client_id: int,
@@ -401,7 +417,7 @@ async def admin_client_edit_post(
     )
 
     db.commit()
-    return RedirectResponse(url=f"/admin/clients?updated={client.id}", status_code=303)
+    return RedirectResponse(url=f"/clients?updated={client.id}", status_code=303)
 
 
 def _form_to_str_map(form) -> dict[str, str]:
@@ -457,17 +473,17 @@ def _client_suggest_items(db: Session, q: str) -> list[dict[str, str | int | boo
     return items
 
 
-@router.get("/admin/clients/suggest")
+@router.get("/suggest")
 def admin_clients_suggest(
     q: str = "",
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
-    # Must be defined BEFORE /admin/clients/{client_id}, otherwise "suggest" is parsed as client_id -> 422.
+    # Must be defined BEFORE /clients/{client_id}, otherwise "suggest" is parsed as client_id -> 422.
     return JSONResponse({"clients": _client_suggest_items(db, q)})
 
 
-@router.get("/admin/clients/{client_id}", response_class=HTMLResponse)
+@router.get("/{client_id}", response_class=HTMLResponse)
 def admin_client_detail(
     request: Request,
     client_id: int,
@@ -556,7 +572,8 @@ def admin_client_detail(
     )
 
 
-@router.post("/admin/clients/{client_id}/confirm")
+@router.post("/{client_id}/confirm")
+@legacy_clients_admin_router.post("/{client_id}/confirm")
 def admin_client_confirm(
     client_id: int,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
@@ -578,5 +595,50 @@ def admin_client_confirm(
         changes=diff_fields(before, client, ("is_confirmed",)),
     )
     db.commit()
-    return RedirectResponse(url=f"/admin/clients/{client_id}?confirmed=1", status_code=303)
+    return RedirectResponse(url=f"/clients/{client_id}?confirmed=1", status_code=303)
+
+
+# --- Старые GET-URL: /admin/clients/... -> 308 -> /clients/... (query сохраняется) ---
+
+
+@legacy_clients_admin_router.get("/{client_id}/edit", response_class=HTMLResponse)
+def admin_client_edit_get_legacy_redirect(
+    client_id: int,
+    request: Request,
+    current_user: AuthUser = _CLIENTS_ADMINS,
+):
+    return _redirect_admin_clients_to_canon(request, suffix=f"/{int(client_id)}/edit")
+
+
+@legacy_clients_admin_router.get("/suggest")
+def admin_clients_suggest_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _CLIENTS_STAFF,
+):
+    return _redirect_admin_clients_to_canon(request, suffix="/suggest")
+
+
+@legacy_clients_admin_router.get("/new", response_class=HTMLResponse)
+def admin_client_new_get_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _CLIENTS_ADMINS,
+):
+    return _redirect_admin_clients_to_canon(request, suffix="/new")
+
+
+@legacy_clients_admin_router.get("/{client_id}", response_class=HTMLResponse)
+def admin_client_detail_legacy_redirect(
+    client_id: int,
+    request: Request,
+    current_user: AuthUser = _CLIENTS_STAFF,
+):
+    return _redirect_admin_clients_to_canon(request, suffix=f"/{int(client_id)}")
+
+
+@legacy_clients_admin_router.get("", response_class=HTMLResponse)
+def admin_clients_list_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _CLIENTS_STAFF,
+):
+    return _redirect_admin_clients_to_canon(request)
 
