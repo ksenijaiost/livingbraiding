@@ -150,7 +150,7 @@ def api_calendar_day(
                 "kind": _booking_kind_label(b.kind.value),
                 "status": _booking_status_label(b.status.value),
                 "time": format_naive_utc_datetime(b.planned_date, get_display_timezone(db)),
-                "url": f"/admin/bookings/{int(b.id)}",
+                "url": f"/bookings/{int(b.id)}",
                 "payout_sum": 0.0,
                 "studio_sum": 0.0,
             }

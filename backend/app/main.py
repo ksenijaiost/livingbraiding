@@ -39,8 +39,14 @@ from app.routes.clients import (  # noqa: E402
 )
 app.include_router(clients_router)
 app.include_router(legacy_clients_admin_router)
-from app.routes.bookings import router as bookings_router  # noqa: E402
+from app.routes.bookings import (  # noqa: E402
+    legacy_bookings_admin_router,
+    master_bookings_page_router,
+    router as bookings_router,
+)
 app.include_router(bookings_router)
+app.include_router(legacy_bookings_admin_router)
+app.include_router(master_bookings_page_router)
 from app.routes.kits import (  # noqa: E402
     legacy_kits_admin_router,
     master_kits_router,

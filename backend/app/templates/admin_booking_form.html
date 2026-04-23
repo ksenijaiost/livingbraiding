@@ -10,7 +10,7 @@
       </p>
     {% endif %}
 
-    <form method="post" action="{% if is_new %}/admin/bookings/new{% else %}/admin/bookings/{{ booking.id }}/edit{% endif %}">
+    <form method="post" action="{% if is_new %}/bookings/new{% else %}/bookings/{{ booking.id }}/edit{% endif %}">
       <input type="hidden" name="client_id" id="client_id" value="{{ selected_client.id if selected_client else fp.get('client_id','') }}" />
       <input type="hidden" name="calc_product_min" value="{{ fp.get('calc_product_min','') }}" />
       <input type="hidden" name="calc_product_max" value="{{ fp.get('calc_product_max','') }}" />

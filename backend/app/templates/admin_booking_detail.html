@@ -6,24 +6,24 @@
         <p class="muted" style="margin-top:0;">
           <a href="/clients/{{ booking.client.id }}">← К клиенту</a>
           <span class="muted" style="margin: 0 6px;">·</span>
-          <a href="/admin/bookings">← Бронь (список)</a>
+          <a href="/bookings">← Бронь (список)</a>
         </p>
         <h2 style="margin:0;">Бронь #{{ booking.id }}</h2>
       </div>
 
       {% if current_user and (current_user.role.value in ["ADMIN", "ADMIN_SUPER"]) %}
         <div style="display:flex; gap: 10px; flex-wrap: wrap; justify-content:flex-end;">
-          <form method="get" action="/admin/bookings/{{ booking.id }}/edit" style="margin:0;">
+          <form method="get" action="/bookings/{{ booking.id }}/edit" style="margin:0;">
             <button type="submit">Изменить</button>
           </form>
           {% if current_user.role.value == "ADMIN_SUPER" and booking.status.value == "ACTIVE" %}
-            <form method="post" action="/admin/bookings/{{ booking.id }}/mark-done" style="margin:0;"
+            <form method="post" action="/bookings/{{ booking.id }}/mark-done" style="margin:0;"
                   onsubmit="return confirm('Отметить бронь выполненной?');">
               <button class="secondary" type="submit">Выполнено</button>
             </form>
           {% endif %}
           {% if booking.status.value == "ACTIVE" %}
-            <form method="post" action="/admin/bookings/{{ booking.id }}/cancel" style="margin:0;"
+            <form method="post" action="/bookings/{{ booking.id }}/cancel" style="margin:0;"
                   onsubmit="const r = prompt('Причина отмены брони:'); if(!r){ return false; } this.reason.value = r; return true;">
               <input type="hidden" name="reason" value="" />
               <button class="secondary" type="submit">Отменить</button>

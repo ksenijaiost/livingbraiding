@@ -52,7 +52,22 @@ from app.kit_inlay_visit import list_master_visit_services_catalog
 from app.webui import templates, ctx as _ctx
 
 
-router = APIRouter()
+router = APIRouter(prefix="/bookings", tags=["bookings"])
+# GET-алиас: /admin/bookings/... -> 308 -> /bookings/...
+legacy_bookings_admin_router = APIRouter(prefix="/admin/bookings", tags=["bookings-legacy"])
+master_bookings_page_router = APIRouter(prefix="/master/bookings", tags=["bookings-master"])
+
+
+def _redirect_admin_bookings_to_canon(request: Request, *, suffix: str = "") -> RedirectResponse:
+    suf = (suffix or "").strip()
+    if suf and not suf.startswith("/"):
+        suf = f"/{suf}"
+    new_path = f"/bookings{suf}"
+    return RedirectResponse(url=str(request.url.replace(path=new_path)), status_code=308)
+
+
+_BOOKINGS_STAFF = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
+_BOOKINGS_ADMINS = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER))
 
 
 def _booking_kind_label(k: str) -> str:
@@ -668,7 +683,7 @@ def _masters_for_visit_form(db: Session) -> list[User]:
     return list(db.scalars(select_users_with_role(UserRole.MASTER).order_by(User.display_name.asc(), User.username.asc())).all())
 
 
-@router.get("/admin/bookings/new", response_class=HTMLResponse)
+@router.get("/new", response_class=HTMLResponse)
 def admin_booking_new_get(
     request: Request,
     client_id: int | None = None,
@@ -750,7 +765,8 @@ def admin_booking_new_get(
     )
 
 
-@router.post("/admin/bookings/new")
+@router.post("/new")
+@legacy_bookings_admin_router.post("/new")
 async def admin_booking_new_post(
     request: Request,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
@@ -891,10 +907,10 @@ async def admin_booking_new_post(
     _refresh_sale_order_master_ids_in_fp(db, booking_id=booking.id, fp=fp)
     booking.details_json = json.dumps(_booking_details_from_form(fp), ensure_ascii=False)
     db.commit()
-    return RedirectResponse(url=f"/admin/bookings/{booking.id}", status_code=303)
+    return RedirectResponse(url=f"/bookings/{booking.id}", status_code=303)
 
 
-@router.get("/admin/bookings/{booking_id}", response_class=HTMLResponse)
+@router.get("/{booking_id}", response_class=HTMLResponse)
 def admin_booking_detail(
     request: Request,
     booking_id: int,
@@ -1031,7 +1047,7 @@ def admin_booking_detail(
     )
 
 
-@router.get("/admin/bookings/{booking_id}/edit", response_class=HTMLResponse)
+@router.get("/{booking_id}/edit", response_class=HTMLResponse)
 def admin_booking_edit_get(
     request: Request,
     booking_id: int,
@@ -1068,7 +1084,8 @@ def admin_booking_edit_get(
     )
 
 
-@router.post("/admin/bookings/{booking_id}/edit")
+@router.post("/{booking_id}/edit")
+@legacy_bookings_admin_router.post("/{booking_id}/edit")
 async def admin_booking_edit_post(
     request: Request,
     booking_id: int,
@@ -1289,10 +1306,10 @@ async def admin_booking_edit_post(
         ),
     )
     db.commit()
-    return RedirectResponse(url=f"/admin/bookings/{b.id}", status_code=303)
+    return RedirectResponse(url=f"/bookings/{b.id}", status_code=303)
 
 
-@router.get("/admin/bookings", response_class=HTMLResponse)
+@router.get("", response_class=HTMLResponse)
 def admin_bookings(
     request: Request,
     show: str | None = None,
@@ -1337,7 +1354,8 @@ def admin_bookings(
     )
 
 
-@router.post("/admin/bookings/{booking_id}/cancel")
+@router.post("/{booking_id}/cancel")
+@legacy_bookings_admin_router.post("/{booking_id}/cancel")
 def admin_booking_cancel(
     booking_id: int,
     reason: str | None = Form(None),
@@ -1348,10 +1366,10 @@ def admin_booking_cancel(
     if b is None:
         raise HTTPException(status_code=404, detail="Бронь не найдена")
     if b.status != BookingStatus.ACTIVE:
-        return RedirectResponse(url=f"/admin/bookings/{booking_id}", status_code=303)
+        return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
     reason_norm = (reason or "").strip()
     if not reason_norm:
-        return RedirectResponse(url=f"/admin/bookings/{booking_id}?err=reason", status_code=303)
+        return RedirectResponse(url=f"/bookings/{booking_id}?err=reason", status_code=303)
     before = SimpleNamespace(status=b.status, cancelled_at=b.cancelled_at, cancelled_by_user_id=b.cancelled_by_user_id, cancelled_reason=b.cancelled_reason)
     b.status = BookingStatus.CANCELLED
     b.cancelled_at = datetime.utcnow()
@@ -1369,10 +1387,11 @@ def admin_booking_cancel(
         changes=diff_fields(before, b, ("status", "cancelled_at", "cancelled_by_user_id", "cancelled_reason")),
     )
     db.commit()
-    return RedirectResponse(url=f"/admin/bookings/{booking_id}", status_code=303)
+    return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
 
 
-@router.post("/admin/bookings/{booking_id}/mark-done")
+@router.post("/{booking_id}/mark-done")
+@legacy_bookings_admin_router.post("/{booking_id}/mark-done")
 def admin_booking_mark_done(
     booking_id: int,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
@@ -1382,7 +1401,7 @@ def admin_booking_mark_done(
     if b is None:
         raise HTTPException(status_code=404, detail="Бронь не найдена")
     if b.status != BookingStatus.ACTIVE:
-        return RedirectResponse(url=f"/admin/bookings/{booking_id}", status_code=303)
+        return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
     old_status = b.status
     b.status = BookingStatus.DONE
     b.updated_at = datetime.utcnow()
@@ -1396,7 +1415,7 @@ def admin_booking_mark_done(
         changes=[FieldChange("status", _booking_status_label(old_status.value), _booking_status_label(BookingStatus.DONE.value))],
     )
     db.commit()
-    return RedirectResponse(url=f"/admin/bookings/{booking_id}", status_code=303)
+    return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
 
 
 def _product_sale_activity_label(sale: ProductSale) -> str:
@@ -1496,7 +1515,44 @@ def master_activity_archive(db: Session, master_id: int, *, days: int = 30, max_
     return items[:max_rows], truncated
 
 
-@router.get("/master/bookings", response_class=HTMLResponse)
+# --- Старые GET-URL: /admin/bookings/... -> 308 -> /bookings/... (query сохраняется) ---
+
+
+@legacy_bookings_admin_router.get("/{booking_id}/edit", response_class=HTMLResponse)
+def admin_booking_edit_get_legacy_redirect(
+    booking_id: int,
+    request: Request,
+    current_user: AuthUser = _BOOKINGS_ADMINS,
+):
+    return _redirect_admin_bookings_to_canon(request, suffix=f"/{int(booking_id)}/edit")
+
+
+@legacy_bookings_admin_router.get("/new", response_class=HTMLResponse)
+def admin_booking_new_get_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _BOOKINGS_ADMINS,
+):
+    return _redirect_admin_bookings_to_canon(request, suffix="/new")
+
+
+@legacy_bookings_admin_router.get("/{booking_id}", response_class=HTMLResponse)
+def admin_booking_detail_legacy_redirect(
+    booking_id: int,
+    request: Request,
+    current_user: AuthUser = _BOOKINGS_STAFF,
+):
+    return _redirect_admin_bookings_to_canon(request, suffix=f"/{int(booking_id)}")
+
+
+@legacy_bookings_admin_router.get("", response_class=HTMLResponse)
+def admin_bookings_list_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _BOOKINGS_STAFF,
+):
+    return _redirect_admin_bookings_to_canon(request)
+
+
+@master_bookings_page_router.get("", response_class=HTMLResponse)
 def master_bookings(
     request: Request,
     current_user: AuthUser = Depends(require_role(UserRole.MASTER)),

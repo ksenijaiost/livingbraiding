@@ -56,7 +56,7 @@
             <td>{{ row.visits_count }}</td>
             <td style="white-space:nowrap;">
               {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
-                <a href="/admin/bookings/new?client_id={{ row.id }}"><button type="button" class="secondary">Бронь</button></a>
+                <a href="/bookings/new?client_id={{ row.id }}"><button type="button" class="secondary">Бронь</button></a>
               {% endif %}
             </td>
           </tr>

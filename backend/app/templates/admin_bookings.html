@@ -4,11 +4,11 @@
     <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
       <h2 style="margin-top:0;">Брони</h2>
       {% if can_manage %}
-        <a href="/admin/bookings/new"><button type="button" class="secondary">Новая бронь</button></a>
+        <a href="/bookings/new"><button type="button" class="secondary">Новая бронь</button></a>
       {% endif %}
     </div>
 
-    <form method="get" action="/admin/bookings" class="row" style="margin: 12px 0;">
+    <form method="get" action="/bookings" class="row" style="margin: 12px 0;">
       <div>
         <label>Показывать</label>
         <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
@@ -48,7 +48,7 @@
         <tbody>
           {% for b in rows %}
             <tr>
-              <td><a href="/admin/bookings/{{ b.id }}">#{{ b.id }}</a></td>
+              <td><a href="/bookings/{{ b.id }}">#{{ b.id }}</a></td>
               <td>{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</td>
               <td><a href="/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
               <td>{{ "Визит" if b.kind.value == "VISIT" else "Продажа" }}</td>
@@ -58,11 +58,11 @@
                 {% if b.status.value == "CANCELLED" %}❌ отменена{% endif %}
               </td>
               <td style="white-space:nowrap;">
-                <a href="/admin/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
+                <a href="/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
                 {% if can_manage %}
-                  <a href="/admin/bookings/{{ b.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+                  <a href="/bookings/{{ b.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
                   {% if b.status.value == "ACTIVE" %}
-                    <form method="post" action="/admin/bookings/{{ b.id }}/cancel" style="display:inline; margin:0;" onsubmit="var r = prompt('Причина отмены'); if(!r) return false; this.querySelector('input[name=reason]').value = r; return confirm('Отменить бронь?');">
+                    <form method="post" action="/bookings/{{ b.id }}/cancel" style="display:inline; margin:0;" onsubmit="var r = prompt('Причина отмены'); if(!r) return false; this.querySelector('input[name=reason]').value = r; return confirm('Отменить бронь?');">
                       <input type="hidden" name="reason" value="" />
                       <button type="submit" class="secondary">Отменить</button>
                     </form>

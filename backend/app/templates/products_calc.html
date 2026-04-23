@@ -544,7 +544,7 @@
         var qpt = document.getElementById('quoted_price_text');
         var extra = {};
         if (qpt && String(qpt.value || '').trim()) extra['quoted_price_text'] = String(qpt.value || '').trim();
-        var url = '/admin/bookings/new?' + toQuery(pre, extra);
+        var url = '/bookings/new?' + toQuery(pre, extra);
         window.location.href = url;
       }
 
