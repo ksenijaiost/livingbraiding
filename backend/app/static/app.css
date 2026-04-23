@@ -1,3 +1,83 @@
 /* Global stylesheet (Step 8.1).
    We'll gradually move inline styles from templates here. */
 
+.lb-card-max-860 { max-width: 860px; }
+.lb-card-max-920 { max-width: 920px; }
+.lb-card-max-720 { max-width: 720px; }
+
+.lb-flex-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.lb-mb-8 { margin-bottom: 8px; }
+.lb-mb-12 { margin-bottom: 12px; }
+.lb-mt-4 { margin-top: 4px; }
+.lb-mt-16 { margin-top: 16px; }
+.lb-mt-12 { margin-top: 12px; }
+.lb-mt-0 { margin-top: 0; }
+.lb-m-0 { margin: 0; }
+
+.lb-pt-12 { padding-top: 12px; }
+.lb-bt { border-top: 1px solid #e5e7eb; }
+
+.lb-hr {
+  border: 0;
+  border-top: 1px solid #e5e7eb;
+  margin: 20px 0;
+}
+
+.lb-summary-strong { cursor: pointer; font-weight: 600; }
+
+.lb-card-subtle { background: #f8fafc; }
+.lb-card-info { background: #eef2ff; border: 1px solid #c7d2fe; }
+.lb-card-ok { border-color: #bbf7d0; background: #f0fdf4; }
+.lb-nowrap { white-space: nowrap; }
+
+.lb-role-chip {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #eef2ff;
+  font-size: 12px;
+}
+
+.lb-stack-10 { display: flex; flex-direction: column; gap: 10px; }
+.lb-row-center-gap { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.lb-inline-center-gap { display:flex; align-items:center; gap:8px; margin:0; }
+
+.lb-input-narrow { width: 100%; max-width: 12rem; }
+.lb-input-narrow-10 { width: 100%; max-width: 10rem; }
+
+.lb-font-12 { font-size: 12px; }
+.lb-font-13 { font-size: 13px; }
+
+.lb-ml-8 { margin-left: 8px; }
+.lb-mb-6 { margin-bottom: 6px; }
+.lb-mb-16 { margin-bottom: 16px; }
+
+.lb-strong-head { font-weight: 600; }
+
+.lb-input-disabled {
+  background: #f3f4f6;
+}
+
+.lb-table-13 { font-size: 13px; }
+.lb-prewrap-12rem { white-space: pre-wrap; max-width: 12rem; }
+.lb-scroll-x { overflow-x: auto; }
+
+.lb-hr-audit {
+  border: 0;
+  border-top: 1px solid #e5e7eb;
+  margin: 28px 0 16px;
+}
+
+.lb-h3-audit {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+

@@ -1,62 +1,70 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="card" style="max-width: 860px;">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:8px;">
-      <h2 style="margin:0;">Настройки</h2>
+  <div class="card lb-card-max-860">
+    <div class="lb-flex-between lb-mb-8">
+      <h2 class="lb-m-0">Настройки</h2>
       <a href="/admin/settings/staff"><button type="button">Открыть список сотрудников</button></a>
     </div>
     <p class="muted">Процент салона и цены материалов влияют только на <strong>новые</strong> визиты (в визите хранится снимок). Часовой пояс влияет на отображение времени в интерфейсе (например, дата резерва комплекта); в базе по-прежнему хранится UTC. Лимит резервов — максимум строк резерва на один складской комплект (частичные резервы).</p>
 
     {% if saved %}
-      <div class="card" style="border-color:#bbf7d0; background:#f0fdf4;">
+      <div class="card lb-card-ok">
         Сохранено.
       </div>
     {% endif %}
 
     <form method="post" action="/admin/settings">
-      <div style="margin-bottom: 12px;">
+      <div class="lb-mb-12">
         <label>Процент салона (0..1)</label>
         <input name="salon_cut_pct" value="{{ salon_cut_pct }}" />
       </div>
-      <div style="margin-bottom: 12px;">
+      <div class="lb-mb-12">
         <label>Канекалон, ₽ за 100 г</label>
         <input name="kanek_per_100g" type="number" step="0.01" min="0" value="{{ kanek_per_100g }}" />
       </div>
-      <div style="margin-bottom: 12px;">
+      <div class="lb-mb-12">
         <label>Кудри, ₽ за 100 г</label>
         <input name="kudri_per_100g" type="number" step="0.01" min="0" value="{{ kudri_per_100g }}" />
       </div>
-      <div style="margin-bottom: 12px;">
+      <div class="lb-mb-12">
         <label>Максимум резервов на один комплект (1–20)</label>
         <input name="kit_max_reserves_per_kit" type="number" step="1" min="1" max="20" value="{{ kit_max_reserves_per_kit }}" />
       </div>
-      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+      <div class="lb-mt-16 lb-pt-12 lb-bt">
         <button type="submit">Сохранить</button>
       </div>
     </form>
 
-    <hr style="border:0; border-top:1px solid #e5e7eb; margin: 20px 0;" />
+    <hr class="lb-hr" />
 
-    <details {% if work_rates_open %}open{% endif %} style="margin-top: 4px;">
-      <summary style="cursor:pointer; font-weight: 600;">Коэффициенты расчётов</summary>
-      <div class="card" style="background:#f8fafc; margin-top: 12px;">
-        <p class="muted" style="margin-top:0;">
+    <details {% if work_rates_open %}open{% endif %} class="lb-mt-4">
+      <summary class="lb-summary-strong">Коэффициенты расчётов</summary>
+      <div class="card lb-card-subtle lb-mt-12">
+        <p class="muted lb-mt-0">
           Эти значения используются для новых записей «Работа с товарами». Цены/ЗП/расходы по фиксированным позициям — в прайсе.
         </p>
         {% if work_rates_saved %}
-          <div class="card" style="border-color:#bbf7d0; background:#f0fdf4; margin-bottom: 12px;">
+          <div class="card lb-card-ok lb-mb-12">
             Сохранено.
           </div>
         {% endif %}
         {% if work_rates_error %}
-          <div class="error" style="margin-bottom: 12px;">{{ work_rates_error }}</div>
+          <div class="error lb-mb-12">{{ work_rates_error }}</div>
         {% endif %}
         <form method="post" action="/admin/settings/work-rates">
-          <div style="margin-bottom: 12px;">
-            <label style="margin-bottom: 6px;">Доля студии</label>
-            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-              <label style="display:flex; align-items:center; gap:8px; margin:0;">
-                <input id="studio_share_override" name="studio_share_override" type="checkbox" value="1" {% if work_rates.studio_share_override %}checked{% endif %} />
+          <div class="lb-mb-12">
+            <label>Доля студии</label>
+            <div class="lb-row-center-gap">
+              <label class="lb-inline-center-gap">
+                <input
+                  id="studio_share_override"
+                  name="studio_share_override"
+                  type="checkbox"
+                  value="1"
+                  data-lb-toggle-input="#studio_share_input"
+                  data-lb-default-value="{{ salon_cut_pct_float }}"
+                  {% if work_rates.studio_share_override %}checked{% endif %}
+                />
                 <span>Вручную (иначе = процент салона)</span>
               </label>
               <input
@@ -68,55 +76,39 @@
                 max="1"
                 value="{{ work_rates.studio_share }}"
                 {% if not work_rates.studio_share_override %}disabled{% endif %}
-                style="width:100%; max-width: 10rem;"
+                class="lb-input-narrow-10"
               />
-              <span class="muted" style="font-size:12px;">Текущий процент салона: {{ salon_cut_pct_float }}</span>
+              <span class="muted lb-font-12">Текущий процент салона: {{ salon_cut_pct_float }}</span>
             </div>
-            <script>
-              (function () {
-                var cb = document.getElementById("studio_share_override");
-                var inp = document.getElementById("studio_share_input");
-                if (!cb || !inp) return;
-                function sync() {
-                  inp.disabled = !cb.checked;
-                  if (!cb.checked) {
-                    // при выключении ручного режима оставляем поле визуально синхронным
-                    inp.value = "{{ salon_cut_pct_float }}";
-                  }
-                }
-                cb.addEventListener("change", sync);
-                sync();
-              })();
-            </script>
           </div>
-          <div class="card" style="background:#eef2ff; border:1px solid #c7d2fe; margin-bottom: 12px; max-width: 28rem;">
+          <div class="card lb-card-info lb-mb-12" style="max-width: 28rem;">
             <div style="font-weight:600; margin-bottom:10px;">Смешка — ставки ₽/г по сложности</div>
-            <p class="muted" style="font-size:12px; margin:-4px 0 10px;">Соответствуют вариантам в формах (лёгкая … сложная длина). Дефолты: 0,5 · 1 · 1,5 · 2 · 2,5.</p>
-            <div style="display:flex; flex-direction:column; gap:10px;">
+            <p class="muted lb-font-12" style="margin:-4px 0 10px;">Соответствуют вариантам в формах (лёгкая … сложная длина). Дефолты: 0,5 · 1 · 1,5 · 2 · 2,5.</p>
+            <div class="lb-stack-10">
               <div>
                 <label>Лёгкая (домешивание)</label>
-                <input name="mix_light" type="number" step="0.01" min="0" value="{{ work_rates.mix_light }}" style="width:100%; max-width:12rem;" />
+                <input name="mix_light" type="number" step="0.01" min="0" value="{{ work_rates.mix_light }}" class="lb-input-narrow" />
               </div>
               <div>
                 <label>Стандарт</label>
-                <input name="mix_standard" type="number" step="0.01" min="0" value="{{ work_rates.mix_standard }}" style="width:100%; max-width:12rem;" />
+                <input name="mix_standard" type="number" step="0.01" min="0" value="{{ work_rates.mix_standard }}" class="lb-input-narrow" />
               </div>
               <div>
                 <label>Сложная канекалон (омбре, мелирование)</label>
-                <input name="mix_kanek" type="number" step="0.01" min="0" value="{{ work_rates.mix_kanek }}" style="width:100%; max-width:12rem;" />
+                <input name="mix_kanek" type="number" step="0.01" min="0" value="{{ work_rates.mix_kanek }}" class="lb-input-narrow" />
               </div>
               <div>
                 <label>Сложная термо</label>
-                <input name="mix_thermo" type="number" step="0.01" min="0" value="{{ work_rates.mix_thermo }}" style="width:100%; max-width:12rem;" />
+                <input name="mix_thermo" type="number" step="0.01" min="0" value="{{ work_rates.mix_thermo }}" class="lb-input-narrow" />
               </div>
               <div>
                 <label>Сложная длина</label>
-                <input name="mix_length" type="number" step="0.01" min="0" value="{{ work_rates.mix_length }}" style="width:100%; max-width:12rem;" />
+                <input name="mix_length" type="number" step="0.01" min="0" value="{{ work_rates.mix_length }}" class="lb-input-narrow" />
               </div>
             </div>
           </div>
 
-          <div style="margin-bottom: 12px;">
+          <div class="lb-mb-12">
             <label>Бонус “на заказ” (множитель, напр. 1.10)</label>
             <input name="custom_order_bonus_multiplier" type="number" step="0.01" min="0" value="{{ work_rates.custom_order_bonus_multiplier }}" />
           </div>
@@ -126,23 +118,23 @@
       </div>
     </details>
 
-    <details style="margin-top: 16px;">
-      <summary style="cursor:pointer; font-weight: 600;">Системные настройки</summary>
-      <div class="card" style="background:#f8fafc; margin-top: 12px;">
-        <p class="muted" style="margin-top:0;">Эти параметры лучше менять только при необходимости.</p>
+    <details class="lb-mt-16">
+      <summary class="lb-summary-strong">Системные настройки</summary>
+      <div class="card lb-card-subtle lb-mt-12">
+        <p class="muted lb-mt-0">Эти параметры лучше менять только при необходимости.</p>
         <form method="post" action="/admin/settings/system">
-          <div style="margin-bottom: 12px;">
+          <div class="lb-mb-12">
             <label>Окно редактирования (дни)</label>
             <input name="edit_window_days" type="number" step="1" min="0" value="{{ edit_window_days }}" />
           </div>
-          <div style="margin-bottom: 12px;">
+          <div class="lb-mb-12">
             <label>Хранить аудит (месяцев)</label>
             <input name="audit_retention_months" type="number" step="1" min="1" max="36" value="{{ audit_retention_months }}" />
-            <div class="muted" style="font-size: 12px; margin-top: 6px;">
+            <div class="muted lb-font-12" style="margin-top: 6px;">
               Записи аудита старше этого срока удаляются автоматически при старте приложения.
             </div>
           </div>
-          <div style="margin-bottom: 12px;">
+          <div class="lb-mb-12">
             <label>Часовой пояс (отображение времени)</label>
             <select name="display_timezone">
               {% for tz_id, tz_name in timezone_choices %}

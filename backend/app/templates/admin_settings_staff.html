@@ -1,20 +1,20 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="card" style="max-width: 920px;">
+  <div class="card lb-card-max-920">
     <p><a href="/admin/settings">← Настройки</a></p>
-    <h2 style="margin-top:0;">Сотрудники</h2>
+    <h2 class="lb-mt-0">Сотрудники</h2>
     <p class="muted">Роли, телефон для входа (вместо логина), отключение учётки. Суперадмин не может остаться один без замены.</p>
 
     {% if msg == "created" %}
-      <div class="card" style="border-color:#bbf7d0; background:#f0fdf4; margin-bottom:12px;">Сотрудник создан.</div>
+      <div class="card lb-card-ok lb-mb-12">Сотрудник создан.</div>
     {% elif msg == "saved" %}
-      <div class="card" style="border-color:#bbf7d0; background:#f0fdf4; margin-bottom:12px;">Сохранено.</div>
+      <div class="card lb-card-ok lb-mb-12">Сохранено.</div>
     {% endif %}
     {% if err %}
-      <div class="error" style="margin-bottom:12px;">{{ err }}</div>
+      <div class="error lb-mb-12">{{ err }}</div>
     {% endif %}
 
-    <p style="margin-bottom:12px;">
+    <p class="lb-mb-12">
       <a href="/admin/settings/staff/new"><button type="button">Новый сотрудник</button></a>
     </p>
 
@@ -40,14 +40,14 @@
               <td>{{ u.display_name }}</td>
               <td>
                 {% for r in row.roles %}
-                  <span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;border-radius:6px;background:#eef2ff;font-size:12px;">{{ ru_user_role(r) }}</span>
+                  <span class="lb-role-chip">{{ ru_user_role(r) }}</span>
                 {% endfor %}
               </td>
               <td class="muted">
                 {% if u.master_level %}{{ ru_master_level(u.master_level) }}{% else %}—{% endif %}
               </td>
               <td>{% if u.is_active %}<span class="muted">активен</span>{% else %}<strong>отключён</strong>{% endif %}</td>
-              <td style="white-space:nowrap;">
+              <td class="lb-nowrap">
                 <a href="/admin/settings/staff/{{ u.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
               </td>
             </tr>
