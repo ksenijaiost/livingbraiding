@@ -90,7 +90,7 @@
             <input name="kanekalon_grams" type="number" step="0.01" min="0" value="{{ fp.kanekalon_grams or 0 }}" />
           </div>
           <div>
-            <label>Кудри (г)</label>
+            <label>Кудри/термо (г)</label>
             <input name="kudri_grams" type="number" step="0.01" min="0" value="{{ fp.kudri_grams or 0 }}" />
           </div>
         </div>
@@ -427,7 +427,19 @@
         var t = document.querySelector('input[name="rubber_type"]:checked');
         var typeVal = t ? t.value : '';
         var map = (meta && meta.rubber) ? meta.rubber : {};
-        var nameByType = { TAIL_ELASTIC: 'Хвост на резинке (1 крепление)', TAIL_CRAB: 'Хвост на крабе', TAIL_NET: 'Хвост на сетке', BRAIDS_ELASTIC: 'Косы на резинке (1 коса)' };
+        var nameByType = {
+          TAIL_ELASTIC: 'Хвост на резинке (1 крепление)',
+          TAIL_CRAB_MINI: 'Хвост на крабе — mini',
+          TAIL_CRAB_STANDARD: 'Хвост на крабе — standard',
+          TAIL_CRAB_MAX: 'Хвост на крабе — max',
+          TAIL_NET_MINI: 'Хвост на сетке — mini',
+          TAIL_NET_STANDARD: 'Хвост на сетке — standard',
+          TAIL_NET_MAX: 'Хвост на сетке — max',
+          TAIL_BUN_MINI: 'Хвост на бублике — mini',
+          TAIL_BUN_STANDARD: 'Хвост на бублике — standard',
+          TAIL_BUN_MAX: 'Хвост на бублике — max',
+          BRAIDS_ELASTIC: 'Косы на резинке (1 коса)'
+        };
         var row = map[nameByType[typeVal] || ''] || null;
         var units = 1;
         if (row && row.is_per_unit) {
@@ -522,7 +534,19 @@
         var t = document.querySelector('input[name="rubber_type"]:checked');
         var typeVal = t ? t.value : '';
         var map = (meta && meta.rubber) ? meta.rubber : {};
-        var nameByType = { TAIL_ELASTIC: 'Хвост на резинке (1 крепление)', TAIL_CRAB: 'Хвост на крабе', TAIL_NET: 'Хвост на сетке', BRAIDS_ELASTIC: 'Косы на резинке (1 коса)' };
+        var nameByType = {
+          TAIL_ELASTIC: 'Хвост на резинке (1 крепление)',
+          TAIL_CRAB_MINI: 'Хвост на крабе — mini',
+          TAIL_CRAB_STANDARD: 'Хвост на крабе — standard',
+          TAIL_CRAB_MAX: 'Хвост на крабе — max',
+          TAIL_NET_MINI: 'Хвост на сетке — mini',
+          TAIL_NET_STANDARD: 'Хвост на сетке — standard',
+          TAIL_NET_MAX: 'Хвост на сетке — max',
+          TAIL_BUN_MINI: 'Хвост на бублике — mini',
+          TAIL_BUN_STANDARD: 'Хвост на бублике — standard',
+          TAIL_BUN_MAX: 'Хвост на бублике — max',
+          BRAIDS_ELASTIC: 'Косы на резинке (1 коса)'
+        };
         var row = map[nameByType[typeVal] || ''] || null;
         if (row) {
           var units = row.is_per_unit ? (typeVal === 'TAIL_ELASTIC' ? parseInt((document.querySelector('input[name="rubber_attach_qty"]')||{}).value||'1',10) : (typeVal === 'BRAIDS_ELASTIC' ? parseInt((document.querySelector('input[name="rubber_braids_qty"]')||{}).value||'1',10) : 1)) : 1;

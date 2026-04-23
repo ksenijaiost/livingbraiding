@@ -214,7 +214,7 @@
           <input type="number" id="kanekalon_grams" name="kanekalon_grams" min="0" step="1" value="{{ fp.get('kanekalon_grams', '0') }}" />
         </div>
         <div>
-          <label>Кудри, г</label>
+          <label>Кудри/термо, г</label>
           <input type="number" id="kudri_grams" name="kudri_grams" min="0" step="1" value="{{ fp.get('kudri_grams', '0') }}" />
         </div>
       </div>
@@ -372,7 +372,7 @@
         <h3>Термозамещение</h3>
         <div class="card" style="margin-bottom: 14px; background: #f0f9ff; border-color: #bae6fd;">
           <div style="margin-bottom: 12px;">
-            <div style="font-weight: 600; margin-bottom: 6px;">Кудри</div>
+            <div style="font-weight: 600; margin-bottom: 6px;">Кудри/термо</div>
             <input type="text" name="thermo_curls" style="width:100%;" value="{{ tp.get('thermo_curls', '')|e }}"
               placeholder="Название материала" />
           </div>

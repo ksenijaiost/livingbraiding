@@ -82,7 +82,7 @@
             {% endif %}
             {% if sale.material_service.retail_material_kudri %}
               <p style="margin:6px 0;">
-                <strong>Кудри</strong>: {{ '%.2f'|format(sale.material_kudri_grams or 0) }} г
+                <strong>Кудри/термо</strong>: {{ '%.2f'|format(sale.material_kudri_grams or 0) }} г
                 {% if sale.material_kudri_price_per_gram_at_time is not none %}
                   <span class="muted">({{ '%.2f'|format(sale.material_kudri_price_per_gram_at_time) }} &#8381;/г)</span>
                 {% endif %}

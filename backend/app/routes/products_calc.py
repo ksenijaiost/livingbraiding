@@ -23,6 +23,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.kit_inlay_visit import list_master_visit_services_catalog
 from app.work_products import _kit_client_stock_price_total, _rubber_type_items, _zakaz_subcategory_services_map
+from app.work_products import _rubber_service_name
 from app.work_products import _kit_se_items, _kit_de_items
 from app.work_products_compute import (
     CORR_SVC_HOURLY,
@@ -392,7 +393,8 @@ async def api_products_calc(
 
         else:
             rubber_type = str(payload.get("rubber_type") or "TAIL_ELASTIC").strip().upper()
-            if rubber_type not in ("TAIL_ELASTIC", "TAIL_CRAB", "TAIL_NET", "BRAIDS_ELASTIC"):
+            rubber_allowed = {k for k, _ in _rubber_type_items()}
+            if rubber_type not in rubber_allowed:
                 rubber_type = "TAIL_ELASTIC"
             qty = 1
             if rubber_type == "TAIL_ELASTIC":
@@ -422,7 +424,7 @@ async def api_products_calc(
                 corr_steam=False,
             )
             rub_map = _zakaz_subcategory_services_map(db, "Хвосты/резинки")
-            svc_name = {"TAIL_ELASTIC": "Хвост на резинке (1 крепление)", "TAIL_CRAB": "Хвост на крабе", "TAIL_NET": "Хвост на сетке", "BRAIDS_ELASTIC": "Косы на резинке (1 коса)"}[rubber_type]
+            svc_name = _rubber_service_name(rubber_type)
             row = rub_map.get(svc_name) or {}
             cp = row.get("client_price")
             if cp is not None:

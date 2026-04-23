@@ -322,8 +322,15 @@ def _wr_float(db: Session, key: str, default: float) -> float:
 def _rubber_type_items() -> list[tuple[str, str]]:
     return [
         ("TAIL_ELASTIC", "Хвост на резинке"),
-        ("TAIL_CRAB", "Хвост на крабе"),
-        ("TAIL_NET", "Хвост на сетке"),
+        ("TAIL_CRAB_MINI", "Хвост на крабе — mini"),
+        ("TAIL_CRAB_STANDARD", "Хвост на крабе — standard"),
+        ("TAIL_CRAB_MAX", "Хвост на крабе — max"),
+        ("TAIL_NET_MINI", "Хвост на сетке — mini"),
+        ("TAIL_NET_STANDARD", "Хвост на сетке — standard"),
+        ("TAIL_NET_MAX", "Хвост на сетке — max"),
+        ("TAIL_BUN_MINI", "Хвост на бублике — mini"),
+        ("TAIL_BUN_STANDARD", "Хвост на бублике — standard"),
+        ("TAIL_BUN_MAX", "Хвост на бублике — max"),
         ("BRAIDS_ELASTIC", "Косы на резинке"),
     ]
 
@@ -331,8 +338,15 @@ def _rubber_type_items() -> list[tuple[str, str]]:
 def _rubber_service_name(rubber_type: str) -> str:
     return {
         "TAIL_ELASTIC": "Хвост на резинке (1 крепление)",
-        "TAIL_CRAB": "Хвост на крабе",
-        "TAIL_NET": "Хвост на сетке",
+        "TAIL_CRAB_MINI": "Хвост на крабе — mini",
+        "TAIL_CRAB_STANDARD": "Хвост на крабе — standard",
+        "TAIL_CRAB_MAX": "Хвост на крабе — max",
+        "TAIL_NET_MINI": "Хвост на сетке — mini",
+        "TAIL_NET_STANDARD": "Хвост на сетке — standard",
+        "TAIL_NET_MAX": "Хвост на сетке — max",
+        "TAIL_BUN_MINI": "Хвост на бублике — mini",
+        "TAIL_BUN_STANDARD": "Хвост на бублике — standard",
+        "TAIL_BUN_MAX": "Хвост на бублике — max",
         "BRAIDS_ELASTIC": "Косы на резинке (1 коса)",
     }[rubber_type]
 

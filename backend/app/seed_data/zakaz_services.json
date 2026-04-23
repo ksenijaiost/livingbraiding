@@ -34,14 +34,49 @@
           "is_active": false,
           "services": [
             {
-              "name": "Хвост на крабе",
-              "price": { "from": 1600, "to": 1800 },
-              "economics": { "master_pay": 500, "studio_pay": 500, "fixed_expense": 400, "is_per_unit": false }
+              "name": "Хвост на крабе — mini",
+              "price": { "from": 1500 },
+              "economics": { "master_pay": 1000, "studio_pay": 0, "fixed_expense": 500, "is_per_unit": false }
             },
             {
-              "name": "Хвост на сетке",
-              "price": { "from": 1900, "to": 2500 },
-              "economics": { "master_pay": 550, "studio_pay": 500, "fixed_expense": 700, "is_per_unit": false }
+              "name": "Хвост на крабе — standard",
+              "price": { "from": 2000 },
+              "economics": { "master_pay": 1500, "studio_pay": 0, "fixed_expense": 500, "is_per_unit": false }
+            },
+            {
+              "name": "Хвост на крабе — max",
+              "price": { "from": 2500 },
+              "economics": { "master_pay": 2000, "studio_pay": 0, "fixed_expense": 500, "is_per_unit": false }
+            },
+            {
+              "name": "Хвост на сетке — mini",
+              "price": { "from": 1500 },
+              "economics": { "master_pay": 1000, "studio_pay": 0, "fixed_expense": 500, "is_per_unit": false }
+            },
+            {
+              "name": "Хвост на сетке — standard",
+              "price": { "from": 2000 },
+              "economics": { "master_pay": 1500, "studio_pay": 0, "fixed_expense": 500, "is_per_unit": false }
+            },
+            {
+              "name": "Хвост на сетке — max",
+              "price": { "from": 2500 },
+              "economics": { "master_pay": 2000, "studio_pay": 0, "fixed_expense": 500, "is_per_unit": false }
+            },
+            {
+              "name": "Хвост на бублике — mini",
+              "price": { "from": 1500 },
+              "economics": { "master_pay": 1000, "studio_pay": 0, "fixed_expense": 500, "is_per_unit": false }
+            },
+            {
+              "name": "Хвост на бублике — standard",
+              "price": { "from": 2000 },
+              "economics": { "master_pay": 1500, "studio_pay": 0, "fixed_expense": 500, "is_per_unit": false }
+            },
+            {
+              "name": "Хвост на бублике — max",
+              "price": { "from": 2500 },
+              "economics": { "master_pay": 2000, "studio_pay": 0, "fixed_expense": 500, "is_per_unit": false }
             },
             {
               "name": "Хвост на резинке (1 крепление)",
