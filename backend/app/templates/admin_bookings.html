@@ -4,32 +4,43 @@
     <div class="lb-flex-between-center">
       <h2 class="lb-mt-0">Брони</h2>
       {% if can_manage %}
-        <a href="/bookings/new"><button type="button" class="secondary">Новая бронь</button></a>
+        <a href="/bookings/new"><button type="button">Новая бронь</button></a>
       {% endif %}
     </div>
 
-    <form method="get" action="/bookings" class="row" style="margin: 12px 0;">
-      <div>
-        <label>Показывать</label>
-        <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
-          <label><input type="radio" name="show" value="active" {% if show_mode != 'all' %}checked{% endif %} /> Только активные</label>
-          <label><input type="radio" name="show" value="all" {% if show_mode == 'all' %}checked{% endif %} /> Все брони</label>
-        </div>
-      </div>
-      <div>
-        <label>Фильтр</label>
-        <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
-          <label><input type="radio" name="mine" value="1" {% if bookings_mine_only %}checked{% endif %} /> Мои</label>
-          <label><input type="radio" name="mine" value="0" {% if not bookings_mine_only %}checked{% endif %} /> Все</label>
-        </div>
-        {% if current_user.role.value == "MASTER" %}
-          <div class="muted lb-font-12 lb-mt-4">По умолчанию показываются «мои»: где вы указаны мастером или ответственным по брони.</div>
-        {% endif %}
-      </div>
-      <div style="align-self:end;">
-        <button type="submit">Применить</button>
-      </div>
-    </form>
+    {% set _show = 'all' if show_mode == 'all' else 'active' %}
+    {% set _mine = '1' if bookings_mine_only else '0' %}
+    <p style="margin:12px 0 14px;font-size:13px;">
+      {# Show mode #}
+      {% if _show == 'active' %}
+        <strong>Только активные</strong>
+        <span class="muted">·</span>
+        <a href="/bookings?show=all&mine={{ _mine }}">Все брони</a>
+      {% else %}
+        <strong>Все брони</strong>
+        <span class="muted">·</span>
+        <a href="/bookings?show=active&mine={{ _mine }}">Только активные</a>
+      {% endif %}
+
+      <span class="muted" style="margin:0 6px;">·</span>
+      <span class="muted" aria-hidden="true">|</span>
+      <span class="muted" style="margin:0 6px;">·</span>
+
+      {# Mine filter #}
+      {% if _mine == '1' %}
+        <strong>Мои</strong>
+        <span class="muted">·</span>
+        <a href="/bookings?show={{ _show }}&mine=0">Все</a>
+      {% else %}
+        <strong>Все</strong>
+        <span class="muted">·</span>
+        <a href="/bookings?show={{ _show }}&mine=1">Мои</a>
+      {% endif %}
+
+      {% if current_user.role.value == "MASTER" %}
+        <span class="muted">(где вы указаны мастером или ответственным по брони)</span>
+      {% endif %}
+    </p>
 
     {% if not rows %}
       <p class="muted">Пока нет броней.</p>

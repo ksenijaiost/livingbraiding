@@ -3,9 +3,10 @@
   <div class="card">
     <h2 style="margin-top: 0;">Редактирование работы с товарами</h2>
 
-    <p style="margin-top: 0;">
-      <a href="/sales/work/{% if row %}{{ row.id }}{% endif %}"><button type="button" class="secondary">← К карточке</button></a>
-      <a href="/sales/work"><button type="button" class="secondary">К списку</button></a>
+    <p class="lb-top-links" style="margin-top: 0;">
+      <a href="/sales/work/{% if row %}{{ row.id }}{% endif %}">← К карточке</a>
+      <span class="lb-top-sep">·</span>
+      <a href="/sales/work">К списку</a>
     </p>
 
     {% if err %}

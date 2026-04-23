@@ -93,27 +93,32 @@
       <p class="error">Такой элемент уже есть в этой подкатегории.</p>
     {% endif %}
 
-    <div style="display:flex; gap:8px; flex-wrap:nowrap; overflow-x:auto; margin-bottom:12px; padding-bottom:4px; align-items:center;">
-      <a href="/service-catalog" style="flex:0 0 auto;">
-        <button type="button" class="secondary">Прайс — услуги</button>
-      </a>
-      <a href="/products-calc" style="flex:0 0 auto;">
-        <button type="button" class="secondary">Калькулятор</button>
-      </a>
-      {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
-        <a href="/bookings/new" style="flex:0 0 auto;">
-          <button type="button" class="secondary">Новая бронь</button>
-        </a>
-      {% endif %}
-      {% if categories %}
-        {% for c in categories %}
-          <a href="/products-catalog?category={{ c|urlencode }}" style="flex:0 0 auto;">
-            <button type="button" class="{% if c == selected_category %}{% else %}secondary{% endif %}">
-              {{ c }}
-            </button>
-          </a>
-        {% endfor %}
-      {% endif %}
+    <div class="lb-nav-strip">
+      <div class="lb-nav-strip-links">
+        <div class="lb-top-links" style="margin:0;">
+          <a href="/service-catalog">Прайс — услуги</a>
+          <span class="lb-top-sep">·</span>
+          <a href="/products-calc">Калькулятор</a>
+          {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
+            <span class="lb-top-sep">·</span>
+            <a href="/bookings/new">Новая бронь</a>
+          {% endif %}
+        </div>
+      </div>
+
+      <span class="lb-nav-strip-sep" aria-hidden="true"></span>
+
+      <div class="lb-nav-strip-tabs">
+        {% if categories %}
+          {% for c in categories %}
+            <a href="/products-catalog?category={{ c|urlencode }}" style="flex:0 0 auto;">
+              <button type="button" class="{% if c == selected_category %}{% else %}secondary{% endif %}">
+                {{ c }}
+              </button>
+            </a>
+          {% endfor %}
+        {% endif %}
+      </div>
     </div>
 
     {% if selected_category == "Заказ" %}

@@ -109,13 +109,13 @@
     {% if not fields %}
       <p class="muted" style="margin-top: 12px;">Пока нет полей — добавьте первое.</p>
     {% endif %}
-    <p style="margin-top: 16px;">
+    <p class="lb-top-links" style="margin-top: 16px;">
       {% if scope == "category" %}
-        <a href="/admin/catalog"><button type="button" class="secondary">← Прайс</button></a>
+        <a href="/admin/catalog">← Прайс</a>
       {% elif scope == "subcategory" %}
-        <a href="/admin/catalog/categories/{{ category.id }}/subcategories"><button type="button" class="secondary">← Подкатегории</button></a>
+        <a href="/admin/catalog/categories/{{ category.id }}/subcategories">← Подкатегории</a>
       {% else %}
-        <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services"><button type="button" class="secondary">← Услуги</button></a>
+        <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services">← Услуги</a>
       {% endif %}
     </p>
   </div>

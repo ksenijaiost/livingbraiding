@@ -1,11 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
   <div class="card">
+    <div class="lb-top-links" style="margin-top:0;">
+      <a href="/products-catalog">← Прайс — товары</a>
+    </div>
     <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
       <h2 style="margin-top: 0;">Управление прайсом</h2>
       <a href="/admin/catalog/categories/new"><button type="button">Новая категория</button></a>
     </div>
-    <p class="muted">Категории → подкатегории → позиции прайса (только суперадмин). Здесь и <strong>услуги</strong> (в т.ч. для формы визита), и <strong>товары</strong> (категории без визита, например «Продажа материала», «Заказ») — у каждой услуги три шкалы цен. Вопросы анкеты — кнопка «Анкета» у категории, подкатегории или услуги.</p>
+    <p class="muted">Категории → подкатегории → позиции прайса (только суперадмин). Здесь <strong>услуги</strong> (в т.ч. для формы визита) — у каждой услуги три шкалы цен. Вопросы анкеты — кнопка «Анкета» у категории, подкатегории или услуги.</p>
     {% if err == "empty" %}
       <div class="error">Укажите название.</div>
     {% elif err == "duplicate" %}

@@ -185,3 +185,68 @@
   border: 1px solid #e2e8f0;
 }
 
+/* Top-of-card navigation links (back/section links) */
+.lb-top-links {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #6b7280;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.lb-top-links a {
+  color: #6b7280 !important;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.lb-top-links a:hover {
+  color: #0f172a !important;
+}
+.lb-top-links .lb-top-sep {
+  color: #9ca3af;
+}
+
+.lb-nav-strip {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 4px;
+}
+
+.lb-nav-strip-links,
+.lb-nav-strip-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  align-items: center;
+}
+
+.lb-nav-link {
+  color: #475569 !important;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding: 2px 0;
+}
+.lb-nav-link:hover {
+  background: #f1f5f9;
+  color: #0f172a !important;
+}
+.lb-nav-link:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.lb-nav-strip-sep {
+  width: 1px;
+  height: 22px;
+  background: #e5e7eb;
+  flex: 0 0 auto;
+  margin: 0 2px;
+}
+
+

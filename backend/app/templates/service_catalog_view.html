@@ -6,22 +6,17 @@
       Позиции каталога, доступные в форме визита. Выберите категорию и подкатегорию; сначала активные услуги, неактивные — в конце списка.
     </p>
 
-    <div style="display:flex; gap:8px; flex-wrap:nowrap; overflow-x:auto; margin-bottom:12px; padding-bottom:4px; align-items:center;">
-      <a href="/products-catalog" style="flex:0 0 auto;">
-        <button type="button" class="secondary">Прайс — товары</button>
-      </a>
-      <a href="/products-calc" style="flex:0 0 auto;">
-        <button type="button" class="secondary">Калькулятор</button>
-      </a>
+    <div class="lb-top-links">
+      <a href="/products-catalog">Прайс — товары</a>
+      <span class="lb-top-sep">·</span>
+      <a href="/products-calc">Калькулятор</a>
       {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
-        <a href="/bookings/new" style="flex:0 0 auto;">
-          <button type="button" class="secondary">Новая бронь</button>
-        </a>
+        <span class="lb-top-sep">·</span>
+        <a href="/bookings/new">Новая бронь</a>
       {% endif %}
       {% if current_user.role.value == "ADMIN_SUPER" %}
-        <a href="/admin/catalog" style="flex:0 0 auto;">
-          <button type="button" class="secondary">Управление прайсом</button>
-        </a>
+        <span class="lb-top-sep">·</span>
+        <a href="/admin/catalog">Управление прайсом</a>
       {% endif %}
     </div>
 

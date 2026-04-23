@@ -14,8 +14,11 @@
 
     {% if sale %}
       <p>
-        <a href="/sales/products/{{ sale.id }}"><button type="button" class="secondary">Назад в карточку</button></a>
-        <a href="/sales/products"><button type="button" class="secondary">К списку</button></a>
+        <span class="lb-top-links" style="margin:0;">
+          <a href="/sales/products/{{ sale.id }}">← Назад в карточку</a>
+          <span class="lb-top-sep">·</span>
+          <a href="/sales/products">К списку</a>
+        </span>
       </p>
 
       <form method="post" action="/sales/products/{{ sale.id }}/edit" id="product-sale-edit-form">
