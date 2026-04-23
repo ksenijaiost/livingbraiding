@@ -67,8 +67,54 @@ templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_user_role"] = ru_user_role
 
 router = APIRouter(prefix="/sales/products", tags=["product-sales"])
+# GET-алиас под старые закладки/ссылки (если где-то фигурировал /admin/sales/...):
+#   /admin/sales/products/...  -> 308 -> /sales/products/...
+legacy_admin_router = APIRouter(prefix="/admin/sales/products", tags=["product-sales-legacy"])
 _STAFF = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
+
+
+def _redirect_admin_sales_products_to_canon(request: Request, *, suffix: str = "") -> RedirectResponse:
+    """Старые URL /admin/sales/products → канон /sales/products (GET, 308, query сохраняется)."""
+    suf = (suffix or "").strip()
+    if suf and not suf.startswith("/"):
+        suf = f"/{suf}"
+    new_path = f"/sales/products{suf}"
+    return RedirectResponse(url=str(request.url.replace(path=new_path)), status_code=308)
+
+
+@legacy_admin_router.get("", response_class=HTMLResponse)
+def product_sales_list_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _STAFF,
+):
+    return _redirect_admin_sales_products_to_canon(request)
+
+
+@legacy_admin_router.get("/new", response_class=HTMLResponse)
+def product_sale_new_get_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _STAFF,
+):
+    return _redirect_admin_sales_products_to_canon(request, suffix="/new")
+
+
+@legacy_admin_router.get("/{sale_id}/edit", response_class=HTMLResponse)
+def product_sale_edit_get_legacy_redirect(
+    sale_id: int,
+    request: Request,
+    current_user: AuthUser = _STAFF,
+):
+    return _redirect_admin_sales_products_to_canon(request, suffix=f"/{int(sale_id)}/edit")
+
+
+@legacy_admin_router.get("/{sale_id}", response_class=HTMLResponse)
+def product_sale_detail_legacy_redirect(
+    sale_id: int,
+    request: Request,
+    current_user: AuthUser = _STAFF,
+):
+    return _redirect_admin_sales_products_to_canon(request, suffix=f"/{int(sale_id)}")
 
 
 def _ctx(request: Request, current_user: AuthUser, **kwargs):
@@ -643,6 +689,7 @@ def product_sale_edit_form(
 
 
 @router.post("/{sale_id}/edit")
+@legacy_admin_router.post("/{sale_id}/edit")
 async def product_sale_edit_save(
     sale_id: int,
     request: Request,
@@ -870,6 +917,7 @@ async def product_sale_edit_save(
 
 
 @router.post("/{sale_id}/void")
+@legacy_admin_router.post("/{sale_id}/void")
 async def product_sale_void(
     sale_id: int,
     request: Request,
@@ -907,6 +955,7 @@ async def product_sale_void(
     return RedirectResponse(url=f"/sales/products/{sale_id}?msg=voided", status_code=303)
 
 @router.post("/new")
+@legacy_admin_router.post("/new")
 async def product_sale_new_post(
     request: Request,
     current_user: AuthUser = _STAFF,
