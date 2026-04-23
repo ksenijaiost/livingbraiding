@@ -62,6 +62,7 @@ from app.visit_edit_policy import (
 )
 from app.ru_labels import ru_user_role
 from app.forms_parse import parse_date_iso, parse_float, parse_int, parse_optional_float
+from app.time_utils import utcnow_naive
 
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_user_role"] = ru_user_role
@@ -873,7 +874,7 @@ async def product_sale_edit_save(
             url=f"/sales/products/{sale_id}/edit?err={quote(str(e))}",
             status_code=303,
         )
-    sale.updated_at = datetime.utcnow()
+    sale.updated_at = utcnow_naive()
     sale.updated_by_user_id = current_user.id
     write_audit_rows(
         db,
@@ -939,9 +940,9 @@ async def product_sale_void(
 
     before = SimpleNamespace(is_voided=sale.is_voided, voided_at=sale.voided_at, voided_by_user_id=sale.voided_by_user_id)
     sale.is_voided = True
-    sale.voided_at = datetime.utcnow()
+    sale.voided_at = utcnow_naive()
     sale.voided_by_user_id = current_user.id
-    sale.updated_at = datetime.utcnow()
+    sale.updated_at = utcnow_naive()
     sale.updated_by_user_id = current_user.id
     write_audit_rows(
         db,

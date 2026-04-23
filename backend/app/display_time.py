@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Setting
 from app.setting_keys import DISPLAY_TIMEZONE
 
-# На сервере визиты/reserved_at пишутся через datetime.utcnow() (naive = UTC).
+# На сервере визиты/reserved_at пишутся через utcnow_naive() (naive = UTC).
 DEFAULT_DISPLAY_TIMEZONE = "Asia/Novosibirsk"
 
 ALLOWED_TIMEZONES: tuple[tuple[str, str], ...] = (

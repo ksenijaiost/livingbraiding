@@ -9,6 +9,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_role
+from app.time_utils import utcnow_naive
 from app.db.session import get_db
 from app.db.models import (
     Client,
@@ -227,9 +228,9 @@ async def admin_visit_cancel(
         cancelled_by_user_id=visit.cancelled_by_user_id,
     )
     visit.is_cancelled = True
-    visit.cancelled_at = datetime.utcnow()
+    visit.cancelled_at = utcnow_naive()
     visit.cancelled_by_user_id = current_user.id
-    visit.updated_at = datetime.utcnow()
+    visit.updated_at = utcnow_naive()
     visit.updated_by_user_id = current_user.id
     write_audit_rows(
         db,
@@ -280,7 +281,7 @@ async def admin_visit_change_client(
     old_id = visit.client_id
     visit.client_id = new_cid
     visit.client_age_group = new_client.age_group
-    visit.updated_at = datetime.utcnow()
+    visit.updated_at = utcnow_naive()
     visit.updated_by_user_id = current_user.id
     db.add(
         VisitAuditLog(

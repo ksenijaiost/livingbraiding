@@ -26,6 +26,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.forms_parse import parse_date_iso, parse_float, parse_int
 from app.payroll_fund import replace_studio_expense_ledger, studio_fund_balance
+from app.time_utils import utcnow_naive
 from app.visit_edit_policy import is_in_closed_payroll_period
 from app.ru_labels import ru_user_role
 
@@ -247,7 +248,7 @@ async def studio_expense_new(
 
     row = StudioExpense(
         created_by_user_id=current_user.id,
-        created_at=datetime.utcnow(),
+        created_at=utcnow_naive(),
         updated_at=None,
         updated_by_user_id=None,
         date=expense_dt,
@@ -324,7 +325,7 @@ async def studio_expense_save(
     row.subcategory_id = sub.id
     row.amount = float(amt)
     row.comment = comment or ""
-    row.updated_at = datetime.utcnow()
+    row.updated_at = utcnow_naive()
     row.updated_by_user_id = current_user.id
     write_audit_rows(
         db,
@@ -374,9 +375,9 @@ async def studio_expense_void(
         voided_by_user_id=row.voided_by_user_id,
     )
     row.is_voided = True
-    row.voided_at = datetime.utcnow()
+    row.voided_at = utcnow_naive()
     row.voided_by_user_id = current_user.id
-    row.updated_at = datetime.utcnow()
+    row.updated_at = utcnow_naive()
     row.updated_by_user_id = current_user.id
     write_audit_rows(
         db,

@@ -8,6 +8,7 @@ from datetime import datetime, time, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.time_utils import utcnow_naive
 from app.auth import AuthUser
 from app.db.models import PayrollPeriod, Setting, UserRole, Visit
 from app.setting_keys import EDIT_WINDOW_DAYS
@@ -26,7 +27,7 @@ def edit_window_days(db: Session) -> int:
 def within_edit_window(visit: Visit, days: int, *, now: datetime | None = None) -> bool:
     if days <= 0:
         return False
-    now = now or datetime.utcnow()
+    now = now or utcnow_naive()
     return visit.created_at + timedelta(days=days) >= now
 
 

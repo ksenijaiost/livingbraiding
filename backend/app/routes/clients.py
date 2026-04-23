@@ -39,6 +39,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.audit import diff_fields, write_audit_rows
+from app.time_utils import utcnow_naive
 from app.ui_visit_display import visit_services_catalog_line
 from app.webui import templates, ctx as _ctx
 
@@ -384,7 +385,7 @@ async def admin_client_edit_post(
     client.birth_day = birth_day
     client.birth_month = birth_month
     client.birth_year = birth_year
-    client.updated_at = datetime.utcnow()
+    client.updated_at = utcnow_naive()
     client.updated_by_user_id = current_user.id
 
     changes = diff_fields(
@@ -584,7 +585,7 @@ def admin_client_confirm(
         raise HTTPException(status_code=404, detail="Клиент не найден")
     before = SimpleNamespace(is_confirmed=client.is_confirmed)
     client.is_confirmed = True
-    client.updated_at = datetime.utcnow()
+    client.updated_at = utcnow_naive()
     client.updated_by_user_id = current_user.id
     write_audit_rows(
         db,

@@ -21,6 +21,7 @@ from app.payroll_fund import (
     recent_ledger_rows,
 )
 from app.payroll_utils import payroll_period_day_end, payroll_period_day_start
+from app.time_utils import utcnow_naive
 from app.user_roles import get_roles_for_user, select_users_with_any_role, user_has_any_role
 from app.webui import templates, ctx as _ctx
 from app.ru_labels import ru_user_roles_payout_suffix
@@ -74,7 +75,7 @@ def admin_payroll_periods_open_next(
 
     last = db.scalar(select(PayrollPeriod).where(PayrollPeriod.closed_at.is_not(None)).order_by(PayrollPeriod.date_to.desc(), PayrollPeriod.id.desc()).limit(1))
     if last is None:
-        df_d = datetime.utcnow().date()
+        df_d = utcnow_naive().date()
     else:
         df_d = last.date_to.date() + timedelta(days=1)
 
@@ -110,7 +111,7 @@ async def admin_payroll_periods_close(
         return RedirectResponse(url="/admin/payroll-periods?err=range", status_code=303)
 
     p.date_to = payroll_period_day_end(d_to)
-    p.closed_at = datetime.utcnow()
+    p.closed_at = utcnow_naive()
     p.closed_by_name = current_user.display_name
     p.closed_by_role = current_user.role.value
     db.commit()

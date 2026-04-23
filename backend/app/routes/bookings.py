@@ -46,6 +46,7 @@ from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_bool, parse_float, parse_int
 from app.kit_inlay_visit import get_kit_max_reserves_per_kit, kit_reserve_slots_used
+from app.time_utils import utcnow_naive
 from app.user_roles import select_users_with_any_role, select_users_with_role
 from app.work_products import _rubber_type_items
 from app.kit_inlay_visit import list_master_visit_services_catalog
@@ -368,7 +369,7 @@ def try_auto_complete_booking(db: Session, booking_id: int) -> None:
             return
     old_status = b.status
     b.status = BookingStatus.DONE
-    b.updated_at = datetime.utcnow()
+    b.updated_at = utcnow_naive()
     b.updated_by_user_id = None
     write_audit_rows(
         db,
@@ -649,13 +650,13 @@ def _apply_booking_auto_reserves(db: Session, *, booking_client_id: int, fp: dic
         qty = max(1, min(qty, avail))
         before = SimpleNamespace(pieces_available=kit.pieces_available)
         kit.pieces_available = avail - qty
-        kit.updated_at = datetime.utcnow()
+        kit.updated_at = utcnow_naive()
         kit.updated_by_user_id = changed_by_user_id
         db.add(
             KitReserve(
                 kit_id=kit.id,
                 pieces_reserved=qty,
-                reserved_at=datetime.utcnow(),
+                reserved_at=utcnow_naive(),
                 reserved_by_user_id=changed_by_user_id,
                 reserved_for_client_id=booking_client_id,
                 reserved_for_user_id=None,
@@ -1231,7 +1232,7 @@ async def admin_booking_edit_post(
     b.planned_service_id = planned_service_id
     b.planned_product_kind = planned_product_kind
     b.details_json = json.dumps(_booking_details_from_form(fp), ensure_ascii=False)
-    b.updated_at = datetime.utcnow()
+    b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
 
     for bm in list(b.masters or []):
@@ -1372,10 +1373,10 @@ def admin_booking_cancel(
         return RedirectResponse(url=f"/bookings/{booking_id}?err=reason", status_code=303)
     before = SimpleNamespace(status=b.status, cancelled_at=b.cancelled_at, cancelled_by_user_id=b.cancelled_by_user_id, cancelled_reason=b.cancelled_reason)
     b.status = BookingStatus.CANCELLED
-    b.cancelled_at = datetime.utcnow()
+    b.cancelled_at = utcnow_naive()
     b.cancelled_by_user_id = current_user.id
     b.cancelled_reason = reason_norm[:2000]
-    b.updated_at = datetime.utcnow()
+    b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
     db.commit()
     write_audit_rows(
@@ -1404,7 +1405,7 @@ def admin_booking_mark_done(
         return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
     old_status = b.status
     b.status = BookingStatus.DONE
-    b.updated_at = datetime.utcnow()
+    b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
     write_audit_rows(
         db,
@@ -1453,7 +1454,7 @@ def _master_activity_archive_row_id(row: dict[str, Any]) -> int:
 
 
 def master_activity_archive(db: Session, master_id: int, *, days: int = 30, max_rows: int = 50) -> tuple[list[dict[str, Any]], bool]:
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = utcnow_naive() - timedelta(days=days)
     items: list[dict[str, Any]] = []
 
     visits = list(

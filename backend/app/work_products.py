@@ -50,6 +50,7 @@ from app.kit_inlay_visit import _materials_cost_and_snapshot
 from app.work_products_compute import compute_work_financials
 from app.forms_parse import parse_bool, parse_date_iso, parse_float, parse_int
 from app.work_rate_keys import CUSTOM_ORDER_BONUS_MULTIPLIER, STUDIO_SHARE
+from app.time_utils import utcnow_naive
 
 _WORK_NEW_FP_KEYS = frozenset({
     "booking_id",
@@ -1057,7 +1058,7 @@ async def work_new_post(
                     title = f"Заказ — комплект (клиент {cl.name if cl else client_id})"
                 # Если внезапно пересекается (крайне редко), дополним временем.
                 if db.scalar(select(Kit.id).where(Kit.sku == sku)):
-                    sku = f"{sku}-{int(datetime.utcnow().timestamp())}"
+                    sku = f"{sku}-{int(utcnow_naive().timestamp())}"
 
             full_cost = float(cost_total_amount) + float(master_total)
             comp_json = _kit_composition_json(kit_totals)
@@ -1103,7 +1104,7 @@ async def work_new_post(
                 cost_total=full_cost,
                 cost_snapshot_text=cost_snapshot_text,
                 author_cost_total=None,
-                created_at=datetime.utcnow(),
+                created_at=utcnow_naive(),
                 is_in_stock=True,
                 is_archived=False,
             )
@@ -1127,7 +1128,7 @@ async def work_new_post(
                     KitReserve(
                         kit_id=kit.id,
                         pieces_reserved=pieces_reserved,
-                        reserved_at=datetime.utcnow(),
+                        reserved_at=utcnow_naive(),
                         reserved_by_user_id=int(current_user.id),
                         reserved_for_client_id=int(client_id),
                         reserved_for_user_id=None,
@@ -1376,9 +1377,9 @@ async def work_void(
         voided_by_user_id=getattr(w, "voided_by_user_id", None),
     )
     w.is_voided = True
-    w.voided_at = datetime.utcnow()
+    w.voided_at = utcnow_naive()
     w.voided_by_user_id = current_user.id
-    w.updated_at = datetime.utcnow()
+    w.updated_at = utcnow_naive()
     w.updated_by_user_id = current_user.id
 
     if kit:
@@ -1510,7 +1511,7 @@ async def work_edit_save(
             status_code=400,
         )
 
-    w.updated_at = datetime.utcnow()
+    w.updated_at = utcnow_naive()
     w.updated_by_user_id = current_user.id
     write_audit_rows(
         db,

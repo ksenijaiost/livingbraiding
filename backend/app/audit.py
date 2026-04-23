@@ -12,6 +12,8 @@ from typing import Any, Iterable, Type
 
 from sqlalchemy.orm import Session
 
+from app.time_utils import utcnow_naive
+
 
 @dataclass(frozen=True)
 class FieldChange:
@@ -54,7 +56,7 @@ def write_audit_rows(
 ) -> None:
     if not changes:
         return
-    when = changed_at or datetime.utcnow()
+    when = changed_at or utcnow_naive()
     for ch in changes:
         db.add(
             log_model(

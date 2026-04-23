@@ -32,6 +32,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.questionnaire_field_validate import NormalizedQuestionnaireField, validate_questionnaire_field_form
 from app.ru_labels import ru_master_level, ru_questionnaire_field_type, ru_user_role
+from app.time_utils import utcnow_naive
 
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_master_level"] = ru_master_level
@@ -562,7 +563,7 @@ def category_field_edit_save(
     )
     _ = norm.as_structure_dict()
     _apply_normalized_category(field_inst, norm)
-    field_inst.updated_at = datetime.utcnow()
+    field_inst.updated_at = utcnow_naive()
     field_inst.updated_by_user_id = current_user.id
     write_audit_rows(
         db,
@@ -967,7 +968,7 @@ def subcategory_field_edit_save(
     )
     _ = norm.as_structure_dict()
     _apply_normalized_subcat(field, norm)
-    field.updated_at = datetime.utcnow()
+    field.updated_at = utcnow_naive()
     field.updated_by_user_id = current_user.id
     write_audit_rows(
         db,
@@ -1373,7 +1374,7 @@ def service_field_edit_save(
     )
     _ = norm.as_structure_dict()
     _apply_normalized_service(field_inst, norm)
-    field_inst.updated_at = datetime.utcnow()
+    field_inst.updated_at = utcnow_naive()
     field_inst.updated_by_user_id = current_user.id
     write_audit_rows(
         db,

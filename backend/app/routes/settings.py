@@ -25,6 +25,7 @@ from app.display_time import ALLOWED_TIMEZONES, ALLOWED_TIMEZONE_IDS, get_displa
 from app.forms_parse import parse_bool, parse_float, parse_int
 from app.mix_rates import mix_rates_for_admin_form
 from app.audit import diff_fields, write_audit_rows
+from app.time_utils import utcnow_naive
 from app.setting_keys import (
     AUDIT_RETENTION_MONTHS,
     DISPLAY_TIMEZONE,
@@ -148,7 +149,7 @@ def admin_settings_save(
     except ValueError:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
 
-    now = datetime.utcnow()
+    now = utcnow_naive()
 
     row = db.get(Setting, SALON_CUT_PCT)
     before_salon = SimpleNamespace(value=(row.value if row else None))
@@ -211,7 +212,7 @@ def admin_settings_system_save(
     if tz_raw not in ALLOWED_TIMEZONE_IDS:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
 
-    now = datetime.utcnow()
+    now = utcnow_naive()
 
     try:
         days = parse_int(edit_window_days, min=0, max=365, field_name=EDIT_WINDOW_DAYS)
@@ -389,7 +390,7 @@ async def admin_settings_work_rates_save(
             status_code=400,
         )
 
-    now = datetime.utcnow()
+    now = utcnow_naive()
     for k, v in payload.items():
         row = db.scalar(select(WorkRate).where(WorkRate.key == k))
         if not row:

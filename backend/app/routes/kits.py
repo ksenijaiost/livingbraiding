@@ -46,6 +46,7 @@ from app.kit_inlay_visit import (
 )
 from app.user_roles import select_users_with_any_role, user_has_any_role
 from app.webui import templates, ctx as _ctx
+from app.time_utils import utcnow_naive
 
 
 router = APIRouter(prefix="/kits", tags=["kits"])
@@ -371,7 +372,7 @@ async def admin_kit_discount_post(
             return RedirectResponse(url="/kits?err=" + err_q, status_code=303)
         before = SimpleNamespace(discount_percent=kit.discount_percent)
         kit.discount_percent = 0
-        kit.updated_at = datetime.utcnow()
+        kit.updated_at = utcnow_naive()
         kit.updated_by_user_id = current_user.id
         write_audit_rows(
             db,
@@ -397,7 +398,7 @@ async def admin_kit_discount_post(
         return RedirectResponse(url="/kits?err=" + err_q, status_code=303)
     before = SimpleNamespace(discount_percent=kit.discount_percent)
     kit.discount_percent = discount
-    kit.updated_at = datetime.utcnow()
+    kit.updated_at = utcnow_naive()
     kit.updated_by_user_id = current_user.id
     write_audit_rows(
         db,
@@ -450,7 +451,7 @@ async def admin_kit_edit_post(
         apply_kit_admin_form(kit, d)
         sync_kit_authors(db, kit, form)
         after_auth_ids = sorted([l.user_id for l in (kit.author_staff_links or [])])
-        kit.updated_at = datetime.utcnow()
+        kit.updated_at = utcnow_naive()
         kit.updated_by_user_id = current_user.id
         after = SimpleNamespace(
             sku=kit.sku,
@@ -564,7 +565,7 @@ async def admin_kit_reserve_post(
         for r in rows:
             db.delete(r)
         kit.pieces_available = int(kit.pieces_available or 0) + total_back
-        kit.updated_at = datetime.utcnow()
+        kit.updated_at = utcnow_naive()
         kit.updated_by_user_id = current_user.id
         write_audit_rows(
             db,
@@ -591,7 +592,7 @@ async def admin_kit_reserve_post(
                 return _err("Снять резерв может автор резерва или администратор.")
             before = SimpleNamespace(pieces_available=kit.pieces_available)
             kit.pieces_available = int(kit.pieces_available or 0) + int(row.pieces_reserved or 0)
-            kit.updated_at = datetime.utcnow()
+            kit.updated_at = utcnow_naive()
             kit.updated_by_user_id = current_user.id
             db.delete(row)
             write_audit_rows(
@@ -652,13 +653,13 @@ async def admin_kit_reserve_post(
 
     before = SimpleNamespace(pieces_available=kit.pieces_available)
     kit.pieces_available = avail - qty
-    kit.updated_at = datetime.utcnow()
+    kit.updated_at = utcnow_naive()
     kit.updated_by_user_id = current_user.id
     db.add(
         KitReserve(
             kit_id=kit.id,
             pieces_reserved=qty,
-            reserved_at=datetime.utcnow(),
+            reserved_at=utcnow_naive(),
             reserved_by_user_id=current_user.id,
             reserved_for_client_id=cid,
             reserved_for_user_id=uid,

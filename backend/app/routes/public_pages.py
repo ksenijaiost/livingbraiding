@@ -35,6 +35,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.display_time import get_display_timezone
+from app.time_utils import utcnow_naive
 from app.payroll_fund import (
     employee_fund_balance,
     employee_payout_total_net,
@@ -80,7 +81,7 @@ def home(
         return d.year, d.month
 
     # Month to render: default = current month in display timezone.
-    now_local = datetime.utcnow().replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
+    now_local = utcnow_naive().replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
     parsed = _parse_month_ym(m)
     year = parsed[0] if parsed else now_local.year
     month = parsed[1] if parsed else now_local.month

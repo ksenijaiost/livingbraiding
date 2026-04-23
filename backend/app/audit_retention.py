@@ -9,6 +9,7 @@ from datetime import datetime
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from app.time_utils import utcnow_naive
 from app.db.models import (
     BookingAuditLog,
     CategoryQuestionnaireFieldAuditLog,
@@ -54,7 +55,7 @@ _AUDIT_MODELS = (
 
 def _utc_months_ago(months: int) -> datetime:
     """Несколько календарных месяцев назад в «наивном» UTC (как datetime.utcnow в моделях)."""
-    now = datetime.utcnow()
+    now = utcnow_naive()
     y, m, d = now.year, now.month, now.day
     m -= months
     while m <= 0:

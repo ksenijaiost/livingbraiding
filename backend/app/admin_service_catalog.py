@@ -30,6 +30,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.ru_labels import ru_master_level, ru_user_role
+from app.time_utils import utcnow_naive
 
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_master_level"] = ru_master_level
@@ -207,7 +208,7 @@ def category_edit_save(
     cat.name = nm
     cat.is_active = _is_checked(is_active)
     cat.include_in_visit = _is_checked(include_in_visit)
-    cat.updated_at = datetime.utcnow()
+    cat.updated_at = utcnow_naive()
     cat.updated_by_user_id = current_user.id
     write_audit_rows(
         db,
@@ -398,7 +399,7 @@ def subcategory_edit_save(
     sub.show_tail_section = _is_checked(show_tail_section)
     sub.show_material_description = _is_checked(show_material_description)
     sub.show_thermo_visit = _is_checked(show_thermo_visit)
-    sub.updated_at = datetime.utcnow()
+    sub.updated_at = utcnow_naive()
     sub.updated_by_user_id = current_user.id
     write_audit_rows(
         db,
@@ -741,7 +742,7 @@ def service_edit_save(
     svc.retail_material_kanekalon = _is_checked(retail_material_kanekalon)
     svc.retail_material_kudri = _is_checked(retail_material_kudri)
     svc.retail_material_mix = _is_checked(retail_material_mix)
-    svc.updated_at = datetime.utcnow()
+    svc.updated_at = utcnow_naive()
     svc.updated_by_user_id = current_user.id
     write_audit_rows(
         db,

@@ -8,6 +8,7 @@ from typing import Sequence
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.time_utils import utcnow_naive
 from app.db.models import (
     Kit,
     MaterialPriceCurrent,
@@ -60,7 +61,7 @@ def append_ledger(
     if payout_payment_kind is not None and entry_kind != PayrollFundEntryKind.PAYOUT:
         raise ValueError("payout_payment_kind только для PAYOUT")
     row = PayrollFundLedger(
-        created_at=datetime.utcnow(),
+        created_at=utcnow_naive(),
         entry_kind=entry_kind,
         side=side,
         user_id=user_id,

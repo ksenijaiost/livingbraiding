@@ -75,6 +75,7 @@ from app.setting_keys import (
     SALON_CUT_PCT,
 )
 from app.zakaz_blanks import zakaz_blank_defs
+from app.time_utils import utcnow_naive
 
 
 def _ensure_demo_user_role_assignments(db: Session) -> None:
@@ -809,7 +810,7 @@ def _ensure_demo_operational_data(db: Session) -> None:
 
     # ---- Payroll periods ----
     if not db.scalar(select(PayrollPeriod).limit(1)):
-        now = datetime.utcnow()
+        now = utcnow_naive()
         cur_from = datetime(now.year, now.month, 1)
         next_month = (cur_from + timedelta(days=32)).replace(day=1)
         cur_to = next_month - timedelta(seconds=1)
@@ -852,7 +853,7 @@ def _ensure_demo_operational_data(db: Session) -> None:
 
         v1 = Visit(
             created_by_user_id=admin.id if admin else None,
-            performed_date=datetime.utcnow() - timedelta(days=1),
+            performed_date=utcnow_naive() - timedelta(days=1),
             duration_minutes=180,
             client_id=c1.id,
             client_type=VisitClientType.NEW,
@@ -926,7 +927,7 @@ def _ensure_demo_operational_data(db: Session) -> None:
             mat_kwargs["material_grams"] = grams_demo
         ps_mat = ProductSale(
             created_by_user_id=demo_creator_id,
-            performed_date=datetime.utcnow(),
+            performed_date=utcnow_naive(),
             client_id=c2.id,
             amount_from_client=1200,
             kind=ProductSaleKind.MATERIAL,
@@ -947,7 +948,7 @@ def _ensure_demo_operational_data(db: Session) -> None:
             db.add(
                 ProductSale(
                     created_by_user_id=admin.id if admin else (m1.id if m1 else 1),
-                    performed_date=datetime.utcnow(),
+                    performed_date=utcnow_naive(),
                     client_id=c1.id,
                     amount_from_client=2500,
                     kind=ProductSaleKind.KIT,
@@ -1007,7 +1008,7 @@ def _ensure_demo_operational_data(db: Session) -> None:
         b1 = Booking(
             created_by_user_id=creator_id,
             client_id=c1.id,
-            planned_date=(datetime.utcnow() + timedelta(days=3)).replace(
+            planned_date=(utcnow_naive() + timedelta(days=3)).replace(
                 second=0, microsecond=0
             ),
             kind=BookingKind.PRODUCT_SALE,
@@ -1045,7 +1046,7 @@ def _ensure_demo_operational_data(db: Session) -> None:
         b2 = Booking(
             created_by_user_id=creator_id,
             client_id=c2.id,
-            planned_date=(datetime.utcnow() + timedelta(days=5)).replace(
+            planned_date=(utcnow_naive() + timedelta(days=5)).replace(
                 second=0, microsecond=0
             ),
             kind=BookingKind.PRODUCT_SALE,
@@ -1084,8 +1085,8 @@ def _ensure_demo_operational_data(db: Session) -> None:
             db.add(
                 StudioExpense(
                     created_by_user_id=admin.id if admin else (m1.id if m1 else 1),
-                    created_at=datetime.utcnow(),
-                    date=datetime.utcnow(),
+                    created_at=utcnow_naive(),
+                    date=utcnow_naive(),
                     subcategory_id=sub.id,
                     amount=500.0,
                     comment="Демо расход",
