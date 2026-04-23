@@ -90,9 +90,55 @@ from app.zakaz_blanks import kit_form_blank_defs
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_user_role"] = ru_user_role
 router = APIRouter(prefix="/sales/work", tags=["work-products"])
+# GET-алиас под старые закладки/ссылки (если где-то фигурировал /admin/sales/...):
+#   /admin/sales/work/...  -> 308 -> /sales/work/...
+legacy_admin_router = APIRouter(prefix="/admin/sales/work", tags=["work-products-legacy"])
 _VIEW = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _MASTER = Depends(require_role(UserRole.MASTER))
 _SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
+
+
+def _redirect_admin_sales_work_to_canon(request: Request, *, suffix: str = "") -> RedirectResponse:
+    """Старые URL /admin/sales/work → канон /sales/work (GET, 308, query сохраняется)."""
+    suf = (suffix or "").strip()
+    if suf and not suf.startswith("/"):
+        suf = f"/{suf}"
+    new_path = f"/sales/work{suf}"
+    return RedirectResponse(url=str(request.url.replace(path=new_path)), status_code=308)
+
+
+@legacy_admin_router.get("", response_class=HTMLResponse)
+def work_list_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _VIEW,
+):
+    return _redirect_admin_sales_work_to_canon(request)
+
+
+@legacy_admin_router.get("/new", response_class=HTMLResponse)
+def work_new_get_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _MASTER,
+):
+    return _redirect_admin_sales_work_to_canon(request, suffix="/new")
+
+
+@legacy_admin_router.get("/{work_id}/edit", response_class=HTMLResponse)
+def work_edit_form_legacy_redirect(
+    work_id: int,
+    request: Request,
+    current_user: AuthUser = _SUPER,
+):
+    return _redirect_admin_sales_work_to_canon(request, suffix=f"/{int(work_id)}/edit")
+
+
+@legacy_admin_router.get("/{work_id}", response_class=HTMLResponse)
+def work_detail_legacy_redirect(
+    work_id: int,
+    request: Request,
+    current_user: AuthUser = _VIEW,
+):
+    return _redirect_admin_sales_work_to_canon(request, suffix=f"/{int(work_id)}")
 
 
 def _ctx(request: Request, current_user: AuthUser, **kwargs):
@@ -690,6 +736,7 @@ def work_new_get(
 
 
 @router.post("/new")
+@legacy_admin_router.post("/new")
 async def work_new_post(
     request: Request,
     current_user: AuthUser = _MASTER,
@@ -1295,6 +1342,7 @@ def _kit_has_any_usage(db: Session, kit_id: int) -> bool:
 
 
 @router.post("/{work_id}/void")
+@legacy_admin_router.post("/{work_id}/void")
 async def work_void(
     work_id: int,
     current_user: AuthUser = _SUPER,
@@ -1385,6 +1433,7 @@ def work_edit_form(
 
 
 @router.post("/{work_id}/edit")
+@legacy_admin_router.post("/{work_id}/edit")
 async def work_edit_save(
     request: Request,
     work_id: int,

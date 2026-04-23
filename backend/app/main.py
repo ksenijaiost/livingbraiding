@@ -28,6 +28,7 @@ app.include_router(admin_studio_expenses_routes.router)
 app.include_router(product_sales_routes.router)
 app.include_router(product_sales_routes.legacy_admin_router)
 app.include_router(work_products_routes.router)
+app.include_router(work_products_routes.legacy_admin_router)
 from app.routes.visits import router as visits_router  # noqa: E402
 app.include_router(visits_router)
 from app.routes.settings import router as settings_router  # noqa: E402
