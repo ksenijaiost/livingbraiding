@@ -29,7 +29,7 @@ from app.db.models import (
     WorkForInventoryAuditLog,
     WorkRateAuditLog,
 )
-from app.setting_keys import AUDIT_RETENTION_MONTHS
+from app.setting_keys import AUDIT_RETENTION_LAST_RUN_UTC, AUDIT_RETENTION_MONTHS
 
 DEFAULT_AUDIT_RETENTION_MONTHS = 6
 
@@ -104,3 +104,34 @@ def purge_expired_audit_logs(db: Session, *, months: int | None = None) -> int:
             total += rc
     db.commit()
     return total
+
+
+def purge_expired_audit_logs_startup_safe(db: Session) -> int:
+    """
+    Startup-friendly wrapper: run audit retention at most once per 24h (UTC naive).
+
+    Stores last run timestamp in `settings` key `audit_retention_last_run_utc` as ISO string.
+    """
+    now = utcnow_naive()
+    last_row = db.get(Setting, AUDIT_RETENTION_LAST_RUN_UTC)
+    last: datetime | None = None
+    if last_row and str(last_row.value or "").strip():
+        try:
+            last = datetime.fromisoformat(str(last_row.value).strip())
+        except Exception:
+            last = None
+
+    if last is not None:
+        delta_s = (now - last).total_seconds()
+        if delta_s >= 0 and delta_s < 24 * 60 * 60:
+            return 0
+
+    deleted = purge_expired_audit_logs(db)
+    # Record last run regardless of deleted count
+    if last_row is None:
+        last_row = Setting(key=AUDIT_RETENTION_LAST_RUN_UTC, value=now.isoformat(), updated_at=None, updated_by_user_id=None)
+        db.add(last_row)
+    else:
+        last_row.value = now.isoformat()
+    db.commit()
+    return deleted

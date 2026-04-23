@@ -7,13 +7,15 @@ FastAPI entrypoint: создание приложения, подключени�
 HTTP-роуты — в `app/routes/`.
 """
 
+import os
+
 from fastapi import FastAPI
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from app.admin_questionnaire_fields import router as admin_questionnaire_fields_router
 from app.admin_service_catalog import router as admin_service_catalog_router
-from app.audit_retention import purge_expired_audit_logs
+from app.audit_retention import purge_expired_audit_logs_startup_safe
 from app.db.session import get_db
 from app.seed import ensure_seed_data
 
@@ -79,14 +81,16 @@ app.include_router(auth_routes_router)
 
 @app.on_event("startup")
 def _startup():
-    """Create dev defaults (users/settings) if DB is empty."""
+    """Optional dev seed + audit retention."""
     db = next(get_db())
     try:
         try:
             db.execute(text("SELECT 1 FROM settings LIMIT 1"))
         except OperationalError:
             return
-        ensure_seed_data(db)
-        purge_expired_audit_logs(db)
+        enable_seed = os.environ.get("ENABLE_DEV_SEED", "").strip().lower() in ("1", "true", "yes")
+        if enable_seed:
+            ensure_seed_data(db)
+        purge_expired_audit_logs_startup_safe(db)
     finally:
         db.close()
