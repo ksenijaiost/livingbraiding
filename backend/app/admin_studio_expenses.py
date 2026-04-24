@@ -321,6 +321,9 @@ async def studio_expense_save(
         amount=row.amount,
         comment=row.comment,
     )
+    prev_date = row.date
+    prev_sub_id = row.subcategory_id
+    prev_amount = float(row.amount or 0.0)
     row.date = expense_dt
     row.subcategory_id = sub.id
     row.amount = float(amt)
@@ -335,7 +338,9 @@ async def studio_expense_save(
         changed_by_user_id=current_user.id,
         changes=diff_fields(before, row, ("date", "subcategory_id", "amount", "comment")),
     )
-    replace_studio_expense_ledger(db, row, current_user.id)
+    # Леджер меняем только если менялись финансовые поля (дата/подкатегория/сумма) или void.
+    if prev_date != row.date or prev_sub_id != row.subcategory_id or abs(prev_amount - float(row.amount or 0.0)) > 0.0001:
+        replace_studio_expense_ledger(db, row, current_user.id)
     db.commit()
 
     params: list[str] = []

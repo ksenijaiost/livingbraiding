@@ -838,6 +838,14 @@ async def product_sale_edit_save(
     except ValueError:
         return _render_new(request, current_user, db, error="Выберите корректный тип товара.", fp={})
 
+    # Леджер по продаже зависит только от суммы маржи студии и бонуса за смешку.
+    prev_ledger_sig = (
+        bool(getattr(sale, "is_voided", False)),
+        round(float(getattr(sale, "studio_margin_amount", 0.0) or 0.0), 2),
+        int(getattr(sale, "material_mix_bonus_user_id", 0) or 0),
+        round(float(getattr(sale, "material_mix_bonus_amount", 0.0) or 0.0), 2),
+    )
+
     # revert stock impact from previous state (if any)
     if sale.kind == ProductSaleKind.KIT and sale.kit_id and sale.kit_pieces_sold:
         _apply_kit_delta(db, sale.kit_id, int(sale.kit_pieces_sold))
@@ -992,7 +1000,14 @@ async def product_sale_edit_save(
             ),
         ),
     )
-    replace_product_sale_studio_accrual(db, sale, current_user.id)
+    new_ledger_sig = (
+        bool(getattr(sale, "is_voided", False)),
+        round(float(getattr(sale, "studio_margin_amount", 0.0) or 0.0), 2),
+        int(getattr(sale, "material_mix_bonus_user_id", 0) or 0),
+        round(float(getattr(sale, "material_mix_bonus_amount", 0.0) or 0.0), 2),
+    )
+    if new_ledger_sig != prev_ledger_sig:
+        replace_product_sale_studio_accrual(db, sale, current_user.id)
     db.commit()
     return RedirectResponse(url=f"/sales/products/{sale_id}?msg=saved", status_code=303)
 

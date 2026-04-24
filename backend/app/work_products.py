@@ -1474,6 +1474,17 @@ async def work_edit_save(
         )
     form = await request.form()
 
+    prev_staff_sig = tuple(
+        sorted(
+            (
+                (int(s.user_id), round(float(s.master_profit_amount or 0.0), 2))
+                for s in (w.staff_rows or [])
+            ),
+            key=lambda x: x[0],
+        )
+    )
+    prev_scope = getattr(w, "scope", None)
+
     def _p_float(name: str, default: float) -> float:
         try:
             return parse_float(form.get(name), default=default, field_name=name)
@@ -1553,7 +1564,15 @@ async def work_edit_save(
     staff_rows = list(
         db.scalars(select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == w.id)).all()
     )
-    replace_work_accruals(db, w.id, staff_rows, current_user.id)
+    new_staff_sig = tuple(
+        sorted(
+            ((int(s.user_id), round(float(s.master_profit_amount or 0.0), 2)) for s in staff_rows),
+            key=lambda x: x[0],
+        )
+    )
+    new_scope = getattr(w, "scope", None)
+    if new_scope != prev_scope or new_staff_sig != prev_staff_sig:
+        replace_work_accruals(db, w.id, staff_rows, current_user.id)
     db.commit()
     return RedirectResponse(url=f"/sales/work/{work_id}?msg=saved", status_code=303)
 
