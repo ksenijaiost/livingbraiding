@@ -183,7 +183,9 @@ def compute_work_financials(
     studio_share = _studio_share_snapshot(db)
     if kind not in (WorkKind.RUBBER, WorkKind.KIT_CORRECTION):
         studio_total = 0.0
-        if 0 < studio_share < 1 and master_total > 0:
+        # Для работ «в наличие» студия не получает долю на этапе производства:
+        # это расход (оплата мастерам) и себестоимость, а маржа появляется при продаже.
+        if scope != WorkScope.IN_STOCK and 0 < studio_share < 1 and master_total > 0:
             studio_total = master_total * (studio_share / (1.0 - studio_share))
     profit_total = master_total + studio_total
     cost_total_amount = float(mat_cost) + float(extra_costs_amount)

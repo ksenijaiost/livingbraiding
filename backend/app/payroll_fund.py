@@ -26,6 +26,7 @@ from app.db.models import (
     Visit,
     VisitMaster,
     WorkForInventory,
+    WorkScope,
     WorkForInventoryStaff,
 )
 
@@ -193,9 +194,11 @@ def post_work_accruals(
 ) -> None:
     if _has_accruals_for_source(db, PayrollFundSourceKind.WORK, work_id):
         return
+    total_staff = 0.0
     for s in staff_rows:
         amt = money_q2(float(s.master_profit_amount or 0))
         if amt > 0:
+            total_staff = money_q2(total_staff + amt)
             append_ledger(
                 db,
                 entry_kind=PayrollFundEntryKind.ACCRUAL,
@@ -206,6 +209,22 @@ def post_work_accruals(
                 source_id=work_id,
                 created_by_user_id=created_by_user_id,
             )
+    # Для работ «в наличие» начисление мастерам должно идти из фонда студии,
+    # чтобы не появлялись «деньги из воздуха» до продажи.
+    if total_staff > 0:
+        w = db.get(WorkForInventory, int(work_id))
+        if w and w.scope == WorkScope.IN_STOCK:
+            append_ledger(
+                db,
+                entry_kind=PayrollFundEntryKind.EXPENSE,
+                side=PayrollFundSide.STUDIO,
+                user_id=None,
+                amount=-money_q2(total_staff),
+                source_kind=PayrollFundSourceKind.WORK,
+                source_id=work_id,
+                created_by_user_id=created_by_user_id,
+                comment="Оплата мастерам (работа в наличие)",
+            )
 
 
 def replace_work_accruals(
@@ -215,9 +234,11 @@ def replace_work_accruals(
     created_by_user_id: int | None,
 ) -> None:
     storno_source_accruals(db, PayrollFundSourceKind.WORK, work_id, created_by_user_id)
+    total_staff = 0.0
     for s in staff_rows:
         amt = money_q2(float(s.master_profit_amount or 0))
         if amt > 0:
+            total_staff = money_q2(total_staff + amt)
             append_ledger(
                 db,
                 entry_kind=PayrollFundEntryKind.ACCRUAL,
@@ -227,6 +248,20 @@ def replace_work_accruals(
                 source_kind=PayrollFundSourceKind.WORK,
                 source_id=work_id,
                 created_by_user_id=created_by_user_id,
+            )
+    if total_staff > 0:
+        w = db.get(WorkForInventory, int(work_id))
+        if w and w.scope == WorkScope.IN_STOCK:
+            append_ledger(
+                db,
+                entry_kind=PayrollFundEntryKind.EXPENSE,
+                side=PayrollFundSide.STUDIO,
+                user_id=None,
+                amount=-money_q2(total_staff),
+                source_kind=PayrollFundSourceKind.WORK,
+                source_id=work_id,
+                created_by_user_id=created_by_user_id,
+                comment="Оплата мастерам (работа в наличие)",
             )
 
 

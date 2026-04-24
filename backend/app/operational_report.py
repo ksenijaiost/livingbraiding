@@ -352,7 +352,10 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
     work_studio = 0.0
     work_masters = 0.0
     for w in works:
-        work_studio = money_q2(work_studio + float(w.studio_profit_amount or 0))
+        # Для работ «в наличие» студийная доля в снимках — не выручка/маржа.
+        # Деньги появляются только при продаже; здесь учитываем только начисления мастерам.
+        if w.scope != WorkScope.IN_STOCK:
+            work_studio = money_q2(work_studio + float(w.studio_profit_amount or 0))
         for s in w.staff_rows:
             a = money_q2(float(s.master_profit_amount or 0))
             work_masters = money_q2(work_masters + a)
