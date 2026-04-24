@@ -596,6 +596,8 @@ def _ensure_zakaz_products_catalog(db: Session) -> None:
     Источник финансовых полей (master_pay/studio_pay/fixed_expense) берём из service-catalog «Заказ»,
     чтобы не дублировать логику и не потерять старые коэффициенты. Клиентскую цену (price) задаём здесь.
     """
+    cat = db.scalar(select(ServiceCategory).where(ServiceCategory.name == "Заказ"))
+
     # Финансовые поля теперь живут в catalog_products.meta_json; из service-catalog их не тянем.
     fin_map: dict[tuple[str, str], dict] = {}
 
