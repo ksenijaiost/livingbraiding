@@ -5,7 +5,7 @@ Revises:
 Create Date: 2026-03-31
 
 service_categories.include_in_visit — участие категории в форме визита мастера.
-services.order_rubber_extra_time_amort — услуга «Заказ» / резинки (длительность + амортизация).
+services.order_rubber_extra_time_amort — удалено (раньше: услуга «Заказ» / резинки).
 services.retail_material_* — флаги розницы материала (канекалон / кудри / смешка).
 product_sales — поля материала: граммы по типам, снимки цен, смешка, ручная себестоимость, material_cost_review_pending.
 
@@ -738,12 +738,7 @@ def upgrade() -> None:
         sa.Column("new_value", sa.Text(), nullable=True),
     )
 
-    op.execute(
-        """
-        UPDATE services SET order_rubber_extra_time_amort = 1
-        WHERE name IN ('Прикрепление хвоста', 'Брейд под хвост')
-        """
-    )
+    # services.order_rubber_extra_time_amort удалено — старую правку больше не применяем.
 
     # ---- Продажа товаров (без услуги): материал/комплект/резинки/другое ----
     op.create_table(
