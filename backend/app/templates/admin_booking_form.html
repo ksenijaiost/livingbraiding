@@ -364,6 +364,21 @@
           </div>
         </div>
         <div style="margin-top: 10px;">
+          <label>Фото (до 3)</label>
+          <div class="row">
+            <div style="flex:1; min-width: 220px;">
+              <input name="photo_1" maxlength="300" value="{{ fp.get('photo_1','') }}" placeholder="Фото 1 (ссылка/путь)" />
+            </div>
+            <div style="flex:1; min-width: 220px;">
+              <input name="photo_2" maxlength="300" value="{{ fp.get('photo_2','') }}" placeholder="Фото 2 (ссылка/путь)" />
+            </div>
+            <div style="flex:1; min-width: 220px;">
+              <input name="photo_3" maxlength="300" value="{{ fp.get('photo_3','') }}" placeholder="Фото 3 (ссылка/путь)" />
+            </div>
+          </div>
+          <p class="muted" style="margin:6px 0 0;font-size:12px;">Загрузка/хранение фото будет добавлена отдельным этапом.</p>
+        </div>
+        <div style="margin-top: 10px;">
           <label>Комментарий к брони</label>
           <textarea name="comment" rows="3" maxlength="2000">{{ fp.get('comment','') }}</textarea>
         </div>

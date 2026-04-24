@@ -781,6 +781,12 @@ async def admin_booking_new_post(
     quoted_price_text = strip_or_none(str(fp.get("quoted_price_text") or ""), 120)
     deposit_raw = str(fp.get("deposit_amount") or "").strip()
     comment = strip_or_none(str(fp.get("comment") or "")) or None
+    photo_1 = strip_or_none(str(fp.get("photo_1") or ""), 300) or None
+    photo_2 = strip_or_none(str(fp.get("photo_2") or ""), 300) or None
+    photo_3 = strip_or_none(str(fp.get("photo_3") or ""), 300) or None
+    photo_1 = strip_or_none(str(fp.get("photo_1") or ""), 300) or None
+    photo_2 = strip_or_none(str(fp.get("photo_2") or ""), 300) or None
+    photo_3 = strip_or_none(str(fp.get("photo_3") or ""), 300) or None
 
     err: str | None = None
     client: Client | None = None
@@ -882,6 +888,9 @@ async def admin_booking_new_post(
         status=BookingStatus.ACTIVE,
         quoted_price_text=quoted_price_text,
         deposit_amount=deposit_amount,
+        photo_1=photo_1,
+        photo_2=photo_2,
+        photo_3=photo_3,
         comment=comment,
         planned_service_id=planned_service_id,
         planned_product_kind=planned_product_kind,
@@ -1217,6 +1226,9 @@ async def admin_booking_edit_post(
         status=b.status,
         quoted_price_text=b.quoted_price_text,
         deposit_amount=b.deposit_amount,
+        photo_1=getattr(b, "photo_1", None),
+        photo_2=getattr(b, "photo_2", None),
+        photo_3=getattr(b, "photo_3", None),
         comment=b.comment,
         planned_service_id=b.planned_service_id,
         planned_product_kind=b.planned_product_kind,
@@ -1228,6 +1240,9 @@ async def admin_booking_edit_post(
     b.kind = BookingKind(kind_raw)
     b.quoted_price_text = quoted_price_text
     b.deposit_amount = deposit_amount
+    b.photo_1 = photo_1
+    b.photo_2 = photo_2
+    b.photo_3 = photo_3
     b.comment = comment
     b.planned_service_id = planned_service_id
     b.planned_product_kind = planned_product_kind
@@ -1257,6 +1272,9 @@ async def admin_booking_edit_post(
         status=b.status,
         quoted_price_text=b.quoted_price_text,
         deposit_amount=b.deposit_amount,
+        photo_1=getattr(b, "photo_1", None),
+        photo_2=getattr(b, "photo_2", None),
+        photo_3=getattr(b, "photo_3", None),
         comment=b.comment,
         planned_service_id=b.planned_service_id,
         planned_product_kind=b.planned_product_kind,
@@ -1279,6 +1297,9 @@ async def admin_booking_edit_post(
                 "status",
                 "quoted_price_text",
                 "deposit_amount",
+                "photo_1",
+                "photo_2",
+                "photo_3",
                 "comment",
                 "planned_service_id",
                 "planned_product_kind",

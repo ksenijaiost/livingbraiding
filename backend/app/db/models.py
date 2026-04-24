@@ -639,6 +639,9 @@ class Booking(Base):
 
     quoted_price_text: Mapped[str | None] = mapped_column(String(120), nullable=True)
     deposit_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    photo_1: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    photo_2: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    photo_3: Mapped[str | None] = mapped_column(String(300), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # VISIT planning

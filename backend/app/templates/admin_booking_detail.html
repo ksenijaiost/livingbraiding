@@ -258,6 +258,15 @@
       </div>
     {% endif %}
 
+    {% if booking.photo_1 or booking.photo_2 or booking.photo_3 %}
+      <h3 style="margin-top: 18px;">Фото</h3>
+      <ul style="margin:6px 0 0; padding-left: 1.2rem;">
+        {% if booking.photo_1 %}<li><a href="{{ booking.photo_1 }}" target="_blank" rel="noopener">Фото 1</a></li>{% endif %}
+        {% if booking.photo_2 %}<li><a href="{{ booking.photo_2 }}" target="_blank" rel="noopener">Фото 2</a></li>{% endif %}
+        {% if booking.photo_3 %}<li><a href="{{ booking.photo_3 }}" target="_blank" rel="noopener">Фото 3</a></li>{% endif %}
+      </ul>
+    {% endif %}
+
     <h3 style="margin-top: 18px;">Аудит</h3>
     {% if not audit_rows %}
       <p class="muted">Пока нет изменений.</p>
