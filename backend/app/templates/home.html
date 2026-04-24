@@ -4,38 +4,56 @@
     <h2 style="margin-top: 0;">Главная</h2>
 
     {% if payroll_home %}
-      <div class="card" style="margin-bottom: 16px; background: #f8fafc;">
-        <h3 style="margin-top: 0;">Сводка</h3>
-        <div style="display:flex; flex-direction:column; gap:10px;">
-          <div>
-            <div class="muted" style="font-size:12px;">Остаток личного фонда ЗП</div>
-            <div style="font-size: 1.15rem;"><strong>{{ "%.2f"|format(payroll_home.personal_balance) }} ₽</strong></div>
-          </div>
-          <div>
-            <div class="muted" style="font-size:12px;">Выплачено вам (по журналу)</div>
-            <div><strong>{{ "%.2f"|format(payroll_home.paid_net) }} ₽</strong></div>
-          </div>
-          {% if payroll_home.show_studio %}
-            <div>
-              <div class="muted" style="font-size:12px;">Остаток фонда ЗП студии</div>
-              <div><strong>{{ "%.2f"|format(payroll_home.studio_balance) }} ₽</strong></div>
-            </div>
-            {% if payroll_home.period %}
+      {% set _pb = (payroll_home.personal_balance or 0)|float %}
+      {% set _paid = (payroll_home.paid_net or 0)|float %}
+      {% set _show_studio = payroll_home.show_studio %}
+      {% set _sb = (payroll_home.studio_balance or 0)|float %}
+      {% set _period_exp = ((payroll_home.period.expenses_sum if payroll_home.period else 0) or 0)|float %}
+
+      {% set _pb_show = _pb|abs > 0.001 %}
+      {% set _paid_show = _paid|abs > 0.001 %}
+      {% set _sb_show = _show_studio and (_sb|abs > 0.001) %}
+      {% set _period_show = _show_studio and payroll_home.period and (_period_exp|abs > 0.001) %}
+      {% set _summary_show = _pb_show or _paid_show or _sb_show or _period_show %}
+
+      {% if _summary_show %}
+        <div class="card" style="margin-bottom: 16px; background: #f8fafc;">
+          <h3 style="margin-top: 0;">Сводка</h3>
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            {% if _pb_show %}
+              <div>
+                <div class="muted" style="font-size:12px;">Остаток личного фонда ЗП</div>
+                <div style="font-size: 1.15rem;"><strong>{{ "%.2f"|format(_pb) }} ₽</strong></div>
+              </div>
+            {% endif %}
+            {% if _paid_show %}
+              <div>
+                <div class="muted" style="font-size:12px;">Выплачено вам (по журналу)</div>
+                <div><strong>{{ "%.2f"|format(_paid) }} ₽</strong></div>
+              </div>
+            {% endif %}
+            {% if _sb_show %}
+              <div>
+                <div class="muted" style="font-size:12px;">Остаток фонда ЗП студии</div>
+                <div><strong>{{ "%.2f"|format(_sb) }} ₽</strong></div>
+              </div>
+            {% endif %}
+            {% if _period_show %}
               <div>
                 <div class="muted" style="font-size:12px;">
                   Расходы за текущий период ({{ payroll_home.period.date_from.strftime("%d.%m.%Y") }}–{{ payroll_home.period.date_to.strftime("%d.%m.%Y") }})
                 </div>
-                <div><strong>{{ "%.2f"|format(payroll_home.period.expenses_sum) }} ₽</strong></div>
+                <div><strong>{{ "%.2f"|format(_period_exp) }} ₽</strong></div>
               </div>
             {% endif %}
+          </div>
+          {% if payroll_home.display_tz %}
+            <p class="muted" style="margin: 10px 0 0; font-size: 12px;">
+              Календарь и группировка по дням — в часовом поясе: <strong>{{ payroll_home.display_tz }}</strong>.
+            </p>
           {% endif %}
         </div>
-        {% if payroll_home.display_tz %}
-          <p class="muted" style="margin: 10px 0 0; font-size: 12px;">
-            Календарь и группировка по дням — в часовом поясе: <strong>{{ payroll_home.display_tz }}</strong>.
-          </p>
-        {% endif %}
-      </div>
+      {% endif %}
     {% endif %}
 
     {% if calendar_ctx %}
