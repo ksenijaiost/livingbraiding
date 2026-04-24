@@ -165,12 +165,6 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
         sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
-        sa.Column(
-            "include_in_visit",
-            sa.Boolean(),
-            nullable=False,
-            server_default=sa.text("1"),
-        ),
         sa.UniqueConstraint("name", name="uq_service_category_name"),
     )
 
@@ -207,18 +201,7 @@ def upgrade() -> None:
         sa.Column("price_senior_to", sa.Float(), nullable=True),
         sa.Column("kit_section_override", sa.Boolean(), nullable=True),
         sa.Column("tail_section_override", sa.Boolean(), nullable=True),
-        sa.Column("hide_material_description", sa.Boolean(), nullable=False, server_default=sa.text("0")),
-        sa.Column(
-            "order_rubber_extra_time_amort",
-            sa.Boolean(),
-            nullable=False,
-            server_default=sa.text("0"),
-        ),
-        sa.Column("master_pay_amount", sa.Float(), nullable=True),
-        sa.Column("studio_pay_amount", sa.Float(), nullable=True),
-        sa.Column("fixed_expense_amount", sa.Float(), nullable=True),
-        sa.Column("is_per_unit", sa.Boolean(), nullable=False, server_default=sa.text("0")),
-        sa.Column("unit_label", sa.String(length=60), nullable=True),
+        sa.Column("material_description_override", sa.Boolean(), nullable=True),
         sa.Column(
             "retail_material_kanekalon",
             sa.Boolean(),

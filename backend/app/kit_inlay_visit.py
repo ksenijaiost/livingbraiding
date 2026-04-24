@@ -761,7 +761,7 @@ def validate_master_visit_step1(db: Session, inp: KitInlayFormInput) -> None:
     )
     if not service or not service.subcategory or not service.subcategory.category:
         raise ValueError("Услуга не найдена")
-    if not service.subcategory.category.include_in_visit:
+    if (service.subcategory.category.name or "").strip() in ("Заказ", "Продажа материала"):
         raise ValueError("Эта позиция недоступна для выбора в визите")
 
     _resolve_visit_master_allocations(db, inp.visit_master_allocations)
@@ -865,7 +865,7 @@ def save_kit_inlay_visit(
     )
     if not service or not service.subcategory or not service.subcategory.category:
         raise ValueError("Услуга не найдена")
-    if not service.subcategory.category.include_in_visit:
+    if (service.subcategory.category.name or "").strip() in ("Заказ", "Продажа материала"):
         raise ValueError("Эта позиция недоступна для выбора в визите")
 
     payload = build_payload_from_input(inp, db)
@@ -1048,6 +1048,8 @@ def save_kit_inlay_visit(
 
 
 def list_master_visit_services(db: Session) -> list[Service]:
+    # Категории "Заказ"/"Продажа материала" — отдельные потоки, не в форме визита.
+    _EXCLUDED_CATS = ("Заказ", "Продажа материала")
     return list(
         db.scalars(
             select(Service)
@@ -1056,7 +1058,8 @@ def list_master_visit_services(db: Session) -> list[Service]:
             .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
             .where(
                 Service.is_active.is_(True),
-                ServiceCategory.include_in_visit.is_(True),
+                ServiceCategory.is_active.is_(True),
+                ServiceCategory.name.not_in(_EXCLUDED_CATS),
             )
             .order_by(
                 ServiceCategory.name.asc(),
@@ -1068,7 +1071,7 @@ def list_master_visit_services(db: Session) -> list[Service]:
 
 
 def list_master_visit_services_catalog(db: Session) -> list[dict[str, Any]]:
-    """Категория → подкатегория → услуга для формы визита (все категории с include_in_visit)."""
+    """Категория → подкатегория → услуга для формы визита (все активные категории, кроме отдельных потоков)."""
 
     def _opt_f(v: float | None) -> float | None:
         return None if v is None else float(v)

@@ -476,7 +476,7 @@ def _ensure_service_kit_material_overrides(db: Session) -> None:
             )
         )
         if svc:
-            svc.hide_material_description = True
+            svc.material_description_override = False
 
 
 def _move_muzhchiny_services_between_subcategories(db: Session) -> None:
@@ -596,21 +596,8 @@ def _ensure_zakaz_products_catalog(db: Session) -> None:
     Источник финансовых полей (master_pay/studio_pay/fixed_expense) берём из service-catalog «Заказ»,
     чтобы не дублировать логику и не потерять старые коэффициенты. Клиентскую цену (price) задаём здесь.
     """
-    # Map from service name -> {master_pay, studio_pay, fixed_expense, is_per_unit, unit_label}
+    # Финансовые поля теперь живут в catalog_products.meta_json; из service-catalog их не тянем.
     fin_map: dict[tuple[str, str], dict] = {}
-    cat = db.scalar(select(ServiceCategory).where(ServiceCategory.name == "Заказ"))
-    if cat:
-        subs = list(db.scalars(select(ServiceSubcategory).where(ServiceSubcategory.category_id == cat.id)).all())
-        for sub in subs:
-            svcs = list(db.scalars(select(Service).where(Service.subcategory_id == sub.id)).all())
-            for s in svcs:
-                fin_map[(sub.name, s.name)] = {
-                    "master_pay": float(s.master_pay_amount or 0.0),
-                    "studio_pay": float(s.studio_pay_amount or 0.0),
-                    "fixed_expense": float(s.fixed_expense_amount or 0.0),
-                    "is_per_unit": bool(getattr(s, "is_per_unit", False)),
-                    "unit_label": (getattr(s, "unit_label", None) or None),
-                }
 
     # ---- Blanks (used for kit price + master pay) ----
     so = 0

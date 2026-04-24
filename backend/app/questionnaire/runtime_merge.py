@@ -88,9 +88,15 @@ def _filter_category_specs(
     out: list[MergedQuestionnaireFieldSpec] = []
     for s in specs:
         if s.field_key == "material_description":
-            if not subcategory.show_material_description:
-                continue
-            if service.hide_material_description:
+            # 3-состояния:
+            # - None → как у подкатегории
+            # - True → всегда показывать
+            # - False → не показывать
+            md_override = getattr(service, "material_description_override", None)
+            if md_override is None:
+                if not subcategory.show_material_description:
+                    continue
+            elif md_override is False:
                 continue
         out.append(s)
     return out

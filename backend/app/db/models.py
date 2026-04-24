@@ -274,8 +274,6 @@ class ServiceCategory(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    # False: не в форме визита (напр. продажа материала — отдельный поток на этапе 7).
-    include_in_visit: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     questionnaire_fields: Mapped[list["CategoryQuestionnaireField"]] = relationship(
         back_populates="category",
@@ -365,22 +363,14 @@ class Service(Base):
     kit_section_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # None — брать из подкатегории show_tail_section; True/False — принудительно.
     tail_section_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # Не показывать «Описание про материал» даже если подкатегория позволяет.
-    hide_material_description: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    order_rubber_extra_time_amort: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # None — брать из подкатегории show_material_description; True — показывать; False — не показывать.
+    material_description_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # Розница «Продажа материала»: какие блоки ценообразования показывать (независимые флаги).
     retail_material_kanekalon: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     retail_material_kudri: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     retail_material_mix: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Экономика (для суперадмина): используется для автоподсчёта ЗП/студии/расходов.
-    # Если is_per_unit=True — значения ниже считаются "за 1 единицу" (крепление/коса/шт).
-    master_pay_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
-    studio_pay_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
-    fixed_expense_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
-    is_per_unit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    unit_label: Mapped[str | None] = mapped_column(String(60), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 

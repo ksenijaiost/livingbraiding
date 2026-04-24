@@ -67,6 +67,25 @@ def _is_checked(raw: object | None) -> bool:
     return str(raw).lower() in ("1", "on", "true", "yes")
 
 
+def _parse_tri_state(raw: object | None) -> bool | None:
+    """
+    Радио с 3 значениями:
+    - "" / None / "inherit" → None (как у подкатегории)
+    - "show" → True
+    - "hide" → False
+    """
+    if raw is None:
+        return None
+    t = str(raw).strip().lower()
+    if t in ("", "inherit", "none", "null"):
+        return None
+    if t in ("show", "1", "on", "true", "yes"):
+        return True
+    if t in ("hide", "0", "off", "false", "no"):
+        return False
+    return None
+
+
 def _parse_kit_section_override(raw: object | None) -> bool | None:
     """Пусто → наследовать от подкатегории (NULL в БД)."""
     if raw is None:
@@ -139,7 +158,6 @@ def category_new_form(
 def category_new_save(
     name: str = Form(...),
     is_active: str | None = Form(None),
-    include_in_visit: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -149,7 +167,6 @@ def category_new_save(
     cat = ServiceCategory(
         name=nm,
         is_active=_is_checked(is_active),
-        include_in_visit=_is_checked(include_in_visit),
     )
     db.add(cat)
     try:
@@ -181,7 +198,7 @@ def category_edit_form(
             category=cat,
             form_name=cat.name,
             form_active=cat.is_active,
-            form_include_in_visit=cat.include_in_visit,
+            form_include_in_visit=True,
         ),
     )
 
@@ -191,14 +208,13 @@ def category_edit_save(
     category_id: int,
     name: str = Form(...),
     is_active: str | None = Form(None),
-    include_in_visit: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
     cat = db.get(ServiceCategory, category_id)
     if cat is None:
         raise HTTPException(status_code=404, detail="Категория не найдена")
-    before = SimpleNamespace(name=cat.name, is_active=cat.is_active, include_in_visit=cat.include_in_visit)
+    before = SimpleNamespace(name=cat.name, is_active=cat.is_active)
     nm = (name or "").strip()
     if not nm:
         return RedirectResponse(
@@ -207,7 +223,6 @@ def category_edit_save(
         )
     cat.name = nm
     cat.is_active = _is_checked(is_active)
-    cat.include_in_visit = _is_checked(include_in_visit)
     cat.updated_at = utcnow_naive()
     cat.updated_by_user_id = current_user.id
     write_audit_rows(
@@ -216,7 +231,7 @@ def category_edit_save(
         entity_field="category_id",
         entity_id=cat.id,
         changed_by_user_id=current_user.id,
-        changes=diff_fields(before, cat, ("name", "is_active", "include_in_visit")),
+        changes=diff_fields(before, cat, ("name", "is_active")),
     )
     try:
         db.commit()
@@ -491,15 +506,9 @@ def service_new_form(
             form_mt="",
             form_sf="",
             form_st="",
-            form_master_pay="",
-            form_studio_pay="",
-            form_fixed_exp="",
-            form_is_per_unit=False,
-            form_unit_label="",
             form_kit_override="",
             form_tail_override="",
-            form_hide_material=False,
-            form_order_rubber=False,
+            form_material_desc_override="",
             form_retail_kanekalon=False,
             form_retail_kudri=False,
             form_retail_mix=False,
@@ -518,15 +527,9 @@ def service_new_save(
     price_middle_to: str | None = Form(None),
     price_senior_from: str | None = Form(None),
     price_senior_to: str | None = Form(None),
-    master_pay_amount: str | None = Form(None),
-    studio_pay_amount: str | None = Form(None),
-    fixed_expense_amount: str | None = Form(None),
-    is_per_unit: str | None = Form(None),
-    unit_label: str | None = Form(None),
     kit_section_override: str | None = Form(None),
     tail_section_override: str | None = Form(None),
-    hide_material_description: str | None = Form(None),
-    order_rubber_extra_time_amort: str | None = Form(None),
+    material_description_override: str | None = Form(None),
     retail_material_kanekalon: str | None = Form(None),
     retail_material_kudri: str | None = Form(None),
     retail_material_mix: str | None = Form(None),
@@ -564,15 +567,9 @@ def service_new_save(
         price_middle_to=mt,
         price_senior_from=sf,
         price_senior_to=st,
-        master_pay_amount=_parse_optional_price(master_pay_amount),
-        studio_pay_amount=_parse_optional_price(studio_pay_amount),
-        fixed_expense_amount=_parse_optional_price(fixed_expense_amount),
-        is_per_unit=_is_checked(is_per_unit),
-        unit_label=(unit_label or "").strip()[:60] or None,
         kit_section_override=_parse_kit_section_override(kit_section_override),
         tail_section_override=_parse_tail_section_override(tail_section_override),
-        hide_material_description=_is_checked(hide_material_description),
-        order_rubber_extra_time_amort=_is_checked(order_rubber_extra_time_amort),
+        material_description_override=_parse_tri_state(material_description_override),
         retail_material_kanekalon=_is_checked(retail_material_kanekalon),
         retail_material_kudri=_is_checked(retail_material_kudri),
         retail_material_mix=_is_checked(retail_material_mix),
@@ -587,7 +584,6 @@ def service_new_save(
             url=f"/admin/catalog/services/new?subcategory_id={q}&err=duplicate",
             status_code=303,
         )
-    # Поля анкеты услуги — отдельный шаг; при создании строк нет (общая форма подкатегории подтягивается позже).
     return RedirectResponse(url=f"/admin/catalog/subcategories/{subcategory_id}/services", status_code=303)
 
 
@@ -624,11 +620,6 @@ def service_edit_form(
             form_mt=_fmt_price_input(svc.price_middle_to),
             form_sf=_fmt_price_input(svc.price_senior_from),
             form_st=_fmt_price_input(svc.price_senior_to),
-            form_master_pay=_fmt_price_input(svc.master_pay_amount),
-            form_studio_pay=_fmt_price_input(svc.studio_pay_amount),
-            form_fixed_exp=_fmt_price_input(svc.fixed_expense_amount),
-            form_is_per_unit=bool(svc.is_per_unit),
-            form_unit_label=(svc.unit_label or ""),
             form_kit_override=(
                 ""
                 if svc.kit_section_override is None
@@ -639,8 +630,11 @@ def service_edit_form(
                 if getattr(svc, "tail_section_override", None) is None
                 else ("1" if svc.tail_section_override else "0")
             ),
-            form_hide_material=svc.hide_material_description,
-            form_order_rubber=svc.order_rubber_extra_time_amort,
+            form_material_desc_override=(
+                ""
+                if getattr(svc, "material_description_override", None) is None
+                else ("show" if svc.material_description_override else "hide")
+            ),
             form_retail_kanekalon=svc.retail_material_kanekalon,
             form_retail_kudri=svc.retail_material_kudri,
             form_retail_mix=svc.retail_material_mix,
@@ -659,15 +653,9 @@ def service_edit_save(
     price_middle_to: str | None = Form(None),
     price_senior_from: str | None = Form(None),
     price_senior_to: str | None = Form(None),
-    master_pay_amount: str | None = Form(None),
-    studio_pay_amount: str | None = Form(None),
-    fixed_expense_amount: str | None = Form(None),
-    is_per_unit: str | None = Form(None),
-    unit_label: str | None = Form(None),
     kit_section_override: str | None = Form(None),
     tail_section_override: str | None = Form(None),
-    hide_material_description: str | None = Form(None),
-    order_rubber_extra_time_amort: str | None = Form(None),
+    material_description_override: str | None = Form(None),
     retail_material_kanekalon: str | None = Form(None),
     retail_material_kudri: str | None = Form(None),
     retail_material_mix: str | None = Form(None),
@@ -690,15 +678,9 @@ def service_edit_save(
         price_middle_to=svc.price_middle_to,
         price_senior_from=svc.price_senior_from,
         price_senior_to=svc.price_senior_to,
-        master_pay_amount=svc.master_pay_amount,
-        studio_pay_amount=svc.studio_pay_amount,
-        fixed_expense_amount=svc.fixed_expense_amount,
-        is_per_unit=svc.is_per_unit,
-        unit_label=svc.unit_label,
         kit_section_override=svc.kit_section_override,
         tail_section_override=getattr(svc, "tail_section_override", None),
-        hide_material_description=svc.hide_material_description,
-        order_rubber_extra_time_amort=svc.order_rubber_extra_time_amort,
+        material_description_override=getattr(svc, "material_description_override", None),
         retail_material_kanekalon=svc.retail_material_kanekalon,
         retail_material_kudri=svc.retail_material_kudri,
         retail_material_mix=svc.retail_material_mix,
@@ -730,15 +712,9 @@ def service_edit_save(
     svc.price_middle_to = mt
     svc.price_senior_from = sf
     svc.price_senior_to = st
-    svc.master_pay_amount = _parse_optional_price(master_pay_amount)
-    svc.studio_pay_amount = _parse_optional_price(studio_pay_amount)
-    svc.fixed_expense_amount = _parse_optional_price(fixed_expense_amount)
-    svc.is_per_unit = _is_checked(is_per_unit)
-    svc.unit_label = (unit_label or "").strip()[:60] or None
     svc.kit_section_override = _parse_kit_section_override(kit_section_override)
     svc.tail_section_override = _parse_tail_section_override(tail_section_override)
-    svc.hide_material_description = _is_checked(hide_material_description)
-    svc.order_rubber_extra_time_amort = _is_checked(order_rubber_extra_time_amort)
+    svc.material_description_override = _parse_tri_state(material_description_override)
     svc.retail_material_kanekalon = _is_checked(retail_material_kanekalon)
     svc.retail_material_kudri = _is_checked(retail_material_kudri)
     svc.retail_material_mix = _is_checked(retail_material_mix)
@@ -762,15 +738,9 @@ def service_edit_save(
                 "price_middle_to",
                 "price_senior_from",
                 "price_senior_to",
-                "master_pay_amount",
-                "studio_pay_amount",
-                "fixed_expense_amount",
-                "is_per_unit",
-                "unit_label",
                 "kit_section_override",
                 "tail_section_override",
-                "hide_material_description",
-                "order_rubber_extra_time_amort",
+                "material_description_override",
                 "retail_material_kanekalon",
                 "retail_material_kudri",
                 "retail_material_mix",

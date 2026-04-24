@@ -50,10 +50,13 @@ def products_catalog_view(
     current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
+    # Исторически сюда попадали категории "товаров" из services.
+    # Сейчас опираемся на имена отдельных потоков.
+    _SERVICE_PRODUCT_CATS = ("Заказ", "Продажа материала")
     service_cats = list(
         db.scalars(
             select(ServiceCategory.name)
-            .where(ServiceCategory.is_active.is_(True), ServiceCategory.include_in_visit.is_(False))
+            .where(ServiceCategory.is_active.is_(True), ServiceCategory.name.in_(_SERVICE_PRODUCT_CATS))
             .order_by(ServiceCategory.name.asc())
         ).all()
     )
@@ -114,7 +117,7 @@ def products_catalog_view(
                     .where(
                         ServiceCategory.name == selected,
                         ServiceCategory.is_active.is_(True),
-                        ServiceCategory.include_in_visit.is_(False),
+                        ServiceCategory.name.in_(_SERVICE_PRODUCT_CATS),
                         ServiceSubcategory.is_active.is_(True),
                         Service.is_active.is_(True),
                     )

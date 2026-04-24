@@ -342,10 +342,14 @@ def service_catalog_view(
     if subcategory_id is not None and subcategory_id <= 0:
         subcategory_id = None
 
+    _EXCLUDED_CATS = ("Заказ", "Продажа материала")
     categories = list(
         db.scalars(
             select(ServiceCategory)
-            .where(ServiceCategory.is_active.is_(True), ServiceCategory.include_in_visit.is_(True))
+            .where(
+                ServiceCategory.is_active.is_(True),
+                ServiceCategory.name.not_in(_EXCLUDED_CATS),
+            )
             .order_by(ServiceCategory.name.asc())
         ).all()
     )
@@ -364,14 +368,19 @@ def service_catalog_view(
             .where(ServiceSubcategory.id == subcategory_id, ServiceSubcategory.is_active.is_(True))
         )
 
-    if sub_from_q and sub_from_q.category and sub_from_q.category.is_active and sub_from_q.category.include_in_visit:
+    if (
+        sub_from_q
+        and sub_from_q.category
+        and sub_from_q.category.is_active
+        and (sub_from_q.category.name or "").strip() not in _EXCLUDED_CATS
+    ):
         if category_id is not None and category_id > 0 and category_id != sub_from_q.category_id:
             mismatch = True
             selected_category = db.scalar(
                 select(ServiceCategory).where(
                     ServiceCategory.id == category_id,
                     ServiceCategory.is_active.is_(True),
-                    ServiceCategory.include_in_visit.is_(True),
+                    ServiceCategory.name.not_in(_EXCLUDED_CATS),
                 )
             )
             if selected_category:
@@ -404,7 +413,7 @@ def service_catalog_view(
             select(ServiceCategory).where(
                 ServiceCategory.id == category_id,
                 ServiceCategory.is_active.is_(True),
-                ServiceCategory.include_in_visit.is_(True),
+                ServiceCategory.name.not_in(_EXCLUDED_CATS),
             )
         )
         if selected_category:

@@ -45,47 +45,54 @@
         <div><label>До<input name="price_senior_to" value="{{ form_st }}" placeholder="например 5500" /></label></div>
       </div>
 
-      <p class="muted" style="margin: 18px 0 8px;">Экономика (для расчётов)</p>
-      <div class="row">
-        <div><label>ЗП мастера, ₽<input name="master_pay_amount" value="{{ form_master_pay }}" placeholder="например 500" /></label></div>
-        <div><label>ЗП студии, ₽<input name="studio_pay_amount" value="{{ form_studio_pay }}" placeholder="например 500" /></label></div>
-      </div>
-      <div class="row" style="margin-top: 8px;">
-        <div><label>Фикс. расход, ₽<input name="fixed_expense_amount" value="{{ form_fixed_exp }}" placeholder="например 400" /></label></div>
-        <div>
-          <label style="display:flex; align-items:center; gap:8px; margin-top: 22px;">
-            <input type="checkbox" name="is_per_unit" {% if form_is_per_unit %}checked{% endif %} />
-            За единицу
-          </label>
-        </div>
-      </div>
-      <label style="display:block; margin-top: 8px;">Подпись единицы (необязательно)
-        <input name="unit_label" value="{{ form_unit_label }}" placeholder="например, крепление / коса / шт" maxlength="60" />
-      </label>
-
       <p class="muted" style="margin: 16px 0 8px;">Визит мастера</p>
-      <label style="display:block; margin-top: 8px;">Блок «Комплект» (склад)
-        <select name="kit_section_override" style="display:block; margin-top:4px; max-width: 28rem;">
-          <option value="" {% if form_kit_override == '' %}selected{% endif %}>Как у подкатегории</option>
-          <option value="1" {% if form_kit_override == '1' %}selected{% endif %}>Всегда показывать</option>
-          <option value="0" {% if form_kit_override == '0' %}selected{% endif %}>Не показывать</option>
-        </select>
-      </label>
-      <label style="display:block; margin-top: 8px;">Блок «Хвост/резинка» (склад)
-        <select name="tail_section_override" style="display:block; margin-top:4px; max-width: 28rem;">
-          <option value="" {% if form_tail_override == '' %}selected{% endif %}>Как у подкатегории</option>
-          <option value="1" {% if form_tail_override == '1' %}selected{% endif %}>Всегда показывать</option>
-          <option value="0" {% if form_tail_override == '0' %}selected{% endif %}>Не показывать</option>
-        </select>
-      </label>
-      <label style="display:flex; align-items:center; gap:8px; margin-top: 12px;">
-        <input type="checkbox" name="hide_material_description" {% if form_hide_material %}checked{% endif %} />
-        Не показывать «Описание про материал» (даже если подкатегория разрешает)
-      </label>
-      <label style="display:flex; align-items:center; gap:8px; margin-top: 12px;">
-        <input type="checkbox" name="order_rubber_extra_time_amort" {% if form_order_rubber %}checked{% endif %} />
-        Форма «Заказ» (резинки): при выборе этой услуги — длительность работы и амортизация
-      </label>
+      <div style="margin-top: 8px;">
+        <div style="font-weight:600; margin-bottom:4px;">Блок «Комплект» (склад)</div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="kit_section_override" value="" {% if form_kit_override == '' %}checked{% endif %} />
+          Как у подкатегории
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="kit_section_override" value="1" {% if form_kit_override == '1' %}checked{% endif %} />
+          Всегда показывать
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="kit_section_override" value="0" {% if form_kit_override == '0' %}checked{% endif %} />
+          Не показывать
+        </label>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <div style="font-weight:600; margin-bottom:4px;">Блок «Хвост/резинка» (склад)</div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="tail_section_override" value="" {% if form_tail_override == '' %}checked{% endif %} />
+          Как у подкатегории
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="tail_section_override" value="1" {% if form_tail_override == '1' %}checked{% endif %} />
+          Всегда показывать
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="tail_section_override" value="0" {% if form_tail_override == '0' %}checked{% endif %} />
+          Не показывать
+        </label>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <div style="font-weight:600; margin-bottom:4px;">Описание про материал (из анкеты категории)</div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="material_description_override" value="" {% if form_material_desc_override == '' %}checked{% endif %} />
+          Как у подкатегории
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="material_description_override" value="show" {% if form_material_desc_override == 'show' %}checked{% endif %} />
+          Показывать
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="material_description_override" value="hide" {% if form_material_desc_override == 'hide' %}checked{% endif %} />
+          Не показывать
+        </label>
+      </div>
       {% if category and category.name == 'Продажа материала' %}
         <p class="muted" style="margin: 16px 0 8px;">Розница материала (поля при продаже товара)</p>
         <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
@@ -101,7 +108,6 @@
           Смешка (как в визите: из наличия / сама мешала + сложность)
         </label>
       {% endif %}
-      <p class="muted" style="margin-top:12px;">Дополнительные поля анкеты услуги — отдельный шаг.</p>
       <p style="margin-top: 16px;">
         <button type="submit">Сохранить</button>
         <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services"><button type="button" class="secondary">Отмена</button></a>

@@ -4,8 +4,7 @@
 Правило «до»: не задано / xx / x / хх (лат., кир.) / — → копируем «от».
 Идемпотентность: услуга с тем же именем в подкатегории не пересоздаётся.
 
-Опционально на уровне каталога: include_in_visit (bool) → ServiceCategory.include_in_visit
-(например false для «Продажа материала»).
+include_in_visit удалено (в визите показываем все активные категории, кроме "Заказ"/"Продажа материала").
 """
 
 from __future__ import annotations
@@ -84,12 +83,7 @@ def _ensure_service_row(
     price_senior_from: float | None,
     price_senior_to: float | None,
     is_active: bool = True,
-    order_rubber_extra_time_amort: bool | None = None,
-    master_pay_amount: float | None = None,
-    studio_pay_amount: float | None = None,
-    fixed_expense_amount: float | None = None,
-    is_per_unit: bool | None = None,
-    unit_label: str | None = None,
+    material_description_override: bool | None = None,
 ) -> None:
     existing = db.scalar(
         select(Service).where(Service.subcategory_id == subcategory_id, Service.name == name)
@@ -102,18 +96,8 @@ def _ensure_service_row(
         existing.price_middle_to = price_middle_to
         existing.price_senior_from = price_senior_from
         existing.price_senior_to = price_senior_to
-        if order_rubber_extra_time_amort is not None:
-            existing.order_rubber_extra_time_amort = bool(order_rubber_extra_time_amort)
-        if master_pay_amount is not None:
-            existing.master_pay_amount = float(master_pay_amount)
-        if studio_pay_amount is not None:
-            existing.studio_pay_amount = float(studio_pay_amount)
-        if fixed_expense_amount is not None:
-            existing.fixed_expense_amount = float(fixed_expense_amount)
-        if is_per_unit is not None:
-            existing.is_per_unit = bool(is_per_unit)
-        if unit_label is not None:
-            existing.unit_label = str(unit_label) if unit_label else None
+        if material_description_override is not None:
+            existing.material_description_override = bool(material_description_override)
         return
     db.add(
         Service(
@@ -126,14 +110,9 @@ def _ensure_service_row(
             price_middle_to=price_middle_to,
             price_senior_from=price_senior_from,
             price_senior_to=price_senior_to,
-            order_rubber_extra_time_amort=bool(order_rubber_extra_time_amort)
-            if order_rubber_extra_time_amort is not None
-            else False,
-            master_pay_amount=float(master_pay_amount) if master_pay_amount is not None else None,
-            studio_pay_amount=float(studio_pay_amount) if studio_pay_amount is not None else None,
-            fixed_expense_amount=float(fixed_expense_amount) if fixed_expense_amount is not None else None,
-            is_per_unit=bool(is_per_unit) if is_per_unit is not None else False,
-            unit_label=str(unit_label) if unit_label else None,
+            material_description_override=bool(material_description_override)
+            if material_description_override is not None
+            else None,
         )
     )
 
@@ -143,9 +122,7 @@ def apply_service_catalog_from_dict(db: Session, data: dict[str, Any]) -> None:
     if not cat_name:
         raise ValueError("В JSON каталога нужно поле category (непустая строка).")
     cat = _get_or_create_category(db, cat_name)
-    inv = data.get("include_in_visit")
-    if inv is not None:
-        cat.include_in_visit = bool(inv)
+    # include_in_visit удалено
 
     for sub_raw in data.get("subcategories") or []:
         if not isinstance(sub_raw, dict):
@@ -170,15 +147,7 @@ def apply_service_catalog_from_dict(db: Session, data: dict[str, Any]) -> None:
             pmf, pmt = _resolve_level_prices(svc_raw, "middle", common)
             psf, pst = _resolve_level_prices(svc_raw, "senior", common)
 
-            rubber_raw = svc_raw.get("order_rubber_extra_time_amort")
-            rubber_opt = bool(rubber_raw) if rubber_raw is not None else None
-
-            econ = svc_raw.get("economics") if isinstance(svc_raw.get("economics"), dict) else {}
-            mp = econ.get("master_pay")
-            sp = econ.get("studio_pay")
-            fx = econ.get("fixed_expense")
-            ipu = econ.get("is_per_unit")
-            ul = econ.get("unit_label")
+            # "economics" и order_rubber_extra_time_amort удалены из Service
 
             _ensure_service_row(
                 db,
@@ -191,12 +160,7 @@ def apply_service_catalog_from_dict(db: Session, data: dict[str, Any]) -> None:
                 price_senior_from=psf,
                 price_senior_to=pst,
                 is_active=is_active,
-                order_rubber_extra_time_amort=rubber_opt,
-                master_pay_amount=mp,
-                studio_pay_amount=sp,
-                fixed_expense_amount=fx,
-                is_per_unit=bool(ipu) if ipu is not None else None,
-                unit_label=str(ul) if ul is not None else None,
+                material_description_override=None,
             )
 
 
