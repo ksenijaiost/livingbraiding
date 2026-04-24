@@ -225,6 +225,14 @@
   align-items: center;
 }
 
+/* Sticky app header */
+.lb-sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 70; /* below mobile drawer/backdrop (80/90), above content */
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
 .lb-nav-link {
   color: #475569 !important;
   font-weight: 500;
