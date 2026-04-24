@@ -91,7 +91,7 @@ def visit_client_change_policy(visit: Visit, user: AuthUser, db: Session) -> Vis
     if is_in_closed_payroll_period(db, visit.created_at):
         return VisitClientChangePolicy(
             can_change=False,
-            message_when_blocked="Визит относится к закрытому периоду ЗП — редактирование запрещено.",
+            message_when_blocked="Визит относится к закрытому периоду ЗП — редактирование и аннулирование запрещено.",
             super_outside_window=False,
         )
     days = edit_window_days(db)

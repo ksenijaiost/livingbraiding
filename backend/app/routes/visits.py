@@ -147,6 +147,7 @@ def admin_visit_detail(
     duration_m = visit.duration_minutes % 60
 
     v_policy = visit_client_change_policy(visit, current_user, db)
+    visit_closed_period = is_in_closed_payroll_period(db, visit.created_at)
 
     return templates.TemplateResponse(
         "admin_visit_detail.html",
@@ -168,6 +169,7 @@ def admin_visit_detail(
             msg=msg,
             visit_edit_blocked=not v_policy.can_change,
             visit_edit_block_msg=v_policy.message_when_blocked,
+            visit_closed_period=visit_closed_period,
         ),
     )
 
