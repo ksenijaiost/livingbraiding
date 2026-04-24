@@ -22,13 +22,13 @@ def max_user_role(roles: list[UserRole]) -> UserRole:
 
 def default_active_role(roles: list[UserRole]) -> UserRole:
     """Начальный контекст после входа: приоритет админских ролей."""
-    if UserRole.TECHSPEC in roles:
-        return UserRole.TECHSPEC
     if UserRole.ADMIN_SUPER in roles:
         return UserRole.ADMIN_SUPER
     if UserRole.ADMIN in roles:
         return UserRole.ADMIN
-    return UserRole.MASTER
+    if UserRole.MASTER in roles:
+        return UserRole.MASTER
+    return UserRole.TECHSPEC
 
 
 def get_roles_for_user(db: Session, user_id: int) -> list[UserRole]:
@@ -94,7 +94,14 @@ def select_users_with_role(role: UserRole) -> Select[tuple[User]]:
     return (
         select(User)
         .join(UserRoleAssignment, UserRoleAssignment.user_id == User.id)
-        .where(User.is_active.is_(True), UserRoleAssignment.role == role)
+        .where(
+            User.is_active.is_(True),
+            UserRoleAssignment.role == role,
+            # TECHSPEC — не сотрудник: не показываем в подборках/списках по ролям.
+            User.id.not_in(
+                select(UserRoleAssignment.user_id).where(UserRoleAssignment.role == UserRole.TECHSPEC)
+            ),
+        )
         .distinct()
     )
 
@@ -103,6 +110,13 @@ def select_users_with_any_role(*roles: UserRole) -> Select[tuple[User]]:
     return (
         select(User)
         .join(UserRoleAssignment, UserRoleAssignment.user_id == User.id)
-        .where(User.is_active.is_(True), UserRoleAssignment.role.in_(roles))
+        .where(
+            User.is_active.is_(True),
+            UserRoleAssignment.role.in_(roles),
+            # TECHSPEC — не сотрудник: не показываем в подборках/списках по ролям.
+            User.id.not_in(
+                select(UserRoleAssignment.user_id).where(UserRoleAssignment.role == UserRole.TECHSPEC)
+            ),
+        )
         .distinct()
     )
