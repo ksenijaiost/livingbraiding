@@ -150,19 +150,35 @@ def _validate_stock_selection(
     kit_id: int,
     use_entire: bool,
     blanks_used: int,
+    client_id: int | None = None,
 ) -> Kit:
     """Проверка без списания (для сборки JSON)."""
     kit = db.get(Kit, kit_id)
     if not kit or kit.is_archived or not kit.is_active:
         raise ValueError("Комплект не найден или недоступен")
     avail = kit.pieces_available
-    if avail <= 0:
+    cid = int(client_id or 0)
+    reserved_for_client = 0
+    if cid > 0:
+        total = db.scalar(
+            select(func.coalesce(func.sum(KitReserve.pieces_reserved), 0)).where(
+                KitReserve.kit_id == int(kit_id),
+                KitReserve.reserved_for_client_id == cid,
+            )
+        )
+        reserved_for_client = int(total or 0)
+    max_for_client = int(avail or 0) + int(reserved_for_client or 0)
+    if max_for_client <= 0:
         raise ValueError("Нет заготовок на складе по этому комплекту")
-    n = avail if use_entire else blanks_used
+    n = max_for_client if use_entire else blanks_used
     if n <= 0:
         raise ValueError("Укажите количество заготовок или «весь комплект»")
-    if n > avail:
-        raise ValueError(f"Нельзя списать больше, чем в наличии ({avail})")
+    if n > max_for_client:
+        if reserved_for_client > 0:
+            raise ValueError(
+                f"Нельзя списать больше, чем доступно (в наличии {int(avail or 0)} + резерв клиента {reserved_for_client})"
+            )
+        raise ValueError(f"Нельзя списать больше, чем в наличии ({int(avail or 0)})")
     return kit
 
 
@@ -172,13 +188,16 @@ def _apply_stock_kit_usage(
     kit_id: int,
     use_entire: bool,
     blanks_used: int,
+    client_id: int | None = None,
 ) -> tuple[int, float, float]:
     """Списание: (pieces_used, cost_amount_for_visit, studio_fund_amount).
 
     cost_amount_for_visit — доля (цена − скидка) по списанным заготовкам (в расход визита/заказа).
     studio_fund — остаток после вычета себестоимости (себестоимость уже включает ЗП авторов).
     """
-    kit = _validate_stock_selection(db, kit_id=kit_id, use_entire=use_entire, blanks_used=blanks_used)
+    kit = _validate_stock_selection(
+        db, kit_id=kit_id, use_entire=use_entire, blanks_used=blanks_used, client_id=client_id
+    )
     raw_price = kit.stock_price_total
     if raw_price is None or float(raw_price) <= 0:
         raise ValueError(
@@ -188,8 +207,35 @@ def _apply_stock_kit_usage(
     total_pieces = int(kit.pieces_total) if kit.pieces_total else 1
     if total_pieces <= 0:
         total_pieces = 1
-    avail = kit.pieces_available
-    n = avail if use_entire else blanks_used
+    # Если на этого клиента есть резерв — используем его в приоритете.
+    # Если списано меньше резерва, остаток резерва снимается (возвращается в свободный остаток).
+    avail = int(kit.pieces_available or 0)
+    cid = int(client_id or 0)
+    if cid > 0:
+        total = db.scalar(
+            select(func.coalesce(func.sum(KitReserve.pieces_reserved), 0)).where(
+                KitReserve.kit_id == int(kit.id),
+                KitReserve.reserved_for_client_id == cid,
+            )
+        )
+        total = int(total or 0)
+        if total > 0:
+            rows = list(
+                db.scalars(
+                    select(KitReserve)
+                    .where(
+                        KitReserve.kit_id == int(kit.id),
+                        KitReserve.reserved_for_client_id == cid,
+                    )
+                    .order_by(KitReserve.id.asc())
+                ).all()
+            )
+            for r in rows:
+                db.delete(r)
+            kit.pieces_available = int(kit.pieces_available or 0) + int(total)
+            avail = int(kit.pieces_available or 0)
+
+    n = avail if use_entire else int(blanks_used or 0)
     kit_cost_full = max(0.0, float(kit.cost_total or 0.0))
     max_disc_margin = max(0.0, price - kit_cost_full)
     pct = max(0, min(100, int(kit.discount_percent or 0)))
@@ -574,6 +620,7 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
             kit_id=inp.stock_kit_id,
             use_entire=inp.stock_use_entire,
             blanks_used=inp.stock_blanks_used,
+            client_id=inp.existing_client_id,
         )
         return KitBlock(
             kind="STOCK",
@@ -620,6 +667,7 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
                 kit_id=inp.own_extra_stock_kit_id,
                 use_entire=inp.own_extra_stock_use_entire,
                 blanks_used=inp.own_extra_stock_blanks_used,
+                client_id=inp.existing_client_id,
             )
             extra = KitOwnExtra(
                 source="STOCK",
@@ -841,6 +889,7 @@ def save_kit_inlay_visit(
                 kit_id=inp.stock_kit_id,
                 use_entire=inp.stock_use_entire,
                 blanks_used=inp.stock_blanks_used,
+                client_id=inp.existing_client_id,
             )
             usages.append((inp.stock_kit_id, n, cost))
             kit_cost_total += cost
@@ -851,6 +900,7 @@ def save_kit_inlay_visit(
                 kit_id=inp.own_extra_stock_kit_id,
                 use_entire=inp.own_extra_stock_use_entire,
                 blanks_used=inp.own_extra_stock_blanks_used,
+                client_id=inp.existing_client_id,
             )
             usages.append((inp.own_extra_stock_kit_id, n, cost))
             kit_cost_total += cost

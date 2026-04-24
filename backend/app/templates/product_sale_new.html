@@ -88,6 +88,10 @@
 
         <div id="block_kit" style="margin-top: 12px; display:none;">
           <h4 style="margin: 0 0 10px;">Комплект из наличия</h4>
+          <p class="muted" style="margin:0 0 8px;font-size:12px;">
+            Если на этого клиента есть резерв по выбранному комплекту, при продаже он спишется в приоритете.
+            Если списано меньше резерва — остаток резерва автоматически снимется.
+          </p>
           <input type="hidden" name="kit_id" id="kit_id" value="{{ fp.get('kit_id', '') }}" />
           <div id="sale_kit_search_row" class="row" style="align-items: flex-end;">
             <div style="flex:1;">

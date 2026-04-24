@@ -146,6 +146,78 @@ def _apply_kit_delta(db: Session, kit_id: int, delta: int) -> None:
     kit.pieces_available = new_avail
 
 
+def _sum_reserved_for_client(db: Session, *, kit_id: int, client_id: int) -> int:
+    if kit_id <= 0 or client_id <= 0:
+        return 0
+    total = db.scalar(
+        select(func.coalesce(func.sum(KitReserve.pieces_reserved), 0)).where(
+            KitReserve.kit_id == int(kit_id),
+            KitReserve.reserved_for_client_id == int(client_id),
+        )
+    )
+    return int(total or 0)
+
+
+def _release_reserved_pieces_to_stock_for_client(
+    db: Session,
+    *,
+    kit: Kit,
+    client_id: int,
+    pieces: int,
+) -> int:
+    """Освобождает резерв клиента в «наличие», чтобы затем списать по pieces_available.
+
+    Возвращает фактически освобождённое количество (0..pieces).
+    """
+    n = int(pieces or 0)
+    if n <= 0 or not kit or client_id <= 0:
+        return 0
+    rows = list(
+        db.scalars(
+            select(KitReserve)
+            .where(
+                KitReserve.kit_id == int(kit.id),
+                KitReserve.reserved_for_client_id == int(client_id),
+            )
+            .order_by(KitReserve.id.asc())
+        ).all()
+    )
+    left = n
+    for r in rows:
+        if left <= 0:
+            break
+        cur = int(r.pieces_reserved or 0)
+        if cur <= 0:
+            db.delete(r)
+            continue
+        take = min(cur, left)
+        new_val = cur - take
+        if new_val <= 0:
+            db.delete(r)
+        else:
+            r.pieces_reserved = int(new_val)
+        left -= take
+    used = n - left
+    if used > 0:
+        kit.pieces_available = int(kit.pieces_available or 0) + int(used)
+    return used
+
+
+def _release_all_reserved_to_stock_for_client(
+    db: Session,
+    *,
+    kit: Kit,
+    client_id: int,
+) -> int:
+    """Снимает весь резерв клиента по комплекту и возвращает его в pieces_available."""
+    total = _sum_reserved_for_client(db, kit_id=int(kit.id), client_id=int(client_id))
+    if total <= 0:
+        return 0
+    return _release_reserved_pieces_to_stock_for_client(
+        db, kit=kit, client_id=int(client_id), pieces=int(total)
+    )
+
+
 def _ru_kind(k: ProductSaleKind) -> str:
     if k == ProductSaleKind.MATERIAL:
         return "Материал"
@@ -825,13 +897,21 @@ async def product_sale_edit_save(
         mode = (_g_str(form, "kit_mode") or "PIECES").strip().upper()
         if mode not in ("PIECES", "ALL"):
             raise ValueError("Некорректный режим продажи комплекта.")
-        pieces_to_sell = kit.pieces_available
+        _release_all_reserved_to_stock_for_client(db, kit=kit, client_id=client.id)
+        avail = int(kit.pieces_available or 0)
+        pieces_to_sell = avail
         if mode == "PIECES":
             pieces_to_sell = _g_int(form, "kit_pieces_sold", 0)
             if pieces_to_sell <= 0:
                 raise ValueError("Укажите количество заготовок больше 0.")
-            if pieces_to_sell > kit.pieces_available:
-                raise ValueError("Нельзя продать больше заготовок, чем есть в наличии.")
+        else:
+            pieces_to_sell = avail
+
+        if pieces_to_sell <= 0:
+            raise ValueError("Нет доступных заготовок для продажи по этому комплекту.")
+
+        if pieces_to_sell > avail:
+            raise ValueError("Нельзя продать больше заготовок, чем есть в наличии.")
         _apply_kit_delta(db, kit.id, -int(pieces_to_sell))
         sale.kit_id = kit.id
         sale.kit_pieces_sold = int(pieces_to_sell)
@@ -1067,15 +1147,28 @@ async def product_sale_new_post(
         if mode not in ("PIECES", "ALL"):
             return _fail("Некорректный режим продажи комплекта.")
 
-        pieces_to_sell = kit.pieces_available
+        # Если на этого клиента есть резерв — используем его в приоритете.
+        # Если списано меньше резерва, остаток резерва снимается (возвращается в свободный остаток).
+        _release_all_reserved_to_stock_for_client(db, kit=kit, client_id=client.id)
+        avail = int(kit.pieces_available or 0)
+        pieces_to_sell = avail
         if mode == "PIECES":
             pieces_to_sell = _g_int(form, "kit_pieces_sold", 0)
             if pieces_to_sell <= 0:
                 return _fail("Укажите количество заготовок больше 0.")
-            if pieces_to_sell > kit.pieces_available:
-                return _fail("Нельзя продать больше заготовок, чем есть в наличии.")
+        else:
+            # «Весь комплект» = весь доступный свободный остаток (резерв клиента уже снят выше).
+            pieces_to_sell = avail
 
-        kit.pieces_available = int(kit.pieces_available - pieces_to_sell)
+        if pieces_to_sell <= 0:
+            return _fail("Нет доступных заготовок для продажи по этому комплекту.")
+
+        if pieces_to_sell > avail:
+            return _fail("Нельзя продать больше заготовок, чем есть в наличии.")
+
+        kit.pieces_available = int(kit.pieces_available or 0) - int(pieces_to_sell)
+        if kit.pieces_available < 0:
+            return _fail("Недостаточно заготовок в наличии для этой операции.")
         row.kit_id = kit.id
         row.kit_pieces_sold = int(pieces_to_sell)
 

@@ -260,6 +260,10 @@
 
       <div id="blk-stock" class="card" style="margin-top: 10px;">
         <strong>Из наличия</strong>
+        <p class="muted" style="margin:6px 0 0;font-size:12px;">
+          Если на клиента есть резерв по выбранному комплекту, при списании он используется в приоритете.
+          Если списано меньше резерва — остаток резерва автоматически снимется.
+        </p>
         <div style="margin-top: 8px;">
           <input type="hidden" name="stock_kit_id" id="stock_kit_id" value="{{ fp.get('stock_kit_id', '') }}" />
           <label>Комплект *</label>
