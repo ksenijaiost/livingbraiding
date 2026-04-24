@@ -1,7 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
   <div class="card" style="max-width: 980px;">
-    <h2 style="margin-top: 0;">Фонды ЗП</h2>
+    <p class="lb-top-links" style="margin-top: 0;">
+      <a href="/admin/payroll-periods">← Периоды</a>
+      <span class="lb-top-sep">·</span>
+      <a href="/admin/settings">Настройки</a>
+    </p>
+
+    <h2 style="margin-top: 0;">Фонды</h2>
     <p class="muted" style="margin-top:-6px;">
       Сальдо по каждому сотруднику (фонд сотрудника) и фонду студии — сумма всех проводок (начисления положительные, сторно и выплаты отрицательные).
       Начисления создаются при сохранении визита, работы с товарами и розничной продажи; сторно — при отмене визита, void работы/продажи или правке продажи (пересчёт маржи).

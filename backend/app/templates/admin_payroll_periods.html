@@ -1,7 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
   <div class="card" style="max-width: 980px;">
-    <h2 style="margin-top: 0;">Периоды ЗП</h2>
+    <p class="lb-top-links" style="margin-top: 0;">
+      <a href="/admin/payroll-fund">← Фонды</a>
+      <span class="lb-top-sep">·</span>
+      <a href="/admin/settings">Настройки</a>
+    </p>
+
+    <h2 style="margin-top: 0;">Периоды</h2>
     <p class="muted" style="margin-top:-6px;">
       «С» у нового периода ставится автоматически (следующий день после «По» предыдущего). Дату «По» для открытого периода вводите вручную и сохраняйте кнопкой «Закрыть» — пока период не закрыт, дата в базу не записывается.
       Закрытый период блокирует редактирование денежных полей в записях, попадающих в его интервал.
@@ -88,8 +94,6 @@
       <p class="muted">Периоды ещё не созданы — нажмите «Открыть следующий период».</p>
     {% endif %}
 
-    <p class="lb-top-links" style="margin-top: 16px;">
-      <a href="/admin/settings">← Настройки</a>
-    </p>
+    {# top links already rendered above #}
   </div>
 {% endblock %}
