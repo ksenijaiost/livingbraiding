@@ -23,16 +23,25 @@
     <div class="row">
       <div class="card" style="flex:1; min-width:280px;">
         <h3 style="margin-top:0;">Сальдо сотрудников</h3>
-        {% if master_rows %}
+        {% if master_rows_nonzero or master_rows_zero %}
           <table>
             <thead><tr><th>Сотрудник</th><th>Сальдо, руб.</th></tr></thead>
             <tbody>
-              {% for m in master_rows %}
+              {% for m in master_rows_nonzero %}
                 <tr>
-                  <td>{{ m.display_name }} <span class="muted">(#{{ m.user_id }})</span></td>
+                  <td>{{ m.display_name }} <span class="muted">({{ ru_user_role(m.role) }} #{{ m.user_id }})</span></td>
                   <td>{{ "%.2f"|format(m.balance) }}</td>
                 </tr>
               {% endfor %}
+              {% if master_rows_zero %}
+                <tr><td colspan="2"><hr style="margin:10px 0; border:0; border-top:1px solid #eee;" /></td></tr>
+                {% for m in master_rows_zero %}
+                  <tr>
+                    <td>{{ m.display_name }} <span class="muted">({{ ru_user_role(m.role) }} #{{ m.user_id }})</span></td>
+                    <td class="muted">0.00</td>
+                  </tr>
+                {% endfor %}
+              {% endif %}
             </tbody>
           </table>
         {% else %}

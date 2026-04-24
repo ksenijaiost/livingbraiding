@@ -140,26 +140,29 @@ def admin_payroll_fund_page(
     db: Session = Depends(get_db),
 ):
     masters_bal, studio_bal = ledger_balances(db)
-    uids = [m["user_id"] for m in masters_bal]
-    users_by_id: dict[int, User] = {}
-    if uids:
-        for u in db.scalars(select(User).where(User.id.in_(uids))).all():
-            users_by_id[u.id] = u
-    master_rows: list[dict[str, Any]] = []
-    for m in masters_bal:
-        uid = int(m["user_id"])
-        u = users_by_id.get(uid)
-        master_rows.append({"user_id": uid, "display_name": (u.display_name if u else f"ID {uid}"), "balance": m["balance"]})
+    # Показываем всех сотрудников (даже с 0), а нулевые выносим в конец списка.
+    bal_by_uid = {int(m["user_id"]): float(m["balance"]) for m in masters_bal}
     ledger_rows = recent_ledger_rows(db)
     payout_users = list(
         db.scalars(
             select_users_with_any_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER).order_by(User.display_name.asc())
         ).all()
     )
+    all_user_rows: list[dict[str, Any]] = []
+    for u in payout_users:
+        all_user_rows.append(
+            {
+                "user_id": int(u.id),
+                "display_name": u.display_name,
+                "role": u.role,
+                "balance": float(bal_by_uid.get(int(u.id), 0.0)),
+            }
+        )
+    master_rows_nonzero = [r for r in all_user_rows if abs(float(r["balance"])) > 0.0001]
+    master_rows_zero = [r for r in all_user_rows if abs(float(r["balance"])) <= 0.0001]
     payout_user_options: list[dict[str, Any]] = []
     for u in payout_users:
         payout_user_options.append({"user": u, "roles_ru": ru_user_roles_payout_suffix(get_roles_for_user(db, u.id))})
-    bal_by_uid = {int(m["user_id"]): float(m["balance"]) for m in master_rows}
     payout_employee_balances = {str(o["user"].id): round(float(bal_by_uid.get(o["user"].id, 0.0)), 2) for o in payout_user_options}
     payout_fund_balances_json = json.dumps({"studio": round(float(studio_bal), 2), "employees": payout_employee_balances}, ensure_ascii=False)
     return templates.TemplateResponse(
@@ -167,7 +170,8 @@ def admin_payroll_fund_page(
         _ctx(
             request,
             current_user=current_user,
-            master_rows=master_rows,
+            master_rows_nonzero=master_rows_nonzero,
+            master_rows_zero=master_rows_zero,
             studio_balance=studio_bal,
             ledger_rows=ledger_rows,
             payout_user_options=payout_user_options,
