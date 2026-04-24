@@ -40,6 +40,12 @@ py -m venv ..\.venv
 ..\.\.venv\Scripts\python -m pip install -r requirements.txt
 ```
 
+Enable dev seed (optional):
+
+```powershell
+$env:ENABLE_DEV_SEED="1"
+```
+
 Run migrations:
 
 ```bash
@@ -52,9 +58,30 @@ Run server:
 ..\.\.venv\Scripts\python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8010
 ```
 
+Run tests:
+
+```bash
+..\.\.venv\Scripts\python -m pytest
+```
+
 Validate questionnaire JSON examples:
 
 ```bash
 ..\.\.venv\Scripts\python -m app.questionnaire.self_check
+```
+
+### First start (no seeds): TECHSPEC user
+
+If the DB is empty and you start the app without dev seed, it will create an initial technical user:
+
+- username/password: `techspec` / `techspec`
+- role: `TECHSPEC` (has access to all pages, but is not treated as an employee in reports/payout lists)
+
+You can override defaults via env vars:
+
+```powershell
+$env:LB_TECHSPEC_USERNAME="techspec"
+$env:LB_TECHSPEC_PASSWORD="change_me"
+$env:LB_TECHSPEC_DISPLAY_NAME="Техспец"
 ```
 
