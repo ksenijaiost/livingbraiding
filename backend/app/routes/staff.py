@@ -59,7 +59,8 @@ def _parse_master_level_from_form(form: Any, roles: list[UserRole]) -> MasterLev
     try:
         return MasterLevel(raw)
     except ValueError:
-        return MasterLevel.JUNIOR
+        # По умолчанию: мастер (middle)
+        return MasterLevel.MIDDLE
 
 
 def _count_other_active_superadmins(db: Session, exclude_user_id: int) -> int:

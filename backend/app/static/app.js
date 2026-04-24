@@ -25,12 +25,37 @@ function lbInitStudioShareOverride() {
 
 document.addEventListener("DOMContentLoaded", function () {
   lbInitStudioShareOverride();
+  initAdminStaffForm();
   initProductsCalc();
   initAdminBookingForm();
   initKitReserveUI();
   initKitClearReservesUI();
   initLbFormGuards();
 });
+
+function initAdminStaffForm() {
+  var form = document.querySelector("form[data-lb-staff-form]");
+  if (!form) return;
+  if (form.dataset.lbInited === "1") return;
+  form.dataset.lbInited = "1";
+
+  var masterCb = form.querySelector('input[name="role_master"]');
+  var radios = Array.from(form.querySelectorAll('input[name="master_level"]'));
+  var block = form.querySelector("[data-lb-master-level-block]");
+  if (!masterCb || radios.length === 0) return;
+
+  function sync() {
+    var on = !!masterCb.checked;
+    radios.forEach(function (r) { r.disabled = !on; });
+    if (block) {
+      block.style.opacity = on ? "1" : "0.55";
+      block.style.pointerEvents = on ? "auto" : "none";
+    }
+  }
+
+  masterCb.addEventListener("change", sync);
+  sync();
+}
 
 function initProductsCalc() {
   var root = document.querySelector("[data-lb-products-calc]");

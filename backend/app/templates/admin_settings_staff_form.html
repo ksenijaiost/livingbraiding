@@ -9,7 +9,7 @@
     {% endif %}
 
     {% if is_new %}
-      <form method="post" action="/admin/settings/staff/new">
+      <form method="post" action="/admin/settings/staff/new" data-lb-staff-form>
         <div class="lb-mb-12">
           <label>Логин (латиница, цифры, _)</label>
           <input name="username" required autocomplete="username" maxlength="50" pattern="[a-z0-9_]{2,50}" title="2–50 символов: a-z, 0-9, _" />
@@ -47,18 +47,28 @@
           </label>
         </div>
         <div class="lb-mb-12">
-          <label>Уровень мастера (если отмечена роль мастера)</label>
-          <select name="master_level">
-            {% for lv in master_levels %}
-              <option value="{{ lv.value }}">{{ ru_master_level(lv) }}</option>
-            {% endfor %}
-          </select>
+          <div class="lb-strong-head lb-mb-6">Уровень мастера</div>
+          <div class="muted lb-font-12 lb-mb-6">Активно только если выбрана роль «Мастер».</div>
+          <div data-lb-master-level-block>
+            <label class="lb-inline-center-gap lb-mb-6">
+              <input type="radio" name="master_level" value="JUNIOR" />
+              <span>{{ ru_master_level('JUNIOR') }}</span>
+            </label>
+            <label class="lb-inline-center-gap lb-mb-6">
+              <input type="radio" name="master_level" value="MIDDLE" checked />
+              <span>{{ ru_master_level('MIDDLE') }}</span>
+            </label>
+            <label class="lb-inline-center-gap">
+              <input type="radio" name="master_level" value="SENIOR" />
+              <span>{{ ru_master_level('SENIOR') }}</span>
+            </label>
+          </div>
         </div>
         <button type="submit">Создать</button>
         <a href="/admin/settings/staff" class="lb-ml-8"><button type="button" class="secondary">Отмена</button></a>
       </form>
     {% else %}
-      <form method="post" action="/admin/settings/staff/{{ user.id }}/edit">
+      <form method="post" action="/admin/settings/staff/{{ user.id }}/edit" data-lb-staff-form>
         <div class="lb-mb-12">
           <label>Логин</label>
           <input value="{{ user.username }}" disabled class="lb-input-disabled" />
@@ -97,12 +107,23 @@
           </label>
         </div>
         <div class="lb-mb-12">
-          <label>Уровень мастера (если отмечена роль мастера)</label>
-          <select name="master_level">
-            {% for lv in master_levels %}
-              <option value="{{ lv.value }}" {% if user.master_level and user.master_level == lv %}selected{% elif not user.master_level and UserRole.MASTER in roles and lv.value == 'JUNIOR' %}selected{% endif %}>{{ ru_master_level(lv) }}</option>
-            {% endfor %}
-          </select>
+          <div class="lb-strong-head lb-mb-6">Уровень мастера</div>
+          <div class="muted lb-font-12 lb-mb-6">Активно только если выбрана роль «Мастер».</div>
+          {% set ml = (user.master_level.value if user and user.master_level else '') %}
+          <div data-lb-master-level-block>
+            <label class="lb-inline-center-gap lb-mb-6">
+              <input type="radio" name="master_level" value="JUNIOR" {% if ml == 'JUNIOR' %}checked{% endif %} />
+              <span>{{ ru_master_level('JUNIOR') }}</span>
+            </label>
+            <label class="lb-inline-center-gap lb-mb-6">
+              <input type="radio" name="master_level" value="MIDDLE" {% if ml == 'MIDDLE' or (not ml and UserRole.MASTER in roles) %}checked{% endif %} />
+              <span>{{ ru_master_level('MIDDLE') }}</span>
+            </label>
+            <label class="lb-inline-center-gap">
+              <input type="radio" name="master_level" value="SENIOR" {% if ml == 'SENIOR' %}checked{% endif %} />
+              <span>{{ ru_master_level('SENIOR') }}</span>
+            </label>
+          </div>
         </div>
         <div class="lb-mb-16">
           {% if user.id == current_user.id %}
