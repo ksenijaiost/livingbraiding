@@ -17,6 +17,7 @@ from sqlalchemy.exc import OperationalError
 from app.admin_questionnaire_fields import router as admin_questionnaire_fields_router
 from app.admin_service_catalog import router as admin_service_catalog_router
 from app.audit_retention import purge_expired_audit_logs_startup_safe
+from app.bootstrap import ensure_initial_techspec_user
 from app.db.session import get_db
 from app.seed import ensure_seed_data
 
@@ -93,6 +94,7 @@ def _startup():
         enable_seed = os.environ.get("ENABLE_DEV_SEED", "").strip().lower() in ("1", "true", "yes")
         if enable_seed:
             ensure_seed_data(db)
+        ensure_initial_techspec_user(db)
         purge_expired_audit_logs_startup_safe(db)
     finally:
         db.close()

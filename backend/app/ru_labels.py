@@ -30,18 +30,20 @@ RU_USER_ROLE: dict[UserRole, str] = {
     UserRole.ADMIN_SUPER: "Суперадмин",
     UserRole.ADMIN: "Админ",
     UserRole.MASTER: "Мастер",
+    UserRole.TECHSPEC: "Техспец",
 }
 
 RU_USER_ROLE_PAYOUT: dict[UserRole, str] = {
     UserRole.ADMIN_SUPER: "суперадмин",
     UserRole.ADMIN: "админ",
     UserRole.MASTER: "мастер",
+    UserRole.TECHSPEC: "техспец",
 }
 
 
 def ru_user_roles_payout_suffix(roles: list[UserRole]) -> str:
     """Подпись ролей в скобках для формы выплат (нижний регистр, порядок: суперадмин → админ → мастер)."""
-    order = {UserRole.ADMIN_SUPER: 0, UserRole.ADMIN: 1, UserRole.MASTER: 2}
+    order = {UserRole.TECHSPEC: -1, UserRole.ADMIN_SUPER: 0, UserRole.ADMIN: 1, UserRole.MASTER: 2}
     uniq = sorted(set(roles), key=lambda r: order[r])
     return ", ".join(RU_USER_ROLE_PAYOUT[r] for r in uniq)
 

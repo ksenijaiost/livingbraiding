@@ -41,7 +41,7 @@ def upgrade() -> None:
         sa.Column("display_name", sa.String(length=120), nullable=False),
         sa.Column(
             "role",
-            sa.Enum("ADMIN_SUPER", "ADMIN", "MASTER", name="userrole"),
+            sa.Enum("ADMIN_SUPER", "ADMIN", "MASTER", "TECHSPEC", name="userrole"),
             nullable=False,
         ),
         sa.Column("password_hash", sa.String(length=255), nullable=False),
@@ -61,7 +61,7 @@ def upgrade() -> None:
         "user_role_assignments",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("role", sa.Enum("ADMIN_SUPER", "ADMIN", "MASTER", name="userrole"), nullable=False),
+        sa.Column("role", sa.Enum("ADMIN_SUPER", "ADMIN", "MASTER", "TECHSPEC", name="userrole"), nullable=False),
         sa.UniqueConstraint("user_id", "role", name="uq_user_role_assignments_user_role"),
     )
 

@@ -149,6 +149,9 @@ def require_role(*roles: UserRole):
     """Dependency factory for role-based access control (по активной роли)."""
 
     def _dep(user: Annotated[AuthUser, Depends(get_current_user)]) -> AuthUser:
+        # TECHSPEC — техническая роль: доступ ко всем страницам независимо от активной роли.
+        if UserRole.TECHSPEC in user.roles:
+            return user
         if user.role not in roles:
             raise HTTPException(status_code=403, detail="Forbidden")
         return user

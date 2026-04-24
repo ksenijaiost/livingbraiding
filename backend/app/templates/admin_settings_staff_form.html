@@ -41,6 +41,10 @@
             <input type="checkbox" name="role_master" value="1" />
             <span>{{ ru_user_role(UserRole.MASTER) }}</span>
           </label>
+          <label class="lb-inline-center-gap lb-mb-6">
+            <input type="checkbox" name="role_techspec" value="1" />
+            <span>{{ ru_user_role(UserRole.TECHSPEC) }}</span>
+          </label>
         </div>
         <div class="lb-mb-12">
           <label>Уровень мастера (если отмечена роль мастера)</label>
@@ -86,6 +90,10 @@
           <label class="lb-inline-center-gap lb-mb-6">
             <input type="checkbox" name="role_master" value="1" {% if UserRole.MASTER in roles %}checked{% endif %} />
             <span>{{ ru_user_role(UserRole.MASTER) }}</span>
+          </label>
+          <label class="lb-inline-center-gap lb-mb-6">
+            <input type="checkbox" name="role_techspec" value="1" {% if UserRole.TECHSPEC in roles %}checked{% endif %} />
+            <span>{{ ru_user_role(UserRole.TECHSPEC) }}</span>
           </label>
         </div>
         <div class="lb-mb-12">

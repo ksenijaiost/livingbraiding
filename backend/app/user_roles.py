@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.db.models import User, UserRole, UserRoleAssignment
 
 _ROLE_PRIORITY = (
+    UserRole.TECHSPEC,
     UserRole.ADMIN_SUPER,
     UserRole.ADMIN,
     UserRole.MASTER,
@@ -21,6 +22,8 @@ def max_user_role(roles: list[UserRole]) -> UserRole:
 
 def default_active_role(roles: list[UserRole]) -> UserRole:
     """Начальный контекст после входа: приоритет админских ролей."""
+    if UserRole.TECHSPEC in roles:
+        return UserRole.TECHSPEC
     if UserRole.ADMIN_SUPER in roles:
         return UserRole.ADMIN_SUPER
     if UserRole.ADMIN in roles:
@@ -36,7 +39,7 @@ def get_roles_for_user(db: Session, user_id: int) -> list[UserRole]:
     )
     if not rows:
         return []
-    order = {UserRole.ADMIN_SUPER: 0, UserRole.ADMIN: 1, UserRole.MASTER: 2}
+    order = {UserRole.TECHSPEC: -1, UserRole.ADMIN_SUPER: 0, UserRole.ADMIN: 1, UserRole.MASTER: 2}
     return sorted(set(rows), key=lambda r: order[r])
 
 
