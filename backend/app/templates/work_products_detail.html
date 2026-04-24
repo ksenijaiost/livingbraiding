@@ -97,7 +97,7 @@
         {% if row.staff_rows %}
           {% for s in row.staff_rows %}
             <div class="muted" style="font-size: 12px; margin-top: 6px;">
-              {{ s.user.display_name }} ({{ s.share }})
+              {{ s.user.display_name }}{% if row.kind.value != "KIT" and s.share is not none and s.share != 1 %} ({{ s.share }}){% endif %}
             </div>
           {% endfor %}
         {% else %}
