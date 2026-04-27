@@ -75,6 +75,22 @@
   <textarea name="{{ field_prefix }}notes" rows="3" placeholder="Тут можно рассказать про украшения в комплекте, какие-то важные нюансы">{{ fp.get('notes', '') }}</textarea>
 </div>
 
+<div style="margin-top:12px;">
+  <label>Фото комплекта (1)</label>
+  {% if not is_new and kit and kit.photo_1 %}
+    <div class="muted" style="margin:6px 0 8px;">
+      <a href="{{ kit.photo_1 }}" target="_blank" rel="noopener">Открыть</a>
+      <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
+        <input type="checkbox" name="clear_photo_1" value="1" />
+        <span>Удалить</span>
+      </label>
+    </div>
+    <img src="{{ kit.photo_1 }}" alt="Фото комплекта" style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:10px;" />
+  {% endif %}
+  <input type="file" name="photo_1" accept="image/*" />
+  <div class="muted" style="font-size:12px; margin-top:6px;">JPG/PNG/WebP, до 10MB.</div>
+</div>
+
 <p style="margin:16px 0 8px;"><strong>Авторство</strong> <span class="muted">(кто изготовил / отметить «Извне»)</span></p>
 <div class="card" style="margin-bottom:12px;padding:12px;background:#fafafa;">
   <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-weight:normal;">

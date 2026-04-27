@@ -39,6 +39,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.audit import diff_fields, write_audit_rows
+from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
 from app.time_utils import utcnow_naive
 from app.ui_visit_display import visit_services_catalog_line
 from app.webui import templates, ctx as _ctx
@@ -194,7 +195,7 @@ async def admin_client_new_post(
     db: Session = Depends(get_db),
 ):
     form_raw = await request.form()
-    form = {k: form_raw.get(k) for k in form_raw.keys()}
+    form = {k: form_raw.get(k) for k in form_raw.keys() if not isinstance(form_raw.get(k), UploadFile)}
     err: str | None = None
 
     name = (str(form.get("name") or "")).strip()
@@ -240,9 +241,30 @@ async def admin_client_new_post(
             status_code=400,
         )
 
+    photo_1_url: str | None = None
+    photo_2_url: str | None = None
+    try:
+        p1 = get_nonempty_upload(form_raw, "photo_1")
+        p2 = get_nonempty_upload(form_raw, "photo_2")
+        if p1 is not None:
+            photo_1_url = await save_upload_image(p1)
+        if p2 is not None:
+            photo_2_url = await save_upload_image(p2)
+    except ValueError as exc:
+        return _admin_client_form_page(
+            request,
+            current_user,
+            form=form,
+            error=str(exc),
+            is_new=True,
+            status_code=400,
+        )
+
     client = Client(
         name=name[:200],
         phone=strip_or_none(phone, 30),
+        photo_1=photo_1_url,
+        photo_2=photo_2_url,
         telegram=strip_or_none(telegram, 100),
         vk=strip_or_none(vk, 120),
         instagram=strip_or_none(instagram, 120),
@@ -302,6 +324,8 @@ async def admin_client_edit_post(
             for k in (
                 "name",
                 "phone",
+                "photo_1",
+                "photo_2",
                 "telegram",
                 "vk",
                 "instagram",
@@ -322,7 +346,10 @@ async def admin_client_edit_post(
     for k in form_raw.keys():
         if k == "is_confirmed":
             continue
-        form[k] = str(form_raw.get(k) or "")
+        v = form_raw.get(k)
+        if isinstance(v, UploadFile):
+            continue
+        form[k] = str(v or "")
     form["is_confirmed"] = "1" if any(parse_bool(v) for v in form_raw.getlist("is_confirmed")) else "0"
 
     name = (str(form.get("name") or "")).strip()
@@ -385,6 +412,39 @@ async def admin_client_edit_post(
     client.birth_day = birth_day
     client.birth_month = birth_month
     client.birth_year = birth_year
+
+    # photos: replace/clear
+    clear_p1 = parse_bool(form_raw.get("clear_photo_1"))
+    clear_p2 = parse_bool(form_raw.get("clear_photo_2"))
+    try:
+        if clear_p1:
+            delete_media_by_url(getattr(client, "photo_1", None))
+            client.photo_1 = None
+        if clear_p2:
+            delete_media_by_url(getattr(client, "photo_2", None))
+            client.photo_2 = None
+        up1 = get_nonempty_upload(form_raw, "photo_1")
+        up2 = get_nonempty_upload(form_raw, "photo_2")
+        if up1 is not None:
+            new_url = await save_upload_image(up1)
+            delete_media_by_url(getattr(client, "photo_1", None))
+            client.photo_1 = new_url
+        if up2 is not None:
+            new_url = await save_upload_image(up2)
+            delete_media_by_url(getattr(client, "photo_2", None))
+            client.photo_2 = new_url
+    except ValueError as exc:
+        return _admin_client_form_page(
+            request,
+            current_user,
+            form=form,
+            error=str(exc),
+            is_new=False,
+            client_id=client.id,
+            created_by_display=client.created_by_label,
+            status_code=400,
+        )
+
     client.updated_at = utcnow_naive()
     client.updated_by_user_id = current_user.id
 
@@ -394,6 +454,8 @@ async def admin_client_edit_post(
         (
             "name",
             "phone",
+            "photo_1",
+            "photo_2",
             "telegram",
             "vk",
             "instagram",

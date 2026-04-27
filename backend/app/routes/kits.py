@@ -6,8 +6,9 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.datastructures import UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -38,6 +39,7 @@ from app.kit_crud import (
     sync_kit_authors,
     validate_kit_admin_form,
 )
+from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
 from app.kit_inlay_visit import (
     get_kit_max_reserves_per_kit,
     kit_reserve_hint_by_id,
@@ -235,6 +237,12 @@ async def admin_kit_new_post(
             raise ValueError("Комплект с таким артикулом уже есть")
         kit = Kit()
         apply_kit_admin_form(kit, d)
+        try:
+            p1 = get_nonempty_upload(form, "photo_1")
+            if p1 is not None:
+                kit.photo_1 = await save_upload_image(p1)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
         db.add(kit)
         db.flush()
         sync_kit_authors(db, kit, form)
@@ -430,6 +438,7 @@ async def admin_kit_edit_post(
         before = SimpleNamespace(
             sku=kit.sku,
             title=kit.title,
+            photo_1=getattr(kit, "photo_1", None),
             description=kit.description,
             notes=kit.notes,
             blank_type_de=kit.blank_type_de,
@@ -449,6 +458,17 @@ async def admin_kit_edit_post(
             if oid:
                 raise ValueError("Комплект с таким артикулом уже есть")
         apply_kit_admin_form(kit, d)
+        try:
+            if parse_bool(form.get("clear_photo_1")):
+                delete_media_by_url(getattr(kit, "photo_1", None))
+                kit.photo_1 = None
+            p1 = get_nonempty_upload(form, "photo_1")
+            if p1 is not None:
+                new_url = await save_upload_image(p1)
+                delete_media_by_url(getattr(kit, "photo_1", None))
+                kit.photo_1 = new_url
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
         sync_kit_authors(db, kit, form)
         after_auth_ids = sorted([l.user_id for l in (kit.author_staff_links or [])])
         kit.updated_at = utcnow_naive()
@@ -456,6 +476,7 @@ async def admin_kit_edit_post(
         after = SimpleNamespace(
             sku=kit.sku,
             title=kit.title,
+            photo_1=getattr(kit, "photo_1", None),
             description=kit.description,
             notes=kit.notes,
             blank_type_de=kit.blank_type_de,
@@ -474,6 +495,7 @@ async def admin_kit_edit_post(
             (
                 "sku",
                 "title",
+                "photo_1",
                 "description",
                 "notes",
                 "blank_type_de",

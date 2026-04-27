@@ -22,7 +22,7 @@
         Нет услуг для визита (каталог пуст или все категории скрыты из визита). Проверьте сиды и настройки категорий.
       </div>
     {% endif %}
-    <form method="post" action="/master/visit/new" id="visit-form">
+    <form method="post" action="/master/visit/new" id="visit-form" enctype="multipart/form-data">
       <input type="hidden" name="booking_id" value="{{ fp.get('booking_id', '') }}" />
       <h3>Клиент</h3>
       <div style="margin-bottom: 10px;">
@@ -121,6 +121,23 @@
         <div>
           <label>Длительность (мин)</label>
           <input type="number" name="duration_m" min="0" value="{{ fp.get('duration_m', '0') }}" />
+        </div>
+      </div>
+
+      <h3>Фото (до 3)</h3>
+      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.</p>
+      <div class="row">
+        <div>
+          <label>Фото 1</label>
+          <input type="file" name="photo_1" accept="image/*" />
+        </div>
+        <div>
+          <label>Фото 2</label>
+          <input type="file" name="photo_2" accept="image/*" />
+        </div>
+        <div>
+          <label>Фото 3</label>
+          <input type="file" name="photo_3" accept="image/*" />
         </div>
       </div>
       <div class="card" style="margin-top: 12px;">

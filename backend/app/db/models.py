@@ -1027,6 +1027,7 @@ class Visit(Base):
     client_discount_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     photo_1: Mapped[str | None] = mapped_column(String(300), nullable=True)
     photo_2: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    photo_3: Mapped[str | None] = mapped_column(String(300), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Addons reduce salon/master profit by rule (stored as a separate snapshot field).

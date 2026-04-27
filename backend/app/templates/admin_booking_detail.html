@@ -260,11 +260,23 @@
 
     {% if booking.photo_1 or booking.photo_2 or booking.photo_3 %}
       <h3 style="margin-top: 18px;">Фото</h3>
-      <ul style="margin:6px 0 0; padding-left: 1.2rem;">
-        {% if booking.photo_1 %}<li><a href="{{ booking.photo_1 }}" target="_blank" rel="noopener">Фото 1</a></li>{% endif %}
-        {% if booking.photo_2 %}<li><a href="{{ booking.photo_2 }}" target="_blank" rel="noopener">Фото 2</a></li>{% endif %}
-        {% if booking.photo_3 %}<li><a href="{{ booking.photo_3 }}" target="_blank" rel="noopener">Фото 3</a></li>{% endif %}
-      </ul>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
+        {% if booking.photo_1 %}
+          <a href="{{ booking.photo_1 }}" target="_blank" rel="noopener" title="Фото 1">
+            <img src="{{ booking.photo_1 }}" alt="Фото 1" style="max-width: 200px; max-height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; object-fit: cover;" />
+          </a>
+        {% endif %}
+        {% if booking.photo_2 %}
+          <a href="{{ booking.photo_2 }}" target="_blank" rel="noopener" title="Фото 2">
+            <img src="{{ booking.photo_2 }}" alt="Фото 2" style="max-width: 200px; max-height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; object-fit: cover;" />
+          </a>
+        {% endif %}
+        {% if booking.photo_3 %}
+          <a href="{{ booking.photo_3 }}" target="_blank" rel="noopener" title="Фото 3">
+            <img src="{{ booking.photo_3 }}" alt="Фото 3" style="max-width: 200px; max-height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; object-fit: cover;" />
+          </a>
+        {% endif %}
+      </div>
     {% endif %}
 
     <h3 style="margin-top: 18px;">Аудит</h3>

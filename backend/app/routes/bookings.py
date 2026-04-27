@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.datastructures import UploadFile
 from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -46,6 +47,7 @@ from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_bool, parse_float, parse_int
 from app.kit_inlay_visit import get_kit_max_reserves_per_kit, kit_reserve_slots_used
+from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
 from app.time_utils import utcnow_naive
 from app.user_roles import select_users_with_any_role, select_users_with_role
 from app.work_products import _rubber_type_items
@@ -774,19 +776,16 @@ async def admin_booking_new_post(
     db: Session = Depends(get_db),
 ):
     form_raw = await request.form()
-    fp = {k: form_raw.get(k) for k in form_raw.keys()}
+    fp = {k: form_raw.get(k) for k in form_raw.keys() if not isinstance(form_raw.get(k), UploadFile)}
 
     client_id_raw = str(fp.get("client_id") or "").strip()
     kind_raw = str(fp.get("kind") or "").strip() or BookingKind.VISIT.value
     quoted_price_text = strip_or_none(str(fp.get("quoted_price_text") or ""), 120)
     deposit_raw = str(fp.get("deposit_amount") or "").strip()
     comment = strip_or_none(str(fp.get("comment") or "")) or None
-    photo_1 = strip_or_none(str(fp.get("photo_1") or ""), 300) or None
-    photo_2 = strip_or_none(str(fp.get("photo_2") or ""), 300) or None
-    photo_3 = strip_or_none(str(fp.get("photo_3") or ""), 300) or None
-    photo_1 = strip_or_none(str(fp.get("photo_1") or ""), 300) or None
-    photo_2 = strip_or_none(str(fp.get("photo_2") or ""), 300) or None
-    photo_3 = strip_or_none(str(fp.get("photo_3") or ""), 300) or None
+    photo_1_url: str | None = None
+    photo_2_url: str | None = None
+    photo_3_url: str | None = None
 
     err: str | None = None
     client: Client | None = None
@@ -880,6 +879,43 @@ async def admin_booking_new_post(
         )
 
     assert client is not None and planned_date is not None
+    try:
+        up1 = get_nonempty_upload(form_raw, "photo_1")
+        up2 = get_nonempty_upload(form_raw, "photo_2")
+        up3 = get_nonempty_upload(form_raw, "photo_3")
+        if up1 is not None:
+            photo_1_url = await save_upload_image(up1)
+        if up2 is not None:
+            photo_2_url = await save_upload_image(up2)
+        if up3 is not None:
+            photo_3_url = await save_upload_image(up3)
+    except ValueError as exc:
+        err = str(exc)
+        masters = _masters_for_visit_form(db)
+        service_catalog = list_master_visit_services_catalog(db)
+        staff_users = list(db.scalars(select_users_with_any_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)).all())
+        return templates.TemplateResponse(
+            "admin_booking_form.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                error=err,
+                is_new=True,
+                booking=None,
+                selected_client=client,
+                masters=masters,
+                staff_users=staff_users,
+                after_reserve=str(request.url),
+                service_catalog=service_catalog,
+                kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                product_kind_options=[k.value for k in ProductSaleKind],
+                rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+                fp=fp,
+                booking_master_on_ids=[],
+            ),
+            status_code=400,
+        )
+
     booking = Booking(
         created_by_user_id=current_user.id,
         client_id=client.id,
@@ -888,9 +924,9 @@ async def admin_booking_new_post(
         status=BookingStatus.ACTIVE,
         quoted_price_text=quoted_price_text,
         deposit_amount=deposit_amount,
-        photo_1=photo_1,
-        photo_2=photo_2,
-        photo_3=photo_3,
+        photo_1=photo_1_url,
+        photo_2=photo_2_url,
+        photo_3=photo_3_url,
         comment=comment,
         planned_service_id=planned_service_id,
         planned_product_kind=planned_product_kind,
@@ -1106,13 +1142,16 @@ async def admin_booking_edit_post(
     if b is None:
         raise HTTPException(status_code=404, detail="Бронь не найдена")
     form_raw = await request.form()
-    fp = {k: form_raw.get(k) for k in form_raw.keys()}
+    fp = {k: form_raw.get(k) for k in form_raw.keys() if not isinstance(form_raw.get(k), UploadFile)}
 
     client_id_raw = str(fp.get("client_id") or "").strip()
     kind_raw = str(fp.get("kind") or "").strip() or BookingKind.VISIT.value
     quoted_price_text = strip_or_none(str(fp.get("quoted_price_text") or ""), 120)
     deposit_raw = str(fp.get("deposit_amount") or "").strip()
     comment = strip_or_none(str(fp.get("comment") or "")) or None
+    photo_1_url = getattr(b, "photo_1", None)
+    photo_2_url = getattr(b, "photo_2", None)
+    photo_3_url = getattr(b, "photo_3", None)
 
     err: str | None = None
     client = None
@@ -1235,14 +1274,68 @@ async def admin_booking_edit_post(
         details_json=_canonical_booking_details_json(b.details_json),
         cancelled_reason=b.cancelled_reason,
     )
+
+    # photos: replace/clear
+    try:
+        if parse_bool(form_raw.get("clear_photo_1")):
+            delete_media_by_url(photo_1_url)
+            photo_1_url = None
+        if parse_bool(form_raw.get("clear_photo_2")):
+            delete_media_by_url(photo_2_url)
+            photo_2_url = None
+        if parse_bool(form_raw.get("clear_photo_3")):
+            delete_media_by_url(photo_3_url)
+            photo_3_url = None
+        up1 = get_nonempty_upload(form_raw, "photo_1")
+        up2 = get_nonempty_upload(form_raw, "photo_2")
+        up3 = get_nonempty_upload(form_raw, "photo_3")
+        if up1 is not None:
+            new_url = await save_upload_image(up1)
+            delete_media_by_url(photo_1_url)
+            photo_1_url = new_url
+        if up2 is not None:
+            new_url = await save_upload_image(up2)
+            delete_media_by_url(photo_2_url)
+            photo_2_url = new_url
+        if up3 is not None:
+            new_url = await save_upload_image(up3)
+            delete_media_by_url(photo_3_url)
+            photo_3_url = new_url
+    except ValueError as exc:
+        err = str(exc)
+        masters = _masters_for_visit_form(db)
+        service_catalog = list_master_visit_services_catalog(db)
+        staff_users = list(db.scalars(select_users_with_any_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)).all())
+        selected_client = client
+        return templates.TemplateResponse(
+            "admin_booking_form.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                error=err,
+                is_new=False,
+                booking=b,
+                selected_client=selected_client,
+                masters=masters,
+                staff_users=staff_users,
+                after_reserve=str(request.url),
+                service_catalog=service_catalog,
+                kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                product_kind_options=[k.value for k in ProductSaleKind],
+                rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+                fp=fp,
+                booking_master_on_ids=on_ids,
+            ),
+            status_code=400,
+        )
     b.client_id = client.id
     b.planned_date = planned_date
     b.kind = BookingKind(kind_raw)
     b.quoted_price_text = quoted_price_text
     b.deposit_amount = deposit_amount
-    b.photo_1 = photo_1
-    b.photo_2 = photo_2
-    b.photo_3 = photo_3
+    b.photo_1 = photo_1_url
+    b.photo_2 = photo_2_url
+    b.photo_3 = photo_3_url
     b.comment = comment
     b.planned_service_id = planned_service_id
     b.planned_product_kind = planned_product_kind

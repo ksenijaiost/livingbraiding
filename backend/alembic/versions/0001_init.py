@@ -487,6 +487,7 @@ def upgrade() -> None:
         sa.Column("client_discount_percent", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("photo_1", sa.String(length=300), nullable=True),
         sa.Column("photo_2", sa.String(length=300), nullable=True),
+        sa.Column("photo_3", sa.String(length=300), nullable=True),
         sa.Column("comment", sa.Text(), nullable=True),
         sa.Column("addons_total", sa.Float(), nullable=False, server_default=sa.text("0")),
         sa.Column("addons_details_json", sa.Text(), nullable=True),

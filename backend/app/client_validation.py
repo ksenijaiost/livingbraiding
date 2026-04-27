@@ -48,6 +48,8 @@ def client_db_to_form_dict(client: Client) -> dict[str, str]:
     return {
         "name": client.name,
         "phone": client.phone or "",
+        "photo_1": getattr(client, "photo_1", None) or "",
+        "photo_2": getattr(client, "photo_2", None) or "",
         "telegram": client.telegram or "",
         "vk": client.vk or "",
         "instagram": client.instagram or "",

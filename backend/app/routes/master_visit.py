@@ -31,6 +31,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_int
+from app.media_store import get_nonempty_upload, save_upload_image
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
     get_salon_cut_pct,
@@ -286,6 +287,42 @@ async def master_visit_new_post(
             inp,
             created_by_label=format_created_by_label(current_user),
         )
+        # photos (up to 3)
+        try:
+            p1 = get_nonempty_upload(form, "photo_1")
+            p2 = get_nonempty_upload(form, "photo_2")
+            p3 = get_nonempty_upload(form, "photo_3")
+            if p1 is not None:
+                visit.photo_1 = await save_upload_image(p1)
+            if p2 is not None:
+                visit.photo_2 = await save_upload_image(p2)
+            if p3 is not None:
+                visit.photo_3 = await save_upload_image(p3)
+            db.commit()
+        except ValueError as exc:
+            db.rollback()
+            fp, vm_on_ids, vm_pct_str = master_visit_step1_prefill_from_form(form)
+            fp.update(collect_questionnaire_prefill_from_form(form))
+            fp.update(collect_thermo_prefill_from_form(form))
+            selected_client = None
+            eid = (fp.get("existing_client_id") or "").strip()
+            try:
+                eid_int = parse_int(eid, min=1, field_name="existing_client_id")
+            except ValueError:
+                eid_int = 0
+            if eid_int > 0:
+                selected_client = db.get(Client, eid_int)
+            return _master_visit_step1_template_response(
+                request,
+                current_user=current_user,
+                db=db,
+                form_prefill=fp,
+                visit_master_on_ids=vm_on_ids,
+                visit_master_pct_str=vm_pct_str,
+                selected_client=selected_client,
+                error=str(exc),
+                status_code=400,
+            )
         bid_raw = str(form.get("booking_id") or "").strip()
         try:
             bid_int = parse_int(bid_raw, min=1, field_name="booking_id")

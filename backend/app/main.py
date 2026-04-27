@@ -78,6 +78,8 @@ from app.routes.products_calc import router as products_calc_router  # noqa: E40
 app.include_router(products_calc_router)
 from app.routes.public_pages import router as public_pages_router  # noqa: E402
 app.include_router(public_pages_router)
+from app.routes.media import router as media_router  # noqa: E402
+app.include_router(media_router)
 from app.routes.auth_routes import router as auth_routes_router  # noqa: E402
 app.include_router(auth_routes_router)
 

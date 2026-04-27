@@ -10,7 +10,7 @@
       </p>
     {% endif %}
 
-    <form method="post" action="{% if is_new %}/bookings/new{% else %}/bookings/{{ booking.id }}/edit{% endif %}">
+    <form method="post" action="{% if is_new %}/bookings/new{% else %}/bookings/{{ booking.id }}/edit{% endif %}" enctype="multipart/form-data">
       <input type="hidden" name="client_id" id="client_id" value="{{ selected_client.id if selected_client else fp.get('client_id','') }}" />
       <input type="hidden" name="calc_product_min" value="{{ fp.get('calc_product_min','') }}" />
       <input type="hidden" name="calc_product_max" value="{{ fp.get('calc_product_max','') }}" />
@@ -367,16 +367,46 @@
           <label>Фото (до 3)</label>
           <div class="row">
             <div style="flex:1; min-width: 220px;">
-              <input name="photo_1" maxlength="300" value="{{ fp.get('photo_1','') }}" placeholder="Фото 1 (ссылка/путь)" />
+              {% if not is_new and fp.get('photo_1') %}
+                <div class="muted" style="margin-bottom:6px;">
+                  <a href="{{ fp.get('photo_1') }}" target="_blank" rel="noopener">Открыть</a>
+                  <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
+                    <input type="checkbox" name="clear_photo_1" value="1" />
+                    <span>Удалить</span>
+                  </label>
+                </div>
+                <img src="{{ fp.get('photo_1') }}" alt="Фото 1" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px;" />
+              {% endif %}
+              <input type="file" name="photo_1" accept="image/*" />
             </div>
             <div style="flex:1; min-width: 220px;">
-              <input name="photo_2" maxlength="300" value="{{ fp.get('photo_2','') }}" placeholder="Фото 2 (ссылка/путь)" />
+              {% if not is_new and fp.get('photo_2') %}
+                <div class="muted" style="margin-bottom:6px;">
+                  <a href="{{ fp.get('photo_2') }}" target="_blank" rel="noopener">Открыть</a>
+                  <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
+                    <input type="checkbox" name="clear_photo_2" value="1" />
+                    <span>Удалить</span>
+                  </label>
+                </div>
+                <img src="{{ fp.get('photo_2') }}" alt="Фото 2" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px;" />
+              {% endif %}
+              <input type="file" name="photo_2" accept="image/*" />
             </div>
             <div style="flex:1; min-width: 220px;">
-              <input name="photo_3" maxlength="300" value="{{ fp.get('photo_3','') }}" placeholder="Фото 3 (ссылка/путь)" />
+              {% if not is_new and fp.get('photo_3') %}
+                <div class="muted" style="margin-bottom:6px;">
+                  <a href="{{ fp.get('photo_3') }}" target="_blank" rel="noopener">Открыть</a>
+                  <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
+                    <input type="checkbox" name="clear_photo_3" value="1" />
+                    <span>Удалить</span>
+                  </label>
+                </div>
+                <img src="{{ fp.get('photo_3') }}" alt="Фото 3" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px;" />
+              {% endif %}
+              <input type="file" name="photo_3" accept="image/*" />
             </div>
           </div>
-          <p class="muted" style="margin:6px 0 0;font-size:12px;">Загрузка/хранение фото будет добавлена отдельным этапом.</p>
+          <p class="muted" style="margin:6px 0 0;font-size:12px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.</p>
         </div>
         <div style="margin-top: 10px;">
           <label>Комментарий к брони</label>

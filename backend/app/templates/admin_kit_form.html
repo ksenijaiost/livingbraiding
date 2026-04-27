@@ -8,7 +8,7 @@
       <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
     {% endif %}
 
-    <form method="post" action="{{ form_action }}">
+    <form method="post" action="{{ form_action }}" enctype="multipart/form-data">
       {% set field_prefix = "" %}
       {% include "partials/kit_admin_form_fields.html" %}
 

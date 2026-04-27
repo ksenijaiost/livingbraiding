@@ -49,6 +49,27 @@
       Свой: {% if visit.client_type.value == 'SELF' %}да{% else %}нет{% endif %}
     </p>
 
+    {% if visit.photo_1 or visit.photo_2 or visit.photo_3 %}
+      <h3 style="margin-top: 18px;">Фото</h3>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        {% if visit.photo_1 %}
+          <a href="{{ visit.photo_1 }}" target="_blank" rel="noopener">
+            <img src="{{ visit.photo_1 }}" alt="Фото 1" style="max-width: 200px; max-height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
+          </a>
+        {% endif %}
+        {% if visit.photo_2 %}
+          <a href="{{ visit.photo_2 }}" target="_blank" rel="noopener">
+            <img src="{{ visit.photo_2 }}" alt="Фото 2" style="max-width: 200px; max-height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
+          </a>
+        {% endif %}
+        {% if visit.photo_3 %}
+          <a href="{{ visit.photo_3 }}" target="_blank" rel="noopener">
+            <img src="{{ visit.photo_3 }}" alt="Фото 3" style="max-width: 200px; max-height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
+          </a>
+        {% endif %}
+      </div>
+    {% endif %}
+
     <h3>Услуга</h3>
 
     <h4 style="margin: 14px 0 6px; font-size: 1rem;">Услуга</h4>
