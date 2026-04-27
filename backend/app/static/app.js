@@ -31,7 +31,84 @@ document.addEventListener("DOMContentLoaded", function () {
   initKitReserveUI();
   initKitClearReservesUI();
   initLbFormGuards();
+  initImageLightbox();
 });
+
+/**
+ * Click any <a class="lb-lightbox" href="..."> to show image fullscreen in-page (see base.html + app.css).
+ */
+function initImageLightbox() {
+  var root = document.getElementById("lb-image-lightbox");
+  if (!root) return;
+  if (root.dataset.lbInited === "1") return;
+  root.dataset.lbInited = "1";
+
+  var img = root.querySelector(".lb-image-lightbox__img");
+  var bodyEl = document.body;
+
+  function isOpen() {
+    return !root.hasAttribute("hidden");
+  }
+
+  function openLightbox(href, alt) {
+    if (!img || !href) return;
+    img.src = href;
+    img.alt = alt || "";
+    root.removeAttribute("hidden");
+    root.setAttribute("aria-hidden", "false");
+    bodyEl.style.overflow = "hidden";
+  }
+
+  function closeLightbox() {
+    if (!isOpen()) return;
+    try {
+      img.removeAttribute("src");
+    } catch (e) {}
+    img.alt = "";
+    root.setAttribute("hidden", "");
+    root.setAttribute("aria-hidden", "true");
+    bodyEl.style.overflow = "";
+  }
+
+  document.body.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    var a = t.closest("a.lb-lightbox");
+    if (!a) return;
+    var href = a.getAttribute("href");
+    if (!href || href === "#") return;
+    e.preventDefault();
+    var im = a.querySelector("img");
+    var alt = "";
+    if (im) {
+      alt = im.getAttribute("alt") || "";
+    } else {
+      alt = a.getAttribute("title") || String(a.textContent || "").trim() || "";
+    }
+    openLightbox(href, alt);
+  });
+
+  root.addEventListener("click", function (e) {
+    var el = e.target;
+    if (!el || !el.getAttribute) return;
+    if (el.getAttribute("data-lb-lightbox-close") != null) {
+      e.preventDefault();
+      closeLightbox();
+    }
+  });
+
+  document.addEventListener(
+    "keydown",
+    function (e) {
+      if (!e || e.key !== "Escape") return;
+      if (!isOpen()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeLightbox();
+    },
+    true
+  );
+}
 
 function initAdminStaffForm() {
   var form = document.querySelector("form[data-lb-staff-form]");

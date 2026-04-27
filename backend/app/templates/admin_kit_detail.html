@@ -82,7 +82,7 @@
       <dt class="muted">Фото</dt>
       <dd style="margin:0;">
         {% if kit.photo_1 %}
-          <a href="{{ kit.photo_1 }}" target="_blank" rel="noopener">
+          <a href="{{ kit.photo_1 }}" class="lb-lightbox" title="Фото комплекта">
             <img src="{{ kit.photo_1 }}" alt="Фото комплекта" style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
           </a>
         {% else %}

@@ -53,17 +53,17 @@
       <h3 style="margin-top: 18px;">Фото</h3>
       <div style="display:flex; gap:10px; flex-wrap:wrap;">
         {% if visit.photo_1 %}
-          <a href="{{ visit.photo_1 }}" target="_blank" rel="noopener">
+          <a href="{{ visit.photo_1 }}" class="lb-lightbox" title="Фото 1">
             <img src="{{ visit.photo_1 }}" alt="Фото 1" style="max-width: 200px; max-height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
           </a>
         {% endif %}
         {% if visit.photo_2 %}
-          <a href="{{ visit.photo_2 }}" target="_blank" rel="noopener">
+          <a href="{{ visit.photo_2 }}" class="lb-lightbox" title="Фото 2">
             <img src="{{ visit.photo_2 }}" alt="Фото 2" style="max-width: 200px; max-height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
           </a>
         {% endif %}
         {% if visit.photo_3 %}
-          <a href="{{ visit.photo_3 }}" target="_blank" rel="noopener">
+          <a href="{{ visit.photo_3 }}" class="lb-lightbox" title="Фото 3">
             <img src="{{ visit.photo_3 }}" alt="Фото 3" style="max-width: 200px; max-height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
           </a>
         {% endif %}

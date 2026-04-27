@@ -50,12 +50,12 @@
           {% if client.photo_1 or client.photo_2 %}
             <div style="display:flex; gap:10px; flex-wrap:wrap;">
               {% if client.photo_1 %}
-                <a href="{{ client.photo_1 }}" target="_blank" rel="noopener">
+                <a href="{{ client.photo_1 }}" class="lb-lightbox" title="Фото 1">
                   <img src="{{ client.photo_1 }}" alt="Фото 1" style="max-width: 160px; max-height: 160px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
                 </a>
               {% endif %}
               {% if client.photo_2 %}
-                <a href="{{ client.photo_2 }}" target="_blank" rel="noopener">
+                <a href="{{ client.photo_2 }}" class="lb-lightbox" title="Фото 2">
                   <img src="{{ client.photo_2 }}" alt="Фото 2" style="max-width: 160px; max-height: 160px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
                 </a>
               {% endif %}

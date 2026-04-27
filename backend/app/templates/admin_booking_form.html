@@ -369,39 +369,45 @@
             <div style="flex:1; min-width: 220px;">
               {% if not is_new and fp.get('photo_1') %}
                 <div class="muted" style="margin-bottom:6px;">
-                  <a href="{{ fp.get('photo_1') }}" target="_blank" rel="noopener">Открыть</a>
+                  <a href="{{ fp.get('photo_1') }}" class="lb-lightbox" title="Фото 1">Открыть</a>
                   <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
                     <input type="checkbox" name="clear_photo_1" value="1" />
                     <span>Удалить</span>
                   </label>
                 </div>
-                <img src="{{ fp.get('photo_1') }}" alt="Фото 1" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px;" />
+                <a href="{{ fp.get('photo_1') }}" class="lb-lightbox" title="Фото 1">
+                  <img src="{{ fp.get('photo_1') }}" alt="Фото 1" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px;" />
+                </a>
               {% endif %}
               <input type="file" name="photo_1" accept="image/*" />
             </div>
             <div style="flex:1; min-width: 220px;">
               {% if not is_new and fp.get('photo_2') %}
                 <div class="muted" style="margin-bottom:6px;">
-                  <a href="{{ fp.get('photo_2') }}" target="_blank" rel="noopener">Открыть</a>
+                  <a href="{{ fp.get('photo_2') }}" class="lb-lightbox" title="Фото 2">Открыть</a>
                   <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
                     <input type="checkbox" name="clear_photo_2" value="1" />
                     <span>Удалить</span>
                   </label>
                 </div>
-                <img src="{{ fp.get('photo_2') }}" alt="Фото 2" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px;" />
+                <a href="{{ fp.get('photo_2') }}" class="lb-lightbox" title="Фото 2">
+                  <img src="{{ fp.get('photo_2') }}" alt="Фото 2" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px;" />
+                </a>
               {% endif %}
               <input type="file" name="photo_2" accept="image/*" />
             </div>
             <div style="flex:1; min-width: 220px;">
               {% if not is_new and fp.get('photo_3') %}
                 <div class="muted" style="margin-bottom:6px;">
-                  <a href="{{ fp.get('photo_3') }}" target="_blank" rel="noopener">Открыть</a>
+                  <a href="{{ fp.get('photo_3') }}" class="lb-lightbox" title="Фото 3">Открыть</a>
                   <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
                     <input type="checkbox" name="clear_photo_3" value="1" />
                     <span>Удалить</span>
                   </label>
                 </div>
-                <img src="{{ fp.get('photo_3') }}" alt="Фото 3" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px;" />
+                <a href="{{ fp.get('photo_3') }}" class="lb-lightbox" title="Фото 3">
+                  <img src="{{ fp.get('photo_3') }}" alt="Фото 3" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px;" />
+                </a>
               {% endif %}
               <input type="file" name="photo_3" accept="image/*" />
             </div>

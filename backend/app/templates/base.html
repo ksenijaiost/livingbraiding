@@ -231,6 +231,23 @@
     <div class="container">
       {% block content %}{% endblock %}
     </div>
+
+    <div
+      id="lb-image-lightbox"
+      class="lb-image-lightbox"
+      hidden
+      aria-hidden="true"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Просмотр фотографии"
+    >
+      <div class="lb-image-lightbox__backdrop" data-lb-lightbox-close tabindex="-1" aria-hidden="true"></div>
+      <div class="lb-image-lightbox__panel">
+        <button type="button" class="lb-image-lightbox__close" data-lb-lightbox-close aria-label="Закрыть">×</button>
+        <img class="lb-image-lightbox__img" src="" alt="" />
+      </div>
+    </div>
+
     <script>
       // Prevent accidental submit on Enter in inputs across the app.
       // Use `data-allow-enter-submit="1"` on an input/form if you ever need default Enter submit back.

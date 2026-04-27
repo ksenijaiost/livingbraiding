@@ -176,13 +176,15 @@
             <label class="label-sub">Фото 1</label>
             {% if not is_new and form.get('photo_1') %}
               <div class="muted" style="margin:-2px 0 8px;">
-                <a href="{{ form.get('photo_1') }}" target="_blank" rel="noopener">Открыть</a>
+                <a href="{{ form.get('photo_1') }}" class="lb-lightbox" title="Фото 1">Открыть</a>
                 <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
                   <input type="checkbox" name="clear_photo_1" value="1" />
                   <span>Удалить</span>
                 </label>
               </div>
-              <img src="{{ form.get('photo_1') }}" alt="Фото 1" style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:10px;" />
+              <a href="{{ form.get('photo_1') }}" class="lb-lightbox" title="Фото 1">
+                <img src="{{ form.get('photo_1') }}" alt="Фото 1" style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:10px;" />
+              </a>
             {% endif %}
             <input type="file" name="photo_1" accept="image/*" />
           </div>
@@ -190,13 +192,15 @@
             <label class="label-sub">Фото 2</label>
             {% if not is_new and form.get('photo_2') %}
               <div class="muted" style="margin:-2px 0 8px;">
-                <a href="{{ form.get('photo_2') }}" target="_blank" rel="noopener">Открыть</a>
+                <a href="{{ form.get('photo_2') }}" class="lb-lightbox" title="Фото 2">Открыть</a>
                 <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
                   <input type="checkbox" name="clear_photo_2" value="1" />
                   <span>Удалить</span>
                 </label>
               </div>
-              <img src="{{ form.get('photo_2') }}" alt="Фото 2" style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:10px;" />
+              <a href="{{ form.get('photo_2') }}" class="lb-lightbox" title="Фото 2">
+                <img src="{{ form.get('photo_2') }}" alt="Фото 2" style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:10px;" />
+              </a>
             {% endif %}
             <input type="file" name="photo_2" accept="image/*" />
           </div>
