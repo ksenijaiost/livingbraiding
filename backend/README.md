@@ -4,6 +4,8 @@ This folder contains the FastAPI app and its SQLite/Postgres database schema.
 
 Файл **`data/livingbraiding.db`** (SQLite) — это **одна база**: все таблицы живут внутри этого файла, отдельных файлов на каждую таблицу не будет.
 
+> Примечание: команды ниже предполагают, что текущая папка — `backend/`.
+
 ### Key folders
 
 - `app/`: application code
@@ -57,6 +59,10 @@ Run server:
 ```bash
 ..\.\.venv\Scripts\python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8010
 ```
+
+Open:
+
+- `http://127.0.0.1:8010/`
 
 Run tests:
 
