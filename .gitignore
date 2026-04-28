@@ -4,3 +4,7 @@ __pycache__/
 *.db
 backend/.env
 backend/data/*.db
+
+# Uploads (local user content)
+backend/data/uploads/*
+!backend/data/uploads/.gitkeep
