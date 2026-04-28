@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">{% if is_new %}Новая услуга{% else %}Услуга{% endif %}</h2>
+    <p>
+      <a href="/admin/catalog">Прайс</a>
+      → <a href="/admin/catalog/categories/{{ category.id }}/subcategories">{{ category.name }}</a>
+      → <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services">{{ subcategory.name }}</a>
+    </p>
+    {% if err == "empty" %}
+      <div class="error">Укажите название.</div>
+    {% elif err == "duplicate" %}
+      <div class="error">Такое имя уже есть в этой подкатегории.</div>
+    {% elif err == "bad_price" %}
+      <div class="error">Некорректная цена.</div>
+    {% endif %}
+    <form method="post" action="{% if is_new %}/admin/catalog/services/new{% else %}/admin/catalog/services/{{ svc.id }}/edit{% endif %}">
+      {% if is_new %}
+        <input type="hidden" name="subcategory_id" value="{{ subcategory.id }}" />
+      {% endif %}
+      <label>Название
+        <input name="name" value="{{ form_name }}" required maxlength="200" />
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 12px;">
+        <input type="checkbox" name="is_active" {% if form_active %}checked{% endif %} />
+        Активна
+      </label>
+      <p class="muted" style="margin: 20px 0 8px;">Прайс (₽), для каждого уровня — «от» и «до». Необязательные поля можно оставить пустыми (в базе будет NULL).</p>
+
+      <p style="margin: 12px 0 6px; font-weight: 600;">{{ ru_master_level('JUNIOR')|capitalize }}</p>
+      <div class="row">
+        <div><label>От<input name="price_junior_from" value="{{ form_jf }}" placeholder="например 4000" /></label></div>
+        <div><label>До<input name="price_junior_to" value="{{ form_jt }}" placeholder="например 4500" /></label></div>
+      </div>
+
+      <p style="margin: 12px 0 6px; font-weight: 600;">{{ ru_master_level('MIDDLE')|capitalize }}</p>
+      <div class="row">
+        <div><label>От<input name="price_middle_from" value="{{ form_mf }}" placeholder="например 4500" /></label></div>
+        <div><label>До<input name="price_middle_to" value="{{ form_mt }}" placeholder="например 5000" /></label></div>
+      </div>
+
+      <p style="margin: 12px 0 6px; font-weight: 600;">{{ ru_master_level('SENIOR')|capitalize }}</p>
+      <div class="row">
+        <div><label>От<input name="price_senior_from" value="{{ form_sf }}" placeholder="например 5000" /></label></div>
+        <div><label>До<input name="price_senior_to" value="{{ form_st }}" placeholder="например 5500" /></label></div>
+      </div>
+
+      <p class="muted" style="margin: 16px 0 8px;">Визит мастера</p>
+      <div style="margin-top: 8px;">
+        <div style="font-weight:600; margin-bottom:4px;">Блок «Комплект» (склад)</div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="kit_section_override" value="" {% if form_kit_override == '' %}checked{% endif %} />
+          Как у подкатегории
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="kit_section_override" value="1" {% if form_kit_override == '1' %}checked{% endif %} />
+          Всегда показывать
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="kit_section_override" value="0" {% if form_kit_override == '0' %}checked{% endif %} />
+          Не показывать
+        </label>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <div style="font-weight:600; margin-bottom:4px;">Блок «Хвост/резинка» (склад)</div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="tail_section_override" value="" {% if form_tail_override == '' %}checked{% endif %} />
+          Как у подкатегории
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="tail_section_override" value="1" {% if form_tail_override == '1' %}checked{% endif %} />
+          Всегда показывать
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="tail_section_override" value="0" {% if form_tail_override == '0' %}checked{% endif %} />
+          Не показывать
+        </label>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <div style="font-weight:600; margin-bottom:4px;">Описание про материал (из анкеты категории)</div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="material_description_override" value="" {% if form_material_desc_override == '' %}checked{% endif %} />
+          Как у подкатегории
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="material_description_override" value="show" {% if form_material_desc_override == 'show' %}checked{% endif %} />
+          Показывать
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 6px;">
+          <input type="radio" name="material_description_override" value="hide" {% if form_material_desc_override == 'hide' %}checked{% endif %} />
+          Не показывать
+        </label>
+      </div>
+      {% if category and category.name == 'Продажа материала' %}
+        <p class="muted" style="margin: 16px 0 8px;">Розница материала (поля при продаже товара)</p>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+          <input type="checkbox" name="retail_material_kanekalon" {% if form_retail_kanekalon %}checked{% endif %} />
+          Канекалон (граммы × цена за г канекалона)
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+          <input type="checkbox" name="retail_material_kudri" {% if form_retail_kudri %}checked{% endif %} />
+          Кудри/термо (граммы × цена за г кудрей/термо)
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+          <input type="checkbox" name="retail_material_mix" {% if form_retail_mix %}checked{% endif %} />
+          Смешка (как в визите: из наличия / сама мешала + сложность)
+        </label>
+      {% endif %}
+      <p style="margin-top: 16px;">
+        <button type="submit">Сохранить</button>
+        <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services"><button type="button" class="secondary">Отмена</button></a>
+      </p>
+    </form>
+  </div>
+{% endblock %}

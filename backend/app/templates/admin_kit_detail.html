@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% block content %}
+  {% set is_admin_kit = current_user.role.value in ['ADMIN', 'ADMIN_SUPER'] %}
+  {% set slots_full = kit_reserve_slots_used >= kit_max_reserves %}
+  {% set can_open_reserve = kit.pieces_available > 0 and not slots_full %}
+  <div class="card">
+    <p><a href="/kits">← К списку комплектов</a></p>
+
+    {% if msg == "reserved" %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Резерв сохранён.</p>
+    {% elif msg == "cleared" %}
+      <p style="background:#dbeafe;border:1px solid #93c5fd;color:#1e40af;padding:10px 12px;border-radius:8px;">Резерв снят.</p>
+    {% elif msg == "created" %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Комплект создан.</p>
+    {% elif msg == "saved" %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Изменения сохранены.</p>
+    {% endif %}
+    {% if err %}
+      <div class="error" style="margin-bottom: 12px;">{{ err }}</div>
+    {% endif %}
+
+    <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-start; justify-content:space-between;">
+      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+        {% if can_open_reserve %}
+          <button
+            type="button"
+            class="js-reserve-open{% if kit.is_reserved %} secondary{% endif %}"
+            data-kit-id="{{ kit.id }}"
+            data-action-url="/kits/{{ kit.id }}/reserve"
+            data-sku="{{ kit.sku|e }}"
+            data-free="{{ kit.pieces_available }}"
+            data-slots="{{ kit_reserve_slots_used }}"
+            data-max="{{ kit_max_reserves }}"
+            data-client-id=""
+            data-user-id=""
+            data-client-name=""
+          >
+            {% if kit.is_reserved %}Добавить резерв{% else %}Зарезервировать{% endif %}
+          </button>
+        {% elif kit.pieces_available > 0 and slots_full %}
+          <button
+            type="button"
+            class="secondary kit-btn-disabled js-reserve-limit-full"
+            aria-disabled="true"
+            title="Достигнут лимит резервов ({{ kit_max_reserves }}). Снимите резерв кнопкой «Снять» или в таблице ниже."
+          >
+            {% if kit.is_reserved %}Добавить резерв (лимит){% else %}Зарезервировать (лимит){% endif %}
+          </button>
+        {% endif %}
+        {% if kit.is_reserved and is_admin_kit %}
+          <script type="application/json" id="clear-reserves-payload-{{ kit.id }}" style="display:none">{{ clear_modal_items_json|safe }}</script>
+          <button type="button" class="secondary js-clear-reserves-open" data-kit-id="{{ kit.id }}" data-action-url="/kits/{{ kit.id }}/reserve" data-sku="{{ kit.sku|e }}" data-after="detail">Снять</button>
+        {% endif %}
+      </div>
+      {% if is_admin_kit %}
+        <a href="/kits/{{ kit.id }}/edit"><button type="button">Редактировать</button></a>
+      {% endif %}
+    </div>
+
+    {% set missing_price = kit.stock_price_total is none or kit.stock_price_total <= 0 %}
+    {% if missing_price %}
+      <div class="card" style="margin-bottom:14px; background:#fffbeb; border-color:#fbbf24; color:#92400e;">
+        <strong>⚠️ Нет цены продажи.</strong> Списание комплекта в визите, заказе или продаже товара невозможно, пока администратор не укажет цену (редактирование карточки).
+      </div>
+    {% endif %}
+
+    <h2 style="margin:16px 0 12px; display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
+      {% if missing_price %}<span title="Нет цены продажи">⚠️</span>{% endif %}
+      <span>{{ kit.sku }}</span>
+      {% if kit.is_reserved %}
+        <span
+          style="display:inline-block;padding:2px 10px;border-radius:6px;background:#fef3c7;border:1px solid #fbbf24;font-size:14px;font-weight:600;"
+          title="{{ reserve_tooltip }}"
+        >Резервы: {{ kit_reserve_slots_used }} / {{ kit_max_reserves }}</span>
+      {% endif %}
+    </h2>
+
+    <dl style="margin:0; display:grid; gap:10px 24px; grid-template-columns: auto 1fr; max-width:720px;">
+      <dt class="muted">Название</dt>
+      <dd style="margin:0;">{{ kit.title }}</dd>
+
+      <dt class="muted">Фото</dt>
+      <dd style="margin:0;">
+        {% if kit.photo_1 %}
+          <a href="{{ kit.photo_1 }}" class="lb-lightbox" title="Фото комплекта">
+            <img src="{{ kit.photo_1 }}" alt="Фото комплекта" style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
+          </a>
+        {% else %}
+          —
+        {% endif %}
+      </dd>
+
+      <dt class="muted">Авторство</dt>
+      <dd style="margin:0;">
+        {% if kit.author_external %}<span>Извне</span>{% endif %}
+        {% if kit.author_external and kit.author_staff_links %} · {% endif %}
+        {% for link in kit.author_staff_links %}
+          {{ link.user.display_name or link.user.username }}{% if not loop.last %}, {% endif %}
+        {% endfor %}
+        {% if not kit.author_external and not kit.author_staff_links %}—{% endif %}
+      </dd>
+
+      <dt class="muted">Заготовок</dt>
+      <dd style="margin:0;">
+        {% set reserved_total = (kit.reserves or [])|sum(attribute='pieces_reserved') %}
+        изначально {{ kit.pieces_total }}, остаток {{ kit.pieces_available }}, зарезервировано {{ reserved_total }}
+      </dd>
+
+      <dt class="muted">Тип заготовок</dt>
+      <dd style="margin:0;">
+        {% if kit.blank_type_de %}<span>D.E.</span>{% endif %}
+        {% if kit.blank_type_de and kit.blank_type_se %} и {% endif %}
+        {% if kit.blank_type_se %}<span>S.E.</span>{% endif %}
+        {% if not kit.blank_type_de and not kit.blank_type_se %}—{% endif %}
+      </dd>
+
+      <dt class="muted">Вес</dt>
+      <dd style="margin:0;">{% if kit.weight_grams is not none %}{{ kit.weight_grams }} г{% else %}—{% endif %}</dd>
+
+      <dt class="muted">Длина</dt>
+      <dd style="margin:0;">{% if kit.length_cm is not none %}{{ kit.length_cm }} см{% else %}—{% endif %}</dd>
+
+      <dt class="muted">Украшения</dt>
+      <dd style="margin:0;">{% if kit.has_decorations %}да{% else %}нет{% endif %}</dd>
+
+      <dt class="muted">Материалы</dt>
+      <dd style="margin:0; white-space:pre-wrap;">{{ kit.materials_text or '—' }}</dd>
+
+      <dt class="muted">Цвет</dt>
+      <dd style="margin:0;">{{ kit.color_text or '—' }}</dd>
+
+      <dt class="muted">Виды заготовок</dt>
+      <dd style="margin:0; white-space:pre-wrap;">{{ kit.blanks_kinds_text or '—' }}</dd>
+
+      <dt class="muted">Описание</dt>
+      <dd style="margin:0; white-space:pre-wrap;">{{ kit.description or '—' }}</dd>
+
+      <dt class="muted">Примечание</dt>
+      <dd style="margin:0; white-space:pre-wrap;">{{ kit.notes or '—' }}</dd>
+
+      <dt class="muted">Цена на складе (всего)</dt>
+      <dd style="margin:0;">
+        {% if kit.stock_price_total is not none %}{{ kit.stock_price_total }} ₽{% else %}—{% endif %}
+        {% if kit.stock_price_snapshot_text %}
+          <details style="margin-top:6px;">
+            <summary class="muted" style="cursor:pointer;">Рассчитано по составу</summary>
+            <pre style="margin:8px 0 0; white-space:pre-wrap; font:inherit;">{{ kit.stock_price_snapshot_text }}</pre>
+          </details>
+        {% elif computed_stock_price_total is not none %}
+          <div class="muted" style="font-size:12px;margin-top:4px;">
+            Рассчитано по составу: <strong>{{ computed_stock_price_total|round(2) }} ₽</strong>
+          </div>
+        {% elif computed_stock_price_missing_keys %}
+          <div class="muted" style="font-size:12px;margin-top:4px;">
+            Нет цен для ключей: <strong>{{ computed_stock_price_missing_keys|join(', ') }}</strong>
+          </div>
+        {% endif %}
+      </dd>
+
+      <dt class="muted">Скидка (всего), %</dt>
+      <dd style="margin:0;">
+        {% if is_admin_kit %}
+          <form method="post" action="/kits/{{ kit.id }}/discount" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <input type="hidden" name="redirect_to" value="detail" />
+            <input name="discount_percent" type="text" inputmode="numeric" pattern="[0-9]*" value="{{ kit.discount_percent }}" style="width:5rem;" />
+            <button type="submit" class="secondary" style="padding:2px 10px;">Сохранить скидку</button>
+          </form>
+          {% if kit.stock_price_total is not none and kit.cost_total is not none and kit.stock_price_total > 0 and kit.cost_total > 0 %}
+            {% set mx_pct = (((kit.stock_price_total - kit.cost_total) / kit.stock_price_total * 100)|int) %}
+            <span class="muted" style="font-size:12px; display:block; margin-top:6px;">Максимум по марже (цена − себестоимость с ЗП): <strong>{{ mx_pct }}%</strong>. Сумма скидки в ₽ считается от цены на складе автоматически.</span>
+          {% else %}
+            <span class="muted" style="font-size:12px; display:block; margin-top:6px;">Чтобы показать лимит %, задайте цену и себестоимость. Скидка уменьшает фонд студии при списании.</span>
+          {% endif %}
+        {% else %}
+          {{ kit.discount_percent }}%
+        {% endif %}
+      </dd>
+      {% set dp = (kit.discount_percent or 0)|int %}
+      {% if kit.stock_price_total is not none and dp > 0 %}
+        {% set net = (kit.stock_price_total * (100 - dp) / 100)|round(2) %}
+        <dt class="muted">Цена с учётом скидки</dt>
+        <dd style="margin:0;">{{ net }} ₽</dd>
+      {% endif %}
+
+      <dt class="muted">Себестоимость (всего)</dt>
+      <dd style="margin:0;">
+        {% if kit.cost_total is not none %}{{ kit.cost_total }} ₽{% else %}—{% endif %}
+        {% if kit.cost_snapshot_text %}
+          <details style="margin-top:6px;">
+            <summary class="muted" style="cursor:pointer;">Показать состав себестоимости</summary>
+            <pre style="margin:8px 0 0; white-space:pre-wrap; font:inherit;">{{ kit.cost_snapshot_text }}</pre>
+          </details>
+        {% endif %}
+      </dd>
+
+      {% if kit.is_reserved %}
+        <dt class="muted">Резервы</dt>
+        <dd style="margin:0;">
+          <table style="width:100%;max-width:640px;font-size:13px;">
+            <thead>
+              <tr><th>Шт.</th><th>Для кого</th><th>Когда (UTC→настройки)</th><th></th></tr>
+            </thead>
+            <tbody>
+              {% for r in kit.reserves %}
+                <tr>
+                  <td>{{ r.pieces_reserved }}</td>
+                  <td>
+                    {% if r.reserved_for_client %}{{ r.reserved_for_client.name }}{% endif %}
+                    {% if r.reserved_for_client and r.reserved_for_user %} · {% endif %}
+                    {% if r.reserved_for_user %}{{ r.reserved_for_user.display_name }}{% endif %}
+                    {% if not r.reserved_for_client and not r.reserved_for_user %}—{% endif %}
+                  </td>
+                  <td class="muted">{{ format_naive_utc_datetime(r.reserved_at, display_tz) }}</td>
+                  <td style="white-space:nowrap;">
+                    {% if is_admin_kit or r.reserved_by_user_id == current_user.id %}
+                      <form method="post" action="/kits/{{ kit.id }}/reserve" style="display:inline;margin:0;" onsubmit="return confirm('Снять этот резерв?');">
+                        <input type="hidden" name="action" value="clear" />
+                        <input type="hidden" name="reserve_id" value="{{ r.id }}" />
+                        <input type="hidden" name="after_reserve" value="detail" />
+                        <button type="submit" class="secondary" style="padding:4px 8px;">Снять</button>
+                      </form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <p class="muted" style="font-size:12px;margin:8px 0 0;">Лимит резервов на комплект задаётся в настройках (суперадмин).</p>
+        </dd>
+      {% endif %}
+    </dl>
+
+    {% if current_user and current_user.role.value == "ADMIN_SUPER" %}
+      <h3 style="margin:18px 0 10px;">История изменений</h3>
+      {% set n = (audit_rows|length if audit_rows else 0) %}
+      {% if n > 0 %}
+        <table>
+          <thead>
+            <tr>
+              <th>Когда</th>
+              <th>Кто</th>
+              <th>Поле</th>
+              <th>Было</th>
+              <th>Стало</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if n > 3 %}
+              {% for a in audit_rows[:2] %}
+                <tr>
+                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                  <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+                  <td><code>{{ a.field_name }}</code></td>
+                  <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+                  <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+                </tr>
+              {% endfor %}
+              <tr>
+                <td colspan="5">
+                  <button type="button" class="secondary" onclick="lbToggleAudit('lb-audit-kit', this)">Раскрыть историю</button>
+                </td>
+              </tr>
+              {% for a in audit_rows[2:] %}
+                <tr class="lb-audit-kit" style="display:none;">
+                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                  <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+                  <td><code>{{ a.field_name }}</code></td>
+                  <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+                  <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              {% for a in audit_rows[:3] %}
+                <tr>
+                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                  <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+                  <td><code>{{ a.field_name }}</code></td>
+                  <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+                  <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+                </tr>
+              {% endfor %}
+            {% endif %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Пока нет изменений.</p>
+      {% endif %}
+    {% endif %}
+  </div>
+
+{% with after_reserve='detail' %}
+{% include "kit_reserve_ui.html" %}
+{% endwith %}
+{% include "kit_clear_reserves_ui.html" %}
+
+{% endblock %}

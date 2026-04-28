@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Редактирование работы с товарами</h2>
+
+    <p class="lb-top-links" style="margin-top: 0;">
+      <a href="/sales/work/{% if row %}{{ row.id }}{% endif %}">← К карточке</a>
+      <span class="lb-top-sep">·</span>
+      <a href="/sales/work">К списку</a>
+    </p>
+
+    {% if err %}
+      <div class="error" style="margin-bottom: 12px;">{{ err }}</div>
+    {% endif %}
+
+    {% if not row %}
+      <p class="muted">Нет данных.</p>
+    {% else %}
+      <form method="post" action="/sales/work/{{ row.id }}/edit">
+        <div class="row">
+          <div>
+            <label>Сумма от клиента, ₽</label>
+            <input name="amount_from_client" type="number" step="1" min="0" value="{{ row.amount_from_client if row.amount_from_client is not none else '' }}" />
+          </div>
+          <div>
+            <label>Комментарий</label>
+            <input name="comment" value="{{ row.comment or '' }}" placeholder="необязательно" />
+          </div>
+        </div>
+
+        <div class="card" style="background:#f8fafc; margin-top: 12px;">
+          <strong>Материал</strong>
+          <div class="row" style="margin-top: 8px;">
+            <div>
+              <label>Канекалон (г)</label>
+              <input name="kanekalon_grams" type="number" step="0.01" min="0" value="{{ row.kanekalon_grams or 0 }}" />
+            </div>
+            <div>
+              <label>Кудри/термо (г)</label>
+              <input name="kudri_grams" type="number" step="0.01" min="0" value="{{ row.kudri_grams or 0 }}" />
+            </div>
+          </div>
+          <div class="row" style="margin-top: 8px;">
+            <div>
+              <label>Себестоимость материалов, ₽</label>
+              <input name="materials_cost_total" type="number" step="0.01" min="0" value="{{ row.materials_cost_total or 0 }}" />
+            </div>
+            <div>
+              <label>Доп. расходы, ₽</label>
+              <input name="extra_costs_amount" type="number" step="0.01" min="0" value="{{ row.extra_costs_amount or 0 }}" />
+            </div>
+          </div>
+          <div style="margin-top: 8px;">
+            <label>Себестоимость всего, ₽</label>
+            <input name="cost_total_amount" type="number" step="0.01" min="0" value="{{ row.cost_total_amount or 0 }}" />
+          </div>
+        </div>
+
+        <div class="card" style="background:#f8fafc; margin-top: 12px;">
+          <strong>Профит</strong>
+          <div class="row" style="margin-top: 8px;">
+            <div>
+              <label>Мастер, ₽</label>
+              <input name="master_profit_amount" type="number" step="0.01" min="0" value="{{ row.master_profit_amount or 0 }}" />
+            </div>
+            <div>
+              <label>Студия, ₽</label>
+              <input name="studio_profit_amount" type="number" step="0.01" min="0" value="{{ row.studio_profit_amount or 0 }}" />
+            </div>
+          </div>
+          <div style="margin-top: 8px;">
+            <label>Всего, ₽</label>
+            <input name="profit_total_amount" type="number" step="0.01" min="0" value="{{ row.profit_total_amount or 0 }}" />
+          </div>
+        </div>
+
+        <p style="margin-top: 12px;">
+          <button type="submit">Сохранить</button>
+        </p>
+      </form>
+    {% endif %}
+  </div>
+{% endblock %}
+

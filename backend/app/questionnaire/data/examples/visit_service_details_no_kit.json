@@ -1,0 +1,13 @@
+{
+  "service_fields": {},
+  "kit": null,
+  "answers": {
+    "note": "пример"
+  },
+  "answer_labels": {
+    "note": "Комментарий"
+  },
+  "answer_display": {
+    "note": "пример"
+  }
+}

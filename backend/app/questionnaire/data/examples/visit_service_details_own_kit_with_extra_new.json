@@ -1,0 +1,29 @@
+{
+  "service_fields": {
+    "bases_count": 28,
+    "blanks_count": 7,
+    "service_comment": "Коррекция своего комплекта"
+  },
+  "kit": {
+    "kind": "OWN",
+    "from_stock": null,
+    "new_kit": null,
+    "own": {
+      "origin": "FOREIGN",
+      "correction": true,
+      "extra_blanks": true,
+      "extra": {
+        "source": "NEW",
+        "from_stock": null,
+        "new_kit": {
+          "title": "Добор к своему комплекту",
+          "description": null,
+          "blanks_total": 4,
+          "sku": "OPT-01",
+          "made_by_self": true,
+          "notes": null
+        }
+      }
+    }
+  }
+}

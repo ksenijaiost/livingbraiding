@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <h2 style="margin-top: 0;">
+        {% if scope == "category" %}
+          Вопросы анкеты: категория «{{ category.name }}»
+        {% elif scope == "subcategory" %}
+          Вопросы анкеты: подкатегория «{{ subcategory.name }}»
+        {% else %}
+          Вопросы анкеты: услуга «{{ service.name }}»
+        {% endif %}
+      </h2>
+      {% if scope == "category" %}
+        <a href="/admin/catalog/categories/{{ category.id }}/fields/new"><button type="button">Добавить поле</button></a>
+      {% elif scope == "subcategory" %}
+        <a href="/admin/catalog/subcategories/{{ subcategory.id }}/fields/new"><button type="button">Добавить поле</button></a>
+      {% else %}
+        <a href="/admin/catalog/services/{{ service.id }}/fields/new"><button type="button">Добавить поле</button></a>
+      {% endif %}
+    </div>
+    <p class="muted">
+      <a href="/admin/catalog">Прайс</a>
+      {% if scope == "category" %}
+        · поля общие для всех услуг категории (до вопросов подкатегории и услуги)
+      {% else %}
+        → <a href="/admin/catalog/categories/{{ category.id }}/subcategories">{{ category.name }}</a>
+        {% if scope == "subcategory" %}
+          · поля общие для всех услуг этой подкатегории
+        {% else %}
+          → <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services">{{ subcategory.name }}</a>
+          · дополнительно только для этой услуги (ключи не должны совпадать с полями подкатегории и категории)
+        {% endif %}
+      {% endif %}
+    </p>
+    {% if err == "duplicate" %}
+      <div class="error">Ключ поля уже занят. Выберите другой идентификатор.</div>
+    {% endif %}
+    <table>
+      <thead>
+        <tr>
+          <th>Порядок</th>
+          <th>Ключ</th>
+          <th>Тип</th>
+          <th>Подпись</th>
+          <th>Обяз.</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in fields %}
+          <tr>
+            <td>
+              {% if scope == "category" %}
+                <form method="post" action="/admin/catalog/categories/{{ category.id }}/fields/{{ f.id }}/move" style="display:inline;">
+                  <input type="hidden" name="direction" value="up" />
+                  <button type="submit" class="secondary" style="padding:4px 8px;">↑</button>
+                </form>
+                <form method="post" action="/admin/catalog/categories/{{ category.id }}/fields/{{ f.id }}/move" style="display:inline;">
+                  <input type="hidden" name="direction" value="down" />
+                  <button type="submit" class="secondary" style="padding:4px 8px;">↓</button>
+                </form>
+              {% elif scope == "subcategory" %}
+                <form method="post" action="/admin/catalog/subcategories/{{ subcategory.id }}/fields/{{ f.id }}/move" style="display:inline;">
+                  <input type="hidden" name="direction" value="up" />
+                  <button type="submit" class="secondary" style="padding:4px 8px;">↑</button>
+                </form>
+                <form method="post" action="/admin/catalog/subcategories/{{ subcategory.id }}/fields/{{ f.id }}/move" style="display:inline;">
+                  <input type="hidden" name="direction" value="down" />
+                  <button type="submit" class="secondary" style="padding:4px 8px;">↓</button>
+                </form>
+              {% else %}
+                <form method="post" action="/admin/catalog/services/{{ service.id }}/fields/{{ f.id }}/move" style="display:inline;">
+                  <input type="hidden" name="direction" value="up" />
+                  <button type="submit" class="secondary" style="padding:4px 8px;">↑</button>
+                </form>
+                <form method="post" action="/admin/catalog/services/{{ service.id }}/fields/{{ f.id }}/move" style="display:inline;">
+                  <input type="hidden" name="direction" value="down" />
+                  <button type="submit" class="secondary" style="padding:4px 8px;">↓</button>
+                </form>
+              {% endif %}
+            </td>
+            <td><code>{{ f.field_key }}</code></td>
+            <td>{{ ru_questionnaire_field_type(f.field_type) }}</td>
+            <td>{{ f.label }}</td>
+            <td>{% if f.required %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
+            <td style="white-space:nowrap;">
+              {% if scope == "category" %}
+                <a href="/admin/catalog/categories/{{ category.id }}/fields/{{ f.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+                <form method="post" action="/admin/catalog/categories/{{ category.id }}/fields/{{ f.id }}/delete" style="display:inline;" onsubmit="return confirm('Удалить поле «{{ f.field_key }}»?');">
+                  <button type="submit" class="secondary">Удалить</button>
+                </form>
+              {% elif scope == "subcategory" %}
+                <a href="/admin/catalog/subcategories/{{ subcategory.id }}/fields/{{ f.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+                <form method="post" action="/admin/catalog/subcategories/{{ subcategory.id }}/fields/{{ f.id }}/delete" style="display:inline;" onsubmit="return confirm('Удалить поле «{{ f.field_key }}»?');">
+                  <button type="submit" class="secondary">Удалить</button>
+                </form>
+              {% else %}
+                <a href="/admin/catalog/services/{{ service.id }}/fields/{{ f.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+                <form method="post" action="/admin/catalog/services/{{ service.id }}/fields/{{ f.id }}/delete" style="display:inline;" onsubmit="return confirm('Удалить поле «{{ f.field_key }}»?');">
+                  <button type="submit" class="secondary">Удалить</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if not fields %}
+      <p class="muted" style="margin-top: 12px;">Пока нет полей — добавьте первое.</p>
+    {% endif %}
+    <p class="lb-top-links" style="margin-top: 16px;">
+      {% if scope == "category" %}
+        <a href="/admin/catalog">← Прайс</a>
+      {% elif scope == "subcategory" %}
+        <a href="/admin/catalog/categories/{{ category.id }}/subcategories">← Подкатегории</a>
+      {% else %}
+        <a href="/admin/catalog/subcategories/{{ subcategory.id }}/services">← Услуги</a>
+      {% endif %}
+    </p>
+  </div>
+{% endblock %}

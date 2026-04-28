@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block content %}
+  {% set is_admin_kit = current_user.role.value in ['ADMIN', 'ADMIN_SUPER'] %}
+  <div class="card">
+    <div class="lb-flex-between-center">
+      <h2 class="lb-mt-0">Комплекты</h2>
+      {% if is_admin_kit %}
+        <a href="/kits/new"><button type="button">Новый комплект</button></a>
+      {% endif %}
+    </div>
+    <p class="muted">Склад: артикулы и остатки. Резерв — кто и для кого (клиент и/или сотрудник); время и автор фиксируются автоматически.</p>
+
+    {% if msg == "reserved" %}
+      <p class="lb-flash lb-flash-ok">Резерв сохранён.</p>
+    {% elif msg == "cleared" %}
+      <p class="lb-flash lb-flash-info">Резерв снят.</p>
+    {% elif msg == "created" %}
+      <p class="lb-flash lb-flash-ok">Комплект создан.</p>
+    {% endif %}
+    {% if err %}
+      <div class="error lb-mb-12">{{ err }}</div>
+    {% endif %}
+
+    <table>
+      <thead>
+        <tr>
+          <th>Артикул</th>
+          <th>Название</th>
+          <th>Цена, ₽</th>
+          <th>Скидка, %</th>
+          <th>Остаток</th>
+          <th>Резерв</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in kit_rows %}
+          {% set k = row.kit %}
+          {% set missing_price = k.stock_price_total is none or k.stock_price_total <= 0 %}
+          {% set slots_u = row.reserve_slots_used %}
+          {% set slots_full = slots_u >= kit_max_reserves %}
+          {% set can_open_reserve = k.pieces_available > 0 and not slots_full %}
+          <tr>
+            <td class="lb-nowrap">
+              {% if missing_price %}
+                <span title="Не задана цена продажи — списание в визите/продаже недоступно" class="lb-icon-warn-mr4">⚠️</span>
+              {% endif %}
+              <a href="/kits/{{ k.id }}"><strong>{{ k.sku }}</strong></a>
+            </td>
+            <td>{{ k.title }}</td>
+            <td class="muted">
+              {% if k.stock_price_total is not none %}
+                {% set dpp = (k.discount_percent or 0)|int %}
+                {% if dpp > 0 %}
+                  {% set netp = (k.stock_price_total * (100 - dpp) / 100)|round(2) %}
+                  <s>{{ k.stock_price_total }}</s><br />{{ netp }}
+                {% else %}
+                  {{ k.stock_price_total }}
+                {% endif %}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td class="lb-nowrap">
+              {% if is_admin_kit %}
+                <form method="post" action="/kits/{{ k.id }}/discount" class="lb-inline-flex-wrap-gap-6">
+                  <input type="hidden" name="redirect_to" value="list" />
+                  <input name="discount_percent" type="text" inputmode="numeric" pattern="[0-9]*" value="{{ k.discount_percent }}" class="lb-w-4rem" />
+                  <button type="submit" class="secondary lb-btn-compact-2x8">Ок</button>
+                </form>
+              {% else %}
+                {{ k.discount_percent }}%
+              {% endif %}
+            </td>
+            <td>{{ k.pieces_available }} / {{ k.pieces_total }}</td>
+            <td class="lb-font-13">
+              {% if k.is_reserved %}
+                <span
+                  class="lb-reserve-chip"
+                  title="{{ row.reserve_tooltip }}"
+                >{{ slots_u }} / {{ kit_max_reserves }}</span>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td style="vertical-align:top;">
+              <div class="lb-actions-col">
+              {% if can_open_reserve %}
+                <button
+                  type="button"
+                  class="js-reserve-open{% if k.is_reserved %} secondary{% endif %} lb-btn-wrap-center"
+                  data-kit-id="{{ k.id }}"
+                  data-action-url="/kits/{{ k.id }}/reserve"
+                  data-sku="{{ k.sku|e }}"
+                  data-free="{{ k.pieces_available }}"
+                  data-slots="{{ slots_u }}"
+                  data-max="{{ kit_max_reserves }}"
+                  data-client-id=""
+                  data-user-id=""
+                  data-client-name=""
+                >
+                  {% if k.is_reserved %}Добавить резерв{% else %}Зарезервировать{% endif %}
+                </button>
+              {% elif k.pieces_available > 0 and slots_full %}
+                <button
+                  type="button"
+                  class="secondary kit-btn-disabled js-reserve-limit-full lb-btn-wrap-center"
+                  aria-disabled="true"
+                  title="Достигнут лимит резервов ({{ kit_max_reserves }}). Снимите резерв кнопкой «Снять»."
+                >
+                  {% if k.is_reserved %}Добавить резерв (лимит){% else %}Зарезервировать (лимит){% endif %}
+                </button>
+              {% endif %}
+              {% if k.is_reserved and is_admin_kit %}
+                <script type="application/json" id="clear-reserves-payload-{{ k.id }}" class="lb-hidden">{{ row.clear_modal_items_json|safe }}</script>
+                <button type="button" class="secondary js-clear-reserves-open lb-btn-wrap-center" data-kit-id="{{ k.id }}" data-action-url="/kits/{{ k.id }}/reserve" data-sku="{{ k.sku|e }}" data-after="list">Снять</button>
+              {% endif %}
+              {% if k.is_reserved and not is_admin_kit %}
+                {% for r in k.reserves %}
+                  {% if r.reserved_by_user_id == current_user.id %}
+                    <form method="post" action="/kits/{{ k.id }}/reserve" style="margin:0;" onsubmit="return confirm('Снять ваш резерв ({{ r.pieces_reserved }} шт.)?');">
+                      <input type="hidden" name="action" value="clear" />
+                      <input type="hidden" name="reserve_id" value="{{ r.id }}" />
+                      <input type="hidden" name="after_reserve" value="list" />
+                      <button type="submit" class="secondary lb-btn-wrap-center" style="width:100%;">Снять {{ r.pieces_reserved }} шт.</button>
+                    </form>
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+{% with after_reserve='list' %}
+{% include "kit_reserve_ui.html" %}
+{% endwith %}
+{% include "kit_clear_reserves_ui.html" %}
+
+{% endblock %}

@@ -1,0 +1,15 @@
+  <div id="clear_reserves_overlay" data-lb-kit-clear="1" style="display:none;pointer-events:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:55;align-items:center;justify-content:center;padding:16px;">
+    <div class="card" data-lb-kit-clear-inner="1" style="max-width:520px;width:100%;margin:0;position:relative;max-height:90vh;overflow:auto;">
+      <h3 style="margin-top:0;">Снять резерв(ы): <span id="clear_reserves_sku"></span></h3>
+      <p class="muted" style="font-size:13px;">Отметьте строки. Свободный остаток на складе увеличится на сумму выбранных заготовок.</p>
+      <form id="clear_reserves_form" method="post" action="">
+        <input type="hidden" name="action" value="clear_selected" />
+        <input type="hidden" name="after_reserve" id="clear_reserves_after" value="list" />
+        <div id="clear_reserves_checkboxes" style="margin:12px 0 16px;"></div>
+        <div class="row" style="flex-wrap:wrap;">
+          <button type="submit">Снять выбранные</button>
+          <button type="button" class="secondary" id="clear_reserves_cancel_btn">Отмена</button>
+        </div>
+      </form>
+    </div>
+  </div>

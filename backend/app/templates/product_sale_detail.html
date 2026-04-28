@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    {% if error %}
+      <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
+    {% endif %}
+
+    {% if sale %}
+      <p><a href="/sales/products">← К списку</a></p>
+      <div class="row" style="align-items:flex-start;justify-content:space-between;gap:12px;">
+        <div>
+          <h2 style="margin:0;">Продажа #{{ sale.id }}</h2>
+          <p class="muted" style="margin:6px 0 0;">
+            Создано: {{ sale.created_at.strftime('%Y-%m-%d %H:%M') }} · Тип: {{ ru_kind }}
+            {% if sale.is_voided %} · <strong>АННУЛИРОВАНО</strong>{% endif %}
+          </p>
+        </div>
+        {% if can_edit and edit_allowed %}
+          <div class="row" style="gap:8px;justify-content:flex-end;flex-shrink:0;">
+            <a href="/sales/products/{{ sale.id }}/edit"><button type="button">Редактировать</button></a>
+            <form id="void_sale_form" method="post" action="/sales/products/{{ sale.id }}/void" style="display:inline;">
+              <button type="button" class="secondary" onclick="openVoidConfirm()">Аннулировать</button>
+            </form>
+          </div>
+        {% endif %}
+      </div>
+
+      {% if sale.material_cost_review_pending %}
+        <div class="card" style="margin-top:12px;background:#fffbeb;border:1px solid #fcd34d;">
+          <strong>[!] Нужна себестоимость</strong>
+          <p class="muted" style="margin:6px 0 0;">Маржа студии с этой продажи не начислена в фонд, пока суперадмин не укажет себестоимость при редактировании.</p>
+        </div>
+      {% endif %}
+
+      <div class="card" style="margin-top:14px;">
+        <h3 style="margin-top:0;">Реквизиты</h3>
+        <p style="margin:6px 0;"><strong>Дата</strong>: {{ sale.performed_date.date().isoformat() }}</p>
+        <p style="margin:6px 0;"><strong>Клиент</strong>: {{ sale.client.name }}</p>
+        <p style="margin:6px 0;"><strong>Сумма с клиента</strong>: {{ sale.amount_from_client }} ₽</p>
+        <p style="margin:6px 0;"><strong>Маржа в фонд студии (ЗП)</strong>: {{ "%.2f"|format(sale.studio_margin_amount|float) }} ₽</p>
+        <p style="margin:6px 0;"><strong>Кто внёс</strong>: {{ sale.created_by_user.display_name if sale.created_by_user else '—' }}</p>
+        {% if sale.booking_id %}
+          <p style="margin:6px 0;"><strong>Бронь</strong>: <a href="/bookings/{{ sale.booking_id }}">#{{ sale.booking_id }}</a></p>
+        {% endif %}
+        {% if linked_work_ids %}
+          <p style="margin:6px 0;">
+            <strong>Работа с товарами</strong>:
+            {% for wid in linked_work_ids %}
+              <a href="/sales/work/{{ wid }}">№{{ wid }}</a>{% if not loop.last %}, {% endif %}
+            {% endfor %}
+          </p>
+        {% endif %}
+        {% if sale.is_voided %}
+          <p style="margin:6px 0;">
+            <strong>Аннулировано</strong>:
+            {{ sale.voided_at.strftime('%Y-%m-%d %H:%M') if sale.voided_at else '—' }}
+            {% if sale.voided_by_user %} ({{ sale.voided_by_user.display_name }}){% endif %}
+          </p>
+        {% endif %}
+      </div>
+
+      <div class="card" style="margin-top:14px;">
+        <h3 style="margin-top:0;">Товар</h3>
+        {% if sale.kind.value == 'MATERIAL' %}
+          <p style="margin:6px 0;"><strong>Тип</strong>: Материал</p>
+          <p style="margin:6px 0;">
+            <strong>Услуга</strong>:
+            {% if sale.material_service %}
+              {{ sale.material_service.subcategory.name }} — {{ sale.material_service.name }}
+            {% else %}
+              <span class="muted">не указано</span>
+            {% endif %}
+          </p>
+          {% if sale.material_service and (sale.material_service.retail_material_kanekalon or sale.material_service.retail_material_kudri) %}
+            {% if sale.material_service.retail_material_kanekalon %}
+              <p style="margin:6px 0;">
+                <strong>Канекалон</strong>: {{ '%.2f'|format(sale.material_kanekalon_grams or 0) }} г
+                {% if sale.material_kanekalon_price_per_gram_at_time is not none %}
+                  <span class="muted">({{ '%.2f'|format(sale.material_kanekalon_price_per_gram_at_time) }} &#8381;/г)</span>
+                {% endif %}
+              </p>
+            {% endif %}
+            {% if sale.material_service.retail_material_kudri %}
+              <p style="margin:6px 0;">
+                <strong>Кудри/термо</strong>: {{ '%.2f'|format(sale.material_kudri_grams or 0) }} г
+                {% if sale.material_kudri_price_per_gram_at_time is not none %}
+                  <span class="muted">({{ '%.2f'|format(sale.material_kudri_price_per_gram_at_time) }} &#8381;/г)</span>
+                {% endif %}
+              </p>
+            {% endif %}
+          {% elif sale.material_grams is not none %}
+            <p style="margin:6px 0;"><strong>Количество</strong>: {{ '%.1f'|format(sale.material_grams or 0) }} г</p>
+          {% endif %}
+          {% if sale.material_manual_cost is not none %}
+            <p style="margin:6px 0;"><strong>Себестоимость</strong>: {{ '%.2f'|format(sale.material_manual_cost) }} &#8381;</p>
+          {% endif %}
+          {% if sale.material_mix_cost_amount and sale.material_mix_cost_amount > 0 %}
+            <p style="margin:6px 0;"><strong>Смешка</strong>: {{ sale.material_mix_source.value if sale.material_mix_source else '—' }}, сложность {{ material_mix_complexity_ru }}, в расчёт {{ '%.2f'|format(sale.material_mix_cost_amount) }} &#8381;</p>
+            {% if sale.material_mix_bonus_amount and sale.material_mix_bonus_amount > 0 and sale.material_mix_bonus_user %}
+              <p style="margin:6px 0;" class="muted">Бонус мастеру {{ sale.material_mix_bonus_user.display_name }}: {{ '%.2f'|format(sale.material_mix_bonus_amount) }} &#8381;</p>
+            {% endif %}
+          {% endif %}
+          {% if sale.material_description %}
+            <div class="card" style="margin-top:10px;background:#f8fafc;">
+              <p class="muted" style="margin:0;white-space:pre-wrap;">{{ sale.material_description }}</p>
+            </div>
+          {% endif %}
+        {% elif sale.kind.value == 'KIT' %}
+          <p style="margin:6px 0;"><strong>Тип</strong>: Комплект из наличия</p>
+          <p style="margin:6px 0;">
+            <strong>Комплект</strong>:
+            {% if sale.kit %}
+              {{ sale.kit.sku }} — {{ sale.kit.title }}
+            {% else %}
+              <span class="muted">не найден</span>
+            {% endif %}
+          </p>
+          <p style="margin:6px 0;"><strong>Списано заготовок</strong>: {{ sale.kit_pieces_sold or 0 }}</p>
+        {% elif sale.kind.value == 'RUBBER' %}
+          <p style="margin:6px 0;"><strong>Тип</strong>: Хвост/резинка</p>
+          <div class="card" style="margin-top:10px;background:#f8fafc;">
+            <p style="margin:0;white-space:pre-wrap;">{{ sale.rubber_description }}</p>
+          </div>
+          {% if sale.rubber_price_override is not none %}
+            <p style="margin:10px 0 0;"><strong>Цена товара</strong>: {{ sale.rubber_price_override }} ₽</p>
+          {% endif %}
+        {% elif sale.kind.value == 'OTHER' %}
+          <p style="margin:6px 0;"><strong>Тип</strong>: Другое</p>
+          <div class="card" style="margin-top:10px;background:#f8fafc;">
+            <p style="margin:0;white-space:pre-wrap;">{{ sale.other_description }}</p>
+          </div>
+        {% endif %}
+      </div>
+
+      {% if can_edit and not edit_allowed %}
+        <div class="card" style="border-color:#fde68a; background:#fffbeb; margin-top: 12px;">
+          {{ edit_block_msg }}
+        </div>
+      {% endif %}
+
+      {% if current_user and current_user.role.value == "ADMIN_SUPER" %}
+        <div class="card" style="margin-top:14px;">
+          <h3 style="margin-top:0;">История изменений</h3>
+          {% set n = (audit_rows|length if audit_rows else 0) %}
+          {% if n > 0 %}
+            <table>
+              <thead>
+                <tr>
+                  <th>Когда</th>
+                  <th>Кто</th>
+                  <th>Поле</th>
+                  <th>Было</th>
+                  <th>Стало</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if n > 3 %}
+                  {% for a in audit_rows[:2] %}
+                    <tr>
+                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+                      <td><code>{{ a.field_name }}</code></td>
+                      <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+                      <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                  <tr>
+                    <td colspan="5">
+                      <button type="button" class="secondary" onclick="lbToggleAudit('lb-audit-sale', this)">Раскрыть историю</button>
+                    </td>
+                  </tr>
+                  {% for a in audit_rows[2:] %}
+                    <tr class="lb-audit-sale" style="display:none;">
+                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+                      <td><code>{{ a.field_name }}</code></td>
+                      <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+                      <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  {% for a in audit_rows[:3] %}
+                    <tr>
+                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+                      <td><code>{{ a.field_name }}</code></td>
+                      <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+                      <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                {% endif %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="muted">Пока нет изменений.</p>
+          {% endif %}
+        </div>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <div id="void_confirm_modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(15,23,42,0.45);align-items:center;justify-content:center;padding:16px;">
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="void_confirm_title" style="max-width:420px;width:100%;margin:0;box-shadow:0 10px 40px rgba(0,0,0,0.2);">
+      <h3 id="void_confirm_title" style="margin-top:0;">Аннулировать продажу?</h3>
+      <p class="muted" style="margin:0 0 16px;">Действие нельзя отменить. Для продажи комплекта заготовки вернутся в наличие.</p>
+      <div class="row" style="justify-content:flex-end;gap:8px;">
+        <button type="button" class="secondary" onclick="closeVoidConfirm()">Отмена</button>
+        <button type="button" onclick="submitVoidForm()">Да, аннулировать</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var modal = document.getElementById('void_confirm_modal');
+      if (!modal) return;
+      function onKey(e) {
+        if (e.key === 'Escape') closeVoidConfirm();
+      }
+      window.openVoidConfirm = function () {
+        modal.style.display = 'flex';
+        document.addEventListener('keydown', onKey);
+      };
+      window.closeVoidConfirm = function () {
+        modal.style.display = 'none';
+        document.removeEventListener('keydown', onKey);
+      };
+      window.submitVoidForm = function () {
+        var f = document.getElementById('void_sale_form');
+        if (f) f.submit();
+      };
+      modal.addEventListener('click', function (e) {
+        if (e.target === modal) closeVoidConfirm();
+      });
+    })();
+  </script>
+{% endblock %}
+

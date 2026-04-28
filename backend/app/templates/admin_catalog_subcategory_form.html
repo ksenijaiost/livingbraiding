@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">{% if is_new %}Новая подкатегория{% else %}Подкатегория{% endif %}</h2>
+    <p><a href="/admin/catalog/categories/{{ category.id }}/subcategories">← {{ category.name }}</a></p>
+    {% if err == "empty" %}
+      <div class="error">Укажите название.</div>
+    {% elif err == "duplicate" %}
+      <div class="error">Такое имя уже есть в этой категории.</div>
+    {% endif %}
+    <form method="post" action="{% if is_new %}/admin/catalog/subcategories/new{% else %}/admin/catalog/subcategories/{{ sub.id }}/edit{% endif %}">
+      {% if is_new %}
+        <input type="hidden" name="category_id" value="{{ category.id }}" />
+      {% endif %}
+      <label>Название
+        <input name="name" value="{{ form_name }}" required maxlength="160" />
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 12px;">
+        <input type="checkbox" name="is_active" {% if form_active %}checked{% endif %} />
+        Активна
+      </label>
+      <p class="muted" style="margin: 16px 0 8px;">Визит мастера</p>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+        <input type="checkbox" name="show_kit_section" {% if form_show_kit %}checked{% endif %} />
+        Раздел «Комплект» (склад) для услуг этой подкатегории
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+        <input type="checkbox" name="show_tail_section" {% if form_show_tail %}checked{% endif %} />
+        Раздел «Хвост/резинка» (склад) для услуг этой подкатегории
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+        <input type="checkbox" name="show_material_description" {% if form_show_material %}checked{% endif %} />
+        Показывать поле «Описание про материал» из анкеты категории (если оно задано)
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+        <input type="checkbox" name="show_thermo_visit" {% if form_show_thermo %}checked{% endif %} />
+        Блок «Термозамещение» на шаге 2 визита (без общих полей анкеты категории)
+      </label>
+      <p style="margin-top: 16px;">
+        <button type="submit">Сохранить</button>
+        <a href="/admin/catalog/categories/{{ category.id }}/subcategories"><button type="button" class="secondary">Отмена</button></a>
+      </p>
+    </form>
+  </div>
+{% endblock %}

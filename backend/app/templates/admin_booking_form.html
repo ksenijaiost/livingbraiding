@@ -1,0 +1,436 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card lb-card-max-980" data-lb-booking-form="1">
+    <p class="muted" style="margin-top:0;"><a href="/clients">← К клиентам</a></p>
+    <h2 style="margin-top:0;">{% if is_new %}Новая бронь{% else %}Редактирование брони{% endif %}</h2>
+
+    {% if error %}
+      <p style="background:#fee2e2;border:1px solid #fecaca;color:#991b1b;padding:10px 12px;border-radius:8px;">
+        {{ error }}
+      </p>
+    {% endif %}
+
+    <form method="post" action="{% if is_new %}/bookings/new{% else %}/bookings/{{ booking.id }}/edit{% endif %}" enctype="multipart/form-data">
+      <input type="hidden" name="client_id" id="client_id" value="{{ selected_client.id if selected_client else fp.get('client_id','') }}" />
+      <input type="hidden" name="calc_product_min" value="{{ fp.get('calc_product_min','') }}" />
+      <input type="hidden" name="calc_product_max" value="{{ fp.get('calc_product_max','') }}" />
+      <input type="hidden" name="calc_service_min" value="{{ fp.get('calc_service_min','') }}" />
+      <input type="hidden" name="calc_service_max" value="{{ fp.get('calc_service_max','') }}" />
+
+      <div class="card" style="background:#f8fafc;">
+        <h3 style="margin-top:0;">Клиент</h3>
+
+        <div id="booking_client_search_row" style="display:flex;gap:8px;align-items:stretch;margin-top:6px;">
+          <div style="flex:1;min-width:0;">
+            <label>Поиск клиента</label>
+            <input id="client_search_q" type="search" placeholder="имя или контакт" autocomplete="off" style="width:100%;box-sizing:border-box;" />
+          </div>
+          <div style="align-self:flex-end;padding-top:1.4rem;">
+            <button type="button" id="booking_client_find_btn" class="secondary" style="white-space:nowrap;">Найти</button>
+          </div>
+        </div>
+        <ul id="client_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0;"></ul>
+        <div id="booking_client_selected_panel" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
+            <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;">
+              <span style="font-weight:700;color:#065f46;">Выбран клиент</span>
+              <span id="booking_client_selected_name" style="font-weight:600;color:#047857;">{% if selected_client %}{{ selected_client.name }}{% if not selected_client.is_confirmed %} (черновик){% endif %}{% elif fp.get('client_id') %}{{ fp.get('client_name','') or ('id ' ~ fp.get('client_id')) }}{% endif %}</span>
+            </div>
+            <button type="button" id="booking_client_change_btn" class="secondary" style="flex-shrink:0;">Изменить</button>
+          </div>
+        </div>
+        <p class="muted" style="margin:8px 0 0;">Подсказка: клиент обязателен для брони.</p>
+      </div>
+
+      <div class="row" style="margin-top: 12px;">
+        <div>
+          <label>Дата брони *</label>
+          <input type="date" name="planned_date" value="{{ fp.get('planned_date','') }}" required />
+        </div>
+        <div>
+          <label>Время (часы:минуты)</label>
+          <input type="time" name="planned_time" value="{{ fp.get('planned_time','') }}" step="60" />
+          <p class="muted" style="margin:4px 0 0;font-size:0.9em;">Без секунд; пусто = 00:00</p>
+        </div>
+        <div>
+          <label>Тип *</label>
+          <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+            <label><input type="radio" name="kind" value="VISIT" {% if (fp.get('kind') or 'VISIT') == 'VISIT' %}checked{% endif %} /> Визит (услуга)</label>
+            <label><input type="radio" name="kind" value="PRODUCT_SALE" {% if fp.get('kind') == 'PRODUCT_SALE' %}checked{% endif %} /> Продажа (без услуги)</label>
+          </div>
+        </div>
+      </div>
+
+      <div id="kind_visit_block" style="margin-top: 14px; display:none;">
+        <div class="card" style="background:#f8fafc;">
+          <h3 style="margin-top:0;">Бронь визита</h3>
+          <div class="row">
+            <div>
+              <label>Категория</label>
+              <select id="service_category_id" name="service_category_id" style="width: 100%; box-sizing: border-box;">
+                {% for c in service_catalog %}
+                  <option value="{{ c.id }}">{{ c.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div id="service_subcategory_wrap">
+              <label>Подкатегория</label>
+              <select id="service_subcategory_id" name="service_subcategory_id" style="width: 100%; box-sizing: border-box;"></select>
+            </div>
+          </div>
+          <div style="margin-top: 12px;">
+            <label>Услуга *</label>
+            <select id="service_id" name="service_id" required style="width: 100%; max-width: 100%; box-sizing: border-box; min-height: 2.5rem;"></select>
+          </div>
+
+          <div style="margin-top: 14px;">
+            <div style="font-weight: 600; margin-bottom: 8px;">Планируемый мастер (можно несколько)</div>
+            {% if not masters %}
+              <p class="muted" style="margin: 0;">Нет активных мастеров.</p>
+            {% else %}
+              <div style="display:flex; flex-direction: column; gap: 8px;">
+                {% for m in masters %}
+                  <label style="display:flex; gap: 8px; align-items: center;">
+                    <input type="checkbox" name="booking_master_on" value="{{ m.id }}"
+                      {% if m.id in (booking_master_on_ids or []) %}checked{% endif %} />
+                    <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
+                  </label>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+
+        <div id="visit_kit_card" class="card" style="margin-top: 12px; background:#f8fafc; display:none;">
+          <h3 style="margin-top:0;">Комплект</h3>
+          <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+            {% set kit_mode = fp.get('visit_kit_mode') or 'IN_STOCK' %}
+            <label><input type="radio" name="visit_kit_mode" value="IN_STOCK" {% if kit_mode == 'IN_STOCK' %}checked{% endif %} /> Из наличия</label>
+            <label><input type="radio" name="visit_kit_mode" value="OWN" {% if kit_mode == 'OWN' %}checked{% endif %} /> Свой</label>
+            <label><input type="radio" name="visit_kit_mode" value="ORDER" {% if kit_mode == 'ORDER' %}checked{% endif %} /> Заказ</label>
+          </div>
+
+          <div id="visit_kit_stock_block" style="margin-top: 12px; display:none;">
+            <input type="hidden" name="visit_stock_kit_id" id="visit_stock_kit_id" value="{{ fp.get('visit_stock_kit_id','') }}" />
+            <label>Комплект из наличия (поиск)</label>
+            <input type="search" id="visit_kit_search_q" autocomplete="off" placeholder="SKU или название" value="" />
+            <ul id="visit_kit_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0;"></ul>
+            <div id="visit_selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not fp.get('visit_stock_kit_id') %}display:none;{% endif %}">
+              <p id="visit_selected_kit_line" style="margin:0;"></p>
+              <div class="row" style="margin-top: 10px;">
+                <div>
+                  <label>Количество заготовок (для резерва)</label>
+                  <input type="number" name="visit_stock_kit_pieces" min="0" step="1" value="{{ fp.get('visit_stock_kit_pieces','') }}" />
+                </div>
+              </div>
+              <p class="muted" style="margin: 8px 0 0; font-size: 12px;">
+                При сохранении брони комплект будет зарезервирован автоматически (под клиента).
+              </p>
+            </div>
+          </div>
+
+          <div id="visit_kit_own_block" style="margin-top: 12px; display:none;">
+            <label style="display:block; margin-bottom: 6px;">
+              <input type="checkbox" name="visit_own_need_correction" {% if fp.get('visit_own_need_correction') %}checked{% endif %} />
+              Нужна коррекция
+            </label>
+            <label style="display:block; margin-bottom: 0;">
+              <input type="checkbox" name="visit_own_need_extra_blanks" {% if fp.get('visit_own_need_extra_blanks') %}checked{% endif %} />
+              Нужны доп. заготовки
+            </label>
+          </div>
+
+          <div id="visit_kit_order_block" style="margin-top: 12px; display:none;">
+            <div class="row">
+              <div>
+                <label>Количество заготовок</label>
+                <input type="number" name="visit_order_blanks_qty" min="0" step="1" value="{{ fp.get('visit_order_blanks_qty','') }}" />
+              </div>
+              <div>
+                <label>Описание (вид, материал и пр.)</label>
+                <input name="visit_order_blanks_desc" maxlength="400" value="{{ fp.get('visit_order_blanks_desc','') }}" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="visit_correction_block" class="card" style="margin-top: 12px; background:#f8fafc; display:none;">
+          <h3 style="margin-top:0;">Коррекция комплекта</h3>
+          <p class="muted" style="margin-top:-6px;">Поля не обязательны — можно оставить пустыми, если админ не знает детали.</p>
+
+          <div class="row">
+            <div>
+              <label>Стрижка (1шт) — количество</label>
+              <input name="corr_trim_qty" type="number" step="1" min="0" value="{{ fp.get('corr_trim_qty','0') }}" />
+            </div>
+            <div>
+              <label>Почасовая коррекция заготовок, ч</label>
+              <input name="corr_hourly_hours" type="number" step="0.25" min="0" value="{{ fp.get('corr_hourly_hours','') }}" placeholder="0 или фактическое время" style="max-width:180px;" />
+            </div>
+          </div>
+
+          <div class="row" style="margin-top: 10px;">
+            <div style="flex:1; min-width:200px;">
+              <label>Описание комплекта</label>
+              <input name="corr_kit_description" type="text" maxlength="500" value="{{ fp.get('corr_kit_description','') }}" />
+            </div>
+            <div>
+              <label>Заготовок в комплекте (учёт)</label>
+              <input name="corr_kit_blanks_count" type="number" step="1" min="0" value="{{ fp.get('corr_kit_blanks_count','') }}" placeholder="для информации" />
+            </div>
+          </div>
+
+          <div style="margin-top: 10px;">
+            <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_wash" {% if fp.get('corr_wash') %}checked{% endif %} /> Стирка</label>
+            <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_steam" {% if fp.get('corr_steam') %}checked{% endif %} /> Отпаривание</label>
+            <label style="display:block; margin-bottom: 0;"><input type="checkbox" name="corr_circle" {% if fp.get('corr_circle') %}checked{% endif %} /> Одевание на круг</label>
+          </div>
+        </div>
+
+        <div id="visit_extra_blanks_block" class="card" style="margin-top: 12px; background:#f8fafc; display:none;">
+          <h3 style="margin-top:0;">Доп. заготовки</h3>
+          {% set extra_mode = fp.get('visit_extra_blanks_mode') or 'IN_STOCK' %}
+          <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+            <label><input type="radio" name="visit_extra_blanks_mode" value="IN_STOCK" {% if extra_mode == 'IN_STOCK' %}checked{% endif %} /> Из наличия</label>
+            <label><input type="radio" name="visit_extra_blanks_mode" value="ORDER" {% if extra_mode == 'ORDER' %}checked{% endif %} /> На заказ</label>
+          </div>
+
+          <div id="visit_extra_stock_block" style="margin-top: 12px; display:none;">
+            <input type="hidden" name="visit_extra_stock_kit_id" id="visit_extra_stock_kit_id" value="{{ fp.get('visit_extra_stock_kit_id','') }}" />
+            <label>Из наличия (поиск)</label>
+            <input type="search" id="visit_extra_kit_search_q" autocomplete="off" placeholder="SKU или название" value="" />
+            <ul id="visit_extra_kit_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0;"></ul>
+            <div id="visit_extra_selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not fp.get('visit_extra_stock_kit_id') %}display:none;{% endif %}">
+              <p id="visit_extra_selected_kit_line" style="margin:0;"></p>
+              <div class="row" style="margin-top: 10px;">
+                <div>
+                  <label>Количество заготовок (для резерва)</label>
+                  <input type="number" name="visit_extra_stock_kit_pieces" min="0" step="1" value="{{ fp.get('visit_extra_stock_kit_pieces','') }}" />
+                </div>
+              </div>
+              <p class="muted" style="margin: 8px 0 0; font-size: 12px;">
+                При сохранении брони комплект будет зарезервирован автоматически (под клиента).
+              </p>
+            </div>
+          </div>
+
+          <div id="visit_extra_order_block" style="margin-top: 12px; display:none;">
+            <div class="row">
+              <div>
+                <label>Количество заготовок</label>
+                <input type="number" name="visit_extra_order_blanks_qty" min="0" step="1" value="{{ fp.get('visit_extra_order_blanks_qty','') }}" />
+              </div>
+              <div>
+                <label>Описание (вид, материал и пр.)</label>
+                <input name="visit_extra_order_blanks_desc" maxlength="400" value="{{ fp.get('visit_extra_order_blanks_desc','') }}" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="kind_sale_block" style="margin-top: 14px; display:none;">
+        <div class="card" style="background:#f8fafc;">
+          <h3 style="margin-top:0;">Бронь продажи (без услуги)</h3>
+          <div>
+            <label>Тип продажи *</label>
+            {% set pk = fp.get('product_kind') or '' %}
+            <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+              <label><input type="radio" name="product_kind" value="MATERIAL" {% if pk == 'MATERIAL' %}checked{% endif %} /> Материал</label>
+              <label><input type="radio" name="product_kind" value="KIT" {% if pk == 'KIT' %}checked{% endif %} /> Комплект</label>
+              <label><input type="radio" name="product_kind" value="RUBBER" {% if pk == 'RUBBER' %}checked{% endif %} /> Хвост/резинка</label>
+              <label><input type="radio" name="product_kind" value="OTHER" {% if pk == 'OTHER' %}checked{% endif %} /> Другое</label>
+            </div>
+          </div>
+
+          <div id="sale_kit_block" style="margin-top: 12px; display:none;">
+            <h4 style="margin: 0 0 10px;">Комплект</h4>
+            {% set skm = fp.get('sale_kit_mode') or 'IN_STOCK' %}
+            <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+              <label><input type="radio" name="sale_kit_mode" value="IN_STOCK" {% if skm == 'IN_STOCK' %}checked{% endif %} /> Из наличия</label>
+              <label><input type="radio" name="sale_kit_mode" value="ORDER" {% if skm == 'ORDER' %}checked{% endif %} /> На заказ</label>
+            </div>
+
+            <div id="sale_kit_stock_block" style="margin-top: 12px; display:none;">
+              <input type="hidden" name="sale_stock_kit_id" id="sale_stock_kit_id" value="{{ fp.get('sale_stock_kit_id','') }}" />
+              <label>Комплект из наличия (поиск)</label>
+              <input type="search" id="sale_kit_search_q" autocomplete="off" placeholder="SKU или название" value="" />
+              <ul id="sale_kit_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0;"></ul>
+              <div id="sale_selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not fp.get('sale_stock_kit_id') %}display:none;{% endif %}">
+                <p id="sale_selected_kit_line" style="margin:0;"></p>
+                <div class="row" style="margin-top: 10px;">
+                  <div>
+                    <label>Количество заготовок (для резерва)</label>
+                    <input type="number" name="sale_stock_kit_pieces" min="0" step="1" value="{{ fp.get('sale_stock_kit_pieces','') }}" />
+                  </div>
+                </div>
+                <p class="muted" style="margin: 8px 0 0; font-size: 12px;">
+                  При сохранении брони комплект будет зарезервирован автоматически (под клиента).
+                </p>
+              </div>
+            </div>
+
+            <div id="sale_kit_order_block" style="margin-top: 12px; display:none;">
+              <div class="row">
+                <div>
+                  <label>Количество заготовок</label>
+                  <input type="number" name="sale_order_blanks_qty" min="0" step="1" value="{{ fp.get('sale_order_blanks_qty','') }}" />
+                </div>
+                <div>
+                  <label>Описание (вид, материал и пр.)</label>
+                  <input name="sale_order_blanks_desc" maxlength="400" value="{{ fp.get('sale_order_blanks_desc','') }}" />
+                </div>
+              </div>
+
+              <div style="margin-top: 12px;">
+                <div style="font-weight: 600; margin-bottom: 8px;">Мастер (можно несколько)</div>
+                {% set ids_csv = fp.get('sale_kit_order_master_ids') or '' %}
+                {% set pre_ids = ids_csv.split(',') if ids_csv else [] %}
+                <div style="display:flex; flex-direction: column; gap: 8px;">
+                  {% for m in masters %}
+                    <label style="display:flex; gap: 8px; align-items: center;">
+                      <input type="checkbox" name="sale_kit_order_master_on" value="{{ m.id }}"
+                        {% if (m.id|string) in pre_ids %}checked{% endif %} />
+                      <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
+                    </label>
+                  {% endfor %}
+                </div>
+                <p class="muted" style="margin: 8px 0 0; font-size: 12px;">Эта бронь появится в «Мои записи» у выбранных мастеров.</p>
+              </div>
+            </div>
+          </div>
+
+          <div id="sale_rubber_block" style="margin-top: 12px; display:none;">
+            <h4 style="margin: 0 0 10px;">Хвост/резинка</h4>
+            {% set rmode = fp.get('sale_rubber_mode') or 'IN_STOCK' %}
+            <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+              <label><input type="radio" name="sale_rubber_mode" value="IN_STOCK" {% if rmode == 'IN_STOCK' %}checked{% endif %} /> Из наличия</label>
+              <label><input type="radio" name="sale_rubber_mode" value="ORDER" {% if rmode == 'ORDER' %}checked{% endif %} /> На заказ</label>
+            </div>
+
+            <div id="sale_rubber_order_master_block" style="margin-top: 12px; display:none;">
+              <label>Мастер *</label>
+              <div style="margin-top: 6px;">
+                {% for m in masters %}
+                  <label style="display:block; margin-bottom: 6px;">
+                    <input type="radio" name="sale_rubber_order_master_id" value="{{ m.id }}"
+                      {% if fp.get('sale_rubber_order_master_id')|string == m.id|string %}checked{% endif %} />
+                    {{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})
+                  </label>
+                {% endfor %}
+              </div>
+              <p class="muted" style="margin: 8px 0 0; font-size: 12px;">Эта бронь появится в «Мои записи» у выбранного мастера.</p>
+            </div>
+
+            {% set rt = fp.get('sale_rubber_type') or '' %}
+            <div style="margin-top: 6px;">
+              {% for t in rubber_types %}
+                <label style="display:block; margin-bottom: 6px;">
+                  <input type="radio" name="sale_rubber_type" value="{{ t.value }}" {% if rt == t.value %}checked{% endif %} />
+                  {{ t.label }}
+                </label>
+              {% endfor %}
+            </div>
+
+            <div class="row" style="margin-top: 10px;">
+              <div id="sale_rubber_attach_qty_block" style="display:none;">
+                <label>Количество креплений (для хвоста на резинке)</label>
+                <input name="sale_rubber_attach_qty" type="number" step="1" min="1" value="{{ fp.get('sale_rubber_attach_qty','') }}" />
+              </div>
+              <div id="sale_rubber_braids_qty_block" style="display:none;">
+                <label>Количество кос (для кос на резинке)</label>
+                <input name="sale_rubber_braids_qty" type="number" step="1" min="1" value="{{ fp.get('sale_rubber_braids_qty','') }}" />
+              </div>
+            </div>
+
+            <div style="margin-top:10px;">
+              <label>Описание</label>
+              <textarea name="sale_rubber_desc" rows="3" maxlength="2000" placeholder="цвет/длина и пр.">{{ fp.get('sale_rubber_desc','') }}</textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 14px; background:#f8fafc;">
+        <h3 style="margin-top:0;">Условия</h3>
+        <div class="row">
+          <div>
+            <label>Сумма, озвученная клиенту</label>
+            <input name="quoted_price_text" maxlength="120" value="{{ fp.get('quoted_price_text','') }}" placeholder="Напр.: 3500 или 3500–4000" />
+          </div>
+          <div>
+            <label>Предоплата, ₽</label>
+            <input name="deposit_amount" type="number" min="0" step="1" value="{{ fp.get('deposit_amount','') }}" />
+          </div>
+        </div>
+        <div style="margin-top: 10px;">
+          <label>Фото (до 3)</label>
+          <div class="row">
+            <div style="flex:1; min-width: 220px;">
+              {% if not is_new and fp.get('photo_1') %}
+                <div class="muted" style="margin-bottom:6px;">
+                  <a href="{{ fp.get('photo_1') }}" class="lb-lightbox" title="Фото 1">Открыть</a>
+                  <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
+                    <input type="checkbox" name="clear_photo_1" value="1" />
+                    <span>Удалить</span>
+                  </label>
+                </div>
+                <a href="{{ fp.get('photo_1') }}" class="lb-lightbox" title="Фото 1">
+                  <img src="{{ fp.get('photo_1') }}" alt="Фото 1" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px;" />
+                </a>
+              {% endif %}
+              <input type="file" name="photo_1" accept="image/*" />
+            </div>
+            <div style="flex:1; min-width: 220px;">
+              {% if not is_new and fp.get('photo_2') %}
+                <div class="muted" style="margin-bottom:6px;">
+                  <a href="{{ fp.get('photo_2') }}" class="lb-lightbox" title="Фото 2">Открыть</a>
+                  <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
+                    <input type="checkbox" name="clear_photo_2" value="1" />
+                    <span>Удалить</span>
+                  </label>
+                </div>
+                <a href="{{ fp.get('photo_2') }}" class="lb-lightbox" title="Фото 2">
+                  <img src="{{ fp.get('photo_2') }}" alt="Фото 2" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px;" />
+                </a>
+              {% endif %}
+              <input type="file" name="photo_2" accept="image/*" />
+            </div>
+            <div style="flex:1; min-width: 220px;">
+              {% if not is_new and fp.get('photo_3') %}
+                <div class="muted" style="margin-bottom:6px;">
+                  <a href="{{ fp.get('photo_3') }}" class="lb-lightbox" title="Фото 3">Открыть</a>
+                  <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
+                    <input type="checkbox" name="clear_photo_3" value="1" />
+                    <span>Удалить</span>
+                  </label>
+                </div>
+                <a href="{{ fp.get('photo_3') }}" class="lb-lightbox" title="Фото 3">
+                  <img src="{{ fp.get('photo_3') }}" alt="Фото 3" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px;" />
+                </a>
+              {% endif %}
+              <input type="file" name="photo_3" accept="image/*" />
+            </div>
+          </div>
+          <p class="muted" style="margin:6px 0 0;font-size:12px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.</p>
+        </div>
+        <div style="margin-top: 10px;">
+          <label>Комментарий к брони</label>
+          <textarea name="comment" rows="3" maxlength="2000">{{ fp.get('comment','') }}</textarea>
+        </div>
+      </div>
+
+      <p style="margin-top: 16px;">
+        <button type="submit">Сохранить бронь</button>
+      </p>
+    </form>
+  </div>
+
+  <script type="application/json" id="lb-booking-service-catalog-json">{{ service_catalog|tojson }}</script>
+  <script type="application/json" id="lb-booking-initial-service-json">
+    {{ {'category_id': (fp.get('service_category_id') or 0)|int, 'subcategory_id': (fp.get('service_subcategory_id') or 0)|int, 'service_id': (fp.get('service_id') or 0)|int } | tojson }}
+  </script>
+
+  {# Резерв комплекта делается автоматически при сохранении брони #}
+{% endblock %}
+

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 1100px;">
+    <p class="muted" style="margin: 0 0 8px;"><a href="/admin/reports?{{ reports_nav_q }}">← К отчёту</a></p>
+    <h2 style="margin-top: 0;">Работы с товарами за период</h2>
+    <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}, не аннулированные, по дате создания записи.</p>
+    {% if rows %}
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>&#8470;</th>
+              <th>Создана</th>
+              <th>Вид</th>
+              <th>Область</th>
+              <th>Клиент</th>
+              <th>От клиента</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for w in rows %}
+              <tr>
+                <td>{{ w.id }}</td>
+                <td>{{ w.display_number or '—' }}</td>
+                <td>{{ w.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ w.kind.value }}</td>
+                <td>{% if w.scope.value == 'IN_STOCK' %}В наличие{% else %}На заказ{% endif %}</td>
+                <td>{% if w.client %}{{ w.client.display_name }}{% else %}—{% endif %}</td>
+                <td>{% if w.amount_from_client is not none %}{{ "%.2f"|format(w.amount_from_client) }}{% else %}—{% endif %}</td>
+                <td><a href="/sales/work/{{ w.id }}">Открыть</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Нет работ за период.</p>
+    {% endif %}
+  </div>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 520px; margin: 24px auto;">
+    <h2 style="margin-top: 0;">Вход</h2>
+    {% if error %}
+      <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/login">
+      <div style="margin-bottom: 12px;">
+        <label>Логин или телефон</label>
+        <input name="username" autocomplete="username" required />
+        <p class="muted" style="font-size:12px;margin:4px 0 0;">Телефон — как в карточке сотрудника (достаточно цифр, можно с +7 и пробелами).</p>
+      </div>
+      <div style="margin-bottom: 12px;">
+        <label>Пароль</label>
+        <input name="password" type="password" autocomplete="current-password" required />
+      </div>
+      <div class="row" style="align-items:center; flex-wrap:wrap;">
+        <button type="submit">Войти</button>
+        <a href="/login/forgot" style="margin-left:auto;"><span class="muted" style="font-size:13px;">Забыли пароль?</span></a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

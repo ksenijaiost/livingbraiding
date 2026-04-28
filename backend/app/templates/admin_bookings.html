@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <div class="lb-flex-between-center">
+      <h2 class="lb-mt-0">Брони</h2>
+      {% if can_manage %}
+        <a href="/bookings/new"><button type="button">Новая бронь</button></a>
+      {% endif %}
+    </div>
+
+    {% set _show = 'all' if show_mode == 'all' else 'active' %}
+    {% set _mine = '1' if bookings_mine_only else '0' %}
+    <p style="margin:12px 0 14px;font-size:13px;">
+      {# Show mode #}
+      {% if _show == 'active' %}
+        <strong>Только активные</strong>
+        <span class="muted">·</span>
+        <a href="/bookings?show=all&mine={{ _mine }}">Все брони</a>
+      {% else %}
+        <strong>Все брони</strong>
+        <span class="muted">·</span>
+        <a href="/bookings?show=active&mine={{ _mine }}">Только активные</a>
+      {% endif %}
+
+      <span class="muted" style="margin:0 6px;">·</span>
+      <span class="muted" aria-hidden="true">|</span>
+      <span class="muted" style="margin:0 6px;">·</span>
+
+      {# Mine filter #}
+      {% if _mine == '1' %}
+        <strong>Мои</strong>
+        <span class="muted">·</span>
+        <a href="/bookings?show={{ _show }}&mine=0">Все</a>
+      {% else %}
+        <strong>Все</strong>
+        <span class="muted">·</span>
+        <a href="/bookings?show={{ _show }}&mine=1">Мои</a>
+      {% endif %}
+
+      {% if current_user.role.value == "MASTER" %}
+        <span class="muted">(где вы указаны мастером или ответственным по брони)</span>
+      {% endif %}
+    </p>
+
+    {% if not rows %}
+      <p class="muted">Пока нет броней.</p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Дата</th>
+            <th>Клиент</th>
+            <th>Тип</th>
+            <th>Статус</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in rows %}
+            <tr>
+              <td><a href="/bookings/{{ b.id }}">#{{ b.id }}</a></td>
+              <td>{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</td>
+              <td><a href="/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
+              <td>{{ "Визит" if b.kind.value == "VISIT" else "Продажа" }}</td>
+              <td>
+                {% if b.status.value == "ACTIVE" %}<strong>активна</strong>{% endif %}
+                {% if b.status.value == "DONE" %}✅ выполнена{% endif %}
+                {% if b.status.value == "CANCELLED" %}❌ отменена{% endif %}
+              </td>
+              <td class="lb-nowrap">
+                <a href="/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
+                {% if can_manage %}
+                  <a href="/bookings/{{ b.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+                  {% if b.status.value == "ACTIVE" %}
+                    <form method="post" action="/bookings/{{ b.id }}/cancel" style="display:inline; margin:0;" data-lb-confirm="Отменить бронь?" data-lb-prompt-input="reason" data-lb-prompt-text="Причина отмены">
+                      <input type="hidden" name="reason" value="" />
+                      <button type="submit" class="secondary">Отменить</button>
+                    </form>
+                  {% endif %}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+{% endblock %}
+

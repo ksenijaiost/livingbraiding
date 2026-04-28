@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Работа с товарами — детали</h2>
+
+    <p class="lb-top-links" style="margin-top: 0;">
+      <a href="/sales/work">← К списку</a>
+    </p>
+
+    {% if msg %}
+      {% if msg == 'voided' %}
+        <div class="ok" style="margin-bottom: 12px;">Аннулировано.</div>
+      {% elif msg == 'already_voided' %}
+        <div class="error" style="margin-bottom: 12px;">Уже аннулировано.</div>
+      {% elif msg == 'void_blocked' %}
+        <div class="error" style="margin-bottom: 12px;">Аннулирование запрещено (закрытый период ЗП или истекло окно редактирования).</div>
+      {% elif msg == 'void_conflict' %}
+        <div class="error" style="margin-bottom: 12px;">Нельзя аннулировать: конфликт со складом (комплект уже использован или остатки изменились).</div>
+      {% endif %}
+    {% endif %}
+
+    {% if saved %}
+      <div class="card" style="border-color:#bbf7d0; background:#f0fdf4; margin-bottom: 12px;">
+        Сохранено.
+      </div>
+    {% endif %}
+
+    {% if err %}
+      <div class="error" style="margin-bottom: 12px;">{{ err }}</div>
+    {% endif %}
+
+    {% if not row %}
+      <p class="muted">Нет данных.</p>
+    {% else %}
+      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+        <div class="row">
+          <div><strong>ID</strong><div class="muted">{{ row.id }}</div></div>
+          <div><strong>Создано</strong><div class="muted">{{ row.created_at.strftime('%Y-%m-%d %H:%M') if row.created_at else '—' }}</div></div>
+        </div>
+        {% if row.is_voided %}
+          <div class="error" style="margin-top:10px;">
+            <strong>АННУЛИРОВАНО</strong>
+            {% if row.voided_at %} · {{ row.voided_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+            {% if row.voided_by_user %} ({{ row.voided_by_user.display_name }}){% endif %}
+          </div>
+        {% endif %}
+        <div class="row" style="margin-top: 10px;">
+          <div><strong>Режим</strong><div class="muted">{{ "В наличие" if row.scope.value == "IN_STOCK" else "На заказ" }}</div></div>
+          <div>
+            <strong>Вид</strong>
+            <div class="muted">
+              {% if row.kind.value == "KIT" %}Комплект/Заготовки
+              {% elif row.kind.value == "MIX" %}Смешка
+              {% elif row.kind.value == "RUBBER" %}Хвосты/резинки
+              {% elif row.kind.value == "KIT_CORRECTION" %}Коррекция комплекта
+              {% else %}{{ row.kind.value }}
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="row" style="margin-top: 10px;">
+          <div>
+            <strong>Клиент</strong>
+            <div class="muted">
+              {% if row.client %}{{ row.client.name }}{% else %}—{% endif %}
+            </div>
+          </div>
+          <div>
+            <strong>Сумма от клиента</strong>
+            <div class="muted">{% if row.amount_from_client is not none %}{{ row.amount_from_client }} ₽{% else %}—{% endif %}</div>
+          </div>
+        </div>
+        {% if row.booking_id or linked_sale_ids %}
+          <div class="row" style="margin-top: 12px;">
+            {% if row.booking_id %}
+              <div>
+                <strong>Бронь</strong>
+                <div class="muted"><a href="/bookings/{{ row.booking_id }}">#{{ row.booking_id }}</a></div>
+              </div>
+            {% endif %}
+            {% if linked_sale_ids %}
+              <div>
+                <strong>Продажа товара</strong>
+                <div class="muted">
+                  {% for sid in linked_sale_ids %}
+                    <a href="/sales/products/{{ sid }}">#{{ sid }}</a>{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                </div>
+              </div>
+            {% endif %}
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+        <strong>Мастера</strong>
+        {% if row.staff_rows %}
+          {% for s in row.staff_rows %}
+            <div class="muted" style="font-size: 12px; margin-top: 6px;">
+              {{ s.user.display_name }}{% if row.kind.value != "KIT" and s.share is not none and s.share != 1 %} ({{ s.share }}){% endif %}
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="muted" style="margin-top: 6px;">—</div>
+        {% endif %}
+      </div>
+
+      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+        <strong>Материал</strong>
+        <div class="muted" style="margin-top: 6px;">Канекалон: {{ row.kanekalon_grams }} г · Кудри/термо: {{ row.kudri_grams }} г</div>
+        <div class="muted" style="font-size: 12px; margin-top: 6px;">Себестоимость материалов: {{ row.materials_cost_total }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 2px;">Доп. расходы: {{ row.extra_costs_amount }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 2px;">Себестоимость всего: {{ row.cost_total_amount }}</div>
+        {% if row.kanekalon_grams == 0 and row.kudri_grams == 0 %}
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Смешка: —</div>
+        {% else %}
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Смешка: {{ "Без смешки" if (row.mix_source and row.mix_source.value == "NO_MIX") else ("Из наличия" if (row.mix_source and row.mix_source.value == "FROM_STOCK") else ("Сама мешала" if (row.mix_source and row.mix_source.value == "SELF_MIXED") else "—")) }}</div>
+          {% if details.get("mix_complexity") and row.mix_source and row.mix_source.value != "NO_MIX" %}
+            <div class="muted" style="font-size: 12px; margin-top: 2px;">Сложность: {{ mix_complexity_label }}</div>
+          {% endif %}
+        {% endif %}
+      </div>
+
+      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+        <strong>Профит</strong>
+        <div class="muted" style="font-size: 12px; margin-top: 6px;">Мастер: {{ row.master_profit_amount }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 2px;">Студия: {{ row.studio_profit_amount }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 2px;">Всего: {{ row.profit_total_amount }}</div>
+      </div>
+
+      {% if row.kind.value == "RUBBER" and details.get("rubber") %}
+        <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+          <strong>Хвосты/резинки</strong>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Тип: {{ details.rubber.type }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Вариант: {{ details.rubber.variant }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Количество: {{ details.rubber.qty }}</div>
+        </div>
+      {% endif %}
+
+      {% if row.kind.value == "KIT_CORRECTION" and details.get("correction") %}
+        {% set _corr = details.get("correction") or {} %}
+        <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+          <strong>Коррекция комплекта</strong>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Стрижка (шт): {{ _corr.get("trim_qty", 0) }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Почасовая коррекция (ч): {{ _corr.get("hourly_hours", 0) }}</div>
+          {% if _corr.get("kit_description") %}<div class="muted" style="font-size: 12px; margin-top: 2px;">Описание комплекта: {{ _corr.kit_description }}</div>{% endif %}
+          {% if _corr.get("kit_blanks_count") is not none %}<div class="muted" style="font-size: 12px; margin-top: 2px;">Заготовок в комплекте (учёт): {{ _corr.kit_blanks_count }}</div>{% endif %}
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Стирка: {{ "да" if _corr.get("wash") else "нет" }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Отпаривание: {{ "да" if _corr.get("steam") else "нет" }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Одевание на круг: {{ "да" if _corr.get("circle") else "нет" }}</div>
+          {% if _corr.get("dread_qty") %}<div class="muted" style="font-size: 12px; margin-top: 2px;">(архив) Коррекция дреда (шт): {{ _corr.dread_qty }}</div>{% endif %}
+          {% if _corr.get("curl_qty") %}<div class="muted" style="font-size: 12px; margin-top: 2px;">(архив) Коррекция кудрей (шт): {{ _corr.curl_qty }}</div>{% endif %}
+        </div>
+      {% endif %}
+
+      {% if can_edit %}
+        {% if edit_allowed %}
+          <p style="margin-top: 0;">
+            <a href="/sales/work/{{ row.id }}/edit"><button type="button">Редактировать</button></a>
+          </p>
+          {% if not row.is_voided %}
+            <form method="post" action="/sales/work/{{ row.id }}/void" style="margin:0;">
+              <button type="submit" class="secondary">Аннулировать</button>
+            </form>
+          {% endif %}
+        {% else %}
+          <div class="card" style="border-color:#fde68a; background:#fffbeb; margin-top: 12px;">
+            {{ edit_block_msg }}
+          </div>
+        {% endif %}
+      {% endif %}
+
+      <div class="card" style="margin-top: 14px;">
+        <h3 style="margin-top:0;">История изменений</h3>
+        {% if current_user and current_user.role.value == "ADMIN_SUPER" %}
+          {% set n = (audit_rows|length if audit_rows else 0) %}
+          {% if n > 0 %}
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 170px;">Когда</th>
+                  <th style="width: 180px;">Кто</th>
+                  <th>Поле</th>
+                  <th>Было</th>
+                  <th>Стало</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if n > 3 %}
+                  {% for a in audit_rows[:2] %}
+                    <tr>
+                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td class="muted">{% if a.changed_by_user %}{{ a.changed_by_user.display_name }}{% else %}—{% endif %}</td>
+                      <td><code>{{ a.field_name }}</code></td>
+                      <td class="muted">{{ a.old_value if a.old_value is not none else "—" }}</td>
+                      <td class="muted">{{ a.new_value if a.new_value is not none else "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                  <tr>
+                    <td colspan="5">
+                      <button type="button" class="secondary" onclick="lbToggleAudit('lb-audit-work', this)">Раскрыть историю</button>
+                    </td>
+                  </tr>
+                  {% for a in audit_rows[2:] %}
+                    <tr class="lb-audit-work" style="display:none;">
+                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td class="muted">{% if a.changed_by_user %}{{ a.changed_by_user.display_name }}{% else %}—{% endif %}</td>
+                      <td><code>{{ a.field_name }}</code></td>
+                      <td class="muted">{{ a.old_value if a.old_value is not none else "—" }}</td>
+                      <td class="muted">{{ a.new_value if a.new_value is not none else "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  {% for a in audit_rows[:3] %}
+                    <tr>
+                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td class="muted">{% if a.changed_by_user %}{{ a.changed_by_user.display_name }}{% else %}—{% endif %}</td>
+                      <td><code>{{ a.field_name }}</code></td>
+                      <td class="muted">{{ a.old_value if a.old_value is not none else "—" }}</td>
+                      <td class="muted">{{ a.new_value if a.new_value is not none else "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                {% endif %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="muted">Пока нет изменений.</p>
+          {% endif %}
+        {% else %}
+          <p class="muted">Доступно только суперадмину.</p>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
+

@@ -1,0 +1,16 @@
+{
+  "items": [
+    { "id": "referral_clients", "label": "Сарафанка от клиентов" },
+    { "id": "referral_friends", "label": "Сарафанка от наших знакомых" },
+    { "id": "web_search", "label": "Поиск в интернете" },
+    { "id": "vk", "label": "Вконтакте" },
+    { "id": "instagram", "label": "Инстаграм" },
+    { "id": "telegram", "label": "Телеграм" },
+    { "id": "yandex_services", "label": "Яндекс.услуги" },
+    { "id": "avito", "label": "Авито" },
+    { "id": "market", "label": "Маркет" },
+    { "id": "other_masters", "label": "От других мастеров" },
+    { "id": "told_in_person", "label": "Мы рассказали сами лично" },
+    { "id": "other", "label": "Другое" }
+  ]
+}

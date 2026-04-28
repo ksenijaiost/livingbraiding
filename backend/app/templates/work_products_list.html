@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Работы с товарами</h2>
+
+    {% if msg == 'saved' %}
+      <div class="card" style="border-color:#bbf7d0; background:#f0fdf4; margin-bottom: 12px;">
+        Сохранено.
+      </div>
+    {% endif %}
+
+    <div style="display:flex; align-items:flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap:wrap;">
+      <p style="margin:0;font-size:13px;max-width:36rem;">
+        {% if current_user.role.value == 'MASTER' %}
+          {% if work_mine_only %}
+            <strong>Мои работы</strong>
+            <span class="muted">·</span>
+            <a href="/sales/work?mine=0">Все работы студии</a>
+          {% else %}
+            <strong>Все работы студии</strong>
+            <span class="muted">·</span>
+            <a href="/sales/work?mine=1">Только мои</a>
+          {% endif %}
+        {% else %}
+          {% if work_mine_only %}
+            <strong>Мои работы</strong>
+            <span class="muted">·</span>
+            <a href="/sales/work">Все работы</a>
+          {% else %}
+            <strong>Все работы</strong>
+            <span class="muted">·</span>
+            <a href="/sales/work?mine=1">Только мои</a>
+            <span class="muted">(создатель или доля в работе)</span>
+          {% endif %}
+        {% endif %}
+      </p>
+      <div>
+        {% if can_create %}
+          <a href="/sales/work/new"><button>Новая работа</button></a>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if rows %}
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Создано</th>
+              <th>Режим</th>
+              <th>Вид</th>
+              <th>Клиент</th>
+              <th>Сотрудники</th>
+              <th>Материал (г)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for w in rows %}
+              <tr{% if w.is_voided %} style="opacity:0.6;text-decoration:line-through;"{% endif %}>
+                <td><a href="/sales/work/{{ w.id }}">{{ w.id }}</a></td>
+                <td>
+                  {% if w.created_at %}
+                    <a href="/sales/work/{{ w.id }}">{{ w.created_at.strftime('%Y-%m-%d %H:%M') }}</a>
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>{{ "В наличие" if w.scope.value == "IN_STOCK" else "На заказ" }}</td>
+                <td>
+                  {% if w.kind.value == "KIT" %}Комплект/Заготовки
+                  {% elif w.kind.value == "MIX" %}Смешка
+                  {% elif w.kind.value == "RUBBER" %}Хвосты/резинки
+                  {% elif w.kind.value == "KIT_CORRECTION" %}Коррекция комплекта
+                  {% else %}{{ w.kind.value }}
+                  {% endif %}
+                </td>
+                <td>
+                  {% if w.client %}
+                    {{ w.client.name }}
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% for s in w.staff_rows %}
+                    <div class="muted" style="font-size: 12px;">
+                      {{ s.user.display_name }}{% if w.kind.value != "KIT" and s.share is not none and s.share != 1 %} ({{ s.share }}){% endif %}
+                    </div>
+                  {% endfor %}
+                </td>
+                <td>
+                  {{ w.kanekalon_grams }} / {{ w.kudri_grams }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Пока нет записей.</p>
+    {% endif %}
+  </div>
+{% endblock %}
+

@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Главная</h2>
+
+    {% if payroll_home %}
+      {% set _pb = (payroll_home.personal_balance or 0)|float %}
+      {% set _paid = (payroll_home.paid_net or 0)|float %}
+      {% set _show_studio = payroll_home.show_studio %}
+      {% set _sb = (payroll_home.studio_balance or 0)|float %}
+      {% set _period_exp = ((payroll_home.period.expenses_sum if payroll_home.period else 0) or 0)|float %}
+
+      {% set _pb_show = _pb|abs > 0.001 %}
+      {% set _paid_show = _paid|abs > 0.001 %}
+      {% set _sb_show = _show_studio and (_sb|abs > 0.001) %}
+      {% set _period_show = _show_studio and payroll_home.period and (_period_exp|abs > 0.001) %}
+      {% set _summary_show = _pb_show or _paid_show or _sb_show or _period_show %}
+
+      {% if _summary_show %}
+        <div class="card" style="margin-bottom: 16px; background: #f8fafc;">
+          <h3 style="margin-top: 0;">Сводка</h3>
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            {% if _pb_show %}
+              <div>
+                <div class="muted" style="font-size:12px;">Остаток личного фонда ЗП</div>
+                <div style="font-size: 1.15rem;"><strong>{{ "%.2f"|format(_pb) }} ₽</strong></div>
+              </div>
+            {% endif %}
+            {% if _paid_show %}
+              <div>
+                <div class="muted" style="font-size:12px;">Выплачено вам (по журналу)</div>
+                <div><strong>{{ "%.2f"|format(_paid) }} ₽</strong></div>
+              </div>
+            {% endif %}
+            {% if _sb_show %}
+              <div>
+                <div class="muted" style="font-size:12px;">Остаток фонда ЗП студии</div>
+                <div><strong>{{ "%.2f"|format(_sb) }} ₽</strong></div>
+              </div>
+            {% endif %}
+            {% if _period_show %}
+              <div>
+                <div class="muted" style="font-size:12px;">
+                  Расходы за текущий период ({{ payroll_home.period.date_from.strftime("%d.%m.%Y") }}–{{ payroll_home.period.date_to.strftime("%d.%m.%Y") }})
+                </div>
+                <div><strong>{{ "%.2f"|format(_period_exp) }} ₽</strong></div>
+              </div>
+            {% endif %}
+          </div>
+          {% if payroll_home.display_tz %}
+            <p class="muted" style="margin: 10px 0 0; font-size: 12px;">
+              Календарь и группировка по дням — в часовом поясе: <strong>{{ payroll_home.display_tz }}</strong>.
+            </p>
+          {% endif %}
+        </div>
+      {% endif %}
+    {% endif %}
+
+    {% if calendar_ctx %}
+      <div class="card" style="margin-bottom: 16px;">
+        <div style="display:flex; align-items:center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+          <h3 style="margin:0;">Календарь · {{ calendar_ctx.label }}</h3>
+          <div style="display:flex; gap:8px;">
+            <a href="/?m={{ calendar_ctx.prev_ym }}"><button type="button" class="secondary">←</button></a>
+            <a href="/?m={{ calendar_ctx.next_ym }}"><button type="button" class="secondary">→</button></a>
+          </div>
+        </div>
+        <div style="overflow-x:auto; margin-top: 10px;">
+          <table style="table-layout: fixed; width: 100%;">
+            <thead>
+              <tr>
+                <th style="width:14.28%;">Пн</th>
+                <th style="width:14.28%;">Вт</th>
+                <th style="width:14.28%;">Ср</th>
+                <th style="width:14.28%;">Чт</th>
+                <th style="width:14.28%;">Пт</th>
+                <th style="width:14.28%;">Сб</th>
+                <th style="width:14.28%;">Вс</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for week in calendar_ctx.weeks %}
+                <tr>
+                  {% for d in week %}
+                    <td class="lb-cal-day"
+                        data-day="{{ d.iso }}"
+                        style="vertical-align: top; padding: 8px 10px; cursor:pointer; {% if not d.in_month %}opacity:0.45;{% endif %} {% if d.is_today %}border-bottom:2px solid #111827;{% endif %}">
+                      <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 8px;">
+                        <div style="font-weight:700;" title="{{ d.iso }}">{{ d.date.day }}</div>
+                      </div>
+                      <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px; font-size:12px;">
+                        {% if d.visits %}
+                          <div>Визиты: <strong>{{ d.visits }}</strong></div>
+                        {% endif %}
+                        {% if d.bookings %}
+                          <div>Брони: <strong>{{ d.bookings }}</strong></div>
+                        {% endif %}
+                        {% if d.works %}
+                          <div>Работа: <strong>{{ d.works }}</strong></div>
+                        {% endif %}
+                        {% if d.payroll_sum and (d.payroll_sum|abs > 0.001) %}
+                          <div>
+                            ЗП:
+                            <strong>
+                              {% if d.payroll_sum > 0 %}+{% endif %}{{ "%.2f"|format(d.payroll_sum) }} ₽
+                            </strong>
+                          </div>
+                        {% endif %}
+                      </div>
+                    </td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endif %}
+
+    <!-- Day modal -->
+    <div id="lbDayModalBackdrop" style="display:none; position:fixed; inset:0; background: rgba(0,0,0,0.35); z-index: 120;"></div>
+    <div id="lbDayModal" style="display:none; position:fixed; inset: 0; z-index: 130; padding: 18px; overflow:auto;">
+      <div style="max-width: 820px; margin: 30px auto; background:#fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px;">
+        <div style="display:flex; justify-content: space-between; align-items:flex-start; gap: 12px;">
+          <div>
+            <div class="muted" style="font-size:12px;">День</div>
+            <h3 id="lbDayModalTitle" style="margin:0;">—</h3>
+          </div>
+          <button type="button" class="secondary" onclick="window.lbCloseDayModal()">Закрыть</button>
+        </div>
+        <div id="lbDayModalBody" style="margin-top: 12px;">
+          <div class="muted">Загрузка…</div>
+        </div>
+      </div>
+    </div>
+
+    {% if sections_ctx %}
+      <div class="card" style="background:#fff;">
+        <h3 style="margin-top:0;">Разделы</h3>
+        <div class="row" style="gap:12px;">
+          <div class="card" style="background:#f8fafc;">
+            <h4 style="margin:0 0 10px;">Записи</h4>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+              {% if sections_ctx.is_master %}
+                <a href="/master/bookings"><button type="button" class="secondary">Мои записи</button></a>
+                <a href="/master/visit/new"><button type="button" class="secondary">Новый визит</button></a>
+              {% endif %}
+              <a href="/clients"><button type="button" class="secondary">Клиенты</button></a>
+              <a href="/visits"><button type="button" class="secondary">Визиты</button></a>
+              <a href="/bookings"><button type="button" class="secondary">Брони</button></a>
+              <a href="/service-catalog"><button type="button" class="secondary">Прайс — услуги</button></a>
+            </div>
+          </div>
+
+          <div class="card" style="background:#f8fafc;">
+            <h4 style="margin:0 0 10px;">Товары</h4>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+              <a href="/sales/products"><button type="button" class="secondary">Продажа</button></a>
+              <a href="/sales/work"><button type="button" class="secondary">Работа</button></a>
+              <a href="/products-calc"><button type="button" class="secondary">Калькулятор</button></a>
+              <a href="/products-catalog"><button type="button" class="secondary">Прайс — товары</button></a>
+            </div>
+          </div>
+
+          <div class="card" style="background:#f8fafc;">
+            <h4 style="margin:0 0 10px;">Склад</h4>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+              <a href="/kits"><button type="button" class="secondary">Комплекты</button></a>
+            </div>
+          </div>
+
+          {% if sections_ctx.is_admin_super %}
+            <div class="card" style="background:#f8fafc;">
+              <h4 style="margin:0 0 10px;">Управление</h4>
+              <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                <a href="/admin/expenses"><button type="button" class="secondary">Расходы</button></a>
+                <a href="/admin/payroll-fund"><button type="button" class="secondary">Фонды</button></a>
+                <a href="/admin/payroll-periods"><button type="button" class="secondary">Периоды</button></a>
+                <a href="/admin/reports"><button type="button" class="secondary">Отчёты</button></a>
+                <a href="/admin/catalog"><button type="button" class="secondary">Прайс</button></a>
+                <a href="/admin/settings"><button type="button" class="secondary">Настройки</button></a>
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+  <script>
+    (function () {
+      function money2(x) {
+        try {
+          var v = Number(x || 0);
+          if (Math.abs(v) < 0.0005) v = 0;
+          return v.toFixed(2) + ' ₽';
+        } catch (e) { return '0.00 ₽'; }
+      }
+
+      function esc(s) {
+        return String(s || '').replace(/[&<>\"']/g, function (c) {
+          return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c] || c);
+        });
+      }
+
+      window.lbCloseDayModal = function () {
+        var bd = document.getElementById('lbDayModalBackdrop');
+        var md = document.getElementById('lbDayModal');
+        if (bd) bd.style.display = 'none';
+        if (md) md.style.display = 'none';
+        document.body.style.overflow = '';
+      };
+
+      window.lbOpenDayModal = async function (isoDay) {
+        var bd = document.getElementById('lbDayModalBackdrop');
+        var md = document.getElementById('lbDayModal');
+        var tt = document.getElementById('lbDayModalTitle');
+        var body = document.getElementById('lbDayModalBody');
+        if (!bd || !md || !tt || !body) return;
+        tt.textContent = isoDay || '—';
+        body.innerHTML = '<div class=\"muted\">Загрузка…</div>';
+        bd.style.display = 'block';
+        md.style.display = 'block';
+        document.body.style.overflow = 'hidden';
+        try {
+          var res = await fetch('/api/calendar/day?d=' + encodeURIComponent(isoDay));
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          var data = await res.json();
+
+          function block(title, payload, key) {
+            payload = payload || {};
+            var items = payload.items || [];
+            var cnt = Number(payload.count || 0);
+            var payout = money2(payload.payout_sum || 0);
+            var studio = money2(payload.studio_sum || 0);
+            var showStudio = !!data.is_super && key !== 'bookings';
+            var h = '';
+            h += '<div class=\"card\" style=\"background:#f8fafc; margin: 10px 0;\">';
+            h += '<div style=\"display:flex; justify-content:space-between; gap:12px; align-items:baseline; flex-wrap:wrap;\">';
+            h += '<div style=\"font-weight:700;\">' + esc(title) + ' <span class=\"muted\">(' + cnt + ')</span></div>';
+            h += '<div class=\"muted\" style=\"font-size:12px; display:flex; gap:12px; flex-wrap:wrap;\">';
+            h += '<span>ЗП: <strong>' + esc(payout) + '</strong></span>';
+            if (showStudio) h += '<span>Фонд студии: <strong>' + esc(studio) + '</strong></span>';
+            h += '</div></div>';
+            if (!items || items.length === 0) {
+              h += '<div class=\"muted\" style=\"margin-top:8px;\">Нет</div>';
+            } else {
+              h += '<div style=\"margin-top:8px; overflow-x:auto;\">';
+              h += '<table style=\"font-size:13px;\">';
+              h += '<thead><tr><th>ID</th><th>Клиент</th><th>Детали</th><th>ЗП</th>' + (showStudio ? '<th>Фонд студии</th>' : '') + '<th></th></tr></thead>';
+              h += '<tbody>';
+              for (var i = 0; i < items.length; i++) {
+                var it = items[i] || {};
+                h += '<tr>';
+                h += '<td><code>' + esc(it.id) + '</code></td>';
+                h += '<td>' + esc(it.client || '—') + '</td>';
+                h += '<td>' + esc(it.label || it.kind || '—') + '</td>';
+                h += '<td>' + esc(money2(it.payout_sum || 0)) + '</td>';
+                if (showStudio) h += '<td>' + esc(money2(it.studio_sum || 0)) + '</td>';
+                h += '<td><a href=\"' + esc(it.url || '#') + '\"><button type=\"button\" class=\"secondary\">Открыть</button></a></td>';
+                h += '</tr>';
+              }
+              h += '</tbody></table></div>';
+            }
+            h += '</div>';
+            return h;
+          }
+
+          var html = '';
+          html += block('Брони', data.bookings, 'bookings');
+          html += block('Визиты', data.visits, 'visits');
+          html += block('Работа', data.works, 'works');
+          body.innerHTML = html;
+          tt.textContent = data.date || isoDay || '—';
+        } catch (e) {
+          body.innerHTML = '<div class=\"error\">Не удалось загрузить данные дня.</div>';
+        }
+      };
+
+      // Bind calendar day clicks
+      function bind() {
+        var cells = document.querySelectorAll('td.lb-cal-day[data-day]');
+        for (var i = 0; i < cells.length; i++) {
+          (function (el) {
+            el.addEventListener('click', function () {
+              var iso = el.getAttribute('data-day');
+              if (!iso) return;
+              window.lbOpenDayModal(iso);
+            });
+          })(cells[i]);
+        }
+      }
+      bind();
+
+      var bd = document.getElementById('lbDayModalBackdrop');
+      if (bd) bd.addEventListener('click', window.lbCloseDayModal);
+      document.addEventListener('keydown', function (e) {
+        if (!e || e.key !== 'Escape') return;
+        var md = document.getElementById('lbDayModal');
+        if (md && md.style.display === 'block') window.lbCloseDayModal();
+      });
+    })();
+  </script>
+{% endblock %}

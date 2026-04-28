@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "id": "full_head_kit_inlay_shared",
+  "title": "Вся голова → Вплетение комплекта (общие поля услуги)",
+  "applies_to_service_codes": ["full_head_kit_2h", "full_head_kit_4h"],
+  "fields": [
+    {
+      "key": "bases_count",
+      "label": "Количество баз",
+      "type": "integer",
+      "min": 0,
+      "required": true
+    },
+    {
+      "key": "blanks_count",
+      "label": "Количество заготовок",
+      "type": "integer",
+      "min": 0,
+      "required": true
+    },
+    {
+      "key": "service_comment",
+      "label": "Комментарий",
+      "type": "string",
+      "required": false,
+      "placeholder": "Несколько заготовок в базу, разметка и др."
+    }
+  ],
+  "kit_block": {
+    "description": "Общий блок комплекта; структура см. schemas.KitBlock и examples/*.json",
+    "kinds": ["STOCK", "NEW", "OWN"]
+  }
+}

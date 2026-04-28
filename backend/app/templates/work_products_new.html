@@ -1,0 +1,911 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Работа с товарами</h2>
+    <p class="muted" style="margin-top:-6px;">
+      Режим, материал; для комплекта — таблица заготовок и мастера в блоке комплекта. ЗП по заготовкам — из количеств в таблице.
+    </p>
+
+    {% if error %}
+      <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
+    {% endif %}
+
+    {% set scope_val = fp.scope or 'IN_STOCK' %}
+
+    <form method="post" action="/sales/work/new" id="work_products_form">
+      <input type="hidden" name="booking_id" value="{{ fp.booking_id or '' }}" />
+      <div class="row">
+        <div>
+          <label>Режим</label>
+          <div style="margin-top: 6px;">
+            {% for s in scopes %}
+              <label style="margin-right: 16px;">
+                <input type="radio" name="scope" value="{{ s.value }}" {% if scope_val == s.value %}checked{% endif %} />
+                {{ s.label }}
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <label>Вид работы</label>
+          <select name="kind">
+            <option value="" {% if not fp.kind %}selected{% endif %}>— выберите —</option>
+            {% for k in kinds %}
+              <option value="{{ k.value }}" {% if fp.kind == k.value %}selected{% endif %}>{{ k.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div id="client_block" class="card" style="background:#f8fafc; margin: 12px 0;">
+        <strong style="display:block; margin-bottom: 6px;">Клиент (обязательно для «на заказ»)</strong>
+        <input type="hidden" name="client_id" id="client_id" value="{{ fp.client_id }}" />
+        <div id="work_client_search_row" class="row" style="align-items: flex-end;">
+          <div style="flex:1;">
+            <label>Поиск клиента по имени или телефону</label>
+            <input type="search" id="client_search_q" autocomplete="off" placeholder="Имя или цифры телефона (например, последние 4), подожди или нажми «Найти»" value="" />
+          </div>
+          <div>
+            <button type="button" id="work_client_find_btn" class="secondary" onclick="clientSuggest()">Найти</button>
+          </div>
+        </div>
+        <ul id="client_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+        <div id="work_client_selected_panel" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
+            <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;">
+              <span style="font-weight:700;color:#065f46;">Выбран клиент</span>
+              <span id="work_client_selected_name" style="font-weight:600;color:#047857;">{% if selected_client %}{{ selected_client.name }}{% if not selected_client.is_confirmed %} (черновик){% endif %}{% elif fp.client_id %}id {{ fp.client_id }}{% endif %}</span>
+            </div>
+            <button type="button" id="work_client_change_btn" class="secondary" style="flex-shrink:0;">Изменить</button>
+          </div>
+        </div>
+        <div id="amount_from_client_block" style="margin-top: 10px; display:none;">
+          <label>Сколько взяли с клиента</label>
+          <div style="display:flex; gap: 8px; align-items:center;">
+            <input name="amount_from_client" type="number" step="1" min="0" value="{{ fp.amount_from_client or '' }}" style="max-width: 12rem;" />
+            <span class="muted">₽</span>
+          </div>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;" id="price_hint_line"></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Дата работы (событие)</label>
+          <input type="date" name="performed_date" required value="{{ fp.performed_date or default_date }}" />
+          <p class="muted" style="font-size:12px;margin:4px 0 0;">Эта дата влияет на календарь и период ЗП.</p>
+        </div>
+      </div>
+
+      <div style="margin-top: 10px;">
+        <label>Комментарий</label>
+        <textarea name="comment" rows="4" maxlength="2000" placeholder="необязательно" style="width: 100%; resize: vertical;">{{ fp.comment }}</textarea>
+      </div>
+
+      <div class="card" style="background:#f8fafc; margin: 12px 0;">
+        <h3 style="margin-top: 0;">Материал</h3>
+        <div class="row">
+          <div>
+            <label>Канекалон (г)</label>
+            <input name="kanekalon_grams" type="number" step="0.01" min="0" value="{{ fp.kanekalon_grams or 0 }}" />
+          </div>
+          <div>
+            <label>Кудри/термо (г)</label>
+            <input name="kudri_grams" type="number" step="0.01" min="0" value="{{ fp.kudri_grams or 0 }}" />
+          </div>
+        </div>
+
+        <div id="mix_source_block" style="margin-top: 10px;">
+          <label>Смешка</label>
+          <label><input type="radio" name="mix_source" value="NO_MIX" {% if (fp.mix_source or 'NO_MIX') == 'NO_MIX' %}checked{% endif %} /> Без смешки</label>
+          <label><input type="radio" name="mix_source" value="FROM_STOCK" {% if fp.mix_source == 'FROM_STOCK' %}checked{% endif %} /> Из наличия</label>
+          <label><input type="radio" name="mix_source" value="SELF_MIXED" {% if fp.mix_source == 'SELF_MIXED' %}checked{% endif %} /> Сама мешала</label>
+        </div>
+        <div id="mix_complexity_block" style="margin-top: 10px; display:none;">
+          <label>Сложность смешки</label>
+          {% set mc = fp.mix_complexity or 'STANDARD' %}
+          <div style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-top: 6px; font-size: 14px;">
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="LIGHT" {% if mc == 'LIGHT' %}checked{% endif %} /> лёгкая (домешивание)</label>
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="STANDARD" {% if mc == 'STANDARD' or mc == 'SIMPLE' %}checked{% endif %} /> стандарт</label>
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="KANEK" {% if mc == 'KANEK' or mc == 'MEDIUM' %}checked{% endif %} /> сложная канекалон (омбре, мелирование)</label>
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="THERMO" {% if mc == 'THERMO' or mc == 'HARD' %}checked{% endif %} /> сложная термо</label>
+            <label style="margin:0;"><input type="radio" name="mix_complexity" value="LENGTH" {% if mc == 'LENGTH' %}checked{% endif %} /> сложная длина</label>
+          </div>
+        </div>
+      </div>
+
+      <div id="rubber_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
+        <h3 style="margin-top:0;">Хвосты/резинки</h3>
+        <div>
+          <label>Тип</label>
+          <div style="margin-top: 6px;">
+            {% for t in rubber_types %}
+              <label style="display:block; margin-bottom: 6px;">
+                <input type="radio" name="rubber_type" value="{{ t.value }}" {% if fp.rubber_type == t.value %}checked{% endif %} />
+                {{ t.label }}
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 10px;">
+          <div id="rubber_attach_qty_block" style="display:none;">
+            <label>Количество креплений (для хвоста на резинке)</label>
+            <input name="rubber_attach_qty" type="number" step="1" min="1" value="{{ fp.rubber_attach_qty or '' }}" />
+          </div>
+          <div id="rubber_braids_qty_block" style="display:none;">
+            <label>Количество кос (для кос на резинке)</label>
+            <input name="rubber_braids_qty" type="number" step="1" min="1" value="{{ fp.rubber_braids_qty or '' }}" />
+          </div>
+        </div>
+      </div>
+
+      <div id="correction_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
+        <h3 style="margin-top:0;">Коррекция комплекта</h3>
+        <p class="muted" style="margin-top:-6px;">Поля необязательны. Если выбрана стирка — «одевание на круг» недоступно. Позиция стирки в прайсе: «с коррекцией» при стрижке и/или почасовой работе; иначе «без коррекции».</p>
+
+        <div class="row">
+          <div>
+            <label>Стрижка (1шт) — количество</label>
+            <input name="corr_trim_qty" type="number" step="1" min="0" value="{{ fp.corr_trim_qty or 0 }}" />
+          </div>
+          <div>
+            <label>Почасовая коррекция заготовок (кудри, дреды), ч</label>
+            <input name="corr_hourly_hours" type="number" step="0.25" min="0" value="{{ fp.corr_hourly_hours or '' }}" placeholder="0 или фактическое время" style="max-width:180px;" />
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 10px;">
+          <div style="flex:1; min-width:220px;">
+            <label>Описание комплекта</label>
+            <input name="corr_kit_description" type="text" maxlength="500" value="{{ fp.get('corr_kit_description', '') or '' }}" placeholder="комментарий" />
+          </div>
+          <div>
+            <label>Количество заготовок в комплекте</label>
+            <input name="corr_kit_blanks_count" type="number" step="1" min="0" value="{{ fp.get('corr_kit_blanks_count', '') or '' }}" placeholder="для информации" />
+          </div>
+        </div>
+
+        <div style="margin-top: 10px;">
+          <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_wash" id="corr_wash" {% if fp.corr_wash %}checked{% endif %} /> Стирка</label>
+          <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_steam" {% if fp.corr_steam %}checked{% endif %} /> Отпаривание</label>
+          <label style="display:block; margin-bottom: 0;"><input type="checkbox" name="corr_circle" id="corr_circle" {% if fp.corr_circle %}checked{% endif %} /> Одевание на круг</label>
+        </div>
+      </div>
+
+      <div id="kit_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
+        <h3 style="margin-top:0;">Комплект/Заготовки (поштучно)</h3>
+        <p class="muted" style="margin-top:-6px;">
+          Заполните материал выше. Таблица ниже — только для мастеров, отмеченных в списке (или одна колонка — текущий мастер).
+        </p>
+
+        <div class="row">
+          <div>
+            <label>Тип заготовок</label>
+            <label><input type="checkbox" name="kit_type_se" {% if fp.kit_type_se %}checked{% endif %} /> SE</label>
+            <label><input type="checkbox" name="kit_type_de" {% if fp.kit_type_de %}checked{% endif %} /> DE</label>
+          </div>
+          <div>
+            <label>Доп. расходы, ₽</label>
+            <input name="extra_costs_amount" type="number" step="0.01" min="0" value="{{ fp.extra_costs_amount or 0 }}" />
+            <div class="muted" style="font-size: 12px; margin-top: 6px;">
+              Например: украшения, расходники, прочие доп. затраты.
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 12px;">
+          <label>
+            <input type="checkbox" name="kit_use_multi_masters" id="kit_use_multi_masters" {% if fp.kit_use_multi_masters %}checked{% endif %} />
+            Несколько мастеров (комплект)
+          </label>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">
+            Если не отмечено — одна колонка для текущего мастера (вход под мастером). Если отмечено — выберите мастеров; в таблице будут только их колонки.
+          </div>
+        </div>
+
+        <div id="kit_master_picker" style="margin-top: 10px; display: none;">
+          <strong style="display:block; margin-bottom: 8px;">Мастера для таблицы заготовок</strong>
+          {% for u in masters %}
+            <label style="display:block; margin-bottom: 6px;">
+              <input
+                type="checkbox"
+                name="kit_master_on"
+                value="{{ u.id }}"
+                class="kit-master-cb"
+                {% if (u.id == current_user.id) or (u.id in kit_master_on_ids) %}checked{% endif %}
+              />
+              {{ u.display_name }}
+            </label>
+          {% endfor %}
+        </div>
+
+        <div style="overflow-x:auto; margin-top: 12px;" id="kit_qty_table_outer">
+          <table id="kit_qty_table">
+            <thead id="kit_qty_thead"></thead>
+            <tbody id="kit_qty_tbody"></tbody>
+          </table>
+        </div>
+
+        <div id="kit_stock_block" style="margin-top: 12px;">
+          <h4 style="margin: 0 0 8px;">Склад (для режима «в наличие»)</h4>
+          <div class="row">
+            <div>
+              <label>Артикул</label>
+              <input name="kit_sku" value="{{ fp.kit_sku }}" placeholder="например, KIT-001" />
+            </div>
+            <div>
+              <label>Название</label>
+              <input name="kit_title" value="{{ fp.kit_title }}" placeholder="например, Комплект SE (короткие косы)" />
+            </div>
+          </div>
+          <p class="muted" style="font-size:12px; margin-bottom:0;">
+            Склад создаём только в режиме «в наличие». Цену продажи комплекта задаёт администратор. Заготовок на складе будет столько, сколько в «Количество заготовок» выше (без стрижек SE/DE из таблицы). ЗП авторов — по таблице.
+          </p>
+        </div>
+      </div>
+
+      <div id="work_preview_block" class="card" style="background:#fff; margin: 12px 0; border: 1px solid #e2e8f0;">
+        <h3 style="margin-top:0;">Предварительный расчёт</h3>
+        <div id="work_preview_pieces_line" class="muted" style="font-size: 13px; display:none;">—</div>
+        <div id="work_preview_master_lines" style="font-size: 13px; margin-top: 8px;">—</div>
+        <div id="work_preview_cost_line" class="muted" style="font-size: 13px; margin-top: 8px;">—</div>
+      </div>
+
+      <button type="submit">Сохранить</button>
+    </form>
+  </div>
+
+  <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
+  <script type="application/json" id="work_price_meta">{{ work_price_meta_json | safe }}</script>
+  <script>
+    function kitTableCurrentUserId() {
+      var el = document.getElementById('kit_table_state');
+      try {
+        if (el && el.textContent) {
+          var st = JSON.parse(el.textContent);
+          return st.currentUserId || 0;
+        }
+      } catch (e) {}
+      return 0;
+    }
+    function getScopeValue() {
+      var r = document.querySelector('input[name="scope"]:checked');
+      return r ? r.value : 'IN_STOCK';
+    }
+    function syncKitBlock() {
+      var kind = document.querySelector('select[name="kind"]');
+      var kit = document.getElementById('kit_block');
+      if (!kind || !kit) return;
+      kit.style.display = (kind.value === 'KIT') ? 'block' : 'none';
+      if (kind.value === 'KIT' && typeof window.rebuildKitTable === 'function') {
+        window.rebuildKitTable();
+      }
+      if (typeof window.syncKitPreview === 'function') window.syncKitPreview();
+    }
+    function syncRubberBlock() {
+      var kind = document.querySelector('select[name="kind"]');
+      var rb = document.getElementById('rubber_block');
+      if (!kind || !rb) return;
+      rb.style.display = (kind.value === 'RUBBER') ? 'block' : 'none';
+      if (kind.value === 'RUBBER') syncRubberTypeFields();
+    }
+    function syncRubberTypeFields() {
+      var sel = document.querySelector('input[name="rubber_type"]:checked');
+      var a = document.getElementById('rubber_attach_qty_block');
+      var b = document.getElementById('rubber_braids_qty_block');
+      if (!sel || !a || !b) return;
+      a.style.display = (sel.value === 'TAIL_ELASTIC') ? 'block' : 'none';
+      b.style.display = (sel.value === 'BRAIDS_ELASTIC') ? 'block' : 'none';
+    }
+    function syncCorrectionBlock() {
+      var kind = document.querySelector('select[name="kind"]');
+      var el = document.getElementById('correction_block');
+      if (!kind || !el) return;
+      el.style.display = (kind.value === 'KIT_CORRECTION') ? 'block' : 'none';
+      syncCorrectionRules();
+    }
+    function syncCorrectionRules() {
+      var wash = document.getElementById('corr_wash');
+      var circle = document.getElementById('corr_circle');
+      if (!wash || !circle) return;
+      if (wash.checked) {
+        circle.checked = false;
+        circle.disabled = true;
+      } else {
+        circle.disabled = false;
+      }
+    }
+    function readWorkPriceMeta() {
+      var el = document.getElementById('work_price_meta');
+      try { return el && el.textContent ? JSON.parse(el.textContent) : {}; } catch (e) { return {}; }
+    }
+    function money2(x) { return Math.round((parseFloat(x) || 0) * 100) / 100; }
+    function readGrams(name) {
+      var el = document.querySelector('input[name="' + name + '"]');
+      if (!el) return 0;
+      var v = String(el.value || '').replace(',', '.');
+      var n = parseFloat(v);
+      return isNaN(n) ? 0 : Math.max(0, n);
+    }
+    function kitState() {
+      var el = document.getElementById('kit_table_state');
+      try { return el && el.textContent ? JSON.parse(el.textContent) : {}; } catch (e) { return {}; }
+    }
+    function nameByUserId(state, uid) {
+      var ms = (state && state.masters) ? state.masters : [];
+      for (var i = 0; i < ms.length; i++) if (ms[i].id === uid) return ms[i].name;
+      return 'ID ' + uid;
+    }
+
+    function syncWorkPreview() {
+      var kind = document.querySelector('select[name="kind"]');
+      var piecesEl = document.getElementById('work_preview_pieces_line');
+      var payEl = document.getElementById('work_preview_master_lines');
+      var costEl = document.getElementById('work_preview_cost_line');
+      if (!piecesEl || !payEl || !costEl) return;
+
+      var k = kind ? kind.value : '';
+      var meta = readWorkPriceMeta();
+      var st = kitState();
+      var mpg = (st && st.materialPricePerGram) ? st.materialPricePerGram : {};
+      var kan = readGrams('kanekalon_grams');
+      var kud = readGrams('kudri_grams');
+      var mat = kan * (parseFloat(mpg.kanekalon) || 0) + kud * (parseFloat(mpg.kudri) || 0);
+      var bonus = parseFloat((meta && meta.customOrderBonus) || 1.0);
+      if (!bonus || bonus <= 0) bonus = 1.0;
+      if (getScopeValue() !== 'CUSTOM_ORDER') bonus = 1.0;
+
+      function setPieces(text, show) {
+        piecesEl.style.display = show ? 'block' : 'none';
+        piecesEl.textContent = show ? text : '—';
+      }
+      function setPayLines(lines) {
+        if (!lines || !lines.length) { payEl.innerHTML = '—'; return; }
+        payEl.innerHTML = lines.map(function (l) { return '<div>' + l + '</div>'; }).join('');
+      }
+      function setCost(text) { costEl.textContent = text || '—'; }
+
+      setPieces('—', false);
+
+      if (k === 'KIT') {
+        var exMap = {};
+        (st.excludeFromInventoryPieceCount || []).forEach(function (x) { exMap[x] = true; });
+        var rates = st.kitWorkPayByKey || {};
+        function kitRateForItem(itemKey, qtyTotal) {
+          return parseFloat(rates[itemKey]) || 0;
+        }
+
+        var totals = {};
+        document.querySelectorAll('#kit_qty_tbody input[name^="kit_qty_"]').forEach(function (inp) {
+          var m = /^kit_qty_(\d+)_(.+)$/.exec(inp.name);
+          if (!m) return;
+          var q = parseInt(inp.value, 10) || 0;
+          var key = m[2];
+          totals[key] = (totals[key] || 0) + q;
+        });
+
+        var inv = 0;
+        for (var key in totals) if (!exMap[key]) inv += totals[key] || 0;
+        setPieces('Количество заготовок: ' + String(inv), true);
+
+        var gramsTotal = kan + kud;
+        var mixSrc = (document.querySelector('input[name="mix_source"]:checked') || {}).value || 'NO_MIX';
+        var mixComp = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || 'STANDARD';
+        var rm0 = (meta && meta.mixRates) ? meta.mixRates : {};
+        var mixRate0 = parseFloat(rm0[mixComp]) || 0;
+        var mixBonusTotal = (gramsTotal > 0 && mixSrc === 'SELF_MIXED') ? (gramsTotal * mixRate0) : 0;
+        var mixMasterId = st.currentUserId || 0;
+
+        var ids = (typeof window.getKitColumnMasterIds === 'function') ? window.getKitColumnMasterIds() : [st.currentUserId || 0];
+        var lines = [];
+        for (var ii = 0; ii < ids.length; ii++) {
+          var uid = ids[ii];
+          var sum = 0;
+          for (var itemKey in totals) {
+            var tq = totals[itemKey] || 0;
+            var r = kitRateForItem(itemKey, tq);
+            if (r <= 0) continue;
+            var inp2 = document.querySelector('input[name="kit_qty_' + uid + '_' + itemKey + '"]');
+            var q2 = inp2 ? (parseInt(inp2.value, 10) || 0) : 0;
+            if (q2 > 0) sum += r * q2;
+          }
+          if (mixBonusTotal > 0 && mixMasterId && uid === mixMasterId) {
+            sum += mixBonusTotal;
+          }
+          lines.push('ЗП «' + nameByUserId(st, uid) + '»: ' + money2(sum) + ' ₽');
+        }
+        setPayLines(lines);
+
+        var extra = parseFloat((document.querySelector('input[name="extra_costs_amount"]') || {}).value) || 0;
+        var costKit = mat + extra;
+        setCost('Себестоимость (итого): ' + money2(costKit) + ' ₽ (материал + доп. расходы)');
+        return;
+      }
+
+      if (k === 'RUBBER') {
+        var t = document.querySelector('input[name="rubber_type"]:checked');
+        var typeVal = t ? t.value : '';
+        var map = (meta && meta.rubber) ? meta.rubber : {};
+        var nameByType = {
+          TAIL_ELASTIC: 'Хвост на резинке (1 крепление)',
+          TAIL_CRAB_MINI: 'Хвост на крабе — mini',
+          TAIL_CRAB_STANDARD: 'Хвост на крабе — standard',
+          TAIL_CRAB_MAX: 'Хвост на крабе — max',
+          TAIL_NET_MINI: 'Хвост на сетке — mini',
+          TAIL_NET_STANDARD: 'Хвост на сетке — standard',
+          TAIL_NET_MAX: 'Хвост на сетке — max',
+          TAIL_BUN_MINI: 'Хвост на бублике — mini',
+          TAIL_BUN_STANDARD: 'Хвост на бублике — standard',
+          TAIL_BUN_MAX: 'Хвост на бублике — max',
+          BRAIDS_ELASTIC: 'Косы на резинке (1 коса)'
+        };
+        var row = map[nameByType[typeVal] || ''] || null;
+        var units = 1;
+        if (row && row.is_per_unit) {
+          if (typeVal === 'TAIL_ELASTIC') units = parseInt((document.querySelector('input[name="rubber_attach_qty"]') || {}).value || '1', 10) || 1;
+          else if (typeVal === 'BRAIDS_ELASTIC') units = parseInt((document.querySelector('input[name="rubber_braids_qty"]') || {}).value || '1', 10) || 1;
+          else units = 1;
+        }
+        if (!units || units < 1) units = 1;
+        var mp = row ? (parseFloat(row.master_pay) || 0) : 0;
+        var fx = row ? (parseFloat(row.fixed_expense) || 0) : 0;
+        var pay = mp * units * bonus;
+        var extra2 = fx * units;
+        var cost = mat + extra2;
+        var uid0 = st.currentUserId || 0;
+        setPayLines([('ЗП «' + nameByUserId(st, uid0) + '»: ' + money2(pay) + ' ₽')]);
+        setCost('Себестоимость (итого): ' + money2(cost) + ' ₽ (материал + доп. расходы)');
+        return;
+      }
+
+      if (k === 'KIT_CORRECTION') {
+        var mapc = (meta && meta.correction) ? meta.correction : {};
+        function svcRow(nm) { return mapc[nm] || null; }
+        function mpSum(nm, units) {
+          var r = svcRow(nm);
+          if (!r) return 0;
+          return (parseFloat(r.master_pay) || 0) * (parseFloat(units) || 0);
+        }
+        function fxSum(nm, units) {
+          var r = svcRow(nm);
+          if (!r) return 0;
+          return (parseFloat(r.fixed_expense) || 0) * (parseFloat(units) || 0);
+        }
+        var trimQ = parseInt((document.querySelector('input[name="corr_trim_qty"]') || {}).value || '0', 10) || 0;
+        var hhRaw = String((document.querySelector('input[name="corr_hourly_hours"]') || {}).value || '').replace(',', '.').trim();
+        var hh = hhRaw ? (parseFloat(hhRaw) || 0) : 0;
+        var hhPay = hh;
+        var wash = (document.getElementById('corr_wash') || {}).checked;
+        var circle = (document.getElementById('corr_circle') || {}).checked;
+        var steam = (document.querySelector('input[name="corr_steam"]') || {}).checked;
+        var washNm = (trimQ > 0 || hh > 0) ? 'Стирка (с коррекцией)' : 'Стирка (без коррекции)';
+
+        var payT = 0;
+        var fxT = 0;
+        if (trimQ > 0) { payT += mpSum('Стрижка (1шт)', trimQ); fxT += fxSum('Стрижка (1шт)', trimQ); }
+        if (hhPay > 0) { payT += mpSum('Почасовая коррекция заготовок (1 ч)', hhPay); fxT += fxSum('Почасовая коррекция заготовок (1 ч)', hhPay); }
+        if (wash) { payT += mpSum(washNm, 1); fxT += fxSum(washNm, 1); }
+        if (steam) { payT += mpSum('Отпаривание', 1); fxT += fxSum('Отпаривание', 1); }
+        if (circle) { payT += mpSum('Одевание на круг', 1); fxT += fxSum('Одевание на круг', 1); }
+
+        var uid1 = st.currentUserId || 0;
+        setPayLines([('ЗП «' + nameByUserId(st, uid1) + '»: ' + money2(payT * bonus) + ' ₽')]);
+        setCost('Себестоимость (итого): ' + money2(mat + fxT) + ' ₽ (материал + доп. расходы)');
+        return;
+      }
+
+      if (k === 'MIX') {
+        var gramsTotal = kan + kud;
+        var mc = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || 'STANDARD';
+        var rm = (meta && meta.mixRates) ? meta.mixRates : {};
+        var rate = parseFloat(rm[mc]) || 0;
+        var payM = gramsTotal > 0 ? gramsTotal * rate : 0;
+        var uid2 = st.currentUserId || 0;
+        setPayLines([('ЗП «' + nameByUserId(st, uid2) + '»: ' + money2(payM) + ' ₽')]);
+        setCost('Себестоимость (итого): ' + money2(mat) + ' ₽ (материал + доп. расходы)');
+        return;
+      }
+
+      // Default / unsupported kind
+      setPayLines([]);
+      setCost('Себестоимость (итого): ' + money2(mat) + ' ₽ (материал + доп. расходы)');
+    }
+
+    function syncPriceHint() {
+      var hint = document.getElementById('price_hint_line');
+      if (!hint) return;
+      if (getScopeValue() !== 'CUSTOM_ORDER') { hint.textContent = ''; return; }
+      var kind = document.querySelector('select[name="kind"]');
+      if (!kind) { hint.textContent = ''; return; }
+      var meta = readWorkPriceMeta();
+      var bonus = parseFloat((meta && meta.customOrderBonus) || 1.0);
+      if (!bonus || bonus <= 0) bonus = 1.0;
+
+      function fmtRange(a, b) {
+        if (a == null && b == null) return '';
+        if (a != null && b != null && a !== b) return String(a) + '–' + String(b);
+        if (a != null) return String(a);
+        return String(b);
+      }
+
+      var line = '';
+      if (kind.value === 'RUBBER') {
+        var t = document.querySelector('input[name="rubber_type"]:checked');
+        var typeVal = t ? t.value : '';
+        var map = (meta && meta.rubber) ? meta.rubber : {};
+        var nameByType = {
+          TAIL_ELASTIC: 'Хвост на резинке (1 крепление)',
+          TAIL_CRAB_MINI: 'Хвост на крабе — mini',
+          TAIL_CRAB_STANDARD: 'Хвост на крабе — standard',
+          TAIL_CRAB_MAX: 'Хвост на крабе — max',
+          TAIL_NET_MINI: 'Хвост на сетке — mini',
+          TAIL_NET_STANDARD: 'Хвост на сетке — standard',
+          TAIL_NET_MAX: 'Хвост на сетке — max',
+          TAIL_BUN_MINI: 'Хвост на бублике — mini',
+          TAIL_BUN_STANDARD: 'Хвост на бублике — standard',
+          TAIL_BUN_MAX: 'Хвост на бублике — max',
+          BRAIDS_ELASTIC: 'Косы на резинке (1 коса)'
+        };
+        var row = map[nameByType[typeVal] || ''] || null;
+        if (row) {
+          var units = row.is_per_unit ? (typeVal === 'TAIL_ELASTIC' ? parseInt((document.querySelector('input[name="rubber_attach_qty"]')||{}).value||'1',10) : (typeVal === 'BRAIDS_ELASTIC' ? parseInt((document.querySelector('input[name="rubber_braids_qty"]')||{}).value||'1',10) : 1)) : 1;
+          if (!units || units < 1) units = 1;
+          var lo = row.client_from != null ? Math.round(row.client_from * units * bonus) : null;
+          var hi = row.client_to != null ? Math.round(row.client_to * units * bonus) : null;
+          var r = fmtRange(lo, hi);
+          if (r) line = 'По прайсу: ' + r + ' ₽';
+        }
+      } else if (kind.value === 'KIT_CORRECTION') {
+        var mapc = (meta && meta.correction) ? meta.correction : {};
+        var sumLo = 0, sumHi = 0, any = false;
+        function add(name, units) {
+          var row = mapc[name] || null;
+          if (!row) return;
+          var lo = row.client_from != null ? row.client_from : null;
+          var hi = row.client_to != null ? row.client_to : null;
+          if (lo != null) { sumLo += lo * units; any = true; }
+          if (hi != null) { sumHi += hi * units; any = true; }
+        }
+        var trimQ = parseInt((document.querySelector('input[name="corr_trim_qty"]')||{}).value||'0',10) || 0;
+        var hhRaw = String((document.querySelector('input[name="corr_hourly_hours"]') || {}).value || '').replace(',', '.').trim();
+        var hh = hhRaw ? (parseFloat(hhRaw) || 0) : 0;
+        var wash = (document.getElementById('corr_wash')||{}).checked;
+        var circle = (document.getElementById('corr_circle')||{}).checked;
+        var steam = (document.querySelector('input[name="corr_steam"]')||{}).checked;
+        var washNm = (trimQ > 0 || hh > 0) ? 'Стирка (с коррекцией)' : 'Стирка (без коррекции)';
+        if (trimQ > 0) add('Стрижка (1шт)', trimQ);
+        var rowH = mapc['Почасовая коррекция заготовок (1 ч)'] || null;
+        var cph = rowH && rowH.client_from != null ? rowH.client_from : null;
+        if (hh > 0 && cph != null) { sumLo += cph * hh; sumHi += cph * hh; any = true; }
+        if (wash) add(washNm, 1);
+        if (steam) add('Отпаривание', 1);
+        if (circle) add('Одевание на круг', 1);
+        if (any) {
+          var r = fmtRange(Math.round(sumLo), Math.round(sumHi));
+          if (r) line = 'По прайсу: ' + r + ' ₽';
+        }
+      }
+      hint.textContent = line;
+    }
+    function syncClientBlock() {
+      var el = document.getElementById('client_block');
+      if (!el) return;
+      el.style.display = (getScopeValue() === 'CUSTOM_ORDER') ? 'block' : 'none';
+      var a = document.getElementById('amount_from_client_block');
+      if (a) a.style.display = (getScopeValue() === 'CUSTOM_ORDER') ? 'block' : 'none';
+      if (typeof syncWorkClientUi === 'function') syncWorkClientUi();
+    }
+    function syncWorkClientUi() {
+      var cidEl = document.getElementById('client_id');
+      var q = document.getElementById('client_search_q');
+      var findBtn = document.getElementById('work_client_find_btn');
+      var row = document.getElementById('work_client_search_row');
+      var panel = document.getElementById('work_client_selected_panel');
+      var nameEl = document.getElementById('work_client_selected_name');
+      if (!cidEl || !q || !findBtn || !row || !panel || !nameEl) return;
+      var cid = (cidEl.value || '').trim();
+      var has = !!cid;
+      q.disabled = has;
+      findBtn.disabled = has;
+      row.style.opacity = has ? '0.55' : '1';
+      panel.style.display = has ? 'block' : 'none';
+      if (!has) nameEl.textContent = '';
+    }
+    function clearWorkClientSelection() {
+      var inp = document.getElementById('client_id');
+      if (inp) inp.value = '';
+      var ul = document.getElementById('client_suggest_list');
+      if (ul) ul.innerHTML = '';
+      var q = document.getElementById('client_search_q');
+      if (q) { q.value = ''; q.focus(); }
+      syncWorkClientUi();
+      syncPriceHint();
+    }
+    function selectClient(id, name, isDraft) {
+      var inp = document.getElementById('client_id');
+      if (inp) inp.value = String(id);
+      var nameEl = document.getElementById('work_client_selected_name');
+      if (nameEl) nameEl.textContent = (name || '') + (isDraft ? ' (черновик)' : '');
+      var ul = document.getElementById('client_suggest_list');
+      if (ul) ul.innerHTML = '';
+      syncWorkClientUi();
+      syncPriceHint();
+    }
+    async function clientSuggest() {
+      var qEl = document.getElementById('client_search_q');
+      if (qEl && qEl.disabled) return;
+      var q = qEl ? qEl.value.trim() : '';
+      var res = await fetch('/master/clients/suggest?q=' + encodeURIComponent(q));
+      var data = await res.json();
+      var ul = document.getElementById('client_suggest_list');
+      if (!ul) return;
+      ul.innerHTML = '';
+      for (var i = 0; i < (data.clients || []).length; i++) {
+        var c = data.clients[i];
+        var li = document.createElement('li');
+        li.style.margin = '0 0 8px';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'secondary';
+        btn.style.width = '100%';
+        btn.style.textAlign = 'left';
+        btn.textContent = c.name + (c.is_draft ? ' (черновик)' : '');
+        (function(cid, cname, cdraft){ btn.addEventListener('click', function(){ selectClient(cid, cname, cdraft); }); })(c.id, c.name, c.is_draft);
+        li.appendChild(btn);
+        ul.appendChild(li);
+      }
+    }
+    var suggestTimer = null;
+    function scheduleSuggest() {
+      var qEl = document.getElementById('client_search_q');
+      if (qEl && qEl.disabled) return;
+      if (suggestTimer) clearTimeout(suggestTimer);
+      suggestTimer = setTimeout(clientSuggest, 350);
+    }
+    var clientQ = document.getElementById('client_search_q');
+    if (clientQ) clientQ.addEventListener('input', scheduleSuggest);
+    var workClientChg = document.getElementById('work_client_change_btn');
+    if (workClientChg) workClientChg.addEventListener('click', clearWorkClientSelection);
+    syncWorkClientUi();
+    function syncKitStockBlock() {
+      var el = document.getElementById('kit_stock_block');
+      if (!el) return;
+      el.style.display = (getScopeValue() === 'IN_STOCK') ? 'block' : 'none';
+    }
+    function syncKitMasterPicker() {
+      var cb = document.getElementById('kit_use_multi_masters');
+      var panel = document.getElementById('kit_master_picker');
+      if (!cb || !panel) return;
+      panel.style.display = cb.checked ? 'block' : 'none';
+    }
+    function syncMixUI() {
+      var kind = document.querySelector('select[name="kind"]');
+      var kan = document.querySelector('input[name="kanekalon_grams"]');
+      var kud = document.querySelector('input[name="kudri_grams"]');
+      var grams = 0;
+      if (kan && kan.value) grams += parseFloat(String(kan.value).replace(',', '.')) || 0;
+      if (kud && kud.value) grams += parseFloat(String(kud.value).replace(',', '.')) || 0;
+      var hasGrams = grams > 0;
+
+      var mixSourceBlock = document.getElementById('mix_source_block');
+      var mixComplexityBlock = document.getElementById('mix_complexity_block');
+
+      // For kind MIX: mix_source is always SELF_MIXED (hide selector).
+      var isMixKind = kind && kind.value === 'MIX';
+      if (mixSourceBlock) mixSourceBlock.style.display = isMixKind ? 'none' : 'block';
+
+      var src = document.querySelector('input[name="mix_source"]:checked');
+      var srcVal = src ? src.value : 'NO_MIX';
+      if (isMixKind && hasGrams) {
+        // force UI state
+        var self = document.querySelector('input[name="mix_source"][value="SELF_MIXED"]');
+        if (self) self.checked = true;
+        srcVal = 'SELF_MIXED';
+      }
+      if (!hasGrams) {
+        // No material -> no mix choice needed
+        var no = document.querySelector('input[name="mix_source"][value="NO_MIX"]');
+        if (no) no.checked = true;
+        srcVal = 'NO_MIX';
+      }
+
+      // Enable/disable mix_source radios based on grams (unless hidden by MIX kind)
+      document.querySelectorAll('input[name="mix_source"]').forEach(function (el) {
+        el.disabled = (!hasGrams) || isMixKind;
+      });
+
+      // Complexity visible only for FROM_STOCK or SELF_MIXED and grams>0
+      var showComplexity = hasGrams && (srcVal === 'FROM_STOCK' || srcVal === 'SELF_MIXED');
+      if (mixComplexityBlock) mixComplexityBlock.style.display = showComplexity ? 'block' : 'none';
+      document.querySelectorAll('input[name="mix_complexity"]').forEach(function (el) {
+        el.disabled = !showComplexity;
+      });
+      if (!showComplexity) {
+        var st0 = document.querySelector('input[name="mix_complexity"][value="STANDARD"]');
+        if (st0) st0.checked = true;
+      }
+    }
+    document.querySelectorAll('input[name="scope"]').forEach(function (el) {
+      el.addEventListener('change', syncClientBlock);
+      el.addEventListener('change', syncKitStockBlock);
+      el.addEventListener('change', syncPriceHint);
+      el.addEventListener('change', syncWorkPreview);
+    });
+    var kindSel = document.querySelector('select[name="kind"]');
+    if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); syncCorrectionBlock(); syncMixUI(); syncPriceHint(); syncWorkPreview(); });
+    document.querySelectorAll('input[name="rubber_type"]').forEach(function(el){
+      el.addEventListener('change', function () { syncRubberTypeFields(); syncPriceHint(); syncWorkPreview(); });
+    });
+    var corrWash = document.getElementById('corr_wash');
+    if (corrWash) corrWash.addEventListener('change', function () { syncCorrectionRules(); syncPriceHint(); syncWorkPreview(); });
+    var corrCircle = document.getElementById('corr_circle');
+    if (corrCircle) corrCircle.addEventListener('change', function(){ syncPriceHint(); syncWorkPreview(); });
+    document.querySelectorAll('input[name="corr_trim_qty"], input[name="corr_hourly_hours"], input[name="corr_steam"], input[name="corr_kit_description"], input[name="corr_kit_blanks_count"], input[name="rubber_attach_qty"], input[name="rubber_braids_qty"], select[name="rubber_variant"], input[name="mix_complexity"], input[name="mix_source"]').forEach(function(el){ el.addEventListener('change', function(){ syncPriceHint(); syncWorkPreview(); }); el.addEventListener('input', function(){ syncPriceHint(); syncWorkPreview(); }); });
+    document.querySelectorAll('input[name="kanekalon_grams"], input[name="kudri_grams"]').forEach(function (el) {
+      el.addEventListener('change', function () { syncMixUI(); syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });
+      el.addEventListener('input', function () { syncMixUI(); syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });
+    });
+    var extraCostsInp = document.querySelector('input[name="extra_costs_amount"]');
+    if (extraCostsInp) {
+      extraCostsInp.addEventListener('change', function () { syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });
+      extraCostsInp.addEventListener('input', function () { syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });
+    }
+    document.querySelectorAll('input[name="mix_source"]').forEach(function (el) {
+      el.addEventListener('change', function () { syncMixUI(); syncWorkPreview(); });
+    });
+    var kitMulti = document.getElementById('kit_use_multi_masters');
+    if (kitMulti) kitMulti.addEventListener('change', function () {
+      syncKitMasterPicker();
+      if (kitMulti.checked) {
+        var anyChecked = false;
+        document.querySelectorAll('input[name="kit_master_on"]:checked').forEach(function () { anyChecked = true; });
+        if (!anyChecked) {
+          var cur = document.querySelector('input[name="kit_master_on"][value="' + String(kitTableCurrentUserId()) + '"]');
+          if (cur) cur.checked = true;
+        }
+      }
+      if (typeof window.rebuildKitTable === 'function') window.rebuildKitTable();
+    });
+    document.querySelectorAll('.kit-master-cb').forEach(function (el) {
+      el.addEventListener('change', function () {
+        if (typeof window.rebuildKitTable === 'function') window.rebuildKitTable();
+      });
+    });
+
+    (function () {
+      var stateEl = document.getElementById('kit_table_state');
+      var state = { currentUserId: 0, masters: [], seItems: [], deItems: [], prefill: {} };
+      try {
+        if (stateEl && stateEl.textContent) state = JSON.parse(stateEl.textContent);
+      } catch (e) {}
+
+      function esc(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      function getKitColumnMasterIds() {
+        var multi = document.getElementById('kit_use_multi_masters');
+        if (!multi || !multi.checked) return [state.currentUserId];
+        var ids = [];
+        document.querySelectorAll('input[name="kit_master_on"]:checked').forEach(function (cb) {
+          var v = parseInt(cb.value, 10);
+          if (!isNaN(v) && v > 0) ids.push(v);
+        });
+        return ids;
+      }
+      window.getKitColumnMasterIds = getKitColumnMasterIds;
+
+      function rebuildKitTable() {
+        var kind = document.querySelector('select[name="kind"]');
+        if (!kind || kind.value !== 'KIT') return;
+        var thead = document.getElementById('kit_qty_thead');
+        var tbody = document.getElementById('kit_qty_tbody');
+        if (!thead || !tbody) return;
+        var ids = getKitColumnMasterIds();
+        var idToName = {};
+        (state.masters || []).forEach(function (m) { idToName[m.id] = m.name; });
+
+        var headHtml = '<tr><th>Вид</th>';
+        ids.forEach(function (id) {
+          headHtml += '<th>' + esc(idToName[id] || ('ID ' + id)) + '</th>';
+        });
+        headHtml += '</tr>';
+        thead.innerHTML = headHtml;
+
+        var bodyHtml = '';
+        var pre = state.prefill || {};
+
+        function rowForItem(key, label) {
+          var tr = '<tr class="kit-data-row"><td>' + esc(label) + '</td>';
+          ids.forEach(function (uid) {
+            var name = 'kit_qty_' + uid + '_' + key;
+            var val = pre[name];
+            if (val === undefined || val === null) val = '0';
+            tr += '<td><input type="number" step="1" min="0" name="' + esc(name) + '" value="' + esc(String(val)) + '" /></td>';
+          });
+          tr += '</tr>';
+          return tr;
+        }
+
+        var kitSe = document.querySelector('input[name="kit_type_se"]');
+        var kitDe = document.querySelector('input[name="kit_type_de"]');
+        var showSe = kitSe && kitSe.checked;
+        var showDe = kitDe && kitDe.checked;
+
+        if (!showSe && !showDe) {
+          bodyHtml += '<tr><td colspan=\"' + (1 + ids.length) + '\"><span class=\"muted\">Выберите тип заготовок: SE и/или DE.</span></td></tr>';
+        }
+        if (showSe && (state.seItems || []).length) {
+          bodyHtml += '<tr><td colspan="' + (1 + ids.length) + '"><strong>SE</strong></td></tr>';
+          (state.seItems || []).forEach(function (it) {
+            bodyHtml += rowForItem(it.key, it.label);
+          });
+        }
+        if (showDe && (state.deItems || []).length) {
+          bodyHtml += '<tr><td colspan="' + (1 + ids.length) + '"><strong>DE</strong></td></tr>';
+          (state.deItems || []).forEach(function (it) {
+            bodyHtml += rowForItem(it.key, it.label);
+          });
+        }
+        tbody.innerHTML = bodyHtml;
+        syncKitPreview();
+      }
+
+      function syncKitPreview() {
+        // Legacy hook point: use unified preview.
+        if (typeof syncWorkPreview === 'function') syncWorkPreview();
+      }
+
+      window.syncKitPreview = syncKitPreview;
+
+      window.rebuildKitTable = rebuildKitTable;
+
+      document.querySelectorAll('input[name="kit_type_se"], input[name="kit_type_de"]').forEach(function (el) {
+        el.addEventListener('change', rebuildKitTable);
+      });
+
+      // Live preview: update on any typing inside the dynamic table.
+      var kitTbody = document.getElementById('kit_qty_tbody');
+      if (kitTbody) {
+        kitTbody.addEventListener('input', function (e) {
+          var t = e && e.target;
+          if (t && t.name && String(t.name).indexOf('kit_qty_') === 0) syncKitPreview();
+        });
+        kitTbody.addEventListener('change', function (e) {
+          var t = e && e.target;
+          if (t && t.name && String(t.name).indexOf('kit_qty_') === 0) syncKitPreview();
+        });
+      }
+
+      syncKitMasterPicker();
+      syncClientBlock();
+      syncKitBlock();
+      syncRubberBlock();
+      syncCorrectionBlock();
+      syncKitStockBlock();
+      syncMixUI();
+      syncPriceHint();
+      syncWorkPreview();
+      rebuildKitTable();
+    })();
+
+    // Prevent accidental submit on Enter in inputs.
+    (function () {
+      var form = document.querySelector('form');
+      if (!form) return;
+      form.addEventListener('keydown', function (e) {
+        if (!e || e.key !== 'Enter') return;
+        var t = e.target;
+        if (!t) return;
+        var tag = (t.tagName || '').toUpperCase();
+        if (tag === 'TEXTAREA') return;
+        // Allow Enter on buttons only.
+        if (tag === 'BUTTON') return;
+        e.preventDefault();
+      });
+    })();
+  </script>
+{% endblock %}

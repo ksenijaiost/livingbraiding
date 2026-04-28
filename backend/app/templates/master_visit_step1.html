@@ -1,0 +1,1317 @@
+{% extends "base.html" %}
+{% block content %}
+  {% set fp = form_prefill %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Новый визит</h2>
+    <p class="muted">Клиент, работа, услуга, материал и анкета по услуге на одной странице. Блок «Комплект» показывается, если это включено для услуги в каталоге.</p>
+    {% if saved %}
+      <div class="card" style="border-color:#86efac; background:#f0fdf4; margin-bottom: 12px;">
+        <p style="margin:0;">Визит <strong>#{{ saved }}</strong> сохранён. Зайди как админ и открой запись по ID вручную.</p>
+        {% if saved_draft_client %}
+          <p style="margin:12px 0 0; padding:10px; background:#fffbeb; border-radius:6px; border:1px solid #fbbf24;">
+            <strong>Черновик клиента.</strong> Карточка создана как неподтверждённая: администратор должен проверить данные и подтвердить клиента в разделе «Клиенты».
+          </p>
+        {% endif %}
+      </div>
+    {% endif %}
+    {% if error %}
+      <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
+    {% endif %}
+    {% if not service_catalog %}
+      <div class="error" style="margin-bottom: 12px;">
+        Нет услуг для визита (каталог пуст или все категории скрыты из визита). Проверьте сиды и настройки категорий.
+      </div>
+    {% endif %}
+    <form method="post" action="/master/visit/new" id="visit-form" enctype="multipart/form-data">
+      <input type="hidden" name="booking_id" value="{{ fp.get('booking_id', '') }}" />
+      <h3>Клиент</h3>
+      <div style="margin-bottom: 10px;">
+        <label style="margin-right: 16px;">
+          <input type="radio" name="client_mode" value="existing" onchange="clientMode()" {% if fp.get('client_mode', 'existing') != 'draft' %}checked{% endif %} />
+          Из базы
+        </label>
+        <label>
+          <input type="radio" name="client_mode" value="draft" onchange="clientMode()" {% if fp.get('client_mode', 'existing') == 'draft' %}checked{% endif %} />
+          Новый черновик
+        </label>
+      </div>
+
+      <div id="blk-client-existing" class="card" style="margin-top: 8px;">
+        <input type="hidden" name="existing_client_id" id="existing_client_id" value="{{ fp.get('existing_client_id', '') }}" />
+        <div id="visit_client_search_row" class="row" style="align-items: flex-end;">
+          <div style="flex:1;">
+            <label>Поиск клиента по имени или телефону</label>
+            <input type="search" id="client_search_q" autocomplete="off" placeholder="Имя или цифры телефона (например, последние 4), подожди или нажми «Найти»" value="" />
+          </div>
+          <div>
+            <button type="button" id="visit_client_find_btn" class="secondary" onclick="clientSuggest()">Найти</button>
+          </div>
+        </div>
+        <ul id="client_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+        <div id="visit_client_selected_panel" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
+            <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;">
+              <span style="font-weight:700;color:#065f46;">Выбран клиент</span>
+              <span id="visit_client_selected_name" style="font-weight:600;color:#047857;">{% if selected_client %}{{ selected_client.name }}{% if not selected_client.is_confirmed %} (черновик){% endif %}{% elif fp.get('existing_client_id') %}id {{ fp.get('existing_client_id') }}{% endif %}</span>
+            </div>
+            <button type="button" id="visit_client_change_btn" class="secondary" style="flex-shrink:0;">Изменить</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="blk-client-draft" class="card" style="margin-top: 8px; display: none; border-color: #fbbf24;">
+        <div style="background:#fffbeb;padding:12px;border-radius:6px;margin-bottom:14px;border:1px solid #fde68a;">
+          <strong>Черновик клиента.</strong>
+          После сохранения визита карточка появится в базе как <em>не подтверждённая</em>. Администратор должен проверить контакты и подтвердить клиента в админке.
+        </div>
+        <div class="row">
+          <div>
+            <label>Имя / как записали <span class="muted">*</span></label>
+            <input id="draft_client_name" name="draft_client_name" maxlength="200" value="{{ fp.get('draft_client_name', '') }}" />
+          </div>
+        </div>
+        <p class="muted" style="font-size:12px;margin:10px 0 6px;">Хотя бы одно поле контакта обязательно.</p>
+        <div class="row">
+          <div>
+            <label>Телефон</label>
+            <input name="draft_phone" maxlength="30" value="{{ fp.get('draft_phone', '') }}" />
+          </div>
+          <div>
+            <label>Telegram</label>
+            <input name="draft_telegram" maxlength="100" value="{{ fp.get('draft_telegram', '') }}" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>ВКонтакте</label>
+            <input name="draft_vk" maxlength="120" value="{{ fp.get('draft_vk', '') }}" />
+          </div>
+          <div>
+            <label>Instagram</label>
+            <input name="draft_instagram" maxlength="120" value="{{ fp.get('draft_instagram', '') }}" />
+          </div>
+        </div>
+        <div>
+          <label>Другой контакт</label>
+          <input name="draft_other_contact" maxlength="200" value="{{ fp.get('draft_other_contact', '') }}" />
+        </div>
+      </div>
+
+      <div style="margin-top: 14px;">
+        <label><input type="checkbox" name="client_is_self" {% if fp.get('client_is_self') == 'on' %}checked{% endif %} />
+          Свой клиент</label>
+        <p class="muted" style="font-size: 12px; margin: 6px 0 10px;">Если не отмечено — обычный платный визит (не «свой»).</p>
+        <div style="margin-top: 10px;">
+          <label for="client_discount_percent">Скидка клиенту, % <span class="muted">(целое; на себестоимость не влияет, хранится для истории)</span></label>
+          <input type="number" name="client_discount_percent" id="client_discount_percent" min="0" max="100" step="1" inputmode="numeric"
+            value="{{ fp.get('client_discount_percent', '0') }}" style="max-width: 6rem; display: block; margin-top: 6px;" />
+        </div>
+      </div>
+
+      <h3>Работа</h3>
+      <div class="row">
+        <div>
+          <label>Дата выполнения *</label>
+          <input type="date" name="performed_date" required value="{{ default_date }}" />
+        </div>
+        <div>
+          <label>Длительность (часы)</label>
+          <input type="number" name="duration_h" min="0" value="{{ fp.get('duration_h', '0') }}" />
+        </div>
+        <div>
+          <label>Длительность (мин)</label>
+          <input type="number" name="duration_m" min="0" value="{{ fp.get('duration_m', '0') }}" />
+        </div>
+      </div>
+
+      <h3>Фото (до 3)</h3>
+      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.</p>
+      <div class="row">
+        <div>
+          <label>Фото 1</label>
+          <input type="file" name="photo_1" accept="image/*" />
+        </div>
+        <div>
+          <label>Фото 2</label>
+          <input type="file" name="photo_2" accept="image/*" />
+        </div>
+        <div>
+          <label>Фото 3</label>
+          <input type="file" name="photo_3" accept="image/*" />
+        </div>
+      </div>
+      <div class="card" style="margin-top: 12px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Мастера на визит</div>
+        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+          <input type="checkbox" name="visit_use_multi_masters" id="visit_use_multi_masters"
+            {% if fp.get('visit_use_multi_masters') == 'on' %}checked{% endif %}
+            onchange="visitMastersModeSync()" />
+          <span>Выбрать несколько мастеров</span>
+        </label>
+        <p id="visit_masters_single_note" class="muted" style="font-size: 12px; margin: -4px 0 10px;">
+          Сейчас в пул идёт только вы, 100%. Включите галочку выше, чтобы распределить доли между мастерами.
+        </p>
+        <p id="visit_masters_multi_note" class="muted" style="font-size: 12px; margin: -4px 0 10px; display: none;">
+          Отметьте мастеров и укажите доли целыми процентами; сумма по отмеченным — ровно 100. Если отмечен один мастер, долю можно не заполнять (100%).
+        </p>
+        <div id="visit_masters_multi_block" style="display: none; flex-direction: column; gap: 10px;">
+          {% for m in masters_for_visit %}
+            <div class="row" style="align-items: center; flex-wrap: wrap; gap: 10px 16px;">
+              <label style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 12rem;">
+                <input type="checkbox" name="visit_master_on" value="{{ m.id }}"
+                  {% if m.id in visit_master_on_ids %}checked{% endif %} />
+                <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
+              </label>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <label class="muted" style="font-size: 12px; margin: 0;">Доля, %</label>
+                <input type="number" name="visit_master_pct_{{ m.id }}" min="0" max="100" step="1"
+                  value="{{ visit_master_pct_str.get(m.id, '') }}" style="width: 5rem;" />
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        {% if not masters_for_visit %}
+          <p class="muted" style="margin: 8px 0 0;">Нет активных пользователей с ролью «мастер» — обратитесь к администратору.</p>
+        {% endif %}
+      </div>
+      <div class="row">
+        <div>
+          <label>Категория</label>
+          <select id="service_category_id" name="service_category_id" onchange="serviceCatalogOnCategory()" {% if not service_catalog %}disabled{% endif %} style="width: 100%; box-sizing: border-box;">
+            {% for c in service_catalog %}
+              <option value="{{ c.id }}" {% if fp.get('service_category_id')|string == c.id|string %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div id="service_subcategory_wrap">
+          <label>Подкатегория</label>
+          <select id="service_subcategory_id" name="service_subcategory_id" onchange="serviceCatalogOnSubcategory()" {% if not service_catalog %}disabled{% endif %} style="width: 100%; box-sizing: border-box;">
+          </select>
+        </div>
+      </div>
+      <div style="margin-top: 12px;">
+        <label for="service_id">Услуга *</label>
+        <select id="service_id" name="service_id" required onchange="updateServiceDerivedUI()"
+          style="width: 100%; max-width: 100%; box-sizing: border-box; min-height: 2.5rem;">
+        </select>
+      </div>
+
+      <div class="card" style="margin-top: 14px; background: #f8fafc;">
+        <strong id="amount_from_client_label" style="font-size: 1.05rem; display: block;">Сколько взяли с клиента</strong>
+        <p id="visit_recommended_price_hint" class="muted" style="font-size: 13px; margin: 8px 0 6px; min-height: 1.25em;"></p>
+        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <input id="amount_from_client" type="number" name="amount_from_client" min="0" step="1" inputmode="numeric" autocomplete="off"
+            value="{{ fp.get('amount_from_client', '') }}" placeholder=""
+            style="max-width: 12rem; font-size: 1.05rem;" />
+          <span class="muted">₽</span>
+        </div>
+        <p class="muted" style="font-size: 12px; margin: 8px 0 0;">Для визита «свой клиент» сумму можно оставить 0.</p>
+
+        <div style="margin-top: 14px;">
+          <div style="font-weight: 600; margin-bottom: 8px;">Амортизация *</div>
+          <label style="display: block; margin-bottom: 6px;">
+            <input type="radio" name="amortization_level" value="MIN" {% if not fp.get('amortization_level') or fp.get('amortization_level') == 'MIN' %}checked{% endif %} />
+            Минимальная
+          </label>
+          <label style="display: block; margin-bottom: 6px;">
+            <input type="radio" name="amortization_level" value="MID" {% if fp.get('amortization_level') == 'MID' %}checked{% endif %} />
+            Средняя <span class="muted">(включая украшения, резинки и пр.)</span>
+          </label>
+          <label style="display: block; margin-bottom: 0;">
+            <input type="radio" name="amortization_level" value="MAX" {% if fp.get('amortization_level') == 'MAX' %}checked{% endif %} />
+            Увеличенная <span class="muted">(включая средства для волос и пр.)</span>
+          </label>
+        </div>
+      </div>
+
+      <h3>Материал</h3>
+      <div class="row">
+        <div>
+          <label>Канекалон, г</label>
+          <input type="number" id="kanekalon_grams" name="kanekalon_grams" min="0" step="1" value="{{ fp.get('kanekalon_grams', '0') }}" />
+        </div>
+        <div>
+          <label>Кудри/термо, г</label>
+          <input type="number" id="kudri_grams" name="kudri_grams" min="0" step="1" value="{{ fp.get('kudri_grams', '0') }}" />
+        </div>
+      </div>
+      <div id="mix_block" style="margin-top: 10px; opacity: 0.55; pointer-events: none;">
+        <div class="muted" style="font-size: 12px; margin-bottom: 8px;">Укажите граммы канекалона и/или кудрей — затем выберите вариант смешки.</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px 16px;">
+          <label><input type="radio" name="mix_source" value="NO_MIX" {% if (fp.get('mix_source') or 'NO_MIX') == 'NO_MIX' %}checked{% endif %} /> Без смешки</label>
+          <label><input type="radio" name="mix_source" value="FROM_STOCK" {% if fp.get('mix_source') == 'FROM_STOCK' %}checked{% endif %} /> Из наличия</label>
+          <label><input type="radio" name="mix_source" value="SELF_MIXED" {% if fp.get('mix_source') == 'SELF_MIXED' %}checked{% endif %} /> Сама мешала</label>
+        </div>
+      </div>
+        <div id="mix_complexity_block" style="margin-top: 12px; display: none;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Сложность смешки *</div>
+        {% set mxc = fp.get('mix_complexity') or 'STANDARD' %}
+        <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 14px;">
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="LIGHT" {% if mxc == 'LIGHT' %}checked{% endif %} /> лёгкая (домешивание)</label>
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="STANDARD" {% if mxc == 'STANDARD' or mxc == 'SIMPLE' %}checked{% endif %} /> стандарт</label>
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="KANEK" {% if mxc == 'KANEK' or mxc == 'MEDIUM' %}checked{% endif %} /> сложная канекалон (омбре, мелирование)</label>
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="THERMO" {% if mxc == 'THERMO' or mxc == 'HARD' %}checked{% endif %} /> сложная термо</label>
+          <label style="margin:0;"><input type="radio" name="mix_complexity" value="LENGTH" {% if mxc == 'LENGTH' %}checked{% endif %} /> сложная длина</label>
+        </div>
+      </div>
+
+      <h3>Доп. продажи</h3>
+      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">Необязательно. Сумма учитывается как расход при расчёте выручки визита.</p>
+      <div class="card" style="margin-bottom: 14px; background: #fafafa;">
+        <div class="row">
+          <div>
+            <label>Сумма, ₽</label>
+            <input type="number" name="addon_sales_amount" min="0" step="1" value="{{ fp.get('addon_sales_amount', '') }}" placeholder="0" />
+          </div>
+          <div style="flex: 1;">
+            <label>Описание</label>
+            <input type="text" name="addon_sales_description" maxlength="500" value="{{ fp.get('addon_sales_description', '') }}" placeholder="Что было продано" style="width:100%;" />
+          </div>
+        </div>
+      </div>
+
+      <div id="kit-section-wrap">
+      <h3>Комплект</h3>
+      <label><input type="radio" name="kit_kind" value="STOCK" onchange="kitKind()" {% if fp.get('kit_kind', 'STOCK') == 'STOCK' %}checked{% endif %} /> Из наличия</label>
+      <label><input type="radio" name="kit_kind" value="OWN" onchange="kitKind()" {% if fp.get('kit_kind', 'STOCK') == 'OWN' %}checked{% endif %} /> Свой</label>
+
+      <div id="blk-stock" class="card" style="margin-top: 10px;">
+        <strong>Из наличия</strong>
+        <p class="muted" style="margin:6px 0 0;font-size:12px;">
+          Если на клиента есть резерв по выбранному комплекту, при списании он используется в приоритете.
+          Если списано меньше резерва — остаток резерва автоматически снимется.
+        </p>
+        <div style="margin-top: 8px;">
+          <input type="hidden" name="stock_kit_id" id="stock_kit_id" value="{{ fp.get('stock_kit_id', '') }}" />
+          <label>Комплект *</label>
+          <div class="row" style="align-items: flex-end;">
+            <div style="flex:1;">
+              <input type="search" id="stock_kit_search_q" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" value="" />
+            </div>
+            <div>
+              <button type="button" class="secondary" onclick="stockKitSuggest()">Найти</button>
+            </div>
+          </div>
+          <ul id="stock_kit_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+          <div id="selected_stock_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not stock_kit_selected_label %}display:none;{% endif %}">
+            <p id="selected_stock_kit_line" style="margin:0;">
+              {% if stock_kit_selected_label %}Выбрано: <strong>{{ stock_kit_selected_label }}</strong>{% endif %}
+            </p>
+            <p id="selected_stock_kit_reserve" style="margin:8px 0 0; padding:8px 10px; background:#fffbeb; border:1px solid #fbbf24; border-radius:8px; font-size:13px; color:#92400e; {% if not stock_kit_reserve_hint %}display:none;{% endif %}">
+              {% if stock_kit_reserve_hint %}<strong>Резерв.</strong> Зарезервирован для: {{ stock_kit_reserve_hint }}{% endif %}
+            </p>
+          </div>
+        </div>
+        <label><input type="checkbox" name="stock_use_entire" {% if fp.get('stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект (все доступные заготовки)</label>
+        <div>
+          <label>Или заготовок списать</label>
+          <input type="number" name="stock_blanks_used" min="0" value="{{ fp.get('stock_blanks_used', '') }}" />
+        </div>
+      </div>
+
+      <div id="blk-own" class="card" style="margin-top: 10px; display: none;">
+        <strong>Свой комплект</strong>
+        <div>
+          <label>Происхождение</label>
+          <select name="own_origin">
+            <option value="" {% if not fp.get('own_origin') %}selected{% endif %}>—</option>
+            <option value="STUDIO" {% if fp.get('own_origin') == 'STUDIO' %}selected{% endif %}>Нашей студии</option>
+            <option value="FOREIGN" {% if fp.get('own_origin') == 'FOREIGN' %}selected{% endif %}>Чужой</option>
+          </select>
+        </div>
+        <label><input type="checkbox" name="own_correction" id="own_correction" onchange="ownCorrectionPanelSync()" {% if fp.get('own_correction') == 'on' %}checked{% endif %} /> Коррекция</label>
+
+        <div id="own_correction_block" class="card" style="display: none; margin-top: 10px; background: #f8fafc;">
+          <h4 style="margin: 0 0 8px;">Коррекция комплекта</h4>
+          <p class="muted" style="margin-top: -4px; font-size: 12px;">Поля необязательны. Стирка в прайсе — «с коррекцией», если есть стрижка и/или почасовая работа.</p>
+          <div class="row">
+            <div>
+              <label>Стрижка (1шт) — количество</label>
+              <input name="own_corr_trim_qty" type="number" step="1" min="0" value="{{ fp.get('own_corr_trim_qty', '0') }}" />
+            </div>
+            <div>
+              <label>Почасовая коррекция заготовок (кудри, дреды), ч</label>
+              <input name="own_corr_hourly_hours" type="number" step="0.25" min="0" value="{{ fp.get('own_corr_hourly_hours', '') }}" placeholder="0 или фактическое время" style="max-width:180px;" />
+            </div>
+          </div>
+          <div class="row" style="margin-top: 10px;">
+            <div style="flex:1; min-width:220px;">
+              <label>Описание комплекта</label>
+              <input name="own_corr_kit_description" type="text" maxlength="500" value="{{ fp.get('own_corr_kit_description', '') }}" placeholder="комментарий" />
+            </div>
+            <div>
+              <label>Количество заготовок в комплекте</label>
+              <input name="own_corr_kit_blanks_count" type="number" step="1" min="0" value="{{ fp.get('own_corr_kit_blanks_count', '') }}" placeholder="для информации" />
+            </div>
+          </div>
+          <div style="margin-top: 10px;">
+            <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="own_corr_wash" id="own_corr_wash" {% if fp.get('own_corr_wash') == 'on' %}checked{% endif %} /> Стирка</label>
+            <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="own_corr_steam" {% if fp.get('own_corr_steam') == 'on' %}checked{% endif %} /> Отпаривание</label>
+            <label style="display:block; margin-bottom: 0;"><input type="checkbox" name="own_corr_circle" id="own_corr_circle" {% if fp.get('own_corr_circle') == 'on' %}checked{% endif %} /> Одевание на круг</label>
+          </div>
+        </div>
+
+        <label><input type="checkbox" name="own_extra_blanks" id="own_extra_blanks" onchange="ownExtra()" {% if fp.get('own_extra_blanks') == 'on' %}checked{% endif %} /> Доп. заготовки</label>
+
+        <div id="blk-own-extra" style="display: none; margin-top: 8px;">
+          <p class="muted" style="margin:0 0 8px;font-size:12px;">Доп. заготовки списываются из наличия — выбери комплект.</p>
+          <input type="hidden" name="own_extra_stock_kit_id" id="own_extra_stock_kit_id" value="{{ fp.get('own_extra_stock_kit_id', '') }}" />
+          <label>Комплект *</label>
+          <div class="row" style="align-items: flex-end;">
+            <div style="flex:1;">
+              <input type="search" id="extra_stock_kit_search_q" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" value="" />
+            </div>
+            <div>
+              <button type="button" class="secondary" onclick="extraStockKitSuggest()">Найти</button>
+            </div>
+          </div>
+          <ul id="extra_stock_kit_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+          <div id="selected_extra_stock_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not extra_stock_kit_selected_label %}display:none;{% endif %}">
+            <p id="selected_extra_stock_kit_line" style="margin:0;">
+              {% if extra_stock_kit_selected_label %}Выбрано: <strong>{{ extra_stock_kit_selected_label }}</strong>{% endif %}
+            </p>
+            <p id="selected_extra_stock_kit_reserve" style="margin:8px 0 0; padding:8px 10px; background:#fffbeb; border:1px solid #fbbf24; border-radius:8px; font-size:13px; color:#92400e; {% if not extra_stock_kit_reserve_hint %}display:none;{% endif %}">
+              {% if extra_stock_kit_reserve_hint %}<strong>Резерв.</strong> Зарезервирован для: {{ extra_stock_kit_reserve_hint }}{% endif %}
+            </p>
+          </div>
+          <div style="margin-top: 8px;">
+            <label><input type="checkbox" name="own_extra_stock_use_entire" {% if fp.get('own_extra_stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект</label>
+            <input type="number" name="own_extra_stock_blanks_used" min="0" value="{{ fp.get('own_extra_stock_blanks_used', '2') }}" placeholder="заготовок" />
+          </div>
+        </div>
+      </div>
+      </div>
+
+      {% set tp = fp %}
+      <div id="visit_questionnaire_section" style="display: none;">
+        <h3>Вопросы по услуге</h3>
+        <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">Поля из каталога для выбранной услуги.</p>
+        <div id="visit_questionnaire_fields" class="card" style="margin-bottom: 14px; background: #fafafa;"></div>
+      </div>
+
+      <div id="visit_thermo_section" style="display: none;">
+        <h3>Термозамещение</h3>
+        <div class="card" style="margin-bottom: 14px; background: #f0f9ff; border-color: #bae6fd;">
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">Кудри/термо</div>
+            <input type="text" name="thermo_curls" style="width:100%;" value="{{ tp.get('thermo_curls', '')|e }}"
+              placeholder="Название материала" />
+          </div>
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">Длина</div>
+            <input type="text" name="thermo_length" style="width:100%;" value="{{ tp.get('thermo_length', '')|e }}"
+              placeholder="Длина материала" />
+          </div>
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">Оттенок</div>
+            <input type="text" name="thermo_shade" style="width:100%;" value="{{ tp.get('thermo_shade', '')|e }}"
+              placeholder="Цвет материала" />
+          </div>
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">Общее количество баз (целое)</div>
+            <input type="number" name="thermo_bases_total" min="0" step="1" inputmode="numeric" style="width:100%; max-width:12rem;"
+              value="{{ tp.get('thermo_bases_total', '')|e }}" />
+          </div>
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; margin-bottom: 6px;">Вес материала (всего со страховками), можно с десятыми</div>
+            <input type="number" name="thermo_weight" min="0" step="any" style="width:100%; max-width:12rem;"
+              value="{{ tp.get('thermo_weight', '')|e }}" />
+          </div>
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; margin-bottom: 8px;">Какой шаблон</div>
+            <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-weight:normal;">
+              <input type="radio" name="thermo_template_mode" value="NEW"
+                {% if tp.get('thermo_template_mode', 'NEW') == 'NEW' %}checked{% endif %} onchange="thermoModeUpdate()" />
+              Новый — заполнить шаблон ниже
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-weight:normal;">
+              <input type="radio" name="thermo_template_mode" value="OLD"
+                {% if tp.get('thermo_template_mode') == 'OLD' %}checked{% endif %} onchange="thermoModeUpdate()" />
+              Старый — выбрать из сохранённых
+            </label>
+          </div>
+
+          <div id="thermo-block-old" style="display:none; margin-top: 14px; padding-top: 12px; border-top: 1px solid #bae6fd;">
+            <label style="display:block; font-weight:600; margin-bottom:6px;">Сохранённый шаблон</label>
+            <select name="thermo_old_template_id" id="thermo_old_template_id" style="width:100%; max-width: 28rem;">
+              <option value="">— выберите —</option>
+            </select>
+            <p id="thermo_saved_templates_empty" class="muted" style="margin:8px 0 0; display:none;">
+              Сохранённых шаблонов у этого клиента пока нет. Выберите «Новый» или сохраните визит после первого заполнения шаблона.
+            </p>
+            <div style="margin-top: 12px;">
+              <div style="font-weight: 600; margin-bottom: 6px;">Изменения в алгоритме плетения (доп. ряды и т.д.)</div>
+              <textarea name="thermo_algorithm_changes" rows="3" style="width:100%;"
+                placeholder="Тут можно описать всё, что менялось">{{ tp.get('thermo_algorithm_changes', '') }}</textarea>
+            </div>
+          </div>
+
+          <div id="thermo-block-new" style="display:none; margin-top: 14px; padding-top: 12px; border-top: 1px solid #bae6fd;">
+            <p class="muted" style="font-size:12px; margin:0 0 10px;">Числовые поля можно оставить пустыми — при сохранении подставится 0.</p>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">Средний вес пряди</span>
+              <input type="number" name="thermo_tpl_strand_weight_avg" min="0" step="any" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_strand_weight_avg', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">1 ряд</span>
+              <input type="number" name="thermo_tpl_row_1" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_row_1', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">2 ряд</span>
+              <input type="number" name="thermo_tpl_row_2" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_row_2', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">3 ряд</span>
+              <input type="number" name="thermo_tpl_row_3" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_row_3', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">Другие ряды</span>
+              <textarea name="thermo_tpl_other_rows" rows="2" style="width:100%; margin-top:4px;"
+                placeholder="Если есть доп ряды, напиши номер ряда и число баз">{{ tp.get('thermo_tpl_other_rows', '') }}</textarea></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">Виски</span>
+              <input type="number" name="thermo_tpl_temples" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_temples', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">Треугольники</span>
+              <input type="number" name="thermo_tpl_triangles" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_triangles', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">Птичка</span>
+              <input type="number" name="thermo_tpl_bird" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_bird', '')|e }}" /></div>
+            <div style="margin-bottom: 10px;"><span style="font-weight:600;">Квадрат</span>
+              <input type="number" name="thermo_tpl_square" min="0" step="1" style="width:100%; max-width:12rem; display:block; margin-top:4px;"
+                value="{{ tp.get('thermo_tpl_square', '')|e }}" /></div>
+            <div style="margin-bottom: 4px;"><span style="font-weight:600;">Комментарий</span>
+              <textarea name="thermo_tpl_comment" rows="2" style="width:100%; margin-top:4px;"
+                placeholder="Другие ряды и/или изменения в алгоритме.">{{ tp.get('thermo_tpl_comment', '') }}</textarea></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="visit_preview_block" class="card" style="background:#fff; margin: 12px 0; border: 1px solid #e2e8f0;">
+        <h3 style="margin-top:0;">Предварительный расчёт</h3>
+        <div id="visit_preview_master_lines" style="font-size: 13px; margin-top: 8px;">—</div>
+        <div id="visit_preview_cost_line" class="muted" style="font-size: 13px; margin-top: 8px;">—</div>
+      </div>
+
+      <p style="margin-top: 16px;">
+        <button type="submit">Сохранить визит</button>
+        <a href="/"><button type="button" class="secondary">Отмена</button></a>
+      </p>
+    </form>
+  </div>
+  <script>
+    function visitMastersModeSync() {
+      const cb = document.getElementById('visit_use_multi_masters');
+      if (!cb) return;
+      const m = cb.checked;
+      const blk = document.getElementById('visit_masters_multi_block');
+      const sn = document.getElementById('visit_masters_single_note');
+      const mn = document.getElementById('visit_masters_multi_note');
+      if (blk) blk.style.display = m ? 'flex' : 'none';
+      if (sn) sn.style.display = m ? 'none' : 'block';
+      if (mn) mn.style.display = m ? 'block' : 'none';
+    }
+    document.addEventListener('DOMContentLoaded', visitMastersModeSync);
+
+    function escapeHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+    function materialGramsTotal() {
+      const k = parseFloat(document.getElementById('kanekalon_grams').value || '0') || 0;
+      const u = parseFloat(document.getElementById('kudri_grams').value || '0') || 0;
+      return Math.max(0, k) + Math.max(0, u);
+    }
+    function updateMixComplexityBlock() {
+      const g = materialGramsTotal();
+      const mix = document.querySelector('input[name="mix_source"]:checked');
+      const wrap = document.getElementById('mix_complexity_block');
+      const need = g > 0 && mix && (mix.value === 'FROM_STOCK' || mix.value === 'SELF_MIXED');
+      wrap.style.display = need ? 'block' : 'none';
+      if (!need) {
+        const std = wrap.querySelector('input[name="mix_complexity"][value="STANDARD"]');
+        if (std) std.checked = true;
+      }
+    }
+    function updateMixBlockUI() {
+      const g = materialGramsTotal();
+      const blk = document.getElementById('mix_block');
+      const radios = blk.querySelectorAll('input[name="mix_source"]');
+      if (g <= 0) {
+        blk.style.opacity = '0.55';
+        blk.style.pointerEvents = 'none';
+        radios.forEach(function (r) {
+          if (r.value === 'NO_MIX') { r.checked = true; }
+          else { r.checked = false; r.disabled = true; }
+        });
+      } else {
+        blk.style.opacity = '1';
+        blk.style.pointerEvents = 'auto';
+        radios.forEach(function (r) { r.disabled = false; });
+      }
+      updateMixComplexityBlock();
+    }
+    function syncAmountRequired() {
+      const self = document.querySelector('input[name="client_is_self"]');
+      const amt = document.getElementById('amount_from_client');
+      if (!amt || !self) return;
+      if (self.checked) amt.removeAttribute('required');
+      else amt.setAttribute('required', 'required');
+    }
+    let suggestTimer = null;
+    function clientMode() {
+      const draft = document.querySelector('input[name="client_mode"]:checked').value === 'draft';
+      document.getElementById('blk-client-existing').style.display = draft ? 'none' : 'block';
+      document.getElementById('blk-client-draft').style.display = draft ? 'block' : 'none';
+      const nameInp = document.getElementById('draft_client_name');
+      if (draft) {
+        document.getElementById('existing_client_id').value = '';
+        document.getElementById('client_suggest_list').innerHTML = '';
+        if (typeof syncVisitClientUi === 'function') syncVisitClientUi();
+        nameInp.setAttribute('required', 'required');
+      } else {
+        nameInp.removeAttribute('required');
+        if (typeof syncVisitClientUi === 'function') syncVisitClientUi();
+      }
+      syncAmountRequired();
+      syncVisitThermoSection();
+    }
+    function syncVisitClientUi() {
+      const cidEl = document.getElementById('existing_client_id');
+      const q = document.getElementById('client_search_q');
+      const findBtn = document.getElementById('visit_client_find_btn');
+      const row = document.getElementById('visit_client_search_row');
+      const panel = document.getElementById('visit_client_selected_panel');
+      const nameEl = document.getElementById('visit_client_selected_name');
+      if (!cidEl || !q || !findBtn || !row || !panel || !nameEl) return;
+      const draft = document.querySelector('input[name="client_mode"]:checked') && document.querySelector('input[name="client_mode"]:checked').value === 'draft';
+      if (draft) {
+        q.disabled = false;
+        findBtn.disabled = false;
+        row.style.opacity = '1';
+        panel.style.display = 'none';
+        return;
+      }
+      const cid = (cidEl.value || '').trim();
+      const has = !!cid;
+      q.disabled = has;
+      findBtn.disabled = has;
+      row.style.opacity = has ? '0.55' : '1';
+      panel.style.display = has ? 'block' : 'none';
+      if (!has) nameEl.textContent = '';
+    }
+    function clearVisitClientSelection() {
+      document.getElementById('existing_client_id').value = '';
+      document.getElementById('client_suggest_list').innerHTML = '';
+      const q = document.getElementById('client_search_q');
+      q.value = '';
+      q.focus();
+      syncVisitClientUi();
+      syncVisitThermoSection();
+    }
+    function selectClient(id, name, isDraft) {
+      document.getElementById('existing_client_id').value = String(id);
+      const nameEl = document.getElementById('visit_client_selected_name');
+      if (nameEl) nameEl.textContent = (name || '') + (isDraft ? ' (черновик)' : '');
+      document.getElementById('client_suggest_list').innerHTML = '';
+      syncVisitClientUi();
+      syncVisitThermoSection();
+    }
+    async function clientSuggest() {
+      const qEl = document.getElementById('client_search_q');
+      if (qEl && qEl.disabled) return;
+      const q = document.getElementById('client_search_q').value.trim();
+      const res = await fetch('/master/clients/suggest?q=' + encodeURIComponent(q));
+      if (!res.ok) return;
+      const data = await res.json();
+      const ul = document.getElementById('client_suggest_list');
+      ul.innerHTML = '';
+      for (const c of data.clients || []) {
+        const li = document.createElement('li');
+        li.style.marginBottom = '8px';
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'secondary';
+        b.textContent = c.name + (c.is_draft ? ' (черновик)' : '');
+        b.onclick = function () { selectClient(c.id, c.name, c.is_draft); };
+        const hint = document.createElement('span');
+        hint.className = 'muted';
+        hint.style.marginLeft = '8px';
+        hint.textContent = c.hint || '';
+        li.appendChild(b);
+        li.appendChild(hint);
+        ul.appendChild(li);
+      }
+    }
+    function scheduleSuggest() {
+      const qEl = document.getElementById('client_search_q');
+      if (qEl && qEl.disabled) return;
+      clearTimeout(suggestTimer);
+      suggestTimer = setTimeout(clientSuggest, 350);
+    }
+    document.getElementById('client_search_q').addEventListener('input', scheduleSuggest);
+    const visitClientChg = document.getElementById('visit_client_change_btn');
+    if (visitClientChg) visitClientChg.addEventListener('click', clearVisitClientSelection);
+    syncVisitClientUi();
+
+    let stockKitTimer = null;
+    let extraStockKitTimer = null;
+    async function fetchKitSuggest(q) {
+      const res = await fetch('/master/kits/suggest?q=' + encodeURIComponent(q));
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.kits || [];
+    }
+    function renderKitSuggestList(ulId, kits, onPick) {
+      const ul = document.getElementById(ulId);
+      ul.innerHTML = '';
+      for (const k of kits) {
+        const li = document.createElement('li');
+        li.style.marginBottom = '8px';
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'secondary';
+        let line = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+        if (k.is_reserved) line += ' · резерв';
+        if (k.missing_sale_price) line = '⚠️ ' + line;
+        b.textContent = line;
+        b.onclick = function () { onPick(k); };
+        li.appendChild(b);
+        ul.appendChild(li);
+      }
+    }
+    function updateKitReserveLine(reserveElId, k) {
+      const el = document.getElementById(reserveElId);
+      if (!el) return;
+      if (k.is_reserved) {
+        el.style.display = 'block';
+        const who = (k.reserved_for_label || 'цель резерва в карточке не заполнена').trim();
+        el.innerHTML =
+          '<strong>Резерв.</strong> Зарезервирован для: ' + escapeHtml(who);
+      } else {
+        el.style.display = 'none';
+        el.innerHTML = '';
+      }
+    }
+    function selectMainStockKit(k) {
+      document.getElementById('stock_kit_id').value = String(k.id);
+      let label = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+      if (k.missing_sale_price) label = '⚠️ ' + label + ' (нет цены — укажите в админке перед сохранением визита)';
+      document.getElementById('selected_stock_kit_box').style.display = 'block';
+      document.getElementById('selected_stock_kit_line').innerHTML =
+        'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
+      updateKitReserveLine('selected_stock_kit_reserve', k);
+      document.getElementById('stock_kit_suggest_list').innerHTML = '';
+      selectedMainStockKit = k;
+      syncVisitPreview();
+    }
+    function selectExtraStockKit(k) {
+      document.getElementById('own_extra_stock_kit_id').value = String(k.id);
+      let label = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+      if (k.missing_sale_price) label = '⚠️ ' + label + ' (нет цены — укажите в админке перед сохранением визита)';
+      document.getElementById('selected_extra_stock_kit_box').style.display = 'block';
+      document.getElementById('selected_extra_stock_kit_line').innerHTML =
+        'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
+      updateKitReserveLine('selected_extra_stock_kit_reserve', k);
+      document.getElementById('extra_stock_kit_suggest_list').innerHTML = '';
+      selectedExtraStockKit = k;
+      syncVisitPreview();
+    }
+    async function stockKitSuggest() {
+      const q = document.getElementById('stock_kit_search_q').value.trim();
+      const kits = await fetchKitSuggest(q);
+      renderKitSuggestList('stock_kit_suggest_list', kits, selectMainStockKit);
+    }
+    async function extraStockKitSuggest() {
+      const q = document.getElementById('extra_stock_kit_search_q').value.trim();
+      const kits = await fetchKitSuggest(q);
+      renderKitSuggestList('extra_stock_kit_suggest_list', kits, selectExtraStockKit);
+    }
+    function scheduleStockKitSuggest() {
+      clearTimeout(stockKitTimer);
+      stockKitTimer = setTimeout(stockKitSuggest, 350);
+    }
+    function scheduleExtraStockKitSuggest() {
+      clearTimeout(extraStockKitTimer);
+      extraStockKitTimer = setTimeout(extraStockKitSuggest, 350);
+    }
+    document.getElementById('stock_kit_search_q').addEventListener('input', scheduleStockKitSuggest);
+    document.getElementById('extra_stock_kit_search_q').addEventListener('input', scheduleExtraStockKitSuggest);
+
+    document.querySelectorAll('input[name="mix_source"]').forEach(function (el) {
+      el.addEventListener('change', updateMixComplexityBlock);
+    });
+    const _kg = document.getElementById('kanekalon_grams');
+    const _ug = document.getElementById('kudri_grams');
+    if (_kg) _kg.addEventListener('input', function(){ updateMixBlockUI(); syncVisitPreview(); });
+    if (_ug) _ug.addEventListener('input', function(){ updateMixBlockUI(); syncVisitPreview(); });
+    const _cis = document.querySelector('input[name="client_is_self"]');
+    if (_cis) _cis.addEventListener('change', syncAmountRequired);
+    const _amt = document.getElementById('amount_from_client');
+    if (_amt) { _amt.addEventListener('input', syncVisitPreview); _amt.addEventListener('change', syncVisitPreview); }
+    const _disc = document.getElementById('client_discount_percent');
+    if (_disc) {
+      _disc.addEventListener('input', function () { updateRecommendedPriceHint(); });
+      _disc.addEventListener('change', function () { updateRecommendedPriceHint(); });
+    }
+    document.querySelectorAll('input[name="addon_sales_amount"], input[name="mix_source"], input[name="mix_complexity"], input[name="amortization_level"]').forEach(function (el) {
+      el.addEventListener('change', syncVisitPreview);
+      el.addEventListener('input', syncVisitPreview);
+    });
+    document.querySelectorAll('input[name="visit_master_on"]').forEach(function (el) { el.addEventListener('change', syncVisitPreview); });
+    document.querySelectorAll('input[name^="visit_master_pct_"]').forEach(function (el) { el.addEventListener('input', syncVisitPreview); el.addEventListener('change', syncVisitPreview); });
+    document.querySelectorAll('input[name="stock_use_entire"], input[name="stock_blanks_used"], input[name="own_extra_stock_use_entire"], input[name="own_extra_stock_blanks_used"]').forEach(function (el) {
+      el.addEventListener('input', syncVisitPreview);
+      el.addEventListener('change', syncVisitPreview);
+    });
+
+    document.getElementById('visit-form').addEventListener('submit', function (e) {
+      const mode = document.querySelector('input[name="client_mode"]:checked').value;
+      if (mode === 'existing') {
+        const id = document.getElementById('existing_client_id').value.trim();
+        if (!id) {
+          e.preventDefault();
+          alert('Выберите клиента из списка поиска или переключитесь на «Новый черновик».');
+          return;
+        }
+      }
+      const g = materialGramsTotal();
+      const mix = document.querySelector('input[name="mix_source"]:checked');
+      if (g > 0 && mix && (mix.value === 'FROM_STOCK' || mix.value === 'SELF_MIXED')) {
+        const c = document.querySelector('input[name="mix_complexity"]:checked');
+        if (!c) {
+          e.preventDefault();
+          alert('Выберите сложность смешки.');
+          return;
+        }
+      }
+      const selfCb = document.querySelector('input[name="client_is_self"]');
+      if (selfCb && !selfCb.checked) {
+        const raw = (document.getElementById('amount_from_client').value || '').trim();
+        const n = parseFloat(raw.replace(',', '.'));
+        if (!raw || !(n >= 0) || n <= 0) {
+          e.preventDefault();
+          alert('Укажите сумму, взятую с клиента.');
+          return;
+        }
+      }
+      const svc = getSelectedService();
+      const needKit = !!(svc && svc.requires_kit_block);
+      if (needKit) {
+        const kk = document.querySelector('input[name="kit_kind"]:checked');
+        if (kk && kk.value === 'STOCK') {
+          const sid = document.getElementById('stock_kit_id').value.trim();
+          if (!sid) {
+            e.preventDefault();
+            alert('Выберите комплект из наличия (поиск по артикулу).');
+            return;
+          }
+        }
+        if (kk && kk.value === 'OWN') {
+          const ownCorr = document.querySelector('input[name="own_correction"]');
+          if (ownCorr && ownCorr.checked) {
+            const trimQ = parseInt((document.querySelector('input[name="own_corr_trim_qty"]') || {}).value || '0', 10) || 0;
+            const hhRaw = String((document.querySelector('input[name="own_corr_hourly_hours"]') || {}).value || '').replace(',', '.').trim();
+            const hh = hhRaw ? (parseFloat(hhRaw) || 0) : 0;
+            const wash = (document.getElementById('own_corr_wash') || {}).checked;
+            const circle = (document.getElementById('own_corr_circle') || {}).checked;
+            const steam = (document.querySelector('input[name="own_corr_steam"]') || {}).checked;
+            const desc = String((document.querySelector('input[name="own_corr_kit_description"]') || {}).value || '').trim();
+            const kbRaw = String((document.querySelector('input[name="own_corr_kit_blanks_count"]') || {}).value || '').trim();
+            if (wash && circle) {
+              e.preventDefault();
+              alert('Если выбрана «Стирка», то «Одевание на круг» выбирать нельзя.');
+              return;
+            }
+            if (
+              trimQ <= 0 && hh <= 0 && !wash && !circle && !steam && !desc && !kbRaw
+            ) {
+              e.preventDefault();
+              alert('При отмеченной коррекции заполните хотя бы одно поле или отметьте операцию.');
+              return;
+            }
+          }
+          const ownEx = document.getElementById('own_extra_blanks');
+          if (ownEx && ownEx.checked) {
+            const eid = document.getElementById('own_extra_stock_kit_id').value.trim();
+            if (!eid) {
+              e.preventDefault();
+              alert('Выберите комплект для доп. заготовок (поиск по артикулу).');
+              return;
+            }
+          }
+        }
+      }
+    });
+
+    const formPrefill = {{ fp|tojson }};
+    const visitMasterLevel = {{ (current_user.master_level.value if current_user.master_level else None) | tojson }};
+    const visitMasterLevelRu = {{ visit_master_level_ru|tojson }};
+    const serviceCatalog = {{ service_catalog|tojson }};
+    const currentUserId = {{ current_user.id|int }};
+    const salonCutPct = {{ salon_cut_pct|float }};
+    const materialPricePerGram = {{ (material_price_per_gram_json or '{}') | safe }};
+    const mixComplexityRatesPerGram = {{ (mix_complexity_rates_json or '{}') | safe }};
+
+    let selectedMainStockKit = null;
+    let selectedExtraStockKit = null;
+
+    function money2(x) { return Math.round((parseFloat(x) || 0) * 100) / 100; }
+    function numVal(sel) {
+      const el = document.querySelector(sel);
+      if (!el) return 0;
+      const n = parseFloat(String(el.value || '').replace(',', '.'));
+      return isNaN(n) ? 0 : n;
+    }
+    function intVal(sel) {
+      const el = document.querySelector(sel);
+      if (!el) return 0;
+      const n = parseInt(String(el.value || '').trim(), 10);
+      return isNaN(n) ? 0 : n;
+    }
+    function isChecked(sel) {
+      const el = document.querySelector(sel);
+      return !!(el && el.checked);
+    }
+    function masterNameById(mid) {
+      const cb = document.querySelector('input[name="visit_master_on"][value="' + String(mid) + '"]');
+      if (!cb) return 'ID ' + mid;
+      const lab = cb.closest('label');
+      if (!lab) return 'ID ' + mid;
+      // Remove percent input value from label text.
+      const t = (lab.textContent || '').replace(/\s+/g, ' ').trim();
+      return t || ('ID ' + mid);
+    }
+    function readAllocationsForPreview() {
+      const ids = Array.from(document.querySelectorAll('input[name="visit_master_on"]:checked')).map((x) => parseInt(x.value, 10)).filter((x) => x > 0);
+      if (ids.length === 0) return null;
+      if (ids.length === 1) {
+        const mid = ids[0];
+        const s = (document.querySelector('input[name="visit_master_pct_' + String(mid) + '"]') || {}).value || '';
+        const p = s.trim() ? parseInt(s.trim(), 10) : 100;
+        if (!(p >= 0)) return null;
+        return [{ mid, pct: p }];
+      }
+      const rows = [];
+      let sum = 0;
+      for (const mid of ids) {
+        const s = (document.querySelector('input[name="visit_master_pct_' + String(mid) + '"]') || {}).value || '';
+        if (!String(s).trim()) return null;
+        const p = parseInt(String(s).trim(), 10);
+        if (isNaN(p)) return null;
+        sum += p;
+        rows.push({ mid, pct: p });
+      }
+      if (sum !== 100) return null;
+      return rows;
+    }
+    function kitUsageCost(kit, useEntireSel, blanksSel) {
+      if (!kit) return { piecesUsed: 0, cost: 0, warn: '' };
+      const avail = parseInt(String(kit.pieces_available || 0), 10) || 0;
+      const total = parseInt(String(kit.pieces_total || 0), 10) || 0;
+      const gross = parseFloat(String(kit.stock_price_total || 0)) || 0;
+      const dPct = Math.max(0, Math.min(100, parseInt(String(kit.discount_percent ?? 0), 10) || 0));
+      const price = gross * (100 - dPct) / 100.0;
+      const useEntire = isChecked(useEntireSel);
+      const blanks = Math.max(0, intVal(blanksSel));
+      const piecesUsed = useEntire ? avail : blanks;
+      if (piecesUsed <= 0) return { piecesUsed: 0, cost: 0, warn: '' };
+      if (total <= 0 || price <= 0) return { piecesUsed, cost: 0, warn: 'Нет цены/кол-ва заготовок у комплекта для расчёта себестоимости.' };
+      return { piecesUsed, cost: price * (piecesUsed / total), warn: '' };
+    }
+    function syncVisitPreview() {
+      const payEl = document.getElementById('visit_preview_master_lines');
+      const costEl = document.getElementById('visit_preview_cost_line');
+      if (!payEl || !costEl) return;
+
+      const kan = Math.max(0, numVal('#kanekalon_grams'));
+      const kud = Math.max(0, numVal('#kudri_grams'));
+      const mat = kan * (parseFloat(materialPricePerGram.kanekalon) || 0) + kud * (parseFloat(materialPricePerGram.kudri) || 0);
+
+      const addons = Math.max(0, numVal('input[name="addon_sales_amount"]'));
+
+      const gramsTotal = kan + kud;
+      const mixSource = (document.querySelector('input[name="mix_source"]:checked') || {}).value || 'NO_MIX';
+      const mixComp = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || null;
+      const mixCoef = mixComp ? (parseFloat(mixComplexityRatesPerGram[mixComp]) || 0) : 0;
+      const mixCost = (gramsTotal > 0 && mixSource !== 'NO_MIX' && mixComp && mixCoef) ? (gramsTotal * mixCoef) : 0;
+      const mixBonus = (mixSource === 'SELF_MIXED') ? mixCost : 0;
+
+      const amort = (function () {
+        const v = (document.querySelector('input[name="amortization_level"]:checked') || {}).value || 'MIN';
+        return { MIN: 100.0, MID: 200.0, MAX: 500.0 }[v] || 0;
+      })();
+
+      let kitCostTotal = 0;
+      let warn = '';
+      const kk = (document.querySelector('input[name="kit_kind"]:checked') || {}).value || '';
+      const needKit = !!(getSelectedService() && getSelectedService().requires_kit_block);
+      if (needKit && kk === 'STOCK') {
+        const r = kitUsageCost(selectedMainStockKit, 'input[name="stock_use_entire"]', 'input[name="stock_blanks_used"]');
+        kitCostTotal += r.cost;
+        if (r.warn) warn = r.warn;
+      }
+      if (needKit && kk === 'OWN' && isChecked('#own_extra_blanks')) {
+        const r2 = kitUsageCost(selectedExtraStockKit, 'input[name="own_extra_stock_use_entire"]', 'input[name="own_extra_stock_blanks_used"]');
+        kitCostTotal += r2.cost;
+        if (r2.warn) warn = r2.warn;
+      }
+
+      const costTotal = mat + kitCostTotal + addons + mixCost + amort;
+      const amount = Math.max(0, numVal('#amount_from_client'));
+      const profitBefore = amount - costTotal;
+      const salonProfit = profitBefore * (parseFloat(salonCutPct) || 0);
+      const mastersPool = profitBefore - salonProfit;
+
+      const alloc = readAllocationsForPreview();
+      if (!alloc) {
+        payEl.innerHTML = '—';
+      } else {
+        const lines = [];
+        for (const r of alloc) {
+          const base = mastersPool * (r.pct / 100.0);
+          const bonus = (r.mid === currentUserId) ? mixBonus : 0;
+          lines.push('ЗП «' + masterNameById(r.mid) + '»: ' + money2(base + bonus) + ' ₽');
+        }
+        payEl.innerHTML = lines.map((l) => '<div>' + l + '</div>').join('');
+      }
+
+      let costLine = 'Себестоимость (итого): ' + money2(costTotal) + ' ₽ (материал + комплект + доп. продажи + смешка + амортизация)';
+      if (warn) costLine += ' · ' + warn;
+      costEl.textContent = costLine;
+    }
+
+    function getSelectedService() {
+      const subSel = document.getElementById('service_subcategory_id');
+      const serviceSel = document.getElementById('service_id');
+      const subId = parseInt(subSel.value || '0', 10);
+      let sc = null;
+      for (const c of serviceCatalog || []) {
+        for (const ssc of (c.subcategories || [])) {
+          if (ssc.id === subId) {
+            sc = ssc;
+            break;
+          }
+        }
+        if (sc) break;
+      }
+      const services = (sc && sc.services) ? sc.services : [];
+      const sid = parseInt(serviceSel.value || '0', 10);
+      return services.find((x) => x.id === sid) || null;
+    }
+
+    function updateKitSectionVisibility() {
+      const wrap = document.getElementById('kit-section-wrap');
+      if (!wrap) return;
+      const svc = getSelectedService();
+      const need = !!(svc && svc.requires_kit_block);
+      wrap.style.display = need ? 'block' : 'none';
+    }
+
+    function visitClientDiscountPct() {
+      const el = document.getElementById('client_discount_percent');
+      if (!el) return 0;
+      let n = parseInt(String(el.value || '').trim(), 10);
+      if (isNaN(n) || n < 0) n = 0;
+      if (n > 100) n = 100;
+      return n;
+    }
+
+    function updateRecommendedPriceHint() {
+      const host = document.getElementById('visit_recommended_price_hint');
+      if (!host) return;
+      const svc = getSelectedService();
+      const pct = visitClientDiscountPct();
+      const level = visitMasterLevel && { JUNIOR: 1, MIDDLE: 1, SENIOR: 1 }[visitMasterLevel]
+        ? visitMasterLevel
+        : 'MIDDLE';
+      const byLevel = {
+        JUNIOR: ['price_junior_from', 'price_junior_to'],
+        MIDDLE: ['price_middle_from', 'price_middle_to'],
+        SENIOR: ['price_senior_from', 'price_senior_to'],
+      };
+      const keys = byLevel[level];
+      const lvlRu = visitMasterLevelRu || 'мастер';
+      if (!svc) {
+        host.textContent = '';
+        return;
+      }
+      const lo = svc[keys[0]];
+      const hi = svc[keys[1]];
+      if (lo == null && hi == null) {
+        host.textContent = '';
+        return;
+      }
+      const mul = (100 - pct) / 100.0;
+      const rLo = lo != null ? Math.round(parseFloat(lo) * mul) : null;
+      const rHi = hi != null ? Math.round(parseFloat(hi) * mul) : null;
+      let priceStr = '';
+      if (rLo != null && rHi != null && rLo !== rHi) {
+        priceStr = String(rLo) + ' – ' + String(rHi) + ' ₽';
+      } else if (rLo != null) {
+        priceStr = String(rLo) + ' ₽';
+      } else if (rHi != null) {
+        priceStr = String(rHi) + ' ₽';
+      }
+      let tail = pct > 0 ? ' с учётом скидки' : '';
+      host.textContent = 'Рекомендуемая цена по прайсу (' + lvlRu + '): ' + priceStr + tail;
+    }
+
+    function updateServiceDerivedUI() {
+      updateKitSectionVisibility();
+      updateRecommendedPriceHint();
+      rebuildVisitQuestionnaire();
+      syncVisitThermoSection();
+      syncVisitPreview();
+    }
+
+    function rebuildVisitQuestionnaire() {
+      const wrap = document.getElementById('visit_questionnaire_section');
+      const host = document.getElementById('visit_questionnaire_fields');
+      if (!wrap || !host) return;
+      const svc = getSelectedService();
+      const fields = (svc && svc.questionnaire_fields) ? svc.questionnaire_fields : [];
+      if (!fields.length) {
+        wrap.style.display = 'none';
+        host.innerHTML = '';
+        return;
+      }
+      wrap.style.display = 'block';
+      let html = '';
+      for (const f of fields) {
+        const qn = 'q_' + f.field_key;
+        const val = (formPrefill && Object.prototype.hasOwnProperty.call(formPrefill, qn))
+          ? String(formPrefill[qn])
+          : '';
+        const reqMark = f.required ? ' *' : '';
+        html += '<div style="margin-bottom: 14px;">';
+        html += '<div style="font-weight: 600; margin-bottom: 6px;">' + escapeHtml(f.label || '') + reqMark + '</div>';
+        if (f.field_type === 'TEXT') {
+          const ph = f.placeholder ? ' placeholder="' + escapeHtml(f.placeholder) + '"' : '';
+          const rq = f.required ? ' required' : '';
+          html += '<input type="text" name="' + escapeHtml(qn) + '" style="width:100%;" value="' + escapeHtml(val) + '"' + ph + rq + ' />';
+        } else if (f.field_type === 'TEXTAREA') {
+          const rq = f.required ? ' required' : '';
+          html += '<textarea name="' + escapeHtml(qn) + '" rows="3" style="width:100%;"' + rq + '>' + escapeHtml(val) + '</textarea>';
+        } else if (f.field_type === 'NUMBER') {
+          let attr = ' step="any" style="width:100%;" value="' + escapeHtml(val) + '"';
+          if (f.min_value != null) attr += ' min="' + escapeHtml(String(f.min_value)) + '"';
+          if (f.max_value != null) attr += ' max="' + escapeHtml(String(f.max_value)) + '"';
+          const rq = f.required ? ' required' : '';
+          html += '<input type="number" name="' + escapeHtml(qn) + '"' + attr + rq + ' />';
+        } else if (f.field_type === 'CHECKBOX') {
+          const chk = (val === 'on' || val === 'true' || val === '1') ? ' checked' : '';
+          html += '<label style="display:flex;align-items:center;gap:8px;font-weight:normal;"><input type="checkbox" name="' + escapeHtml(qn) + '" value="on"' + chk + ' /> ' + escapeHtml(f.placeholder || 'Да') + '</label>';
+        } else if (f.field_type === 'SELECT') {
+          const rq = f.required ? ' required' : '';
+          html += '<select name="' + escapeHtml(qn) + '" style="width:100%;"' + rq + '>';
+          html += '<option value="">—</option>';
+          for (const o of (f.options || [])) {
+            const sel = (val === o.value) ? ' selected' : '';
+            html += '<option value="' + escapeHtml(o.value) + '"' + sel + '>' + escapeHtml(o.label) + '</option>';
+          }
+          html += '</select>';
+        }
+        if (f.help_text) {
+          html += '<p class="muted" style="font-size:12px;margin:6px 0 0;">' + escapeHtml(f.help_text) + '</p>';
+        }
+        html += '</div>';
+      }
+      host.innerHTML = html;
+    }
+
+    function thermoModeUpdate() {
+      const r = document.querySelector('input[name="thermo_template_mode"]:checked');
+      const m = r ? r.value : 'NEW';
+      const bn = document.getElementById('thermo-block-new');
+      const bo = document.getElementById('thermo-block-old');
+      if (bn) bn.style.display = m === 'NEW' ? 'block' : 'none';
+      if (bo) bo.style.display = m === 'OLD' ? 'block' : 'none';
+    }
+
+    async function loadThermoTemplates(clientId) {
+      const sel = document.getElementById('thermo_old_template_id');
+      const emptyNote = document.getElementById('thermo_saved_templates_empty');
+      if (!sel) return;
+      const preferred = String(sel.value || (formPrefill && formPrefill.thermo_old_template_id) || '').trim();
+      sel.innerHTML = '<option value="">— выберите —</option>';
+      if (!clientId || clientId <= 0) {
+        if (emptyNote) emptyNote.style.display = 'none';
+        return;
+      }
+      try {
+        const res = await fetch('/master/clients/' + clientId + '/thermo-templates');
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = data.templates || [];
+        if (emptyNote) emptyNote.style.display = list.length ? 'none' : 'block';
+        for (const t of list) {
+          const opt = document.createElement('option');
+          opt.value = String(t.id);
+          opt.textContent = '№' + t.id + ' · ' + (t.label || '') + ' (' + (t.created_at || '') + ')';
+          sel.appendChild(opt);
+        }
+        if (preferred) sel.value = preferred;
+      } catch (e) {}
+    }
+
+    function syncVisitThermoSection() {
+      const sec = document.getElementById('visit_thermo_section');
+      if (!sec) return;
+      const svc = getSelectedService();
+      const show = !!(svc && svc.requires_thermo);
+      sec.style.display = show ? 'block' : 'none';
+      if (show) {
+        const cid = (document.getElementById('existing_client_id') || {}).value || '';
+        const id = parseInt(String(cid).trim(), 10) || 0;
+        loadThermoTemplates(id);
+        thermoModeUpdate();
+      }
+    }
+
+    const serviceMetaById = {};
+    for (const c of serviceCatalog || []) {
+      for (const sc of (c.subcategories || [])) {
+        for (const s of (sc.services || [])) {
+          serviceMetaById[s.id] = { categoryId: c.id, subcategoryId: sc.id };
+        }
+      }
+    }
+
+    function fillSubcategories() {
+      const catSel = document.getElementById('service_category_id');
+      const subSel = document.getElementById('service_subcategory_id');
+      const serviceSel = document.getElementById('service_id');
+      const subWrap = document.getElementById('service_subcategory_wrap');
+
+      const catId = parseInt(catSel.value || '0');
+      const cat = (serviceCatalog || []).find(x => x.id === catId);
+      const subs = (cat && cat.subcategories) ? cat.subcategories : [];
+
+      subSel.innerHTML = '';
+      for (const sc of subs) {
+        const opt = document.createElement('option');
+        opt.value = sc.id;
+        opt.textContent = sc.name;
+        opt.title = sc.name;
+        subSel.appendChild(opt);
+      }
+
+      if (subs.length > 0) subSel.value = subs[0].id;
+
+      // UX: if subcategory is single, no need to "choose" it.
+      if (subs.length <= 1) {
+        subSel.disabled = true;
+        if (subWrap) subWrap.style.opacity = '0.85';
+      } else {
+        subSel.disabled = false;
+        if (subWrap) subWrap.style.opacity = '1';
+      }
+      fillServices();
+    }
+
+    function fillServices() {
+      const catSel = document.getElementById('service_category_id');
+      const subSel = document.getElementById('service_subcategory_id');
+      const serviceSel = document.getElementById('service_id');
+
+      const subId = parseInt(subSel.value || '0');
+      let sc = null;
+      for (const c of serviceCatalog || []) {
+        for (const ssc of (c.subcategories || [])) {
+          if (ssc.id === subId) {
+            sc = ssc;
+            break;
+          }
+        }
+      }
+      const services = (sc && sc.services) ? sc.services : [];
+
+      serviceSel.innerHTML = '';
+      for (const s of services) {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name;
+        opt.title = s.name;
+        serviceSel.appendChild(opt);
+      }
+      updateServiceDerivedUI();
+    }
+
+    function serviceCatalogOnCategory() {
+      fillSubcategories();
+    }
+
+    function serviceCatalogOnSubcategory() {
+      fillServices();
+    }
+
+    (function initServiceCatalog() {
+      if (!serviceCatalog || serviceCatalog.length === 0) return;
+
+      // If user came back with a service_id, try to restore category/subcategory.
+      const initialServiceId = parseInt({{ (fp.get('service_id') or 0)|int }} || 0);
+      const meta = initialServiceId ? serviceMetaById[initialServiceId] : null;
+
+      const catSel = document.getElementById('service_category_id');
+      const subSel = document.getElementById('service_subcategory_id');
+      const serviceSel = document.getElementById('service_id');
+
+      if (meta && meta.categoryId) catSel.value = String(meta.categoryId);
+      fillSubcategories();
+
+      if (meta && meta.subcategoryId) {
+        subSel.value = String(meta.subcategoryId);
+        fillServices();
+      }
+
+      if (initialServiceId) {
+        serviceSel.value = String(initialServiceId);
+      }
+      updateServiceDerivedUI();
+    })();
+
+    function syncOwnCorrWashCircle() {
+      const wash = document.getElementById('own_corr_wash');
+      const circle = document.getElementById('own_corr_circle');
+      if (!wash || !circle) return;
+      if (wash.checked) {
+        circle.checked = false;
+        circle.disabled = true;
+      } else {
+        circle.disabled = false;
+      }
+    }
+    function ownCorrectionPanelSync() {
+      const kk = document.querySelector('input[name="kit_kind"]:checked');
+      const cb = document.getElementById('own_correction');
+      const panel = document.getElementById('own_correction_block');
+      if (!panel || !cb || !kk) return;
+      const show = kk.value === 'OWN' && cb.checked;
+      panel.style.display = show ? 'block' : 'none';
+      if (show) {
+        syncOwnCorrWashCircle();
+      }
+    }
+    function kitKind() {
+      const v = document.querySelector('input[name="kit_kind"]:checked').value;
+      document.getElementById('blk-stock').style.display = v === 'STOCK' ? 'block' : 'none';
+      document.getElementById('blk-own').style.display = v === 'OWN' ? 'block' : 'none';
+      ownCorrectionPanelSync();
+    }
+    function ownExtra() {
+      const on = document.getElementById('own_extra_blanks').checked;
+      document.getElementById('blk-own-extra').style.display = on ? 'block' : 'none';
+    }
+    const ownCorrWash = document.getElementById('own_corr_wash');
+    if (ownCorrWash) ownCorrWash.addEventListener('change', function () { syncOwnCorrWashCircle(); });
+
+    document.querySelectorAll('input[name="thermo_template_mode"]').forEach(function (el) {
+      el.addEventListener('change', thermoModeUpdate);
+    });
+
+    clientMode();
+    kitKind();
+    ownExtra();
+    ownCorrectionPanelSync();
+    updateMixBlockUI();
+    syncAmountRequired();
+    updateServiceDerivedUI();
+  </script>
+{% endblock %}

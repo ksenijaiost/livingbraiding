@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <h2 style="margin-top: 0;">Клиенты</h2>
+      {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
+        <a href="/clients/new"><button type="button">Новый клиент</button></a>
+      {% endif %}
+    </div>
+
+    {% if created_ok %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">
+        Клиент «{{ created_ok.name }}» создан (id {{ created_ok.id }}).
+      </p>
+    {% endif %}
+    {% if updated_ok %}
+      <p style="background:#dbeafe;border:1px solid #93c5fd;color:#1e40af;padding:10px 12px;border-radius:8px;">
+        Клиент «{{ updated_ok.name }}» сохранён (id {{ updated_ok.id }}).
+      </p>
+    {% endif %}
+
+    <form method="get" action="/clients" class="row" style="margin-bottom: 12px;">
+      <div>
+        <label>Поиск</label>
+        <input name="q" value="{{ q or '' }}" placeholder="имя или контакт" />
+      </div>
+      <div style="align-self:end;">
+        <button type="submit">Найти</button>
+      </div>
+    </form>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Имя</th>
+          <th>Контакт</th>
+          <th>Посещений</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td><a href="/clients/{{ row.id }}">{{ row.id }}</a></td>
+            <td>
+              <a href="/clients/{{ row.id }}">{{ row.name }}</a>
+              {% if row.has_active_booking %}
+                <span title="Есть активная бронь">📝</span>
+              {% endif %}
+              {% if not row.is_confirmed %}
+                <span class="muted" title="Ждёт подтверждения администратора">· черновик</span>
+              {% endif %}
+            </td>
+            <td>{{ row.contact_preview or "—" }}</td>
+            <td>{{ row.visits_count }}</td>
+            <td style="white-space:nowrap;">
+              {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
+                <a href="/bookings/new?client_id={{ row.id }}"><button type="button" class="secondary">Бронь</button></a>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}
+

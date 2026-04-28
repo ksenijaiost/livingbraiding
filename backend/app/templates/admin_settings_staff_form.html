@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card lb-card-max-720">
+    <p><a href="/admin/settings/staff">← Сотрудники</a></p>
+    <h2 class="lb-mt-0">{% if is_new %}Новый сотрудник{% else %}Сотрудник: {{ user.username }}{% endif %}</h2>
+
+    {% if error %}
+      <div class="error lb-mb-12">{{ error }}</div>
+    {% endif %}
+
+    {% if is_new %}
+      <form method="post" action="/admin/settings/staff/new" data-lb-staff-form>
+        <div class="lb-mb-12">
+          <label>Логин (латиница, цифры, _)</label>
+          <input name="username" required autocomplete="username" maxlength="50" pattern="[a-z0-9_]{2,50}" title="2–50 символов: a-z, 0-9, _" />
+        </div>
+        <div class="lb-mb-12">
+          <label>Телефон для входа (необязательно)</label>
+          <input name="phone" type="tel" autocomplete="tel" placeholder="+7 … или 10–15 цифр" maxlength="40" />
+          <p class="muted lb-font-12" style="margin:4px 0 0;">Сохраняются только цифры, не меньше 10. Вход на странице «Вход» — логин <strong>или</strong> этот номер.</p>
+        </div>
+        <div class="lb-mb-12">
+          <label>Отображаемое имя</label>
+          <input name="display_name" required maxlength="120" />
+        </div>
+        <div class="lb-mb-12">
+          <label>Пароль (не короче 6 символов)</label>
+          <input name="password" type="password" required autocomplete="new-password" minlength="6" />
+        </div>
+        <div class="lb-mb-12">
+          <div class="lb-strong-head lb-mb-6">Роли</div>
+          <label class="lb-inline-center-gap lb-mb-6">
+            <input type="checkbox" name="role_admin_super" value="1" />
+            <span>{{ ru_user_role(UserRole.ADMIN_SUPER) }}</span>
+          </label>
+          <label class="lb-inline-center-gap lb-mb-6">
+            <input type="checkbox" name="role_admin" value="1" />
+            <span>{{ ru_user_role(UserRole.ADMIN) }}</span>
+          </label>
+          <label class="lb-inline-center-gap lb-mb-6">
+            <input type="checkbox" name="role_master" value="1" />
+            <span>{{ ru_user_role(UserRole.MASTER) }}</span>
+          </label>
+          <label class="lb-inline-center-gap lb-mb-6">
+            <input type="checkbox" name="role_techspec" value="1" />
+            <span>{{ ru_user_role(UserRole.TECHSPEC) }}</span>
+          </label>
+        </div>
+        <div class="lb-mb-12">
+          <div class="lb-strong-head lb-mb-6">Уровень мастера</div>
+          <div class="muted lb-font-12 lb-mb-6">Активно только если выбрана роль «Мастер».</div>
+          <div data-lb-master-level-block>
+            <label class="lb-inline-center-gap lb-mb-6">
+              <input type="radio" name="master_level" value="JUNIOR" />
+              <span>{{ ru_master_level('JUNIOR') }}</span>
+            </label>
+            <label class="lb-inline-center-gap lb-mb-6">
+              <input type="radio" name="master_level" value="MIDDLE" checked />
+              <span>{{ ru_master_level('MIDDLE') }}</span>
+            </label>
+            <label class="lb-inline-center-gap">
+              <input type="radio" name="master_level" value="SENIOR" />
+              <span>{{ ru_master_level('SENIOR') }}</span>
+            </label>
+          </div>
+        </div>
+        <button type="submit">Создать</button>
+        <a href="/admin/settings/staff" class="lb-ml-8"><button type="button" class="secondary">Отмена</button></a>
+      </form>
+    {% else %}
+      <form method="post" action="/admin/settings/staff/{{ user.id }}/edit" data-lb-staff-form>
+        <div class="lb-mb-12">
+          <label>Логин</label>
+          <input value="{{ user.username }}" disabled class="lb-input-disabled" />
+          <p class="muted lb-font-12" style="margin:4px 0 0;">Логин не меняется.</p>
+        </div>
+        <div class="lb-mb-12">
+          <label>Телефон для входа</label>
+          <input name="phone" type="tel" autocomplete="tel" value="{{ user.phone or '' }}" placeholder="+7 …" maxlength="40" />
+          <p class="muted lb-font-12" style="margin:4px 0 0;">Очистите поле, чтобы убрать вход по номеру. Не менее 10 цифр, если заполняете.</p>
+        </div>
+        <div class="lb-mb-12">
+          <label>Отображаемое имя</label>
+          <input name="display_name" required maxlength="120" value="{{ user.display_name }}" />
+        </div>
+        <div class="lb-mb-12">
+          <label>Новый пароль (оставьте пустым, чтобы не менять)</label>
+          <input name="new_password" type="password" autocomplete="new-password" minlength="6" />
+        </div>
+        <div class="lb-mb-12">
+          <div class="lb-strong-head lb-mb-6">Роли</div>
+          <label class="lb-inline-center-gap lb-mb-6">
+            <input type="checkbox" name="role_admin_super" value="1" {% if UserRole.ADMIN_SUPER in roles %}checked{% endif %} />
+            <span>{{ ru_user_role(UserRole.ADMIN_SUPER) }}</span>
+          </label>
+          <label class="lb-inline-center-gap lb-mb-6">
+            <input type="checkbox" name="role_admin" value="1" {% if UserRole.ADMIN in roles %}checked{% endif %} />
+            <span>{{ ru_user_role(UserRole.ADMIN) }}</span>
+          </label>
+          <label class="lb-inline-center-gap lb-mb-6">
+            <input type="checkbox" name="role_master" value="1" {% if UserRole.MASTER in roles %}checked{% endif %} />
+            <span>{{ ru_user_role(UserRole.MASTER) }}</span>
+          </label>
+          <label class="lb-inline-center-gap lb-mb-6">
+            <input type="checkbox" name="role_techspec" value="1" {% if UserRole.TECHSPEC in roles %}checked{% endif %} />
+            <span>{{ ru_user_role(UserRole.TECHSPEC) }}</span>
+          </label>
+        </div>
+        <div class="lb-mb-12">
+          <div class="lb-strong-head lb-mb-6">Уровень мастера</div>
+          <div class="muted lb-font-12 lb-mb-6">Активно только если выбрана роль «Мастер».</div>
+          {% set ml = (user.master_level.value if user and user.master_level else '') %}
+          <div data-lb-master-level-block>
+            <label class="lb-inline-center-gap lb-mb-6">
+              <input type="radio" name="master_level" value="JUNIOR" {% if ml == 'JUNIOR' %}checked{% endif %} />
+              <span>{{ ru_master_level('JUNIOR') }}</span>
+            </label>
+            <label class="lb-inline-center-gap lb-mb-6">
+              <input type="radio" name="master_level" value="MIDDLE" {% if ml == 'MIDDLE' or (not ml and UserRole.MASTER in roles) %}checked{% endif %} />
+              <span>{{ ru_master_level('MIDDLE') }}</span>
+            </label>
+            <label class="lb-inline-center-gap">
+              <input type="radio" name="master_level" value="SENIOR" {% if ml == 'SENIOR' %}checked{% endif %} />
+              <span>{{ ru_master_level('SENIOR') }}</span>
+            </label>
+          </div>
+        </div>
+        <div class="lb-mb-16">
+          {% if user.id == current_user.id %}
+            <input type="hidden" name="is_active" value="1" />
+            <p class="muted lb-m-0">Свою учётную запись нельзя отключить здесь.</p>
+          {% else %}
+            <label class="lb-inline-center-gap">
+              <input type="checkbox" name="is_active" value="1" {% if user.is_active %}checked{% endif %} />
+              <span>Учётная запись активна (может войти)</span>
+            </label>
+          {% endif %}
+        </div>
+        <button type="submit">Сохранить</button>
+        <a href="/admin/settings/staff" class="lb-ml-8"><button type="button" class="secondary">Отмена</button></a>
+      </form>
+
+      {% if audit_rows %}
+        <hr class="lb-hr-audit" />
+        <h3 class="lb-h3-audit">История изменений</h3>
+        <p class="muted lb-mt-0 lb-font-13">Кто и что менял в карточке (роли, телефон, активность, пароль — без раскрытия секрета).</p>
+        <div class="lb-scroll-x">
+          <table class="lb-table-13">
+            <thead>
+              <tr>
+                <th>Когда (UTC)</th>
+                <th>Кто</th>
+                <th>Поле</th>
+                <th>Было</th>
+                <th>Стало</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for a in audit_rows %}
+                <tr>
+                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                  <td>{{ a.changed_by_user.display_name if a.changed_by_user else "—" }}</td>
+                  <td><code>{{ a.field_name }}</code></td>
+                  <td class="lb-prewrap-12rem">{{ a.old_value or "—" }}</td>
+                  <td class="lb-prewrap-12rem">{{ a.new_value or "—" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endblock %}

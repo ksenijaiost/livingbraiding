@@ -1,0 +1,60 @@
+  <div id="reserve_overlay" data-lb-kit-reserve="1" style="display:none;pointer-events:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:50;align-items:center;justify-content:center;padding:16px;">
+    <div class="card" data-lb-kit-reserve-inner="1" style="max-width:480px;width:100%;margin:0;position:relative;">
+      <h3 style="margin-top:0;">Резерв комплекта <span id="reserve_sku_label"></span></h3>
+      <form id="reserve_form" method="post" action="">
+        <input type="hidden" name="action" value="set" />
+        <input type="hidden" name="after_reserve" value="{{ after_reserve }}" />
+        <input type="hidden" name="reserved_for_client_id" id="reserve_client_id" value="" />
+
+        <p id="reserve_stock_hint" class="muted" style="font-size:13px;margin:0 0 12px;"></p>
+
+        <div style="margin-bottom:12px;">
+          <div style="font-weight:600;margin-bottom:8px;">Объём резерва *</div>
+          <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;">
+            <input type="checkbox" name="reserve_full" id="reserve_full_cb" value="1" style="margin-top:4px;" />
+            <span>Весь свободный остаток (все доступные сейчас заготовки)</span>
+          </label>
+          <div id="reserve_qty_block">
+            <label>Количество заготовок</label>
+            <input type="number" name="reserve_pieces" id="reserve_pieces_inp" min="1" step="1" value="" placeholder="например, 5" />
+          </div>
+          <p class="muted" style="font-size:12px;margin:8px 0 0;">Нужно выбрать галочку «весь остаток» <strong>или</strong> указать число (не больше свободного остатка).</p>
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <label>Клиент (необязательно)</label>
+          <div id="reserve_client_search_row" style="display:flex;gap:8px;align-items:stretch;margin-top:6px;">
+            <input type="search" id="reserve_client_q" autocomplete="off" placeholder="Поиск по имени" value="" style="flex:1;min-width:0;" />
+            <button type="button" id="reserve_client_find_btn" class="secondary" style="flex-shrink:0;white-space:nowrap;">Найти</button>
+          </div>
+          <ul id="reserve_client_list" style="list-style:none;padding:0;margin:8px 0 0;max-height:160px;overflow:auto;"></ul>
+          <div id="reserve_client_selected_panel" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
+              <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;">
+                <span style="font-weight:700;color:#065f46;">Выбран клиент</span>
+                <span id="reserve_client_selected_name" style="font-weight:600;color:#047857;"></span>
+              </div>
+              <button type="button" id="reserve_client_change_btn" class="secondary" style="flex-shrink:0;">Изменить</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <label>Сотрудник (необязательно)</label>
+          <select name="reserved_for_user_id" id="reserve_user_select">
+            <option value="">— не выбран —</option>
+            {% for u in staff_users %}
+              <option value="{{ u.id }}">{{ u.display_name }} ({% if u.role.value == 'MASTER' %}{{ ru_master_level(u.master_level) }}{% else %}{{ u.role.value }}{% endif %})</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <p class="muted" style="font-size:12px;">Нужно выбрать хотя бы клиента или сотрудника.</p>
+
+        <div class="row" style="margin-top:16px;">
+          <button type="submit">Сохранить резерв</button>
+          <button type="button" class="secondary" id="reserve_cancel_btn">Отмена</button>
+        </div>
+      </form>
+    </div>
+  </div>

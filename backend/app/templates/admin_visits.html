@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Визиты</h2>
+    <p><a href="/sales/work">Работа с товарами</a></p>
+    <p class="muted" style="margin-bottom:8px;">Список последних визитов (до 200).</p>
+    <p style="margin:0 0 12px;font-size:13px;">
+      {% if visits_mine_only %}
+        <strong>Мои визиты</strong>
+        <span class="muted">·</span>
+        <a href="/visits">Все визиты</a>
+      {% else %}
+        <strong>Все визиты</strong>
+        <span class="muted">·</span>
+        <a href="/visits?mine=1">Только мои</a>
+        <span class="muted">(где вы в долях мастеров или бонус за смешку)</span>
+      {% endif %}
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Дата</th>
+          <th>Клиент</th>
+          <th>Услуга</th>
+          <th>Выручка</th>
+          <th>Себестоимость</th>
+          <th>Студия</th>
+          <th>Мастера</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in visits %}
+          <tr>
+            <td><a href="/visits/{{ v.id }}">{{ v.id }}</a></td>
+            <td>
+              <a href="/visits/{{ v.id }}">{{ v.performed_date.strftime("%d.%m.%Y") }}</a>
+            </td>
+            <td>{{ v.client.name }}</td>
+            <td>
+              {% if v.services %}
+                {{ (v.services|sort(attribute='id')|first).service_name }}
+              {% else %}—{% endif %}
+            </td>
+            <td>{{ "%.0f"|format(v.amount_from_client) }}</td>
+            <td>{{ "%.0f"|format(v.cost_total) }}</td>
+            <td>{{ "%.0f"|format(v.salon_profit) }}</td>
+            <td>{{ "%.0f"|format(v.masters_pool) }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

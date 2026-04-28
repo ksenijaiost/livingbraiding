@@ -1,0 +1,515 @@
+{% extends "base.html" %}
+{% block content %}
+  <style>
+    .expense-void-btn {
+      background: transparent;
+      border: none;
+      color: #4b5563;
+      cursor: pointer;
+      font-size: 1.1rem;
+      line-height: 1;
+      padding: 0 2px;
+      min-width: 1.2em;
+      vertical-align: middle;
+    }
+    .expense-void-btn:hover { color: #991b1b; }
+    .expense-col-actions .expense-row-actions {
+      justify-content: flex-end;
+      width: 100%;
+    }
+    .expense-row-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: nowrap;
+      justify-content: flex-end;
+    }
+    .expense-row-actions form {
+      display: contents;
+      margin: 0;
+      padding: 0;
+    }
+    .expense-row-actions .expense-edit-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.5em;
+      text-decoration: none;
+      font-size: 1.15rem;
+      color: #111827;
+    }
+    .expense-row-actions .expense-audit-btn {
+      background: transparent;
+      border: none;
+      color: #111827;
+      cursor: pointer;
+      font-size: 1.05rem;
+      line-height: 1;
+      padding: 0 2px;
+      min-width: 1.5em;
+      vertical-align: middle;
+    }
+    .expense-row-actions .expense-audit-btn:hover { color: #1f2937; }
+    .expense-table-wrap {
+      width: 100%;
+      max-width: 100%;
+      overflow-x: auto;
+    }
+    .expense-table {
+      width: 100%;
+      max-width: 100%;
+      table-layout: fixed;
+      border-collapse: collapse;
+    }
+    .expense-table th,
+    .expense-table td {
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      vertical-align: top;
+    }
+    .expense-table .expense-col-date,
+    .expense-table .expense-col-amount {
+      white-space: nowrap;
+      word-break: normal;
+      overflow-wrap: normal;
+    }
+    .expense-table .expense-col-actions {
+      width: 7.25rem;
+      max-width: 7.25rem;
+      min-width: 7.25rem;
+      padding-left: 4px;
+      padding-right: 8px;
+      white-space: nowrap;
+      word-break: keep-all;
+      overflow-wrap: normal;
+      vertical-align: middle;
+      text-align: right;
+      box-sizing: border-box;
+    }
+    .expense-toolbar-main {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      width: 100%;
+      gap: 12px 24px;
+    }
+    .expense-filter-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 10px;
+      flex: 1 1 auto;
+      justify-content: flex-end;
+    }
+    .expense-filter-group > div {
+      flex: 0 1 auto;
+      min-width: 0;
+    }
+    .expense-filter-group > div.minw-date {
+      min-width: 132px;
+      max-width: 180px;
+    }
+    .expense-filter-group > div.minw-cat {
+      min-width: 160px;
+      max-width: 280px;
+    }
+    /* Не использовать глобальный .row здесь: в base.html у .row > * min-width:260px — ломает селекты и кнопки */
+    .expense-inline-fields {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .expense-inline-fields > div {
+      flex: 0 1 auto;
+      min-width: 0;
+    }
+    .expense-inline-fields .efx-date { flex: 0 0 auto; min-width: 9.5rem; }
+    .expense-inline-fields .efx-cat { flex: 1 1 10rem; max-width: 20rem; min-width: 8rem; }
+    .expense-inline-fields .efx-sub { flex: 1 1 10rem; max-width: 20rem; min-width: 8rem; }
+    .expense-inline-fields .efx-amount { flex: 0 0 auto; min-width: 6.5rem; }
+    .expense-inline-fields .efx-comment { flex: 2 1 12rem; min-width: 10rem; }
+    .expense-inline-fields .efx-actions {
+      flex: 0 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .expense-inline-fields select { min-width: 0; max-width: 100%; }
+  </style>
+  <div class="card">
+    <h2 style="margin-top:0;">Расходы студии</h2>
+    <p class="muted">Только суперадмин. Редактирование и аннулирование запрещены, если дата расхода попадает в закрытый период ЗП. Расходы списываются с фонда студии проводками в журнале ЗП (как и начисления).</p>
+
+    <div class="card" style="margin-bottom:14px;background:#f0fdf4;border:1px solid #86efac;">
+      <h3 style="margin-top:0;">Остаток фонда студии</h3>
+      <p style="font-size:1.35rem;margin:0;"><strong>{{ "%.2f"|format(studio_fund_balance) }} руб.</strong></p>
+      <p class="muted" style="margin:8px 0 0;">Сумма всех проводок по стороне «Студия» в <a href="/admin/payroll-fund">журнале фондов ЗП</a> (начисления, розница, выплаты, расходы и сторно).</p>
+    </div>
+
+    {% if msg == 'saved' %}
+      <div class="ok" style="margin-bottom:12px;">Запись добавлена.</div>
+    {% elif msg == 'updated' %}
+      <div class="ok" style="margin-bottom:12px;">Изменения сохранены.</div>
+    {% elif msg == 'voided' %}
+      <div class="ok" style="margin-bottom:12px;">Расход аннулирован.</div>
+    {% elif msg == 'bad_date' %}
+      <div class="error" style="margin-bottom:12px;">Укажите корректную дату расхода.</div>
+    {% elif msg == 'closed_period' %}
+      <div class="error" style="margin-bottom:12px;">Дата попадает в закрытый период ЗП.</div>
+    {% elif msg == 'void_closed' %}
+      <div class="error" style="margin-bottom:12px;">Нельзя аннулировать: дата в закрытом периоде ЗП.</div>
+    {% elif msg == 'subcat' %}
+      <div class="error" style="margin-bottom:12px;">Выберите подкатегорию.</div>
+    {% elif msg == 'amount' %}
+      <div class="error" style="margin-bottom:12px;">Укажите сумму ≥ 0 (до сотых).</div>
+    {% elif msg == 'not_found' %}
+      <div class="error" style="margin-bottom:12px;">Запись не найдена.</div>
+    {% endif %}
+
+    {% set qfilter = ('?' ~ filter_query) if filter_query else '' %}
+
+    <form method="get" action="/admin/expenses" class="card" style="margin-bottom:14px;background:#f8fafc;">
+      <div class="expense-toolbar-main">
+        <div style="flex:0 0 auto;">
+          <label style="visibility:hidden;">.</label>
+          <a href="/admin/expenses{{ qfilter }}{% if qfilter %}&{% else %}?{% endif %}new=1"><button type="button">Добавить расход</button></a>
+        </div>
+        <div class="expense-filter-group">
+          <div class="minw-date">
+            <label>С даты</label>
+            <input type="date" name="date_from" value="{{ date_from }}" />
+          </div>
+          <div class="minw-date">
+            <label>По дату</label>
+            <input type="date" name="date_to" value="{{ date_to }}" />
+          </div>
+          <div class="minw-cat">
+            <label>Категория</label>
+            <select name="category_id">
+              <option value="0">— все —</option>
+              {% for c in categories %}
+                <option value="{{ c.id }}" {% if filter_category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div style="flex:0 0 auto;">
+            <label style="visibility:hidden;">.</label>
+            <button type="submit">Применить фильтр</button>
+          </div>
+        </div>
+      </div>
+    </form>
+
+    <div class="expense-table-wrap">
+      <table class="expense-table">
+        <colgroup>
+          <col style="width:6.5rem;" />
+          <col style="width:13%;" />
+          <col style="width:15%;" />
+          <col style="width:5.5rem;" />
+          <col />
+          <col style="width:10%;" />
+          <col style="width:10%;" />
+          <col style="width:7.25rem;" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="expense-col-date">Дата расхода</th>
+            <th>Категория</th>
+            <th>Подкатегория</th>
+            <th class="expense-col-amount">Сумма, ₽</th>
+            <th>Комментарий</th>
+            <th class="muted" style="font-weight:600;">Кто внёс</th>
+            <th class="muted" style="font-weight:600;">Создано</th>
+            <th class="expense-col-actions muted" style="font-weight:600;"> </th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if show_new %}
+            <tr style="background:#eff6ff;">
+              <td colspan="8" style="padding:12px;">
+                <strong>Новая запись</strong>
+                <form method="post" action="/admin/expenses/new" style="margin-top:10px;">
+                  <input type="hidden" name="_filter_date_from" value="{{ date_from }}" />
+                  <input type="hidden" name="_filter_date_to" value="{{ date_to }}" />
+                  <input type="hidden" name="_filter_category_id" value="{{ filter_category_id }}" />
+                  <div class="expense-inline-fields">
+                    <div class="efx-date">
+                      <label>Дата *</label><br/>
+                      <input type="date" name="expense_date" required value="{{ date_from or today_iso }}" />
+                    </div>
+                    <div class="efx-cat">
+                      <label>Категория *</label><br/>
+                      <select id="new_cat" required>
+                        {% for c in categories %}
+                          <option value="{{ c.id }}">{{ c.name }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="efx-sub">
+                      <label>Подкатегория *</label><br/>
+                      <select name="subcategory_id" id="new_sub" required></select>
+                    </div>
+                    <div class="efx-amount">
+                      <label>Сумма *</label><br/>
+                      <input type="text" name="amount" inputmode="decimal" required placeholder="0.00" style="width:100px;max-width:100%;" />
+                    </div>
+                    <div class="efx-comment">
+                      <label>Комментарий</label><br/>
+                      <input type="text" name="comment" maxlength="2000" placeholder="необязательно" style="width:100%;" />
+                    </div>
+                    <div class="efx-actions">
+                      <button type="submit">Сохранить</button>
+                      <a href="/admin/expenses{{ qfilter }}"><button type="button" class="secondary">Отмена</button></a>
+                    </div>
+                  </div>
+                </form>
+              </td>
+            </tr>
+          {% endif %}
+
+          {% for r in rows %}
+            {% set is_edit = (edit_id and edit_id == r.id) %}
+            {% set row_style = 'opacity:0.55;text-decoration:line-through;' if r.is_voided else '' %}
+            <tr style="{{ row_style }}">
+              {% if is_edit and not r.is_voided %}
+                <td colspan="8" style="padding:12px;background:#fffbeb;">
+                  <form method="post" action="/admin/expenses/{{ r.id }}/save">
+                    <input type="hidden" name="_filter_date_from" value="{{ date_from }}" />
+                    <input type="hidden" name="_filter_date_to" value="{{ date_to }}" />
+                    <input type="hidden" name="_filter_category_id" value="{{ filter_category_id }}" />
+                    <div class="expense-inline-fields">
+                      <div class="efx-date">
+                        <label>Дата *</label><br/>
+                        <input type="date" name="expense_date" required value="{{ r.date.date().isoformat() }}" />
+                      </div>
+                      <div class="efx-cat">
+                        <label>Категория *</label><br/>
+                        <select id="edit_cat_{{ r.id }}" required>
+                          {% for c in categories %}
+                            <option value="{{ c.id }}" {% if c.id == r.subcategory.category_id %}selected{% endif %}>{{ c.name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="efx-sub">
+                        <label>Подкатегория *</label><br/>
+                        <select name="subcategory_id" id="edit_sub_{{ r.id }}" required></select>
+                      </div>
+                      <div class="efx-amount">
+                        <label>Сумма *</label><br/>
+                        <input type="text" name="amount" inputmode="decimal" required value="{{ '%.2f'|format(r.amount) }}" style="width:100px;max-width:100%;" />
+                      </div>
+                      <div class="efx-comment">
+                        <label>Комментарий</label><br/>
+                        <input type="text" name="comment" maxlength="2000" value="{{ r.comment }}" placeholder="необязательно" style="width:100%;" />
+                      </div>
+                      <div class="efx-actions">
+                        <button type="submit">Сохранить</button>
+                        <a href="/admin/expenses{{ qfilter }}"><button type="button" class="secondary">Отмена</button></a>
+                      </div>
+                    </div>
+                  </form>
+                </td>
+              {% else %}
+                <td class="expense-col-date">{{ r.date.date().isoformat() }}</td>
+                <td>{{ r.subcategory.category.name if r.subcategory and r.subcategory.category else '—' }}</td>
+                <td>{{ r.subcategory.name if r.subcategory else '—' }}</td>
+                <td class="expense-col-amount">{{ '%.2f'|format(r.amount) }}</td>
+                <td style="white-space:pre-wrap;">{{ r.comment }}</td>
+                <td class="muted">{{ r.created_by_user.display_name if r.created_by_user else '—' }}</td>
+                <td class="muted">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td class="expense-col-actions">
+                  {% if not r.is_voided %}
+                    <div class="expense-row-actions">
+                      <a class="expense-edit-link" href="/admin/expenses{% if filter_query %}?{{ filter_query }}&amp;{% else %}?{% endif %}edit={{ r.id }}" title="Редактировать">✎</a>
+                      <button type="button" class="expense-audit-btn" title="История изменений" onclick="toggleExpenseAudit({{ r.id }})">🕘</button>
+                      <form id="void_form_{{ r.id }}" method="post" action="/admin/expenses/{{ r.id }}/void">
+                        <button type="button" title="Аннулировать" class="expense-void-btn" onclick="openVoidConfirm({{ r.id }})">⊘</button>
+                      </form>
+                    </div>
+                  {% else %}
+                    <span class="muted">аннулировано{% if r.voided_at %} {{ r.voided_at.strftime('%Y-%m-%d') }}{% endif %}</span>
+                  {% endif %}
+                </td>
+              {% endif %}
+            </tr>
+            <tr id="expense_audit_row_{{ r.id }}" style="display:none;">
+              <td colspan="8" style="padding:10px 12px;">
+                <div id="expense_audit_box_{{ r.id }}" class="card" style="background:#f8fafc; border-color:#e5e7eb; margin:0;">
+                  <div class="muted" style="font-size:12px;">Загрузка истории…</div>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+          {% if not rows and not show_new %}
+            <tr><td colspan="8" class="muted">Нет записей.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="void_confirm_modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(15,23,42,0.45);align-items:center;justify-content:center;padding:16px;">
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="void_confirm_title" style="max-width:420px;width:100%;margin:0;box-shadow:0 10px 40px rgba(0,0,0,0.2);">
+      <h3 id="void_confirm_title" style="margin-top:0;">Аннулировать расход?</h3>
+      <p class="muted" style="margin:0 0 16px;">Запись останется в списке как аннулированная.</p>
+      <div class="row" style="justify-content:flex-end;gap:8px;">
+        <button type="button" class="secondary" onclick="closeVoidConfirm()">Отмена</button>
+        <button type="button" onclick="submitVoidForm()">Да, аннулировать</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="application/json" id="subcats_json">{{ subcats_json | tojson }}</script>
+  <script>
+    var SUBCATS = JSON.parse(document.getElementById('subcats_json').textContent);
+    var voidTargetId = null;
+
+    function fillSubSelect(catId, subSelect, selectedSubId) {
+      subSelect.innerHTML = '';
+      var list = SUBCATS[String(catId)] || [];
+      for (var i = 0; i < list.length; i++) {
+        var o = document.createElement('option');
+        o.value = String(list[i].id);
+        o.textContent = list[i].name;
+        if (selectedSubId != null && String(list[i].id) === String(selectedSubId)) o.selected = true;
+        subSelect.appendChild(o);
+      }
+    }
+
+    function wireCategorySelect(catSel, subSel, selectedSubId) {
+      fillSubSelect(catSel.value, subSel, selectedSubId);
+      catSel.addEventListener('change', function () {
+        fillSubSelect(catSel.value, subSel, null);
+      });
+    }
+
+    (function initNewRow() {
+      var nc = document.getElementById('new_cat');
+      var ns = document.getElementById('new_sub');
+      if (nc && ns) wireCategorySelect(nc, ns, null);
+    })();
+
+    {% if edit_id %}
+      {% for r in rows %}
+        {% if r.id == edit_id and not r.is_voided %}
+          (function () {
+            var catSel = document.getElementById('edit_cat_{{ r.id }}');
+            var subSel = document.getElementById('edit_sub_{{ r.id }}');
+            if (catSel && subSel) wireCategorySelect(catSel, subSel, {{ r.subcategory_id }});
+          })();
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+
+    function escapeHtml(s) {
+      if (s === null || s === undefined) return '';
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function renderExpenseAudit(expenseId, rows) {
+      var box = document.getElementById('expense_audit_box_' + expenseId);
+      if (!box) return;
+      var n = rows ? rows.length : 0;
+      if (!n) {
+        box.innerHTML = '<div class="muted" style="font-size:12px;">Пока нет изменений.</div>';
+        return;
+      }
+      var cls = 'lb-exp-audit-' + String(expenseId);
+      var html = '';
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">';
+      html += '<strong>История изменений</strong>';
+      html += '</div>';
+      html += '<table style="margin-top:8px;">';
+      html += '<thead><tr><th style="width:170px;">Когда</th><th style="width:180px;">Кто</th><th>Поле</th><th>Было</th><th>Стало</th></tr></thead>';
+      html += '<tbody>';
+      if (n > 3) {
+        for (var i = 0; i < 2; i++) {
+          var a = rows[i];
+          html += '<tr>';
+          html += '<td class="muted">' + escapeHtml(a.changed_at) + '</td>';
+          html += '<td class="muted">' + escapeHtml(a.changed_by || '—') + '</td>';
+          html += '<td><code>' + escapeHtml(a.field_name) + '</code></td>';
+          html += '<td class="muted" style="white-space:pre-wrap;">' + escapeHtml(a.old_value || '—') + '</td>';
+          html += '<td class="muted" style="white-space:pre-wrap;">' + escapeHtml(a.new_value || '—') + '</td>';
+          html += '</tr>';
+        }
+        html += '<tr><td colspan="5"><button type="button" class="secondary" onclick="lbToggleAudit(' + "'" + cls + "'" + ', this)">Раскрыть историю</button></td></tr>';
+        for (var j = 2; j < n; j++) {
+          var b = rows[j];
+          html += '<tr class="' + cls + '" style="display:none;">';
+          html += '<td class="muted">' + escapeHtml(b.changed_at) + '</td>';
+          html += '<td class="muted">' + escapeHtml(b.changed_by || '—') + '</td>';
+          html += '<td><code>' + escapeHtml(b.field_name) + '</code></td>';
+          html += '<td class="muted" style="white-space:pre-wrap;">' + escapeHtml(b.old_value || '—') + '</td>';
+          html += '<td class="muted" style="white-space:pre-wrap;">' + escapeHtml(b.new_value || '—') + '</td>';
+          html += '</tr>';
+        }
+      } else {
+        for (var k = 0; k < Math.min(3, n); k++) {
+          var c = rows[k];
+          html += '<tr>';
+          html += '<td class="muted">' + escapeHtml(c.changed_at) + '</td>';
+          html += '<td class="muted">' + escapeHtml(c.changed_by || '—') + '</td>';
+          html += '<td><code>' + escapeHtml(c.field_name) + '</code></td>';
+          html += '<td class="muted" style="white-space:pre-wrap;">' + escapeHtml(c.old_value || '—') + '</td>';
+          html += '<td class="muted" style="white-space:pre-wrap;">' + escapeHtml(c.new_value || '—') + '</td>';
+          html += '</tr>';
+        }
+      }
+      html += '</tbody></table>';
+      box.innerHTML = html;
+    }
+
+    async function toggleExpenseAudit(expenseId) {
+      var tr = document.getElementById('expense_audit_row_' + expenseId);
+      if (!tr) return;
+      var isHidden = (tr.style.display === 'none' || tr.style.display === '');
+      tr.style.display = isHidden ? 'table-row' : 'none';
+      if (!isHidden) return;
+
+      var box = document.getElementById('expense_audit_box_' + expenseId);
+      if (!box) return;
+      if (box.getAttribute('data-loaded') === '1') return;
+      box.innerHTML = '<div class="muted" style="font-size:12px;">Загрузка истории…</div>';
+      try {
+        var resp = await fetch('/admin/expenses/' + expenseId + '/audit', { credentials: 'same-origin' });
+        if (!resp.ok) throw new Error('bad status');
+        var data = await resp.json();
+        renderExpenseAudit(expenseId, (data && data.rows) ? data.rows : []);
+        box.setAttribute('data-loaded', '1');
+      } catch (e) {
+        box.innerHTML = '<div class="error">Не удалось загрузить историю.</div>';
+      }
+    }
+    window.toggleExpenseAudit = toggleExpenseAudit;
+  </script>
+  <script>
+    var modal = document.getElementById('void_confirm_modal');
+    function onKey(e) { if (e.key === 'Escape') closeVoidConfirm(); }
+    window.openVoidConfirm = function (id) {
+      voidTargetId = id;
+      modal.style.display = 'flex';
+      document.addEventListener('keydown', onKey);
+    };
+    window.closeVoidConfirm = function () {
+      modal.style.display = 'none';
+      document.removeEventListener('keydown', onKey);
+      voidTargetId = null;
+    };
+    window.submitVoidForm = function () {
+      if (voidTargetId == null) return;
+      var f = document.getElementById('void_form_' + voidTargetId);
+      if (f) f.submit();
+    };
+    modal.addEventListener('click', function (e) { if (e.target === modal) closeVoidConfirm(); });
+  </script>
+{% endblock %}

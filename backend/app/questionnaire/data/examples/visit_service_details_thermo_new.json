@@ -1,0 +1,30 @@
+{
+  "service_fields": {},
+  "kit": null,
+  "answers": {},
+  "answer_labels": {},
+  "answer_display": {},
+  "thermo": {
+    "curls_material": "X",
+    "material_length": "55",
+    "shade": "1b",
+    "bases_total": 40,
+    "weight_with_margin": 120.0,
+    "template_mode": "NEW",
+    "old_template_id": null,
+    "algorithm_changes": null,
+    "filled_template": {
+      "strand_weight_avg": 3.25,
+      "row_1": 10,
+      "row_2": 8,
+      "row_3": 6,
+      "other_rows_text": "",
+      "temples": 2,
+      "triangles": 1,
+      "bird": 0,
+      "square": 0,
+      "comment": ""
+    },
+    "saved_template_snapshot": null
+  }
+}

@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <p><a href="/visits">← Все визиты</a></p>
+    <h2 style="margin-top: 0;">Визит #{{ visit.id }}. Дата: {{ visit.performed_date.strftime("%d.%m.%Y") }}</h2>
+    <p class="muted">
+      Создан: {{ visit.created_at.strftime("%d.%m.%Y %H:%M") }}
+      {% if visit_creator_label %}· {{ visit_creator_label }}{% endif %}
+    </p>
+    {% if visit.is_cancelled %}
+      <div class="error" style="margin:12px 0;">
+        <strong>ВИЗИТ ОТМЕНЁН</strong>
+        {% if visit.cancelled_at %} · {{ visit.cancelled_at.strftime("%d.%m.%Y %H:%M") }}{% endif %}
+        {% if visit.cancelled_by_user %} ({{ visit.cancelled_by_user.display_name }}){% endif %}
+      </div>
+    {% endif %}
+    {% if msg %}
+      {% if msg == 'cancelled' %}
+        <div class="ok" style="margin:12px 0;">Визит отменён. Складные списания возвращены.</div>
+      {% elif msg == 'already_cancelled' %}
+        <div class="error" style="margin:12px 0;">Визит уже отменён.</div>
+      {% elif msg == 'cancel_conflict' %}
+        <div class="error" style="margin:12px 0;">Нельзя отменить: конфликт при возврате заготовок на склад (проверьте движения по комплекту).</div>
+      {% endif %}
+    {% endif %}
+    <p class="muted" style="font-size: 12px; margin-top: 4px;">История изменений доступна только суперадмину.</p>
+
+    {% if client_err %}
+      <div class="error" style="margin:12px 0;">
+        {% if client_err == 'need_confirm' %}
+          Отметьте подтверждение смены клиента после истечения окна редактирования.
+        {% elif client_err == 'bad_id' %}
+          Укажите клиента и повторите сохранение.
+        {% elif client_err == 'not_found' %}
+          Клиент не найден.
+        {% elif client_err == 'same' %}
+          Выбран тот же клиент.
+        {% else %}
+          Не удалось сохранить изменение клиента.
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <h3>Клиент</h3>
+    <p>
+      <strong><a href="/clients/{{ visit.client_id }}">{{ visit.client.name }}</a></strong>
+    </p>
+    <p class="muted">
+      Свой: {% if visit.client_type.value == 'SELF' %}да{% else %}нет{% endif %}
+    </p>
+
+    {% if visit.photo_1 or visit.photo_2 or visit.photo_3 %}
+      <h3 style="margin-top: 18px;">Фото</h3>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        {% if visit.photo_1 %}
+          <a href="{{ visit.photo_1 }}" class="lb-lightbox" title="Фото 1">
+            <img src="{{ visit.photo_1 }}" alt="Фото 1" style="max-width: 200px; max-height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
+          </a>
+        {% endif %}
+        {% if visit.photo_2 %}
+          <a href="{{ visit.photo_2 }}" class="lb-lightbox" title="Фото 2">
+            <img src="{{ visit.photo_2 }}" alt="Фото 2" style="max-width: 200px; max-height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
+          </a>
+        {% endif %}
+        {% if visit.photo_3 %}
+          <a href="{{ visit.photo_3 }}" class="lb-lightbox" title="Фото 3">
+            <img src="{{ visit.photo_3 }}" alt="Фото 3" style="max-width: 200px; max-height: 200px; border-radius: 10px; border: 1px solid #e5e7eb; display:block;" />
+          </a>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <h3>Услуга</h3>
+
+    <h4 style="margin: 14px 0 6px; font-size: 1rem;">Услуга</h4>
+    {% if visit.services %}
+      {% for disp in service_displays %}
+        {% if service_displays|length > 1 %}
+          <p class="muted" style="margin: 8px 0 2px; font-size: 12px;">Услуга {{ loop.index }}</p>
+        {% endif %}
+        <p style="margin: 4px 0;">{{ disp.catalog_line }}</p>
+      {% endfor %}
+    {% else %}
+      <p class="muted">—</p>
+    {% endif %}
+
+    <h4 style="margin: 16px 0 6px; font-size: 1rem;">Мастера</h4>
+    <p style="margin: 4px 0;">
+      {% for vm in visit.masters %}
+        {{ vm.master.display_name }} ({{ vm.percent|round(2) }}%){% if not loop.last %}, {% endif %}
+      {% else %}—{% endfor %}
+    </p>
+
+    <h4 style="margin: 16px 0 6px; font-size: 1rem;">Длительность</h4>
+    <p style="margin: 4px 0;">{{ duration_h }} ч {{ duration_m }} мин</p>
+
+    <h4 style="margin: 16px 0 6px; font-size: 1rem;">Информация об услуге</h4>
+    {% if service_displays %}
+      {% for disp in service_displays %}
+        {% if service_displays|length > 1 %}
+          <p class="muted" style="margin: 8px 0 2px; font-size: 12px;">Услуга {{ loop.index }}</p>
+        {% endif %}
+        {% if disp.detail_blocks %}
+          <ul style="margin: 4px 0 10px; padding-left: 1.2rem; line-height: 1.35;">
+            {% for label, val in disp.detail_blocks %}
+              <li style="margin-bottom: 4px;"><span style="color:#6b7280;">{{ label }}:</span> {{ val }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted" style="margin: 4px 0;">Нет данных анкеты.</p>
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      <p class="muted">—</p>
+    {% endif %}
+
+    <h4 style="margin: 16px 0 6px; font-size: 1rem;">Материал</h4>
+    <div class="muted" style="line-height: 1.35; font-size: 0.95rem;">
+      <div style="margin: 2px 0;">Учитывался в расчёте: <strong>{{ materials_used_ru }}</strong> · Канек {{ visit.kanekalon_grams|int }} г · Кудри/термо {{ visit.kudri_grams|int }} г · Смешка: <strong>{{ mix_source_ru }}</strong></div>
+      <div style="margin: 2px 0;">Сложность смешки: <strong>{{ mix_complexity_ru }}</strong> · Стоимость смешки: {{ "%.0f"|format(visit.mix_cost_amount) }} ₽{% if visit.mix_bonus_amount and visit.mix_bonus_amount > 0 %} · Бонус за смешку, мастер <strong>{{ mix_bonus_master_label or "—" }}</strong>: {{ "%.0f"|format(visit.mix_bonus_amount) }} ₽{% endif %}</div>
+      <div style="margin: 2px 0;">Цены на момент визита (₽/г): канек {% if visit.kanekalon_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kanekalon_price_per_gram_at_time) }}{% else %}—{% endif %}, кудри {% if visit.kudri_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kudri_price_per_gram_at_time) }}{% else %}—{% endif %}</div>
+    </div>
+
+    <h3>Деньги</h3>
+    <table>
+      <tr><td>Выручка (с клиента)</td><td>{{ "%.0f"|format(visit.amount_from_client) }} ₽</td></tr>
+      <tr><td>Скидка от прайса (история)</td><td>{% if visit.client_discount_percent and visit.client_discount_percent > 0 %}{{ visit.client_discount_percent }}%{% else %}—{% endif %}</td></tr>
+      <tr><td>Себестоимость (материалы + комплект)</td><td>{{ "%.0f"|format(visit.cost_total) }} ₽</td></tr>
+      <tr><td>Прибыль до распределения</td><td>{{ "%.0f"|format(visit.profit_before_split) }} ₽</td></tr>
+      <tr><td>Амортизация</td><td>{{ "%.0f"|format(visit.amortization_amount or 0) }} ₽</td></tr>
+      <tr><td>Доля салона</td><td>{{ visit.salon_cut_pct_at_time }}</td></tr>
+      <tr><td>Заработок студии</td><td>{{ "%.0f"|format(visit.salon_profit) }} ₽</td></tr>
+      <tr><td>ЗП мастеров (суммарно)</td><td>{{ "%.0f"|format(visit.masters_pool) }} ₽</td></tr>
+    </table>
+
+    <h3>Списания комплектов со склада</h3>
+    {% if visit.kit_usages %}
+      <table>
+        <thead><tr><th>Артикул</th><th>Заготовок</th><th>В расчёт себестоимости (снимок), ₽</th></tr></thead>
+        <tbody>
+          {% for u in visit.kit_usages %}
+            <tr>
+              <td>{{ u.kit.sku }}</td>
+              <td>{{ u.pieces_used }}</td>
+              <td>{{ "%.0f"|format(u.cost_amount) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">{{ kit_usages_note }}</p>
+    {% endif %}
+
+    {% if current_user and current_user.role.value == "ADMIN_SUPER" and not visit.is_cancelled and not visit_closed_period %}
+      <div class="card" style="margin-top: 14px; border-color:#fecaca; background:#fff1f2;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <strong>Аннулирование</strong>
+          <form method="post" action="/visits/{{ visit.id }}/cancel" style="margin:0;">
+            <button type="submit" class="secondary">Отменить визит</button>
+          </form>
+        </div>
+        <div class="muted" style="font-size:12px; margin-top:6px;">
+          При отмене визита будут возвращены списанные со склада заготовки (если возможно) и запись попадёт в историю изменений.
+        </div>
+      </div>
+    {% endif %}
+
+    {% if visit_edit_blocked and visit_edit_block_msg %}
+      <div class="card" style="border-color:#fde68a; background:#fffbeb; margin-top: 12px;">
+        {{ visit_edit_block_msg }}
+      </div>
+    {% endif %}
+
+    {% if current_user and current_user.role.value == "ADMIN_SUPER" %}
+      <h3>История изменений</h3>
+      {% set n = (audit_rows|length if audit_rows else 0) %}
+      {% if n > 0 %}
+        <table>
+          <thead>
+            <tr>
+              <th>Когда</th>
+              <th>Кто</th>
+              <th>Поле</th>
+              <th>Было</th>
+              <th>Стало</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if n > 3 %}
+              {% for a in audit_rows[:2] %}
+                <tr>
+                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                  <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+                  <td><code>{{ a.field_name }}</code></td>
+                  <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+                  <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+                </tr>
+              {% endfor %}
+              <tr>
+                <td colspan="5">
+                  <button type="button" class="secondary" onclick="lbToggleAudit('lb-audit-visit', this)">Раскрыть историю</button>
+                </td>
+              </tr>
+              {% for a in audit_rows[2:] %}
+                <tr class="lb-audit-visit" style="display:none;">
+                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                  <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+                  <td><code>{{ a.field_name }}</code></td>
+                  <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+                  <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              {% for a in audit_rows[:3] %}
+                <tr>
+                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                  <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
+                  <td><code>{{ a.field_name }}</code></td>
+                  <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
+                  <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
+                </tr>
+              {% endfor %}
+            {% endif %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Пока нет изменений.</p>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endblock %}

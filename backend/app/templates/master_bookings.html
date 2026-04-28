@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top:0;">Мои записи</h2>
+
+    <h3 style="margin:18px 0 8px;font-size:1.05rem;">Активные записи</h3>
+    <p class="muted" style="margin-top:0;">Будущие брони (визит или продажа/заказ), где вы указаны мастером или ответственным по продаже.</p>
+
+    {% if not rows %}
+      <p class="muted">Активных записей нет.</p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Бронь</th>
+            <th>Дата</th>
+            <th>Клиент</th>
+            <th>Услуга/заказ</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            {% set b = row.booking %}
+            <tr>
+              <td><a href="/bookings/{{ b.id }}">#{{ b.id }}</a></td>
+              <td>{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</td>
+              <td><a href="/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
+              <td>{{ row.label }}</td>
+              <td style="white-space:nowrap;">
+                <a href="/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    <hr style="border:0;border-top:1px solid #e5e7eb;margin:28px 0 16px;" />
+
+    <h3 style="margin:0 0 8px;font-size:1.05rem;">Архив за {{ archive_days }} дней</h3>
+    <p class="muted" style="margin-top:0;">
+      Визиты, работы с товарами и продажи, где вы участвовали (мастер визита, в долях работы, оформление/бонус по продаже или назначение по брони).
+      {% if archive_truncated %}
+        Показано не более {{ archive_cap }} последних событий — откройте <a href="/visits?mine=1">визиты</a> или <a href="/sales/work?mine=1">работы</a> для полного списка.
+      {% endif %}
+    </p>
+
+    {% if not archive_rows %}
+      <p class="muted">За выбранный период записей нет.</p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Тип</th>
+            <th>Суть</th>
+            <th>Клиент</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in archive_rows %}
+            <tr>
+              <td class="muted">
+                {% if row.kind == 'visit' %}
+                  {{ format_naive_utc_datetime(row.visit.performed_date, display_tz) }}
+                {% elif row.kind == 'work' %}
+                  {{ format_naive_utc_datetime(row.work.created_at, display_tz) }}
+                {% else %}
+                  {{ format_naive_utc_datetime(row.sale.performed_date, display_tz) }}
+                {% endif %}
+              </td>
+              <td>
+                {% if row.kind == 'visit' %}Визит
+                {% elif row.kind == 'work' %}Работа
+                {% else %}Продажа
+                {% endif %}
+              </td>
+              <td>{{ row.label }}</td>
+              <td>
+                {% if row.client %}
+                  <a href="/clients/{{ row.client.id }}">{{ row.client.name }}</a>
+                {% else %}
+                  <span class="muted">—</span>
+                {% endif %}
+              </td>
+              <td style="white-space:nowrap;">
+                {% if row.kind == 'visit' %}
+                  <a href="/visits/{{ row.visit.id }}"><button type="button" class="secondary">Открыть</button></a>
+                {% elif row.kind == 'work' %}
+                  <a href="/sales/work/{{ row.work.id }}"><button type="button" class="secondary">Открыть</button></a>
+                {% else %}
+                  <a href="/sales/products/{{ row.sale.id }}"><button type="button" class="secondary">Открыть</button></a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+{% endblock %}
