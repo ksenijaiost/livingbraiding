@@ -12,7 +12,7 @@ import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from app.admin_questionnaire_fields import router as admin_questionnaire_fields_router
 from app.admin_service_catalog import router as admin_service_catalog_router
@@ -91,7 +91,7 @@ def _startup():
     try:
         try:
             db.execute(text("SELECT 1 FROM settings LIMIT 1"))
-        except OperationalError:
+        except (OperationalError, ProgrammingError):
             return
         enable_seed = os.environ.get("ENABLE_DEV_SEED", "").strip().lower() in ("1", "true", "yes")
         if enable_seed:
