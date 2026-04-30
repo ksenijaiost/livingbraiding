@@ -406,7 +406,7 @@ def upgrade() -> None:
             "created_at",
             sa.DateTime(),
             nullable=False,
-            server_default=sa.text("(datetime('now'))"),
+            server_default=sa.text("now()"),
         ),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
         sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
