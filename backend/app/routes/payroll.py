@@ -16,7 +16,9 @@ from app.forms_parse import parse_date_iso, parse_float, parse_int
 from app.payroll_fund import (
     PayrollFundPayoutPaymentKind,
     PayrollFundSide,
+    current_fund_balance,
     ledger_balances,
+    post_manual_adjustment,
     post_payout,
     recent_ledger_rows,
 )
@@ -119,7 +121,10 @@ async def admin_payroll_periods_close(
 
 
 def _payroll_fund_msg_ru(code: str | None) -> str | None:
-    return {"paid": "Выплата записана в журнал."}.get(code or "", code)
+    return {
+        "paid": "Выплата записана в журнал.",
+        "adjusted": "Корректировка записана в журнал.",
+    }.get(code or "", code)
 
 
 def _payroll_fund_err_ru(code: str | None) -> str | None:
@@ -128,6 +133,7 @@ def _payroll_fund_err_ru(code: str | None) -> str | None:
         "bad_amount": "Укажите ненулевую сумму (для возврата в фонд можно ввести отрицательное число).",
         "bad_user": "Выберите сотрудника.",
         "bad_payment": "Укажите тип оплаты.",
+        "bad_mode": "Укажите корректный режим корректировки.",
     }.get(code or "", code)
 
 
@@ -226,4 +232,59 @@ async def admin_payroll_fund_payout(
         return RedirectResponse(url="/admin/payroll-fund?err=bad_amount", status_code=303)
     db.commit()
     return RedirectResponse(url="/admin/payroll-fund?msg=paid", status_code=303)
+
+
+@router.post("/admin/payroll-fund/adjust")
+async def admin_payroll_fund_adjust(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    side_raw = (str(form.get("side") or "")).strip().upper()
+    try:
+        side = PayrollFundSide(side_raw)
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_side", status_code=303)
+
+    # For MASTER adjustments we need a user.
+    user_id: int | None = None
+    if side == PayrollFundSide.MASTER:
+        try:
+            user_id = parse_int(form.get("user_id"), min=1, field_name="user_id")
+        except ValueError:
+            return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
+        if db.get(User, user_id) is None:
+            return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
+
+    mode = (str(form.get("mode") or "")).strip().lower()
+    if mode not in ("delta", "set"):
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_mode", status_code=303)
+
+    try:
+        amount = parse_float(form.get("amount"), field_name="amount")
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_amount", status_code=303)
+
+    comment = str(form.get("comment") or "").strip()
+
+    try:
+        if mode == "set":
+            cur = current_fund_balance(db, side=side, user_id=user_id)
+            delta = float(amount) - float(cur)
+        else:
+            delta = float(amount)
+        post_manual_adjustment(
+            db,
+            side=side,
+            user_id=user_id,
+            amount_delta=delta,
+            created_by_user_id=current_user.id,
+            comment=comment or ("Начальный остаток" if mode == "set" else None),
+        )
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_amount", status_code=303)
+
+    db.commit()
+    return RedirectResponse(url="/admin/payroll-fund?msg=adjusted", status_code=303)
 
