@@ -19,7 +19,7 @@ from app.admin_service_catalog import router as admin_service_catalog_router
 from app.audit_retention import purge_expired_audit_logs_startup_safe
 from app.bootstrap import ensure_initial_techspec_user
 from app.db.session import get_db
-from app.seed import ensure_seed_data
+from app.seed import ensure_dev_seed_data, ensure_prod_seed_data
 
 from app import admin_studio_expenses as admin_studio_expenses_routes
 from app import product_sales as product_sales_routes
@@ -93,9 +93,12 @@ def _startup():
             db.execute(text("SELECT 1 FROM settings LIMIT 1"))
         except (OperationalError, ProgrammingError):
             return
-        enable_seed = os.environ.get("ENABLE_DEV_SEED", "").strip().lower() in ("1", "true", "yes")
-        if enable_seed:
-            ensure_seed_data(db)
+        enable_dev_seed = os.environ.get("ENABLE_DEV_SEED", "").strip().lower() in ("1", "true", "yes")
+        enable_prod_seed = os.environ.get("ENABLE_PROD_SEED", "").strip().lower() in ("1", "true", "yes")
+        if enable_dev_seed:
+            ensure_dev_seed_data(db)
+        elif enable_prod_seed:
+            ensure_prod_seed_data(db)
         ensure_initial_techspec_user(db)
         purge_expired_audit_logs_startup_safe(db)
     finally:
