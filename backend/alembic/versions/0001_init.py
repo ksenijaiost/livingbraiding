@@ -27,14 +27,6 @@ depends_on = None
 
 def upgrade() -> None:
     op.create_table(
-        "settings",
-        sa.Column("key", sa.String(length=100), primary_key=True),
-        sa.Column("value", sa.String(length=500), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=True),
-        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
-    )
-
-    op.create_table(
         "users",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("username", sa.String(length=50), nullable=False),
@@ -55,6 +47,14 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.UniqueConstraint("username", name="uq_users_username"),
         sa.UniqueConstraint("phone", name="uq_users_phone"),
+    )
+
+    op.create_table(
+        "settings",
+        sa.Column("key", sa.String(length=100), primary_key=True),
+        sa.Column("value", sa.String(length=500), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
     )
 
     op.create_table(
