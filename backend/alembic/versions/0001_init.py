@@ -569,17 +569,6 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "product_sale_audit_logs",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("sale_id", sa.Integer(), sa.ForeignKey("product_sales.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("changed_at", sa.DateTime(), nullable=False),
-        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("field_name", sa.String(length=120), nullable=False),
-        sa.Column("old_value", sa.Text(), nullable=True),
-        sa.Column("new_value", sa.Text(), nullable=True),
-    )
-
-    op.create_table(
         "studio_expense_audit_logs",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column(
@@ -596,44 +585,12 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "work_for_inventory_audit_logs",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column(
-            "work_id",
-            sa.Integer(),
-            sa.ForeignKey("work_for_inventory.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("changed_at", sa.DateTime(), nullable=False),
-        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("field_name", sa.String(length=120), nullable=False),
-        sa.Column("old_value", sa.Text(), nullable=True),
-        sa.Column("new_value", sa.Text(), nullable=True),
-    )
-
-    op.create_table(
         "setting_audit_logs",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column(
             "setting_key",
             sa.String(length=100),
             sa.ForeignKey("settings.key", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("changed_at", sa.DateTime(), nullable=False),
-        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("field_name", sa.String(length=120), nullable=False),
-        sa.Column("old_value", sa.Text(), nullable=True),
-        sa.Column("new_value", sa.Text(), nullable=True),
-    )
-
-    op.create_table(
-        "work_rate_audit_logs",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column(
-            "work_rate_id",
-            sa.Integer(),
-            sa.ForeignKey("work_rates.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column("changed_at", sa.DateTime(), nullable=False),
@@ -812,6 +769,17 @@ def upgrade() -> None:
         sa.Column("studio_margin_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
     )
 
+    op.create_table(
+        "product_sale_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("sale_id", sa.Integer(), sa.ForeignKey("product_sales.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
     # ---- Прайс «Товары» (вне визита) ----
     op.create_table(
         "catalog_products",
@@ -866,6 +834,22 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "work_for_inventory_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "work_id",
+            sa.Integer(),
+            sa.ForeignKey("work_for_inventory.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+    )
+
+    op.create_table(
         "work_for_inventory_staff",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column(
@@ -891,6 +875,22 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.Column("updated_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.UniqueConstraint("key", name="uq_work_rates_key"),
+    )
+
+    op.create_table(
+        "work_rate_audit_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "work_rate_id",
+            sa.Integer(),
+            sa.ForeignKey("work_rates.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("changed_at", sa.DateTime(), nullable=False),
+        sa.Column("changed_by_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("field_name", sa.String(length=120), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
     )
 
     # ---- Журнал фондов ЗП ----
