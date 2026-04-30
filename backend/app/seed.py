@@ -97,6 +97,21 @@ def _ensure_demo_user_role_assignments(db: Session) -> None:
 
 
 def ensure_seed_data(db: Session) -> None:
+    """
+    Legacy entrypoint (kept for compatibility).
+
+    Prefer:
+    - ensure_prod_seed_data: safe defaults + catalogs/prices (no demo operational data)
+    - ensure_dev_seed_data: production seed + demo users + demo operational data
+    """
+    ensure_dev_seed_data(db)
+
+
+def ensure_prod_seed_data(db: Session) -> None:
+    """Idempotent seed safe for production: settings, price catalogs, expense catalog.
+
+    Does NOT create demo users/clients/visits/sales/etc.
+    """
     # Settings
     salon = db.get(Setting, SALON_CUT_PCT)
     if not salon:
@@ -131,6 +146,19 @@ def ensure_seed_data(db: Session) -> None:
         row = db.get(MaterialPriceCurrent, mt)
         if not row:
             db.add(MaterialPriceCurrent(material_type=mt, price_per_gram=default_per_gram))
+
+    # Service catalogs + catalog_products price lists (idempotent)
+    _ensure_vsy_golova_catalog_and_kits(db, include_demo_kits=False)
+
+    # Expense catalog (idempotent)
+    ensure_studio_expense_catalog(db)
+
+    db.commit()
+
+
+def ensure_dev_seed_data(db: Session) -> None:
+    """Idempotent development seed: prod seed + demo accounts + demo operational data."""
+    ensure_prod_seed_data(db)
 
     # Users
     if not db.scalar(select(User).where(User.username == "admin")):
@@ -172,9 +200,9 @@ def ensure_seed_data(db: Session) -> None:
     db.flush()
     _ensure_demo_user_role_assignments(db)
 
-    _ensure_vsy_golova_catalog_and_kits(db)
+    # Service catalogs + kits + derived price lists in catalog_products
+    _ensure_vsy_golova_catalog_and_kits(db, include_demo_kits=True)
 
-    ensure_studio_expense_catalog(db)
     _ensure_demo_operational_data(db)
 
     db.commit()
@@ -724,8 +752,8 @@ def _ensure_prodazha_materiala_products_catalog(db: Session) -> None:
             )
             so += 1
 
-def _ensure_vsy_golova_catalog_and_kits(db: Session) -> None:
-    """Каталоги из JSON + анкета вплетения + демо-комплекты."""
+def _ensure_vsy_golova_catalog_and_kits(db: Session, *, include_demo_kits: bool) -> None:
+    """Каталоги из JSON + анкета вплетения + (опционально) демо-комплекты."""
     ensure_vsy_golova_catalog(db)
     ensure_zakaz_catalog(db)
     ensure_malishki_muzhchiny_catalog(db)
@@ -739,6 +767,9 @@ def _ensure_vsy_golova_catalog_and_kits(db: Session) -> None:
 
     _ensure_zakaz_products_catalog(db)
     _ensure_prodazha_materiala_products_catalog(db)
+
+    if (not include_demo_kits) or db.scalar(select(Kit).limit(1)):
+        return
 
     if not db.scalar(select(Kit).where(Kit.sku == "DEMO-001")):
         db.add(
