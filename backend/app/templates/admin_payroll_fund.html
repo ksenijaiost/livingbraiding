@@ -165,6 +165,91 @@
       <p class="muted" style="margin:12px 0 0;">Положительная сумма списывает фонд; отрицательная записывает возврат в фонд. Проводки не редактируются — при ошибке добавьте новую запись.</p>
     </div>
 
+    <div class="card" style="margin-top: 16px;">
+      <h3 style="margin-top:0;">Корректировка / начальный остаток</h3>
+      <p class="muted" style="margin-top:-6px;">
+        Для переноса балансов из «реального мира» можно внести ручную проводку (дельту) или установить баланс фонда в нужное значение (будет записана разница).
+      </p>
+      <form method="post" action="/admin/payroll-fund/adjust">
+        <div class="pf-adj-grid" style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 32px; align-items:start;">
+          <div>
+            <div class="muted" style="margin-bottom:6px;">Фонд</div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="radio" name="side" value="MASTER" checked />
+                <span>Фонд сотрудника</span>
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="radio" name="side" value="STUDIO" />
+                <span>Фонд студии</span>
+              </label>
+            </div>
+          </div>
+          <div>
+            <label for="pf_adj_user">Сотрудник (для фонда сотрудника)</label>
+            <select name="user_id" id="pf_adj_user" style="width:100%; max-width:100%; box-sizing:border-box;">
+              {% for row in payout_user_options %}
+                <option value="{{ row.user.id }}">{{ row.user.display_name }} ({{ row.roles_ru }})</option>
+              {% endfor %}
+            </select>
+            <p class="muted" style="margin:6px 0 0;">Если выбран «Фонд студии», поле игнорируется.</p>
+          </div>
+          <div>
+            <label for="pf_adj_mode">Режим</label>
+            <select name="mode" id="pf_adj_mode" style="width:100%; max-width:100%; box-sizing:border-box;">
+              <option value="set" selected>Установить баланс</option>
+              <option value="delta">Внести дельту</option>
+            </select>
+            <p class="muted" style="margin:6px 0 0;">«Установить баланс» запишет разницу между текущим и желаемым значением.</p>
+          </div>
+          <div>
+            <div id="pf_adj_balance_hint" class="muted" style="margin-bottom:6px; min-height:1.35em;">Текущий баланс: —</div>
+            <label for="pf_adj_amount">Сумма, руб.</label>
+            <input type="text" name="amount" id="pf_adj_amount" required placeholder="0.00" style="width:100%; max-width:100%; box-sizing:border-box;" />
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <label for="pf_adj_comment">Комментарий</label>
+            <input type="text" name="comment" id="pf_adj_comment" placeholder="Например: стартовый баланс на дату …" style="width:100%; max-width:100%; box-sizing:border-box;" />
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <button type="submit">Записать корректировку</button>
+          </div>
+        </div>
+      </form>
+      <style>
+        @media (max-width: 640px) {
+          .pf-adj-grid { grid-template-columns: 1fr !important; }
+        }
+      </style>
+      <script>
+        (function () {
+          var elData = document.getElementById("pf-fund-balances-data");
+          var hint = document.getElementById("pf_adj_balance_hint");
+          var sel = document.getElementById("pf_adj_user");
+          var data = { studio: 0, employees: {} };
+          try { if (elData && elData.textContent) data = JSON.parse(elData.textContent); } catch (e) {}
+          function fmt(n) { var x = Number(n); if (!isFinite(x)) x = 0; return x.toFixed(2); }
+          function currentSide() { var r = document.querySelector('input[name=\"side\"]:checked'); return r ? r.value : \"MASTER\"; }
+          function syncHint() {
+            if (!hint) return;
+            var side = currentSide();
+            var v, label;
+            if (side === "STUDIO") { v = data.studio; label = "Текущий баланс фонда студии"; }
+            else {
+              var uid = sel && sel.value ? String(sel.value) : \"\";
+              v = (data.employees && uid) ? data.employees[uid] : 0;
+              if (v === undefined || v === null) v = 0;
+              label = "Текущий баланс фонда сотрудника";
+            }
+            hint.textContent = label + ": " + fmt(v) + " руб.";
+          }
+          document.querySelectorAll('input[name=\"side\"]').forEach(function (inp) { inp.addEventListener(\"change\", syncHint); });
+          if (sel) sel.addEventListener(\"change\", syncHint);
+          syncHint();
+        })();
+      </script>
+    </div>
+
     <h3 style="margin-top: 24px;">Журнал (последние записи)</h3>
     {% if ledger_rows %}
       <div style="overflow-x:auto;">

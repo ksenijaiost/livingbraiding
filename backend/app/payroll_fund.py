@@ -370,6 +370,42 @@ def post_payout(
     )
 
 
+def post_manual_adjustment(
+    db: Session,
+    *,
+    side: PayrollFundSide,
+    user_id: int | None,
+    amount_delta: float,
+    created_by_user_id: int,
+    comment: str | None,
+) -> None:
+    """Manual adjustment (including initial balances).
+
+    Uses source_kind=MANUAL and entry_kind=ACCRUAL. The delta may be negative.
+    """
+    amt = money_q2(float(amount_delta))
+    if amt == 0:
+        raise ValueError("Сумма не может быть нулевой")
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.ACCRUAL,
+        side=side,
+        user_id=user_id,
+        amount=amt,
+        source_kind=PayrollFundSourceKind.MANUAL,
+        source_id=None,
+        created_by_user_id=created_by_user_id,
+        comment=(comment or "").strip() or None,
+    )
+
+
+def current_fund_balance(db: Session, *, side: PayrollFundSide, user_id: int | None) -> float:
+    if side == PayrollFundSide.STUDIO:
+        return studio_fund_balance(db)
+    if user_id is None:
+        raise ValueError("MASTER требует user_id")
+    return employee_fund_balance(db, int(user_id))
+
 def ledger_balances(db: Session) -> tuple[list[dict], float]:
     """Сальдо: мастера списком + студия одной суммой."""
     stmt = (
