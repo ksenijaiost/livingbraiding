@@ -152,6 +152,13 @@ def post_visit_accruals(db: Session, visit: Visit, created_by_user_id: int | Non
             created_by_user_id=created_by_user_id,
         )
 
+    append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
+
+
+def append_visit_master_pool_and_mix_bonus_ledgers(
+    db: Session, visit: Visit, created_by_user_id: int | None
+) -> None:
+    """Начисления мастерам с визита: доля от masters_pool + бонус за смешку (без проводки студии)."""
     mp = float(visit.masters_pool or 0)
     masters = list(
         db.scalars(select(VisitMaster).where(VisitMaster.visit_id == visit.id).order_by(VisitMaster.id.asc())).all()
@@ -184,6 +191,51 @@ def post_visit_accruals(db: Session, visit: Visit, created_by_user_id: int | Non
             source_id=visit.id,
             created_by_user_id=created_by_user_id,
         )
+
+
+def _has_master_side_accrual_for_visit(db: Session, visit_id: int) -> bool:
+    return (
+        db.scalar(
+            select(PayrollFundLedger.id)
+            .where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == visit_id,
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+                PayrollFundLedger.side == PayrollFundSide.MASTER,
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
+def backfill_visit_master_accruals_if_missing(db: Session, visit: Visit, created_by_user_id: int | None) -> None:
+    """
+    Восстановление после бага: студия уже в журнале, а строки мастеров не создались
+    (VisitMaster не были flush до первого post_visit_accruals).
+    """
+    if visit.is_cancelled:
+        return
+    if not _has_accruals_for_source(db, PayrollFundSourceKind.VISIT, visit.id):
+        return
+    if _has_master_side_accrual_for_visit(db, visit.id):
+        return
+    mp = float(visit.masters_pool or 0)
+    bonus_amt = money_q2(float(visit.mix_bonus_amount or 0))
+    masters = list(
+        db.scalars(select(VisitMaster).where(VisitMaster.visit_id == visit.id).order_by(VisitMaster.id.asc())).all()
+    )
+    if mp <= 0 and bonus_amt <= 0:
+        return
+    if mp > 0 and not masters:
+        return
+    append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
+
+
+def backfill_all_visit_master_accruals_if_missing(db: Session) -> None:
+    """Проход по всем визитам: восстановить начисления мастерам после частичного первого прохода."""
+    for visit in db.scalars(select(Visit).where(Visit.is_cancelled.is_(False))).all():
+        backfill_visit_master_accruals_if_missing(db, visit, visit.created_by_user_id)
 
 
 def post_work_accruals(
@@ -519,6 +571,7 @@ def sync_operational_payroll_postings(db: Session) -> None:
     """
     for visit in db.scalars(select(Visit).where(Visit.is_cancelled.is_(False))).all():
         post_visit_accruals(db, visit, visit.created_by_user_id)
+        backfill_visit_master_accruals_if_missing(db, visit, visit.created_by_user_id)
 
     for sale in db.scalars(select(ProductSale).where(ProductSale.is_voided.is_(False))).all():
         if not _has_accruals_for_source(db, PayrollFundSourceKind.PRODUCT_SALE, sale.id):

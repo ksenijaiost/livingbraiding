@@ -33,6 +33,7 @@ from app.display_time import get_display_timezone
 from app.forms_parse import parse_int
 from app.media_store import get_nonempty_upload, save_upload_image
 from app.kit_inlay_visit import (
+    AMORTIZATION_LEVEL_RUBLES,
     collect_questionnaire_prefill_from_form,
     get_salon_cut_pct,
     list_master_visit_services_catalog,
@@ -200,6 +201,8 @@ def _master_visit_step1_template_response(
             salon_cut_pct=salon_cut_pct,
             material_price_per_gram_json=json.dumps(material_price_per_gram, ensure_ascii=False),
             mix_complexity_rates_json=json.dumps(mix_rates_meta_json_dict(db), ensure_ascii=False),
+            amortization_rubles=AMORTIZATION_LEVEL_RUBLES,
+            amortization_rubles_json=json.dumps(AMORTIZATION_LEVEL_RUBLES, ensure_ascii=False),
             visit_master_level_ru=ru_master_level(current_user.master_level),
             default_date=performed,
             form_prefill=form_prefill,

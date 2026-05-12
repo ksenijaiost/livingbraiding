@@ -14,11 +14,13 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
+from app.access_logging import AccessLogWithUserMiddleware, configure_request_access_logging
 from app.admin_questionnaire_fields import router as admin_questionnaire_fields_router
 from app.admin_service_catalog import router as admin_service_catalog_router
 from app.audit_retention import purge_expired_audit_logs_startup_safe
 from app.bootstrap import ensure_initial_techspec_user
 from app.db.session import get_db
+from app.payroll_fund import backfill_all_visit_master_accruals_if_missing
 from app.seed import ensure_dev_seed_data, ensure_prod_seed_data
 
 from app import admin_studio_expenses as admin_studio_expenses_routes
@@ -26,6 +28,7 @@ from app import product_sales as product_sales_routes
 from app import work_products as work_products_routes
 
 app = FastAPI(title="livingbraiding")
+app.add_middleware(AccessLogWithUserMiddleware)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(admin_service_catalog_router)
 app.include_router(admin_questionnaire_fields_router)
@@ -86,7 +89,8 @@ app.include_router(auth_routes_router)
 
 @app.on_event("startup")
 def _startup():
-    """Optional dev seed + audit retention."""
+    """Access-лог (время, user) + optional dev seed + audit retention."""
+    configure_request_access_logging()
     db = next(get_db())
     try:
         try:
@@ -101,5 +105,7 @@ def _startup():
             ensure_prod_seed_data(db)
         ensure_initial_techspec_user(db)
         purge_expired_audit_logs_startup_safe(db)
+        backfill_all_visit_master_accruals_if_missing(db)
+        db.commit()
     finally:
         db.close()

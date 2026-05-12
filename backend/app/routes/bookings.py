@@ -46,12 +46,16 @@ from app.db.models import (
 from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_bool, parse_float, parse_int
-from app.kit_inlay_visit import get_kit_max_reserves_per_kit, kit_reserve_slots_used
+from app.kit_inlay_visit import (
+    get_kit_max_reserves_per_kit,
+    kit_reserve_slots_used,
+    list_master_visit_services_catalog,
+    service_requires_kit_block,
+)
 from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
 from app.time_utils import utcnow_naive
 from app.user_roles import select_users_with_any_role, select_users_with_role
 from app.work_products import _rubber_type_items
-from app.kit_inlay_visit import list_master_visit_services_catalog
 from app.webui import templates, ctx as _ctx
 
 
@@ -511,7 +515,33 @@ def _booking_work_new_query_params(db: Session, b: Booking, details: dict[str, A
     return q
 
 
-def _booking_details_from_form(fp: dict[str, str]) -> dict[str, object]:
+# Поля комплекта/коррекции брони визита — только для услуг с блоком комплекта (иначе из скрытой формы уезжали дефолты).
+_BOOKING_VISIT_KIT_DETAIL_KEYS: frozenset[str] = frozenset(
+    (
+        "visit_kit_mode",
+        "visit_stock_kit_id",
+        "visit_stock_kit_pieces",
+        "visit_own_need_correction",
+        "visit_own_need_extra_blanks",
+        "visit_extra_blanks_mode",
+        "visit_extra_stock_kit_id",
+        "visit_extra_stock_kit_pieces",
+        "visit_order_blanks_qty",
+        "visit_order_blanks_desc",
+        "visit_extra_order_blanks_qty",
+        "visit_extra_order_blanks_desc",
+        "corr_trim_qty",
+        "corr_hourly_hours",
+        "corr_kit_description",
+        "corr_kit_blanks_count",
+        "corr_wash",
+        "corr_steam",
+        "corr_circle",
+    )
+)
+
+
+def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, object]:
     kind_raw = str(fp.get("kind") or "").strip() or BookingKind.VISIT.value
     product_kind = str(fp.get("product_kind") or "").strip()
     checkbox_keys = (
@@ -587,6 +617,21 @@ def _booking_details_from_form(fp: dict[str, str]) -> dict[str, object]:
             if key.startswith("corr_") and sv in ("0", "0.0"):
                 continue
             d[key] = sv
+
+    if kind_raw == BookingKind.VISIT.value:
+        strip_visit_kit_keys = True
+        try:
+            sid = parse_int(str(fp.get("service_id") or "").strip(), min=1, field_name="service_id")
+        except ValueError:
+            sid = 0
+        if sid > 0:
+            svc = db.get(Service, sid)
+            if svc is not None:
+                strip_visit_kit_keys = not service_requires_kit_block(svc)
+        if strip_visit_kit_keys:
+            for k in _BOOKING_VISIT_KIT_DETAIL_KEYS:
+                d.pop(k, None)
+
     return {k: v for k, v in d.items() if not (isinstance(v, str) and str(v).strip() == "")}
 
 
@@ -930,7 +975,7 @@ async def admin_booking_new_post(
         comment=comment,
         planned_service_id=planned_service_id,
         planned_product_kind=planned_product_kind,
-        details_json=json.dumps(_booking_details_from_form(fp), ensure_ascii=False),
+        details_json=json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False),
     )
     db.add(booking)
     db.flush()
@@ -951,7 +996,7 @@ async def admin_booking_new_post(
     _sync_booking_staff_rows_for_sale(db, booking_id=booking.id, fp=fp, form_raw=form_raw)
     _apply_booking_auto_reserves(db, booking_client_id=booking.client_id, fp=fp, changed_by_user_id=current_user.id)
     _refresh_sale_order_master_ids_in_fp(db, booking_id=booking.id, fp=fp)
-    booking.details_json = json.dumps(_booking_details_from_form(fp), ensure_ascii=False)
+    booking.details_json = json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False)
     db.commit()
     return RedirectResponse(url=f"/bookings/{booking.id}", status_code=303)
 
@@ -1339,7 +1384,7 @@ async def admin_booking_edit_post(
     b.comment = comment
     b.planned_service_id = planned_service_id
     b.planned_product_kind = planned_product_kind
-    b.details_json = json.dumps(_booking_details_from_form(fp), ensure_ascii=False)
+    b.details_json = json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False)
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
 
@@ -1354,7 +1399,7 @@ async def admin_booking_edit_post(
     _sync_booking_staff_rows_for_sale(db, booking_id=b.id, fp=fp, form_raw=form_raw)
     _apply_booking_auto_reserves(db, booking_client_id=b.client_id, fp=fp, changed_by_user_id=current_user.id)
     _refresh_sale_order_master_ids_in_fp(db, booking_id=b.id, fp=fp)
-    b.details_json = json.dumps(_booking_details_from_form(fp), ensure_ascii=False)
+    b.details_json = json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False)
     after_details_json = b.details_json
     after_visit_masters = _audit_user_names(db, on_ids if kind_raw == BookingKind.VISIT.value else [])
     after_sale_staff = _audit_sale_order_masters_label(db, b.id)
