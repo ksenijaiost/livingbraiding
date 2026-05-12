@@ -120,6 +120,12 @@ def _get_session_payload(request: Request) -> tuple[Optional[int], Optional[str]
     return None, None
 
 
+def optional_session_user_id(request: Request) -> Optional[int]:
+    """Идентификатор пользователя из подписанной сессии или None (без редиректа на /login)."""
+    user_id, _ = _get_session_payload(request)
+    return user_id
+
+
 def get_current_user(
     request: Request,
     db: Annotated[Session, Depends(get_db)],

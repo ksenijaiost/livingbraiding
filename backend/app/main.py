@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
+from app.access_logging import AccessLogWithUserMiddleware, configure_request_access_logging
 from app.admin_questionnaire_fields import router as admin_questionnaire_fields_router
 from app.admin_service_catalog import router as admin_service_catalog_router
 from app.audit_retention import purge_expired_audit_logs_startup_safe
@@ -26,6 +27,7 @@ from app import product_sales as product_sales_routes
 from app import work_products as work_products_routes
 
 app = FastAPI(title="livingbraiding")
+app.add_middleware(AccessLogWithUserMiddleware)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(admin_service_catalog_router)
 app.include_router(admin_questionnaire_fields_router)
@@ -86,7 +88,8 @@ app.include_router(auth_routes_router)
 
 @app.on_event("startup")
 def _startup():
-    """Optional dev seed + audit retention."""
+    """Access-лог (время, user) + optional dev seed + audit retention."""
+    configure_request_access_logging()
     db = next(get_db())
     try:
         try:
