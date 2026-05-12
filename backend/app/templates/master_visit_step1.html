@@ -211,15 +211,15 @@
           <div style="font-weight: 600; margin-bottom: 8px;">Амортизация *</div>
           <label style="display: block; margin-bottom: 6px;">
             <input type="radio" name="amortization_level" value="MIN" {% if not fp.get('amortization_level') or fp.get('amortization_level') == 'MIN' %}checked{% endif %} />
-            Минимальная
+            Минимальная — {{ (amortization_rubles.get('MIN') or 0)|int }} ₽
           </label>
           <label style="display: block; margin-bottom: 6px;">
             <input type="radio" name="amortization_level" value="MID" {% if fp.get('amortization_level') == 'MID' %}checked{% endif %} />
-            Средняя <span class="muted">(включая украшения, резинки и пр.)</span>
+            Средняя <span class="muted">(включая украшения, резинки и пр.)</span> — {{ (amortization_rubles.get('MID') or 0)|int }} ₽
           </label>
           <label style="display: block; margin-bottom: 0;">
             <input type="radio" name="amortization_level" value="MAX" {% if fp.get('amortization_level') == 'MAX' %}checked{% endif %} />
-            Увеличенная <span class="muted">(включая средства для волос и пр.)</span>
+            Увеличенная <span class="muted">(включая средства для волос и пр.)</span> — {{ (amortization_rubles.get('MAX') or 0)|int }} ₽
           </label>
         </div>
       </div>
@@ -848,6 +848,7 @@
     const salonCutPct = {{ salon_cut_pct|float }};
     const materialPricePerGram = {{ (material_price_per_gram_json or '{}') | safe }};
     const mixComplexityRatesPerGram = {{ (mix_complexity_rates_json or '{}') | safe }};
+    const amortizationRublesByLevel = {{ (amortization_rubles_json or '{}') | safe }};
 
     let selectedMainStockKit = null;
     let selectedExtraStockKit = null;
@@ -935,7 +936,7 @@
 
       const amort = (function () {
         const v = (document.querySelector('input[name="amortization_level"]:checked') || {}).value || 'MIN';
-        return { MIN: 100.0, MID: 200.0, MAX: 500.0 }[v] || 0;
+        return parseFloat(amortizationRublesByLevel[v]) || 0;
       })();
 
       let kitCostTotal = 0;

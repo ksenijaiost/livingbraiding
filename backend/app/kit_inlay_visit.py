@@ -44,6 +44,13 @@ from app.mix_rates import mix_complexity_rate_for
 from app.forms_parse import parse_bool, parse_date_iso, parse_float
 from app.setting_keys import KIT_MAX_RESERVES_PER_KIT, SALON_CUT_PCT
 
+# Фиксированные суммы амортизации по уровню (себестоимость визита); подписи на форме — из этого же словаря.
+AMORTIZATION_LEVEL_RUBLES: dict[str, float] = {
+    AmortizationLevel.MIN.value: 100.0,
+    AmortizationLevel.MID.value: 200.0,
+    AmortizationLevel.MAX.value: 500.0,
+}
+
 
 def get_kit_max_reserves_per_kit(db: Session) -> int:
     row = db.get(Setting, KIT_MAX_RESERVES_PER_KIT)
@@ -930,7 +937,7 @@ def save_kit_inlay_visit(
 
     amort_amount = 0.0
     if inp.amortization_level is not None:
-        amort_amount = {"MIN": 100.0, "MID": 200.0, "MAX": 500.0}[inp.amortization_level.value]
+        amort_amount = float(AMORTIZATION_LEVEL_RUBLES.get(inp.amortization_level.value, 0.0))
 
     # Расходы до распределения
     cost_total = mat_cost + kit_cost_total + addons + mix_cost + amort_amount
