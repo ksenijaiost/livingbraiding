@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -38,6 +39,15 @@ from app.webui import templates, ctx as _ctx
 router = APIRouter()
 
 
+def _visits_list_url(*, mine_only: bool, show_cancelled: bool) -> str:
+    q: dict[str, str] = {}
+    if mine_only:
+        q["mine"] = "1"
+    if show_cancelled:
+        q["show_cancelled"] = "1"
+    return "/visits" + ("?" + urlencode(q) if q else "")
+
+
 def _redirect_admin_visits_to_canon(request: Request, *, visit_id: int | None = None) -> RedirectResponse:
     """Старые URL под /admin/visits → канон /visits (GET, постоянный редирект)."""
     if visit_id is None:
@@ -60,12 +70,16 @@ def admin_visits_legacy_redirect(
 def admin_visits(
     request: Request,
     mine: str | None = Query(None),
+    show_cancelled: str | None = Query(None),
     current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
     mine_raw = (mine or "").strip().lower()
     visits_mine_only = mine_raw in ("1", "true", "yes", "only")
+    visits_show_cancelled = parse_bool(show_cancelled)
     stmt = select(Visit).options(selectinload(Visit.client), selectinload(Visit.services))
+    if not visits_show_cancelled:
+        stmt = stmt.where(Visit.is_cancelled.is_(False))
     if visits_mine_only:
         stmt = stmt.where(
             or_(
@@ -82,6 +96,11 @@ def admin_visits(
             current_user=current_user,
             visits=visits,
             visits_mine_only=visits_mine_only,
+            visits_show_cancelled=visits_show_cancelled,
+            visits_url_scope_all=_visits_list_url(mine_only=False, show_cancelled=visits_show_cancelled),
+            visits_url_scope_mine=_visits_list_url(mine_only=True, show_cancelled=visits_show_cancelled),
+            visits_url_active_only=_visits_list_url(mine_only=visits_mine_only, show_cancelled=False),
+            visits_url_include_cancelled=_visits_list_url(mine_only=visits_mine_only, show_cancelled=True),
         ),
     )
 

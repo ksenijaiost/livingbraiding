@@ -570,7 +570,7 @@ def admin_client_detail(
 
     visits_stmt = (
         select(Visit)
-        .where(Visit.client_id == client_id, Visit.is_cancelled.is_(False))
+        .where(Visit.client_id == client_id)
         .options(selectinload(Visit.services))
         .order_by(Visit.performed_date.desc())
     )
@@ -580,7 +580,7 @@ def admin_client_detail(
     kit_stmt = (
         select(VisitKitUsage)
         .join(Visit, VisitKitUsage.visit_id == Visit.id)
-        .where(Visit.client_id == client_id, Visit.is_cancelled.is_(False))
+        .where(Visit.client_id == client_id)
         .options(selectinload(VisitKitUsage.kit), selectinload(VisitKitUsage.visit))
         .order_by(Visit.performed_date.desc(), VisitKitUsage.id.asc())
     )

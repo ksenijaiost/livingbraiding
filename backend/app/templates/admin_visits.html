@@ -3,17 +3,30 @@
   <div class="card">
     <h2 style="margin-top: 0;">Визиты</h2>
     <p><a href="/sales/work">Работа с товарами</a></p>
-    <p class="muted" style="margin-bottom:8px;">Список последних визитов (до 200).</p>
-    <p style="margin:0 0 12px;font-size:13px;">
+    <p class="muted" style="margin-bottom:8px;">
+      Список последних визитов (до 200). По умолчанию скрыты аннулированные — их можно показать отдельной ссылкой ниже.
+    </p>
+    <p style="margin:0 0 8px;font-size:13px;">
       {% if visits_mine_only %}
         <strong>Мои визиты</strong>
         <span class="muted">·</span>
-        <a href="/visits">Все визиты</a>
+        <a href="{{ visits_url_scope_all }}">Все визиты</a>
       {% else %}
         <strong>Все визиты</strong>
         <span class="muted">·</span>
-        <a href="/visits?mine=1">Только мои</a>
+        <a href="{{ visits_url_scope_mine }}">Только мои</a>
         <span class="muted">(где вы в долях мастеров или бонус за смешку)</span>
+      {% endif %}
+    </p>
+    <p style="margin:0 0 12px;font-size:13px;">
+      {% if visits_show_cancelled %}
+        <strong>С аннулированными</strong>
+        <span class="muted">·</span>
+        <a href="{{ visits_url_active_only }}">Только действующие</a>
+      {% else %}
+        <strong>Только действующие</strong>
+        <span class="muted">·</span>
+        <a href="{{ visits_url_include_cancelled }}">Показать с аннулированными</a>
       {% endif %}
     </p>
     <table>
@@ -31,8 +44,13 @@
       </thead>
       <tbody>
         {% for v in visits %}
-          <tr>
-            <td><a href="/visits/{{ v.id }}">{{ v.id }}</a></td>
+          <tr{% if v.is_cancelled %} class="lb-visit-row-cancelled"{% endif %}>
+            <td>
+              <a href="/visits/{{ v.id }}">{{ v.id }}</a>
+              {% if v.is_cancelled %}
+                <span title="Визит аннулирован"> ❌ аннулирован</span>
+              {% endif %}
+            </td>
             <td>
               <a href="/visits/{{ v.id }}">{{ v.performed_date.strftime("%d.%m.%Y") }}</a>
             </td>

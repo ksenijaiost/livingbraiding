@@ -167,6 +167,11 @@
 .lb-va-mid { vertical-align: middle; }
 .lb-text-right { text-align: right; }
 
+.lb-visit-row-cancelled {
+  opacity: 0.72;
+  color: #64748b;
+}
+
 .lb-btn-disabled {
   opacity: 0.45;
   cursor: not-allowed;
