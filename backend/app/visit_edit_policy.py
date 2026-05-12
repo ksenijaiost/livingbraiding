@@ -97,7 +97,7 @@ def visit_client_change_policy(visit: Visit, user: AuthUser, db: Session) -> Vis
     days = edit_window_days(db)
     inside = within_edit_window(visit, days)
 
-    if user.role == UserRole.ADMIN_SUPER:
+    if UserRole.ADMIN_SUPER in user.roles:
         return VisitClientChangePolicy(
             can_change=True,
             message_when_blocked="",

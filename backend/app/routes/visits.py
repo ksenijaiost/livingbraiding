@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import AuthUser, require_role
+from app.auth import AuthUser, require_assigned_roles, require_role
 from app.time_utils import utcnow_naive
 from app.db.session import get_db
 from app.db.models import (
@@ -224,7 +224,7 @@ def _visit_cancel_revert_stock(db: Session, visit: Visit) -> tuple[bool, str]:
 @router.post("/admin/visits/{visit_id}/cancel")
 async def admin_visit_cancel(
     visit_id: int,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_assigned_roles(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     visit = db.scalar(

@@ -151,7 +151,7 @@
       <p class="muted">{{ kit_usages_note }}</p>
     {% endif %}
 
-    {% if current_user and current_user.role.value == "ADMIN_SUPER" and not visit.is_cancelled and not visit_closed_period %}
+    {% if current_user and UserRole.ADMIN_SUPER in current_user.roles and not visit.is_cancelled and not visit_closed_period %}
       <div class="card" style="margin-top: 14px; border-color:#fecaca; background:#fff1f2;">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
           <strong>Аннулирование</strong>
@@ -171,7 +171,7 @@
       </div>
     {% endif %}
 
-    {% if current_user and current_user.role.value == "ADMIN_SUPER" %}
+    {% if current_user and UserRole.ADMIN_SUPER in current_user.roles %}
       <h3>История изменений</h3>
       {% set n = (audit_rows|length if audit_rows else 0) %}
       {% if n > 0 %}
