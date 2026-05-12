@@ -163,3 +163,14 @@ def require_role(*roles: UserRole):
         return user
 
     return _dep
+
+
+def require_techspec_user():
+    """Только пользователи с ролью TECHSPEC (опасные операции: бэкап/восстановление медиа)."""
+
+    def _dep(user: Annotated[AuthUser, Depends(get_current_user)]) -> AuthUser:
+        if UserRole.TECHSPEC not in user.roles:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return user
+
+    return _dep
