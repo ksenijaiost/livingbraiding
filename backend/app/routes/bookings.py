@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import UploadFile
-from sqlalchemy import and_, case, exists, func, or_, select
+from sqlalchemy import and_, case, delete, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.audit import FieldChange, diff_fields, write_audit_rows
@@ -1388,8 +1388,9 @@ async def admin_booking_edit_post(
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
 
-    for bm in list(b.masters or []):
-        db.delete(bm)
+    db.execute(delete(BookingMaster).where(BookingMaster.booking_id == b.id))
+    db.flush()
+    db.expire(b, ["masters"])
     if kind_raw == BookingKind.VISIT.value:
         for mid in on_ids:
             if db.get(User, mid) is None:
