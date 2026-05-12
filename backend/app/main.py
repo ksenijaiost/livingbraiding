@@ -83,6 +83,8 @@ from app.routes.public_pages import router as public_pages_router  # noqa: E402
 app.include_router(public_pages_router)
 from app.routes.media import router as media_router  # noqa: E402
 app.include_router(media_router)
+from app.routes.techspec_media import router as techspec_media_router  # noqa: E402
+app.include_router(techspec_media_router)
 from app.routes.auth_routes import router as auth_routes_router  # noqa: E402
 app.include_router(auth_routes_router)
 
