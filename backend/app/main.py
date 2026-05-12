@@ -20,6 +20,7 @@ from app.admin_service_catalog import router as admin_service_catalog_router
 from app.audit_retention import purge_expired_audit_logs_startup_safe
 from app.bootstrap import ensure_initial_techspec_user
 from app.db.session import get_db
+from app.payroll_fund import backfill_all_visit_master_accruals_if_missing
 from app.seed import ensure_dev_seed_data, ensure_prod_seed_data
 
 from app import admin_studio_expenses as admin_studio_expenses_routes
@@ -104,5 +105,7 @@ def _startup():
             ensure_prod_seed_data(db)
         ensure_initial_techspec_user(db)
         purge_expired_audit_logs_startup_safe(db)
+        backfill_all_visit_master_accruals_if_missing(db)
+        db.commit()
     finally:
         db.close()

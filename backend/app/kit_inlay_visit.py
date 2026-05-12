@@ -1016,6 +1016,7 @@ def save_kit_inlay_visit(
 
     for mid, pct in master_rows:
         db.add(VisitMaster(visit_id=visit.id, master_id=mid, percent=pct))
+    db.flush()
 
     details = payload.model_dump(mode="json")
     db.add(
