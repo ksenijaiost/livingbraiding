@@ -87,7 +87,7 @@ def _booking_kind_label(k: str) -> str:
 
 def _booking_status_label(s: str) -> str:
     if s == BookingStatus.ACTIVE.value:
-        return "активна"
+        return "⌛ активна"
     if s == BookingStatus.DONE.value:
         return "✅ выполнена"
     if s == BookingStatus.CANCELLED.value:
