@@ -1301,6 +1301,14 @@ function initKitClearReservesUI() {
       line2.textContent = (item.when || "") + " · " + (item.author || "");
       right.appendChild(line1);
       right.appendChild(line2);
+      if (item.booking_line) {
+        var line3 = document.createElement("div");
+        line3.className = "muted";
+        line3.style.fontSize = "12px";
+        line3.style.marginTop = "2px";
+        line3.textContent = item.booking_line;
+        right.appendChild(line3);
+      }
       wrap.appendChild(cb);
       wrap.appendChild(right);
       box.appendChild(wrap);

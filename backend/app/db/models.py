@@ -546,11 +546,13 @@ class KitReserve(Base):
     reserved_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     reserved_for_client_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("clients.id"), nullable=True)
     reserved_for_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    booking_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("bookings.id", ondelete="SET NULL"), nullable=True)
 
     kit: Mapped["Kit"] = relationship(back_populates="reserves")
     reserved_by_user: Mapped["User"] = relationship(foreign_keys=[reserved_by_user_id])
     reserved_for_client: Mapped["Client | None"] = relationship(foreign_keys=[reserved_for_client_id])
     reserved_for_user: Mapped["User | None"] = relationship(foreign_keys=[reserved_for_user_id])
+    booking: Mapped["Booking | None"] = relationship(back_populates="kit_reserves")
 
 
 class KitAuthorStaff(Base):
@@ -652,6 +654,7 @@ class Booking(Base):
         back_populates="booking",
         cascade="all, delete-orphan",
     )
+    kit_reserves: Mapped[list["KitReserve"]] = relationship(back_populates="booking")
 
 
 class BookingMaster(Base):

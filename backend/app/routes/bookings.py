@@ -387,6 +387,7 @@ def try_auto_complete_booking(db: Session, booking_id: int) -> None:
             FieldChange("status", _booking_status_label(old_status.value), _booking_status_label(BookingStatus.DONE.value))
         ],
     )
+    release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=None)
 
 
 def _amount_hint_from_booking(b: Booking) -> str:
@@ -672,7 +673,37 @@ def _sync_booking_staff_rows_for_sale(db: Session, *, booking_id: int, fp: dict[
     db.flush()
 
 
-def _apply_booking_auto_reserves(db: Session, *, booking_client_id: int, fp: dict[str, str], changed_by_user_id: int) -> None:
+def release_booking_kit_reserves(db: Session, *, booking_id: int, changed_by_user_id: int | None) -> None:
+    """Вернуть заготовки на склад и удалить строки резерва, привязанные к брони."""
+    rows = list(
+        db.scalars(
+            select(KitReserve).where(KitReserve.booking_id == int(booking_id)).order_by(KitReserve.id.asc())
+        ).all()
+    )
+    for r in rows:
+        kit = db.get(Kit, r.kit_id)
+        if kit is None:
+            db.delete(r)
+            continue
+        before = SimpleNamespace(pieces_available=kit.pieces_available)
+        kit.pieces_available = int(kit.pieces_available or 0) + int(r.pieces_reserved or 0)
+        kit.updated_at = utcnow_naive()
+        if changed_by_user_id is not None:
+            kit.updated_by_user_id = changed_by_user_id
+        db.delete(r)
+        write_audit_rows(
+            db,
+            log_model=KitAuditLog,
+            entity_field="kit_id",
+            entity_id=kit.id,
+            changed_by_user_id=changed_by_user_id,
+            changes=diff_fields(before, kit, ("pieces_available",)),
+        )
+
+
+def _apply_booking_auto_reserves(
+    db: Session, *, booking_id: int, booking_client_id: int, fp: dict[str, str], changed_by_user_id: int
+) -> None:
     def _reserve_kit(kit_id_raw: str | None, pieces_field: str | None) -> None:
         if not kit_id_raw:
             return
@@ -707,6 +738,7 @@ def _apply_booking_auto_reserves(db: Session, *, booking_client_id: int, fp: dic
                 reserved_by_user_id=changed_by_user_id,
                 reserved_for_client_id=booking_client_id,
                 reserved_for_user_id=None,
+                booking_id=int(booking_id),
             )
         )
         write_audit_rows(
@@ -994,7 +1026,13 @@ async def admin_booking_new_post(
             db.add(BookingMaster(booking_id=booking.id, master_id=mid))
 
     _sync_booking_staff_rows_for_sale(db, booking_id=booking.id, fp=fp, form_raw=form_raw)
-    _apply_booking_auto_reserves(db, booking_client_id=booking.client_id, fp=fp, changed_by_user_id=current_user.id)
+    _apply_booking_auto_reserves(
+        db,
+        booking_id=booking.id,
+        booking_client_id=booking.client_id,
+        fp=fp,
+        changed_by_user_id=current_user.id,
+    )
     _refresh_sale_order_master_ids_in_fp(db, booking_id=booking.id, fp=fp)
     booking.details_json = json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False)
     db.commit()
@@ -1026,6 +1064,15 @@ def admin_booking_detail(
     linked_visit_id = db.scalar(select(Visit.id).where(Visit.booking_id == booking_id).limit(1))
     linked_sale_id = db.scalar(select(ProductSale.id).where(ProductSale.booking_id == booking_id).limit(1))
     linked_work_id = db.scalar(select(WorkForInventory.id).where(WorkForInventory.booking_id == booking_id).limit(1))
+
+    booking_kit_reserves = list(
+        db.scalars(
+            select(KitReserve)
+            .where(KitReserve.booking_id == booking_id)
+            .options(selectinload(KitReserve.kit))
+            .order_by(KitReserve.id.asc())
+        ).all()
+    )
 
     sale_staff = list(
         db.scalars(
@@ -1134,6 +1181,7 @@ def admin_booking_detail(
             work_create_url=work_create_url,
             visit_create_url=visit_create_url,
             sale_create_url=sale_create_url,
+            booking_kit_reserves=booking_kit_reserves,
         ),
     )
 
@@ -1398,7 +1446,14 @@ async def admin_booking_edit_post(
             db.add(BookingMaster(booking_id=b.id, master_id=mid))
 
     _sync_booking_staff_rows_for_sale(db, booking_id=b.id, fp=fp, form_raw=form_raw)
-    _apply_booking_auto_reserves(db, booking_client_id=b.client_id, fp=fp, changed_by_user_id=current_user.id)
+    release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
+    _apply_booking_auto_reserves(
+        db,
+        booking_id=b.id,
+        booking_client_id=b.client_id,
+        fp=fp,
+        changed_by_user_id=current_user.id,
+    )
     _refresh_sale_order_master_ids_in_fp(db, booking_id=b.id, fp=fp)
     b.details_json = json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False)
     after_details_json = b.details_json
@@ -1538,6 +1593,7 @@ def admin_booking_cancel(
     b.cancelled_reason = reason_norm[:2000]
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
+    release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
     db.commit()
     write_audit_rows(
         db,
@@ -1567,6 +1623,7 @@ def admin_booking_mark_done(
     b.status = BookingStatus.DONE
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
+    release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
     write_audit_rows(
         db,
         log_model=BookingAuditLog,

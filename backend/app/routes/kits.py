@@ -121,6 +121,8 @@ def _kit_reservation_tooltip(kit: Kit, db: Session) -> str:
             who.append(f"сотр.: {r.reserved_for_user.display_name}")
         if r.reserved_by_user:
             who.append(f"забронировал: {r.reserved_by_user.display_name}")
+        if r.booking_id:
+            who.append(f"бронь #{int(r.booking_id)}")
         when = format_naive_utc_datetime(r.reserved_at, tz)
         chunks.append(
             f"{r.pieces_reserved} шт. ({', '.join(who) if who else 'цель не указана'}) · {when} ({timezone_label(tz)})"
@@ -142,7 +144,17 @@ def _kit_clear_modal_items(kit: Kit, display_tz: str) -> list[dict[str, Any]]:
             author = (r.reserved_by_user.display_name or r.reserved_by_user.username or "").strip() or "—"
         else:
             author = "—"
-        out.append({"id": r.id, "pieces": int(r.pieces_reserved or 0), "target": target, "when": when, "author": author})
+        booking_line = f"бронь #{int(r.booking_id)}" if r.booking_id else None
+        out.append(
+            {
+                "id": r.id,
+                "pieces": int(r.pieces_reserved or 0),
+                "target": target,
+                "when": when,
+                "author": author,
+                "booking_line": booking_line,
+            }
+        )
     return out
 
 
@@ -282,6 +294,7 @@ def admin_kit_detail(
             selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
             selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_user),
             selectinload(Kit.reserves).selectinload(KitReserve.reserved_by_user),
+            selectinload(Kit.reserves).selectinload(KitReserve.booking),
             selectinload(Kit.author_staff_links).selectinload(KitAuthorStaff.user),
         )
         .where(Kit.id == kit_id)
