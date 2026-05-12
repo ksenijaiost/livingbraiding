@@ -142,14 +142,18 @@ def api_calendar_day(
     bookings = list(db.scalars(b_stmt).all())
 
     booking_items: list[dict[str, Any]] = []
+    tz = get_display_timezone(db)
     for b in bookings:
+        kind_l = _booking_kind_label(b.kind.value)
+        time_l = format_naive_utc_datetime(b.planned_date, tz)
         booking_items.append(
             {
                 "id": int(b.id),
                 "client": (b.client.name if b.client else "—"),
-                "kind": _booking_kind_label(b.kind.value),
+                "kind": kind_l,
+                "label": f"{kind_l} · {time_l}",
                 "status": _booking_status_label(b.status.value),
-                "time": format_naive_utc_datetime(b.planned_date, get_display_timezone(db)),
+                "time": time_l,
                 "url": f"/bookings/{int(b.id)}",
                 "payout_sum": 0.0,
                 "studio_sum": 0.0,

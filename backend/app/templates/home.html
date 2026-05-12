@@ -234,20 +234,31 @@
             var payout = money2(payload.payout_sum || 0);
             var studio = money2(payload.studio_sum || 0);
             var showStudio = !!data.is_super && key !== 'bookings';
+            var isBookings = key === 'bookings';
             var h = '';
             h += '<div class=\"card\" style=\"background:#f8fafc; margin: 10px 0;\">';
             h += '<div style=\"display:flex; justify-content:space-between; gap:12px; align-items:baseline; flex-wrap:wrap;\">';
             h += '<div style=\"font-weight:700;\">' + esc(title) + ' <span class=\"muted\">(' + cnt + ')</span></div>';
-            h += '<div class=\"muted\" style=\"font-size:12px; display:flex; gap:12px; flex-wrap:wrap;\">';
-            h += '<span>ЗП: <strong>' + esc(payout) + '</strong></span>';
-            if (showStudio) h += '<span>Фонд студии: <strong>' + esc(studio) + '</strong></span>';
-            h += '</div></div>';
+            if (!isBookings) {
+              h += '<div class=\"muted\" style=\"font-size:12px; display:flex; gap:12px; flex-wrap:wrap;\">';
+              h += '<span>ЗП: <strong>' + esc(payout) + '</strong></span>';
+              if (showStudio) h += '<span>Фонд студии: <strong>' + esc(studio) + '</strong></span>';
+              h += '</div>';
+            }
+            h += '</div>';
             if (!items || items.length === 0) {
               h += '<div class=\"muted\" style=\"margin-top:8px;\">Нет</div>';
             } else {
               h += '<div style=\"margin-top:8px; overflow-x:auto;\">';
               h += '<table style=\"font-size:13px;\">';
-              h += '<thead><tr><th>ID</th><th>Клиент</th><th>Детали</th><th>ЗП</th>' + (showStudio ? '<th>Фонд студии</th>' : '') + '<th></th></tr></thead>';
+              h += '<thead><tr><th>ID</th><th>Клиент</th><th>Детали</th>';
+              if (isBookings) {
+                h += '<th>Статус</th>';
+              } else {
+                h += '<th>ЗП</th>';
+                if (showStudio) h += '<th>Фонд студии</th>';
+              }
+              h += '<th></th></tr></thead>';
               h += '<tbody>';
               for (var i = 0; i < items.length; i++) {
                 var it = items[i] || {};
@@ -255,8 +266,12 @@
                 h += '<td><code>' + esc(it.id) + '</code></td>';
                 h += '<td>' + esc(it.client || '—') + '</td>';
                 h += '<td>' + esc(it.label || it.kind || '—') + '</td>';
-                h += '<td>' + esc(money2(it.payout_sum || 0)) + '</td>';
-                if (showStudio) h += '<td>' + esc(money2(it.studio_sum || 0)) + '</td>';
+                if (isBookings) {
+                  h += '<td>' + esc(it.status || '—') + '</td>';
+                } else {
+                  h += '<td>' + esc(money2(it.payout_sum || 0)) + '</td>';
+                  if (showStudio) h += '<td>' + esc(money2(it.studio_sum || 0)) + '</td>';
+                }
                 h += '<td><a href=\"' + esc(it.url || '#') + '\"><button type=\"button\" class=\"secondary\">Открыть</button></a></td>';
                 h += '</tr>';
               }
