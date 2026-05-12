@@ -679,6 +679,9 @@ function initAdminBookingForm() {
     qa('input[name="product_kind"]').forEach(function (r) {
       r.required = (k === "PRODUCT_SALE");
     });
+    if (k === "VISIT") {
+      updateVisitKitVisibility();
+    }
   }
 
   // --- Visit kit mode / own extras / extra blanks ---
@@ -815,6 +818,17 @@ function initAdminBookingForm() {
     updateVisitKitVisibility();
   }
 
+  /** Скрытые поля комплекта не должны уходить в POST (иначе в details_json попадает лишний префилл). */
+  function setBookingVisitKitControlsDisabled(disabled) {
+    ["visit_kit_card", "visit_correction_block", "visit_extra_blanks_block"].forEach(function (wrapId) {
+      var wrap = byId(wrapId);
+      if (!wrap) return;
+      qa("input, select, textarea, button", wrap).forEach(function (el) {
+        el.disabled = !!disabled;
+      });
+    });
+  }
+
   function updateVisitKitVisibility() {
     var svcSel = byId("service_id");
     var kitCard = byId("visit_kit_card");
@@ -824,8 +838,10 @@ function initAdminBookingForm() {
     var needsKit = meta && meta.requiresKit;
     kitCard.style.display = needsKit ? "block" : "none";
     if (needsKit) {
+      setBookingVisitKitControlsDisabled(false);
       syncVisitKitMode();
     } else {
+      setBookingVisitKitControlsDisabled(true);
       var ids = ["visit_kit_stock_block", "visit_kit_own_block", "visit_kit_order_block", "visit_correction_block", "visit_extra_blanks_block"];
       ids.forEach(function (id) { var el = byId(id); if (el) el.style.display = "none"; });
     }
