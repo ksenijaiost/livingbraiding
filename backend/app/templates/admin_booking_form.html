@@ -112,19 +112,32 @@
 
           <div id="visit_kit_stock_block" style="margin-top: 12px; display:none;">
             <input type="hidden" name="visit_stock_kit_id" id="visit_stock_kit_id" value="{{ fp.get('visit_stock_kit_id','') }}" />
-            <label>Комплект из наличия (поиск)</label>
-            <input type="search" id="visit_kit_search_q" autocomplete="off" placeholder="SKU или название" value="" />
-            <ul id="visit_kit_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0;"></ul>
+            <label>Комплект из наличия</label>
+            <div class="row" style="align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:6px;">
+              <div style="flex:1; min-width:160px;">
+                <input type="search" id="visit_kit_search_q" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" value="" />
+              </div>
+              <div>
+                <button type="button" class="secondary" id="visit_kit_stock_find_btn">Найти</button>
+              </div>
+            </div>
+            <ul id="visit_kit_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0; max-height:220px; overflow:auto;"></ul>
             <div id="visit_selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not fp.get('visit_stock_kit_id') %}display:none;{% endif %}">
               <p id="visit_selected_kit_line" style="margin:0;"></p>
+              <div style="margin-top: 10px;">
+                <label style="display:flex; align-items:flex-start; gap:8px; font-weight:normal;">
+                  <input type="checkbox" name="visit_stock_use_entire" {% if fp.get('visit_stock_use_entire') in ('1', 'on', 'true', 'yes') %}checked{% endif %} />
+                  <span>Весь свободный остаток (все доступные заготовки)</span>
+                </label>
+              </div>
               <div class="row" style="margin-top: 10px;">
                 <div>
-                  <label>Количество заготовок (для резерва)</label>
-                  <input type="number" name="visit_stock_kit_pieces" min="0" step="1" value="{{ fp.get('visit_stock_kit_pieces','') }}" />
+                  <label>Или заготовок зарезервировать</label>
+                  <input type="number" name="visit_stock_kit_pieces" id="visit_stock_kit_pieces" min="0" step="1" value="{{ fp.get('visit_stock_kit_pieces','') }}" />
                 </div>
               </div>
               <p class="muted" style="margin: 8px 0 0; font-size: 12px;">
-                При сохранении брони комплект будет зарезервирован автоматически (под клиента).
+                При сохранении брони комплект будет зарезервирован автоматически (под клиента). Пустой поиск + «Найти» — список как в визите (в т.ч. только под резерв клиента).
               </p>
             </div>
           </div>
@@ -197,15 +210,28 @@
 
           <div id="visit_extra_stock_block" style="margin-top: 12px; display:none;">
             <input type="hidden" name="visit_extra_stock_kit_id" id="visit_extra_stock_kit_id" value="{{ fp.get('visit_extra_stock_kit_id','') }}" />
-            <label>Из наличия (поиск)</label>
-            <input type="search" id="visit_extra_kit_search_q" autocomplete="off" placeholder="SKU или название" value="" />
-            <ul id="visit_extra_kit_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0;"></ul>
+            <label>Из наличия</label>
+            <div class="row" style="align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:6px;">
+              <div style="flex:1; min-width:160px;">
+                <input type="search" id="visit_extra_kit_search_q" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" value="" />
+              </div>
+              <div>
+                <button type="button" class="secondary" id="visit_extra_kit_stock_find_btn">Найти</button>
+              </div>
+            </div>
+            <ul id="visit_extra_kit_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0; max-height:220px; overflow:auto;"></ul>
             <div id="visit_extra_selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not fp.get('visit_extra_stock_kit_id') %}display:none;{% endif %}">
               <p id="visit_extra_selected_kit_line" style="margin:0;"></p>
+              <div style="margin-top: 10px;">
+                <label style="display:flex; align-items:flex-start; gap:8px; font-weight:normal;">
+                  <input type="checkbox" name="visit_extra_stock_use_entire" {% if fp.get('visit_extra_stock_use_entire') in ('1', 'on', 'true', 'yes') %}checked{% endif %} />
+                  <span>Весь свободный остаток (все доступные заготовки)</span>
+                </label>
+              </div>
               <div class="row" style="margin-top: 10px;">
                 <div>
-                  <label>Количество заготовок (для резерва)</label>
-                  <input type="number" name="visit_extra_stock_kit_pieces" min="0" step="1" value="{{ fp.get('visit_extra_stock_kit_pieces','') }}" />
+                  <label>Или заготовок зарезервировать</label>
+                  <input type="number" name="visit_extra_stock_kit_pieces" id="visit_extra_stock_kit_pieces" min="0" step="1" value="{{ fp.get('visit_extra_stock_kit_pieces','') }}" />
                 </div>
               </div>
               <p class="muted" style="margin: 8px 0 0; font-size: 12px;">
@@ -253,15 +279,28 @@
 
             <div id="sale_kit_stock_block" style="margin-top: 12px; display:none;">
               <input type="hidden" name="sale_stock_kit_id" id="sale_stock_kit_id" value="{{ fp.get('sale_stock_kit_id','') }}" />
-              <label>Комплект из наличия (поиск)</label>
-              <input type="search" id="sale_kit_search_q" autocomplete="off" placeholder="SKU или название" value="" />
-              <ul id="sale_kit_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0;"></ul>
+              <label>Комплект из наличия</label>
+              <div class="row" style="align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:6px;">
+                <div style="flex:1; min-width:160px;">
+                  <input type="search" id="sale_kit_search_q" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" value="" />
+                </div>
+                <div>
+                  <button type="button" class="secondary" id="sale_kit_stock_find_btn">Найти</button>
+                </div>
+              </div>
+              <ul id="sale_kit_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0; max-height:220px; overflow:auto;"></ul>
               <div id="sale_selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not fp.get('sale_stock_kit_id') %}display:none;{% endif %}">
                 <p id="sale_selected_kit_line" style="margin:0;"></p>
+                <div style="margin-top: 10px;">
+                  <label style="display:flex; align-items:flex-start; gap:8px; font-weight:normal;">
+                    <input type="checkbox" name="sale_stock_use_entire" {% if fp.get('sale_stock_use_entire') in ('1', 'on', 'true', 'yes') %}checked{% endif %} />
+                    <span>Весь свободный остаток (все доступные заготовки)</span>
+                  </label>
+                </div>
                 <div class="row" style="margin-top: 10px;">
                   <div>
-                    <label>Количество заготовок (для резерва)</label>
-                    <input type="number" name="sale_stock_kit_pieces" min="0" step="1" value="{{ fp.get('sale_stock_kit_pieces','') }}" />
+                    <label>Или заготовок зарезервировать</label>
+                    <input type="number" name="sale_stock_kit_pieces" id="sale_stock_kit_pieces" min="0" step="1" value="{{ fp.get('sale_stock_kit_pieces','') }}" />
                   </div>
                 </div>
                 <p class="muted" style="margin: 8px 0 0; font-size: 12px;">

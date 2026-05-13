@@ -302,10 +302,10 @@
             </p>
           </div>
         </div>
-        <label><input type="checkbox" name="stock_use_entire" {% if fp.get('stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект (все доступные заготовки)</label>
+        <label><input type="checkbox" name="stock_use_entire" id="stock_use_entire_cb" {% if fp.get('stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект (все доступные заготовки)</label>
         <div>
           <label>Или заготовок списать</label>
-          <input type="number" name="stock_blanks_used" min="0" value="{{ fp.get('stock_blanks_used', '') }}" />
+          <input type="number" name="stock_blanks_used" id="stock_blanks_used" min="0" value="{{ fp.get('stock_blanks_used', '') }}" />
         </div>
       </div>
 
@@ -375,8 +375,8 @@
             </p>
           </div>
           <div style="margin-top: 8px;">
-            <label><input type="checkbox" name="own_extra_stock_use_entire" {% if fp.get('own_extra_stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект</label>
-            <input type="number" name="own_extra_stock_blanks_used" min="0" value="{{ fp.get('own_extra_stock_blanks_used', '2') }}" placeholder="заготовок" />
+            <label><input type="checkbox" name="own_extra_stock_use_entire" id="own_extra_stock_use_entire_cb" {% if fp.get('own_extra_stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект</label>
+            <input type="number" name="own_extra_stock_blanks_used" id="own_extra_stock_blanks_used" min="0" value="{{ fp.get('own_extra_stock_blanks_used', '2') }}" placeholder="заготовок" />
           </div>
         </div>
       </div>
@@ -808,7 +808,27 @@
     });
     document.querySelectorAll('input[name="visit_master_on"]').forEach(function (el) { el.addEventListener('change', syncVisitPreview); });
     document.querySelectorAll('input[name^="visit_master_pct_"]').forEach(function (el) { el.addEventListener('input', syncVisitPreview); el.addEventListener('change', syncVisitPreview); });
-    document.querySelectorAll('input[name="stock_use_entire"], input[name="stock_blanks_used"], input[name="own_extra_stock_use_entire"], input[name="own_extra_stock_blanks_used"]').forEach(function (el) {
+    function syncVisitStockEntireUi() {
+      const u = document.getElementById('stock_use_entire_cb');
+      const n = document.getElementById('stock_blanks_used');
+      if (u && n) {
+        n.disabled = !!u.checked;
+        if (u.checked) n.value = '';
+      }
+      const u2 = document.getElementById('own_extra_stock_use_entire_cb');
+      const n2 = document.getElementById('own_extra_stock_blanks_used');
+      if (u2 && n2) {
+        n2.disabled = !!u2.checked;
+        if (u2.checked) n2.value = '';
+      }
+    }
+    document.querySelectorAll('input[name="stock_use_entire"], input[name="own_extra_stock_use_entire"]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        syncVisitStockEntireUi();
+        syncVisitPreview();
+      });
+    });
+    document.querySelectorAll('input[name="stock_blanks_used"], input[name="own_extra_stock_blanks_used"]').forEach(function (el) {
       el.addEventListener('input', syncVisitPreview);
       el.addEventListener('change', syncVisitPreview);
     });
@@ -1352,6 +1372,7 @@
       document.getElementById('blk-own').style.display = v === 'OWN' ? 'block' : 'none';
       ownCorrectionPanelSync();
       if (v === 'STOCK') void prefetchVisitStockKitsIfReady('main');
+      syncVisitStockEntireUi();
     }
     function ownExtra() {
       const on = document.getElementById('own_extra_blanks').checked;
@@ -1369,6 +1390,7 @@
     kitKind();
     ownExtra();
     ownCorrectionPanelSync();
+    syncVisitStockEntireUi();
     updateMixBlockUI();
     syncAmountRequired();
     updateServiceDerivedUI();

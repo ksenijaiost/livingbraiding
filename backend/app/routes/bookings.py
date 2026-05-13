@@ -522,11 +522,13 @@ _BOOKING_VISIT_KIT_DETAIL_KEYS: frozenset[str] = frozenset(
         "visit_kit_mode",
         "visit_stock_kit_id",
         "visit_stock_kit_pieces",
+        "visit_stock_use_entire",
         "visit_own_need_correction",
         "visit_own_need_extra_blanks",
         "visit_extra_blanks_mode",
         "visit_extra_stock_kit_id",
         "visit_extra_stock_kit_pieces",
+        "visit_extra_stock_use_entire",
         "visit_order_blanks_qty",
         "visit_order_blanks_desc",
         "visit_extra_order_blanks_qty",
@@ -551,6 +553,9 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
         "corr_circle",
         "visit_own_need_correction",
         "visit_own_need_extra_blanks",
+        "visit_stock_use_entire",
+        "visit_extra_stock_use_entire",
+        "sale_stock_use_entire",
     )
     d: dict[str, object] = {}
     keys: tuple[str, ...]
@@ -560,11 +565,13 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
             "visit_kit_mode",
             "visit_stock_kit_id",
             "visit_stock_kit_pieces",
+            "visit_stock_use_entire",
             "visit_own_need_correction",
             "visit_own_need_extra_blanks",
             "visit_extra_blanks_mode",
             "visit_extra_stock_kit_id",
             "visit_extra_stock_kit_pieces",
+            "visit_extra_stock_use_entire",
             "visit_order_blanks_qty",
             "visit_order_blanks_desc",
             "visit_extra_order_blanks_qty",
@@ -587,6 +594,7 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
                 "sale_kit_mode",
                 "sale_stock_kit_id",
                 "sale_stock_kit_pieces",
+                "sale_stock_use_entire",
                 "sale_kit_order_master_ids",
                 "sale_order_blanks_qty",
                 "sale_order_blanks_desc",
@@ -704,7 +712,12 @@ def release_booking_kit_reserves(db: Session, *, booking_id: int, changed_by_use
 def _apply_booking_auto_reserves(
     db: Session, *, booking_id: int, booking_client_id: int, fp: dict[str, str], changed_by_user_id: int
 ) -> None:
-    def _reserve_kit(kit_id_raw: str | None, pieces_field: str | None) -> None:
+    def _reserve_kit(
+        kit_id_raw: str | None,
+        pieces_field: str | None,
+        *,
+        use_entire_field: str | None = None,
+    ) -> None:
         if not kit_id_raw:
             return
         kit_id_raw = str(kit_id_raw).strip()
@@ -720,7 +733,8 @@ def _apply_booking_auto_reserves(
             return
         if kit_reserve_slots_used(db, kit.id) >= get_kit_max_reserves_per_kit(db):
             return
-        pq = str(fp.get(pieces_field) or "").strip() if pieces_field else ""
+        use_entire = bool(use_entire_field and parse_bool(fp.get(use_entire_field)))
+        pq = "" if use_entire else (str(fp.get(pieces_field) or "").strip() if pieces_field else "")
         try:
             qty = parse_int(pq, min=1, field_name="reserve_pieces") if pq else avail
         except ValueError:
@@ -751,12 +765,24 @@ def _apply_booking_auto_reserves(
         )
 
     if (fp.get("visit_kit_mode") or "") == "IN_STOCK":
-        _reserve_kit(fp.get("visit_stock_kit_id"), "visit_stock_kit_pieces")
+        _reserve_kit(
+            fp.get("visit_stock_kit_id"),
+            "visit_stock_kit_pieces",
+            use_entire_field="visit_stock_use_entire",
+        )
     if (fp.get("visit_kit_mode") or "") == "OWN" and (fp.get("visit_own_need_extra_blanks") or ""):
         if (fp.get("visit_extra_blanks_mode") or "") == "IN_STOCK":
-            _reserve_kit(fp.get("visit_extra_stock_kit_id"), "visit_extra_stock_kit_pieces")
+            _reserve_kit(
+                fp.get("visit_extra_stock_kit_id"),
+                "visit_extra_stock_kit_pieces",
+                use_entire_field="visit_extra_stock_use_entire",
+            )
     if (fp.get("product_kind") or "") == "KIT" and (fp.get("sale_kit_mode") or "") == "IN_STOCK":
-        _reserve_kit(fp.get("sale_stock_kit_id"), "sale_stock_kit_pieces")
+        _reserve_kit(
+            fp.get("sale_stock_kit_id"),
+            "sale_stock_kit_pieces",
+            use_entire_field="sale_stock_use_entire",
+        )
 
 
 def _masters_for_visit_form(db: Session) -> list[User]:
@@ -782,11 +808,13 @@ def admin_booking_new_get(
         "visit_kit_mode",
         "visit_stock_kit_id",
         "visit_stock_kit_pieces",
+        "visit_stock_use_entire",
         "visit_own_need_correction",
         "visit_own_need_extra_blanks",
         "visit_extra_blanks_mode",
         "visit_extra_stock_kit_id",
         "visit_extra_stock_kit_pieces",
+        "visit_extra_stock_use_entire",
         "visit_order_blanks_qty",
         "visit_order_blanks_desc",
         "visit_extra_order_blanks_qty",
@@ -801,6 +829,7 @@ def admin_booking_new_get(
         "sale_kit_mode",
         "sale_stock_kit_id",
         "sale_stock_kit_pieces",
+        "sale_stock_use_entire",
         "sale_kit_order_master_ids",
         "sale_order_blanks_qty",
         "sale_order_blanks_desc",
