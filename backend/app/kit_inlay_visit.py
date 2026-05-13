@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Callable
 
@@ -485,6 +485,82 @@ def _parse_stock_breakdown_json(g: Callable[[str, str], str], field: str) -> dic
     return out or None
 
 
+def _usage_dict_from_json_val(raw: Any) -> dict[str, int] | None:
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, int] = {}
+    for k, v in raw.items():
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            out[str(k).strip()] = n
+    return out or None
+
+
+@dataclass
+class StockKitLineInput:
+    kit_id: int
+    use_entire: bool
+    blanks_used: int
+    usage_by_key: dict[str, int] | None = None
+
+
+def _parse_stock_kit_lines_from_form(
+    form: Any,
+    g: Callable[[str, str], str],
+    g_int: Callable[[str, int], int],
+    g_bool: Callable[[str], bool],
+) -> list[StockKitLineInput]:
+    raw = (g("stock_kit_lines_json", "") or "").strip()
+    lines: list[StockKitLineInput] = []
+    if raw:
+        try:
+            arr = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Некорректные данные списка комплектов из наличия.") from exc
+        if not isinstance(arr, list):
+            raise ValueError("Ожидается список комплектов из наличия.")
+        for item in arr:
+            if not isinstance(item, dict):
+                continue
+            try:
+                kid = int(item.get("kit_id") or 0)
+            except (TypeError, ValueError):
+                kid = 0
+            if kid <= 0:
+                continue
+            ue = bool(item.get("use_entire"))
+            try:
+                bu = int(item.get("blanks_used") or 0)
+            except (TypeError, ValueError):
+                bu = 0
+            bu = max(0, bu)
+            ub = _usage_dict_from_json_val(item.get("breakdown"))
+            lines.append(
+                StockKitLineInput(
+                    kit_id=kid,
+                    use_entire=ue,
+                    blanks_used=bu,
+                    usage_by_key=ub,
+                )
+            )
+        if lines:
+            return lines
+    sid = g_int("stock_kit_id", 0)
+    if sid > 0:
+        return [
+            StockKitLineInput(
+                kit_id=sid,
+                use_entire=g_bool("stock_use_entire"),
+                blanks_used=g_int("stock_blanks_used", 0),
+                usage_by_key=_parse_stock_breakdown_json(g, "stock_breakdown_json"),
+            )
+        ]
+    return []
+
+
 def parse_kit_inlay_form(
     form: Any, *, single_master_default_id: int | None = None
 ) -> KitInlayFormInput:
@@ -565,7 +641,8 @@ def parse_kit_inlay_form(
     except ValueError:
         amort = AmortizationLevel.MIN
 
-    stock_id = g_int("stock_kit_id", 0)
+    stock_kit_lines = _parse_stock_kit_lines_from_form(form, g, g_int, g_bool)
+    stock_id = stock_kit_lines[0].kit_id if stock_kit_lines else 0
     extra_stock_id = g_int("own_extra_stock_kit_id", 0)
 
     ct = VisitClientType.SELF if g_bool("client_is_self") else VisitClientType.RETURNING
@@ -609,9 +686,10 @@ def parse_kit_inlay_form(
         service_id=g_int("service_id", 0),
         kit_kind=g("kit_kind", "STOCK").upper(),
         stock_kit_id=stock_id if stock_id else None,
-        stock_use_entire=g_bool("stock_use_entire"),
-        stock_blanks_used=g_int("stock_blanks_used", 0),
-        stock_usage_by_key=_parse_stock_breakdown_json(g, "stock_breakdown_json"),
+        stock_use_entire=stock_kit_lines[0].use_entire if stock_kit_lines else False,
+        stock_blanks_used=stock_kit_lines[0].blanks_used if stock_kit_lines else 0,
+        stock_usage_by_key=stock_kit_lines[0].usage_by_key if stock_kit_lines else None,
+        stock_kit_lines=stock_kit_lines,
         kit_paid_separately=g_bool("kit_paid_separately"),
         # В текущем шаге анкеты «Новый комплект» недоступен, поэтому поля не парсим.
         new_title="",
@@ -697,6 +775,7 @@ class KitInlayFormInput:
     addon_sales_amount: float
     addon_sales_description: str
     thermo_parsed: ThermoFormParsed
+    stock_kit_lines: list[StockKitLineInput] = field(default_factory=list)
 
 
 def _answers_labels_display_from_specs(
@@ -722,24 +801,31 @@ def _answers_labels_display_from_specs(
 def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock:
     kind = inp.kit_kind.upper()
     if kind == "STOCK":
-        if not inp.stock_kit_id:
+        lines = inp.stock_kit_lines
+        if not lines:
             raise ValueError("Выберите комплект из наличия")
-        kit_row = _validate_stock_selection(
-            db,
-            kit_id=inp.stock_kit_id,
-            use_entire=inp.stock_use_entire,
-            blanks_used=inp.stock_blanks_used,
-            client_id=inp.existing_client_id,
-            usage_by_key=inp.stock_usage_by_key,
-        )
+        from_stocks: list[KitFromStock] = []
+        for line in lines:
+            kit_row = _validate_stock_selection(
+                db,
+                kit_id=line.kit_id,
+                use_entire=line.use_entire,
+                blanks_used=line.blanks_used,
+                client_id=inp.existing_client_id,
+                usage_by_key=line.usage_by_key,
+            )
+            from_stocks.append(
+                KitFromStock(
+                    sku=kit_row.sku,
+                    blanks_used=0 if line.use_entire else line.blanks_used,
+                    use_entire_kit=line.use_entire,
+                    usage_by_key=line.usage_by_key,
+                )
+            )
         return KitBlock(
             kind="STOCK",
-            from_stock=KitFromStock(
-                sku=kit_row.sku,
-                blanks_used=0 if inp.stock_use_entire else inp.stock_blanks_used,
-                use_entire_kit=inp.stock_use_entire,
-                usage_by_key=inp.stock_usage_by_key,
-            ),
+            from_stock=from_stocks[0],
+            from_stocks=from_stocks,
             new_kit=None,
             own=None,
         )
@@ -996,21 +1082,22 @@ def save_kit_inlay_visit(
 
     if service_requires_kit_block(service):
         kind = inp.kit_kind.upper()
-        exclude_main_stock_cost = (
-            kind == "STOCK" and bool(inp.kit_paid_separately) and inp.stock_kit_id is not None
+        exclude_main_stock_cost = kind == "STOCK" and bool(inp.kit_paid_separately) and bool(
+            inp.stock_kit_lines
         )
-        if kind == "STOCK" and inp.stock_kit_id:
-            n, cost, sf, bd = _apply_stock_kit_usage(
-                db,
-                kit_id=inp.stock_kit_id,
-                use_entire=inp.stock_use_entire,
-                blanks_used=inp.stock_blanks_used,
-                client_id=inp.existing_client_id,
-                usage_by_key=inp.stock_usage_by_key,
-            )
-            usage_cost = 0.0 if exclude_main_stock_cost else cost
-            usage_sf = 0.0 if exclude_main_stock_cost else sf
-            usages.append((inp.stock_kit_id, n, usage_cost, bd))
+        if kind == "STOCK" and inp.stock_kit_lines:
+            for line in inp.stock_kit_lines:
+                n, cost, sf, bd = _apply_stock_kit_usage(
+                    db,
+                    kit_id=line.kit_id,
+                    use_entire=line.use_entire,
+                    blanks_used=line.blanks_used,
+                    client_id=inp.existing_client_id,
+                    usage_by_key=line.usage_by_key,
+                )
+                usage_cost = 0.0 if exclude_main_stock_cost else cost
+                usage_sf = 0.0 if exclude_main_stock_cost else sf
+                usages.append((line.kit_id, n, usage_cost, bd))
             kit_cost_total += usage_cost
             kit_studio_fund += usage_sf
         if kind == "OWN" and inp.own_extra_blanks and inp.own_extra_stock_kit_id:

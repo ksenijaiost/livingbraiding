@@ -210,14 +210,25 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
         blocks.append(("Тип комплекта", ru_kit_kind(kind)))
 
         if kind == "STOCK":
-            fs = kit.get("from_stock") or {}
-            sku = fs.get("sku", "—")
-            ent = fs.get("use_entire_kit")
-            bu = fs.get("blanks_used", 0)
-            if ent:
-                blocks.append(("Со склада", f"арт. {sku}, весь комплект"))
-            else:
-                blocks.append(("Со склада", f"арт. {sku}, заготовок: {_format_card_scalar(bu)}"))
+            stocks = kit.get("from_stocks")
+            lines: list[dict] = []
+            if isinstance(stocks, list) and stocks:
+                for it in stocks:
+                    if isinstance(it, dict):
+                        lines.append(it)
+            if not lines:
+                fs0 = kit.get("from_stock")
+                if isinstance(fs0, dict):
+                    lines = [fs0]
+            for idx, fs in enumerate(lines, start=1):
+                sku = fs.get("sku", "—")
+                ent = fs.get("use_entire_kit")
+                bu = fs.get("blanks_used", 0)
+                prefix = "Со склада" if len(lines) == 1 else f"Со склада ({idx})"
+                if ent:
+                    blocks.append((prefix, f"арт. {sku}, весь комплект"))
+                else:
+                    blocks.append((prefix, f"арт. {sku}, заготовок: {_format_card_scalar(bu)}"))
         elif kind == "NEW":
             nk = kit.get("new_kit") or {}
             blocks.append(("Новый комплект", nk.get("title") or "—"))

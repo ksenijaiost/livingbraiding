@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class KitFromStock(BaseModel):
@@ -120,21 +120,50 @@ class KitBlock(BaseModel):
       STOCK — из наличия
       NEW — новый (данные как при внесении в таблицу комплектов)
       OWN — свой (не из ассортимента студии как обычная продажа)
+
+    Для STOCK: в новых визитах задаётся ``from_stocks`` (несколько комплектов).
+    Старое сохранённое ``from_stock`` (один комплект) при разборе дублируется в ``from_stocks``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["STOCK", "NEW", "OWN"]
     from_stock: KitFromStock | None = None
+    from_stocks: list[KitFromStock] = Field(default_factory=list)
     new_kit: KitNew | None = None
     own: KitOwn | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _stock_coerce_legacy_single(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if data.get("kind") != "STOCK":
+            return data
+        if data.get("from_stocks"):
+            return data
+        fs = data.get("from_stock")
+        if fs is not None:
+            return {**data, "from_stocks": [fs]}
+        return data
+
+    @field_validator("from_stocks", mode="before")
+    @classmethod
+    def _from_stocks_none_to_empty(cls, v: Any) -> Any:
+        if v is None:
+            return []
+        return v
 
     @model_validator(mode="after")
     def _validate_kind(self):
         if self.kind == "STOCK":
-            if self.from_stock is None:
-                raise ValueError("Для kind=STOCK нужен from_stock")
-        elif self.kind == "NEW":
+            stocks = [x for x in (self.from_stocks or []) if x is not None]
+            if not stocks and self.from_stock is not None:
+                stocks = [self.from_stock]
+            if len(stocks) < 1:
+                raise ValueError("Для kind=STOCK нужен from_stock или непустой from_stocks")
+            return self.model_copy(update={"from_stocks": stocks, "from_stock": stocks[0]})
+        if self.kind == "NEW":
             if self.new_kit is None:
                 raise ValueError("Для kind=NEW нужен new_kit")
         elif self.kind == "OWN":

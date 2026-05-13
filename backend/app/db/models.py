@@ -805,6 +805,7 @@ class ProductSale(Base):
     kit_id: Mapped[int | None] = mapped_column(ForeignKey("kits.id"), nullable=True)
     kit_pieces_sold: Mapped[int | None] = mapped_column(Integer, nullable=True)
     kit_breakdown_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kit_lines_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # RUBBER
     rubber_description: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -175,6 +175,40 @@ def _prefill_visit_stock_kit_from_booking(db: Session, b: Booking, form_prefill:
             form_prefill["stock_blanks_used"] = str(int(kit.pieces_total))
 
 
+def _stock_kit_lines_initial_for_template(fp: dict[str, str]) -> list[dict[str, Any]]:
+    raw = (fp.get("stock_kit_lines_json") or "").strip()
+    if raw:
+        try:
+            arr = json.loads(raw)
+            if isinstance(arr, list) and arr:
+                return [dict(x) for x in arr if isinstance(x, dict)]
+        except Exception:
+            pass
+    sk = (fp.get("stock_kit_id") or "").strip()
+    if sk.isdigit() and int(sk) > 0:
+        bd_raw = (fp.get("stock_breakdown_json") or "").strip()
+        breakdown = None
+        if bd_raw:
+            try:
+                breakdown = json.loads(bd_raw)
+                if not isinstance(breakdown, dict):
+                    breakdown = None
+            except Exception:
+                breakdown = None
+        bu = 0
+        if str(fp.get("stock_blanks_used") or "").strip().isdigit():
+            bu = int(fp["stock_blanks_used"])
+        return [
+            {
+                "kit_id": int(sk),
+                "use_entire": fp.get("stock_use_entire") == "on",
+                "blanks_used": bu,
+                "breakdown": breakdown,
+            }
+        ]
+    return [{"kit_id": None, "use_entire": False, "blanks_used": 0, "breakdown": None}]
+
+
 def _master_visit_step1_template_response(
     request: Request,
     *,
@@ -199,6 +233,20 @@ def _master_visit_step1_template_response(
         "kudri": float(pku.price_per_gram) if pku else 0.0,
     }
     cid_prev = _visit_kit_preview_client_id(form_prefill, selected_client)
+    stock_lines_initial = _stock_kit_lines_initial_for_template(form_prefill)
+    stock_kit_lines_preview: list[dict[str, Any] | None] = []
+    for item in stock_lines_initial:
+        kid = item.get("kit_id")
+        try:
+            ik = int(kid) if kid is not None else 0
+        except (TypeError, ValueError):
+            ik = 0
+        if ik > 0:
+            stock_kit_lines_preview.append(
+                kit_suggest_dict_for_kit_id(db, ik, for_client_id=cid_prev)
+            )
+        else:
+            stock_kit_lines_preview.append(None)
     stock_kit_preview: dict[str, Any] | None = None
     sk_raw = (form_prefill.get("stock_kit_id") or "").strip()
     if sk_raw.isdigit():
@@ -221,6 +269,8 @@ def _master_visit_step1_template_response(
             extra_stock_kit_selected_label=_kit_stock_label_from_form(db, form_prefill, "own_extra_stock_kit_id"),
             extra_stock_kit_reserve_hint=_kit_reserve_hint_from_form(db, form_prefill, "own_extra_stock_kit_id"),
             stock_kit_preview=stock_kit_preview,
+            stock_lines_initial=stock_lines_initial,
+            stock_kit_lines_preview=stock_kit_lines_preview,
             extra_stock_kit_preview=extra_stock_kit_preview,
             salon_cut_pct=salon_cut_pct,
             material_price_per_gram_json=json.dumps(material_price_per_gram, ensure_ascii=False),

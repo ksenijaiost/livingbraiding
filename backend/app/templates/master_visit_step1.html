@@ -278,40 +278,52 @@
       <div id="blk-stock" class="card" style="margin-top: 10px;">
         <strong>Из наличия</strong>
         <p class="muted" style="margin:6px 0 0;font-size:12px;">
-          Если на клиента есть резерв по выбранному комплекту, при списании он используется в приоритете.
+          Можно списать заготовки из нескольких комплектов. Если на клиента есть резерв по комплекту, при списании он используется в приоритете.
           Если списано меньше резерва — остаток резерва автоматически снимется.
         </p>
-        <div style="margin-top: 8px;">
-          <input type="hidden" name="stock_kit_id" id="stock_kit_id" value="{{ fp.get('stock_kit_id', '') }}" />
-          <input type="hidden" name="stock_breakdown_json" id="stock_breakdown_json" value="{{ fp.get('stock_breakdown_json', '') }}" />
-          <label>Комплект *</label>
-          <div class="row" style="align-items: flex-end;">
-            <div style="flex:1;">
-              <input type="search" id="stock_kit_search_q" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" value="" />
+        <input type="hidden" name="stock_kit_lines_json" id="stock_kit_lines_json" value="{{ fp.get('stock_kit_lines_json', '')|e }}" />
+        <input type="hidden" name="stock_kit_id" id="stock_kit_id" value="{{ fp.get('stock_kit_id', '') }}" />
+        <input type="hidden" name="stock_breakdown_json" id="stock_breakdown_json" value="{{ fp.get('stock_breakdown_json', '') }}" />
+        <div id="stock_kit_rows_wrap">
+          {% for line in stock_lines_initial %}
+          <div class="visit-stock-kit-row card" style="margin-top:10px;background:#fafafa;">
+            <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+              <strong class="vsk-row-title">Комплект {{ loop.index }}</strong>
+              {% if loop.index > 1 %}
+              <button type="button" class="secondary vsk-remove-row" style="padding:2px 10px;">Убрать строку</button>
+              {% endif %}
             </div>
+            <input type="hidden" class="vsk-kit-id" value="{% if line.kit_id %}{{ line.kit_id }}{% endif %}" />
+            <input type="hidden" class="vsk-breakdown" value="" />
+            <label>Комплект *</label>
+            <div class="row" style="align-items: flex-end;">
+              <div style="flex:1;">
+                <input type="search" class="vsk-search-q" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" value="" />
+              </div>
+              <div>
+                <button type="button" class="secondary vsk-find-btn">Найти</button>
+              </div>
+            </div>
+            <ul class="vsk-suggest-list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+            <div class="vsk-selected-box card" style="margin-top:10px;background:#f8fafc;{% if not line.kit_id %}display:none;{% endif %}">
+              <p class="vsk-selected-line" style="margin:0;"></p>
+              <p class="vsk-selected-reserve" style="margin:8px 0 0; padding:8px 10px; background:#fffbeb; border:1px solid #fbbf24; border-radius:8px; font-size:13px; color:#92400e; display:none;"></p>
+            </div>
+            <label style="display:block;margin-top:8px;"><input type="checkbox" class="vsk-use-entire" {% if line.use_entire %}checked{% endif %} /> Весь комплект (все доступные заготовки)</label>
             <div>
-              <button type="button" class="secondary" onclick="stockKitSuggest()">Найти</button>
+              <label>Или заготовок списать</label>
+              <input type="number" class="vsk-blanks-used" min="0" value="{% if line.blanks_used %}{{ line.blanks_used }}{% endif %}" />
             </div>
           </div>
-          <ul id="stock_kit_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
-          <div id="selected_stock_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not stock_kit_selected_label %}display:none;{% endif %}">
-            <p id="selected_stock_kit_line" style="margin:0;">
-              {% if stock_kit_selected_label %}Выбрано: <strong>{{ stock_kit_selected_label }}</strong>{% endif %}
-            </p>
-            <p id="selected_stock_kit_reserve" style="margin:8px 0 0; padding:8px 10px; background:#fffbeb; border:1px solid #fbbf24; border-radius:8px; font-size:13px; color:#92400e; {% if not stock_kit_reserve_hint %}display:none;{% endif %}">
-              {% if stock_kit_reserve_hint %}<strong>Резерв.</strong> Зарезервирован для: {{ stock_kit_reserve_hint }}{% endif %}
-            </p>
-          </div>
+          {% endfor %}
         </div>
-        <label><input type="checkbox" name="stock_use_entire" id="stock_use_entire_cb" {% if fp.get('stock_use_entire') == 'on' %}checked{% endif %} /> Весь комплект (все доступные заготовки)</label>
-        <div>
-          <label>Или заготовок списать</label>
-          <input type="number" name="stock_blanks_used" id="stock_blanks_used" min="0" value="{{ fp.get('stock_blanks_used', '') }}" />
-        </div>
+        <p style="margin-top:10px;">
+          <button type="button" class="secondary" id="visit_add_stock_kit_row">+ Ещё комплект из наличия</button>
+        </p>
         <div style="margin-top: 10px;">
           <label style="font-weight: normal; font-size: 14px;">
             <input type="checkbox" name="kit_paid_separately" id="kit_paid_separately_cb" {% if fp.get('kit_paid_separately') == 'on' %}checked{% endif %} />
-            Комплект из наличия уже оплачен (не включать его стоимость в себестоимость визита)
+            Комплект(ы) из наличия уже оплачены (не включать их стоимость в себестоимость визита)
           </label>
         </div>
       </div>
@@ -571,8 +583,7 @@
       if (draft) {
         document.getElementById('existing_client_id').value = '';
         document.getElementById('client_suggest_list').innerHTML = '';
-        const skl = document.getElementById('stock_kit_suggest_list');
-        if (skl) skl.innerHTML = '';
+        document.querySelectorAll('.vsk-suggest-list').forEach(function (u) { u.innerHTML = ''; });
         const ekl = document.getElementById('extra_stock_kit_suggest_list');
         if (ekl) ekl.innerHTML = '';
         if (typeof syncVisitClientUi === 'function') syncVisitClientUi();
@@ -611,8 +622,7 @@
     function clearVisitClientSelection() {
       document.getElementById('existing_client_id').value = '';
       document.getElementById('client_suggest_list').innerHTML = '';
-      const skl = document.getElementById('stock_kit_suggest_list');
-      if (skl) skl.innerHTML = '';
+      document.querySelectorAll('.vsk-suggest-list').forEach(function (u) { u.innerHTML = ''; });
       const ekl = document.getElementById('extra_stock_kit_suggest_list');
       if (ekl) ekl.innerHTML = '';
       const q = document.getElementById('client_search_q');
@@ -668,7 +678,7 @@
     if (visitClientChg) visitClientChg.addEventListener('click', clearVisitClientSelection);
     syncVisitClientUi();
 
-    let stockKitTimer = null;
+    const stockRowTimers = new WeakMap();
     let extraStockKitTimer = null;
     function visitKitSuggestUrl(q) {
       const params = new URLSearchParams();
@@ -691,8 +701,8 @@
       const data = await res.json();
       return data.kits || [];
     }
-    function renderKitSuggestList(ulId, kits, onPick) {
-      const ul = document.getElementById(ulId);
+    function renderKitSuggestListInto(ul, kits, onPick) {
+      if (!ul) return;
       ul.innerHTML = '';
       for (const k of kits) {
         const li = document.createElement('li');
@@ -709,29 +719,34 @@
         ul.appendChild(li);
       }
     }
-    function updateKitReserveLine(reserveElId, k) {
-      const el = document.getElementById(reserveElId);
-      if (!el) return;
+    function updateKitReserveLineEl(resEl, k) {
+      if (!resEl) return;
       if (k.is_reserved) {
-        el.style.display = 'block';
+        resEl.style.display = 'block';
         const who = (k.reserved_for_label || 'цель резерва в карточке не заполнена').trim();
-        el.innerHTML =
+        resEl.innerHTML =
           '<strong>Резерв.</strong> Зарезервирован для: ' + escapeHtml(who);
       } else {
-        el.style.display = 'none';
-        el.innerHTML = '';
+        resEl.style.display = 'none';
+        resEl.innerHTML = '';
       }
     }
-    function selectMainStockKit(k) {
-      document.getElementById('stock_kit_id').value = String(k.id);
+    function selectStockKitForRow(row, k) {
+      const hid = row.querySelector('.vsk-kit-id');
+      if (hid) hid.value = String(k.id);
       let label = stockLineForVisitKit(k);
       if (k.missing_sale_price) label = '⚠️ ' + label + ' (нет цены — укажите в админке перед сохранением визита)';
-      document.getElementById('selected_stock_kit_box').style.display = 'block';
-      document.getElementById('selected_stock_kit_line').innerHTML =
-        'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
-      updateKitReserveLine('selected_stock_kit_reserve', k);
-      document.getElementById('stock_kit_suggest_list').innerHTML = '';
-      selectedMainStockKit = k;
+      const box = row.querySelector('.vsk-selected-box');
+      const lineEl = row.querySelector('.vsk-selected-line');
+      const resEl = row.querySelector('.vsk-selected-reserve');
+      if (box) box.style.display = 'block';
+      if (lineEl) lineEl.innerHTML = 'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
+      updateKitReserveLineEl(resEl, k);
+      const ul = row.querySelector('.vsk-suggest-list');
+      if (ul) ul.innerHTML = '';
+      row._visitStockKit = k;
+      const skLegacy = document.getElementById('stock_kit_id');
+      if (skLegacy) skLegacy.value = String(k.id);
       syncVisitPreview();
     }
     function selectExtraStockKit(k) {
@@ -741,20 +756,28 @@
       document.getElementById('selected_extra_stock_kit_box').style.display = 'block';
       document.getElementById('selected_extra_stock_kit_line').innerHTML =
         'Выбрано: <strong>' + escapeHtml(label) + '</strong>';
-      updateKitReserveLine('selected_extra_stock_kit_reserve', k);
+      updateKitReserveLineEl(document.getElementById('selected_extra_stock_kit_reserve'), k);
       document.getElementById('extra_stock_kit_suggest_list').innerHTML = '';
       selectedExtraStockKit = k;
       syncVisitPreview();
     }
-    async function stockKitSuggest() {
-      const q = document.getElementById('stock_kit_search_q').value.trim();
+    async function stockKitSuggestForRow(row) {
+      const qEl = row.querySelector('.vsk-search-q');
+      const q = qEl ? qEl.value.trim() : '';
       const kits = await fetchKitSuggest(q);
-      renderKitSuggestList('stock_kit_suggest_list', kits, selectMainStockKit);
+      const ul = row.querySelector('.vsk-suggest-list');
+      renderKitSuggestListInto(ul, kits, function (kk) { selectStockKitForRow(row, kk); });
+    }
+    function scheduleStockKitSuggestForRow(row) {
+      let t = stockRowTimers.get(row);
+      if (t) clearTimeout(t);
+      t = setTimeout(function () { stockKitSuggestForRow(row); }, 350);
+      stockRowTimers.set(row, t);
     }
     async function extraStockKitSuggest() {
       const q = document.getElementById('extra_stock_kit_search_q').value.trim();
       const kits = await fetchKitSuggest(q);
-      renderKitSuggestList('extra_stock_kit_suggest_list', kits, selectExtraStockKit);
+      renderKitSuggestListInto(document.getElementById('extra_stock_kit_suggest_list'), kits, selectExtraStockKit);
     }
     /** Подгрузить подсказки комплектов с учётом client_id (в т.ч. только в резерве), если блок уже на экране. */
     async function prefetchVisitStockKitsIfReady(kind) {
@@ -768,10 +791,14 @@
         if (!kk || kk.value !== 'STOCK') return;
         const blk = document.getElementById('blk-stock');
         if (!blk || blk.style.display === 'none') return;
-        const qEl = document.getElementById('stock_kit_search_q');
-        const q = qEl ? qEl.value.trim() : '';
-        const kits = await fetchKitSuggest(q);
-        renderKitSuggestList('stock_kit_suggest_list', kits, selectMainStockKit);
+        document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row').forEach(function (row) {
+          const qEl = row.querySelector('.vsk-search-q');
+          const q = qEl ? qEl.value.trim() : '';
+          fetchKitSuggest(q).then(function (kits) {
+            const ul = row.querySelector('.vsk-suggest-list');
+            renderKitSuggestListInto(ul, kits, function (kk) { selectStockKitForRow(row, kk); });
+          });
+        });
       } else {
         const ownExtra = document.getElementById('own_extra_blanks');
         if (!ownExtra || !ownExtra.checked) return;
@@ -780,18 +807,83 @@
         const qEl = document.getElementById('extra_stock_kit_search_q');
         const q = qEl ? qEl.value.trim() : '';
         const kits = await fetchKitSuggest(q);
-        renderKitSuggestList('extra_stock_kit_suggest_list', kits, selectExtraStockKit);
+        renderKitSuggestListInto(document.getElementById('extra_stock_kit_suggest_list'), kits, selectExtraStockKit);
       }
     }
-    function scheduleStockKitSuggest() {
-      clearTimeout(stockKitTimer);
-      stockKitTimer = setTimeout(stockKitSuggest, 350);
+    function bindVisitStockKitRow(row) {
+      const qEl = row.querySelector('.vsk-search-q');
+      const findBtn = row.querySelector('.vsk-find-btn');
+      if (qEl) qEl.addEventListener('input', function () { scheduleStockKitSuggestForRow(row); });
+      if (findBtn) findBtn.addEventListener('click', function () { stockKitSuggestForRow(row); });
+      const rm = row.querySelector('.vsk-remove-row');
+      if (rm) rm.addEventListener('click', function () {
+        row.remove();
+        renumberVisitStockKitRows();
+        syncVisitPreview();
+      });
+      row.querySelectorAll('.vsk-use-entire, .vsk-blanks-used').forEach(function (el) {
+        el.addEventListener('change', function () { syncVisitStockRowEntireUi(row); syncVisitPreview(); });
+        el.addEventListener('input', syncVisitPreview);
+      });
+      syncVisitStockRowEntireUi(row);
     }
+    function renumberVisitStockKitRows() {
+      document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row').forEach(function (row, i) {
+        const t = row.querySelector('.vsk-row-title');
+        if (t) t.textContent = 'Комплект ' + (i + 1);
+        const rm = row.querySelector('.vsk-remove-row');
+        if (rm) rm.style.display = (i === 0) ? 'none' : '';
+      });
+    }
+    function syncVisitStockRowEntireUi(row) {
+      const u = row.querySelector('.vsk-use-entire');
+      const n = row.querySelector('.vsk-blanks-used');
+      if (u && n) {
+        n.disabled = !!u.checked;
+        if (u.checked) n.value = '';
+      }
+    }
+    function addVisitStockKitRow() {
+      const wrap = document.getElementById('stock_kit_rows_wrap');
+      const proto = wrap && wrap.querySelector('.visit-stock-kit-row');
+      if (!wrap || !proto) return;
+      const row = proto.cloneNode(true);
+      row.querySelectorAll('.vsk-kit-id, .vsk-breakdown').forEach(function (h) { h.value = ''; });
+      const q = row.querySelector('.vsk-search-q');
+      if (q) q.value = '';
+      row.querySelectorAll('.vsk-suggest-list').forEach(function (u) { u.innerHTML = ''; });
+      const box = row.querySelector('.vsk-selected-box');
+      if (box) box.style.display = 'none';
+      const lineEl = row.querySelector('.vsk-selected-line');
+      if (lineEl) lineEl.innerHTML = '';
+      const resEl = row.querySelector('.vsk-selected-reserve');
+      if (resEl) { resEl.style.display = 'none'; resEl.innerHTML = ''; }
+      const ue = row.querySelector('.vsk-use-entire');
+      if (ue) ue.checked = false;
+      const bu = row.querySelector('.vsk-blanks-used');
+      if (bu) { bu.value = ''; bu.disabled = false; }
+      row._visitStockKit = null;
+      let rm = row.querySelector('.vsk-remove-row');
+      if (!rm) {
+        rm = document.createElement('button');
+        rm.type = 'button';
+        rm.className = 'secondary vsk-remove-row';
+        rm.style.padding = '2px 10px';
+        rm.textContent = 'Убрать строку';
+        const hdr = row.querySelector('.vsk-row-title');
+        if (hdr && hdr.parentNode) hdr.parentNode.appendChild(rm);
+      }
+      wrap.appendChild(row);
+      bindVisitStockKitRow(row);
+      renumberVisitStockKitRows();
+    }
+    const addStockRowBtn = document.getElementById('visit_add_stock_kit_row');
+    if (addStockRowBtn) addStockRowBtn.addEventListener('click', addVisitStockKitRow);
+    document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row').forEach(bindVisitStockKitRow);
     function scheduleExtraStockKitSuggest() {
       clearTimeout(extraStockKitTimer);
       extraStockKitTimer = setTimeout(extraStockKitSuggest, 350);
     }
-    document.getElementById('stock_kit_search_q').addEventListener('input', scheduleStockKitSuggest);
     document.getElementById('extra_stock_kit_search_q').addEventListener('input', scheduleExtraStockKitSuggest);
 
     document.querySelectorAll('input[name="mix_source"]').forEach(function (el) {
@@ -817,12 +909,7 @@
     document.querySelectorAll('input[name="visit_master_on"]').forEach(function (el) { el.addEventListener('change', syncVisitPreview); });
     document.querySelectorAll('input[name^="visit_master_pct_"]').forEach(function (el) { el.addEventListener('input', syncVisitPreview); el.addEventListener('change', syncVisitPreview); });
     function syncVisitStockEntireUi() {
-      const u = document.getElementById('stock_use_entire_cb');
-      const n = document.getElementById('stock_blanks_used');
-      if (u && n) {
-        n.disabled = !!u.checked;
-        if (u.checked) n.value = '';
-      }
+      document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row').forEach(syncVisitStockRowEntireUi);
       const u2 = document.getElementById('own_extra_stock_use_entire_cb');
       const n2 = document.getElementById('own_extra_stock_blanks_used');
       if (u2 && n2) {
@@ -830,13 +917,13 @@
         if (u2.checked) n2.value = '';
       }
     }
-    document.querySelectorAll('input[name="stock_use_entire"], input[name="own_extra_stock_use_entire"]').forEach(function (el) {
+    document.querySelectorAll('input[name="own_extra_stock_use_entire"]').forEach(function (el) {
       el.addEventListener('change', function () {
         syncVisitStockEntireUi();
         syncVisitPreview();
       });
     });
-    document.querySelectorAll('input[name="stock_blanks_used"], input[name="own_extra_stock_blanks_used"]').forEach(function (el) {
+    document.querySelectorAll('input[name="own_extra_stock_blanks_used"]').forEach(function (el) {
       el.addEventListener('input', syncVisitPreview);
       el.addEventListener('change', syncVisitPreview);
     });
@@ -876,16 +963,36 @@
         }
       }
       const svc = getSelectedService();
+      function buildVisitStockKitLinesJson() {
+        const lines = [];
+        document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row').forEach(function (row) {
+          const kid = parseInt((row.querySelector('.vsk-kit-id') || {}).value || '0', 10) || 0;
+          if (kid <= 0) return;
+          const ue = !!(row.querySelector('.vsk-use-entire') || {}).checked;
+          const bu = parseInt((row.querySelector('.vsk-blanks-used') || {}).value || '0', 10) || 0;
+          const bdRaw = (row.querySelector('.vsk-breakdown') || {}).value || '';
+          let breakdown = null;
+          if (bdRaw.trim()) {
+            try { breakdown = JSON.parse(bdRaw); } catch (err) { breakdown = null; }
+          }
+          lines.push({ kit_id: kid, use_entire: ue, blanks_used: bu, breakdown: breakdown });
+        });
+        return lines;
+      }
       const needKit = !!(svc && svc.requires_kit_block);
       if (needKit) {
         const kk = document.querySelector('input[name="kit_kind"]:checked');
         if (kk && kk.value === 'STOCK') {
-          const sid = document.getElementById('stock_kit_id').value.trim();
-          if (!sid) {
+          const lines = buildVisitStockKitLinesJson();
+          const jel = document.getElementById('stock_kit_lines_json');
+          if (jel) jel.value = JSON.stringify(lines);
+          if (!lines.length) {
             e.preventDefault();
-            alert('Выберите комплект из наличия (поиск по артикулу).');
+            alert('Выберите хотя бы один комплект из наличия (поиск по артикулу).');
             return;
           }
+          const skLegacy = document.getElementById('stock_kit_id');
+          if (skLegacy) skLegacy.value = String(lines[0].kit_id);
         }
         if (kk && kk.value === 'OWN') {
           const ownCorr = document.querySelector('input[name="own_correction"]');
@@ -933,11 +1040,21 @@
     const materialPricePerGram = {{ (material_price_per_gram_json or '{}') | safe }};
     const mixComplexityRatesPerGram = {{ (mix_complexity_rates_json or '{}') | safe }};
     const amortizationRublesByLevel = {{ (amortization_rubles_json or '{}') | safe }};
+    const stockKitLinesPreviewInitial = {{ stock_kit_lines_preview | tojson }};
     const stockKitPreviewInitial = {{ stock_kit_preview | tojson }};
     const extraStockKitPreviewInitial = {{ extra_stock_kit_preview | tojson }};
 
-    let selectedMainStockKit = stockKitPreviewInitial;
     let selectedExtraStockKit = extraStockKitPreviewInitial;
+    (function initVisitStockRowsFromPreview() {
+      const rows = document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row');
+      const prev = stockKitLinesPreviewInitial || [];
+      rows.forEach(function (row, i) {
+        const k = prev[i];
+        if (k && typeof k === 'object' && k.id) {
+          selectStockKitForRow(row, k);
+        }
+      });
+    })();
 
     function money2(x) { return Math.round((parseFloat(x) || 0) * 100) / 100; }
     function numVal(sel) {
@@ -1046,14 +1163,15 @@
     }
     function kitUsageCost(kit, useEntireSel, blanksSel) {
       if (!kit) return { piecesUsed: 0, cost: 0, warn: '', kitParts: '' };
+      const useEntire = typeof useEntireSel === 'boolean' ? useEntireSel : isChecked(useEntireSel);
+      const blanks =
+        typeof blanksSel === 'number' ? blanksSel : Math.max(0, intVal(blanksSel));
       if (kit.inventory_keyed && Array.isArray(kit.per_key) && kit.per_key.length) {
         const maxBy = {};
         for (const row of kit.per_key) {
           maxBy[row.key] = Math.max(0, parseInt(String(row.qty_max_for_client), 10) || 0);
         }
         const capSum = Object.values(maxBy).reduce((a, b) => a + b, 0);
-        const useEntire = isChecked(useEntireSel);
-        const blanks = Math.max(0, intVal(blanksSel));
         let take = {};
         if (useEntire) {
           for (const row of kit.per_key) {
@@ -1118,8 +1236,6 @@
       const gross = parseFloat(String(kit.stock_price_total || 0)) || 0;
       const dPct = Math.max(0, Math.min(100, parseInt(String(kit.discount_percent ?? 0), 10) || 0));
       const price = gross * (100 - dPct) / 100.0;
-      const useEntire = isChecked(useEntireSel);
-      const blanks = Math.max(0, intVal(blanksSel));
       const piecesUsed = useEntire ? avail : blanks;
       if (piecesUsed <= 0) return { piecesUsed: 0, cost: 0, warn: '', kitParts: '' };
       if (total <= 0 || price <= 0) return { piecesUsed, cost: 0, warn: 'Нет цены/кол-ва заготовок у комплекта для расчёта себестоимости.', kitParts: '' };
@@ -1155,12 +1271,21 @@
       const kk = (document.querySelector('input[name="kit_kind"]:checked') || {}).value || '';
       const needKit = !!(getSelectedService() && getSelectedService().requires_kit_block);
       if (needKit && kk === 'STOCK') {
-        const r = kitUsageCost(selectedMainStockKit, 'input[name="stock_use_entire"]', 'input[name="stock_blanks_used"]');
-        let mainCost = r.cost;
-        if (isChecked('#kit_paid_separately_cb')) mainCost = 0;
-        kitCostTotal += mainCost;
-        if (r.warn) warn = r.warn;
-        if (r.kitParts) stockKitParts = r.kitParts;
+        document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row').forEach(function (row) {
+          const kit = row._visitStockKit || null;
+          const ueEl = row.querySelector('.vsk-use-entire');
+          const buEl = row.querySelector('.vsk-blanks-used');
+          const ue = !!(ueEl && ueEl.checked);
+          const bu = Math.max(0, parseInt(String(buEl && buEl.value || '0'), 10) || 0);
+          const r = kitUsageCost(kit, ue, bu);
+          let c = r.cost;
+          if (isChecked('#kit_paid_separately_cb')) c = 0;
+          kitCostTotal += c;
+          if (r.warn) warn = r.warn;
+          if (r.kitParts) {
+            stockKitParts = stockKitParts ? (stockKitParts + ' · ' + r.kitParts) : r.kitParts;
+          }
+        });
       }
       if (needKit && kk === 'OWN' && isChecked('#own_extra_blanks')) {
         const r2 = kitUsageCost(selectedExtraStockKit, 'input[name="own_extra_stock_use_entire"]', 'input[name="own_extra_stock_blanks_used"]');
