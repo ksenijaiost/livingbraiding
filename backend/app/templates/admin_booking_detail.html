@@ -279,6 +279,37 @@
       </div>
     {% endif %}
 
+    {% if booking_kit_reserves %}
+      <h3 class="lb-mt-18">Резервы комплектов</h3>
+      <p class="muted lb-font-13 lb-mb-8">По этой брони зарезервированы заготовки на складе. Ссылка ведёт в карточку комплекта.</p>
+      <table class="lb-table-compact lb-max-720">
+        <thead>
+          <tr>
+            <th class="lb-td-pad-left0">Комплект</th>
+            <th>Шт.</th>
+            <th class="lb-td-pad-right0">Зарезервировано</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for kr in booking_kit_reserves %}
+            <tr class="lb-table-compact-row">
+              <td class="lb-td-pad-left0 lb-va-mid">
+                {% if kr.kit %}
+                  <a href="/kits/{{ kr.kit.id }}">{{ kr.kit.sku }}</a>
+                  <span class="muted"> — {{ kr.kit.title }}</span>
+                {% else %}
+                  <span class="muted">#{{ kr.kit_id }}</span>
+                {% endif %}
+              </td>
+              <td class="lb-va-mid">{{ kr.pieces_reserved }}</td>
+              <td class="lb-td-pad-right0 lb-va-mid muted lb-nowrap">{{ format_naive_utc_datetime(kr.reserved_at, display_tz) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted lb-font-12 lb-mt-8">При отмене брони резерв снимается автоматически. При редактировании брони (другой комплект или режим) старый резерв снимается и создаётся новый по форме.</p>
+    {% endif %}
+
     <h3 style="margin-top: 18px;">Аудит</h3>
     {% if not audit_rows %}
       <p class="muted">Пока нет изменений.</p>

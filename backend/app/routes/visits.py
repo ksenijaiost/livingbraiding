@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import AuthUser, require_role
+from app.auth import AuthUser, require_assigned_roles, require_role
 from app.time_utils import utcnow_naive
 from app.db.session import get_db
 from app.db.models import (
@@ -32,10 +33,20 @@ from app.ui_visit_display import (
 )
 from app.visit_edit_policy import is_in_closed_payroll_period, visit_client_change_policy
 from app.audit import diff_fields, write_audit_rows
+from app.kit_blank_stock_core import parse_usage_breakdown_json, return_stock_to_kit
 from app.webui import templates, ctx as _ctx
 
 
 router = APIRouter()
+
+
+def _visits_list_url(*, mine_only: bool, show_cancelled: bool) -> str:
+    q: dict[str, str] = {}
+    if mine_only:
+        q["mine"] = "1"
+    if show_cancelled:
+        q["show_cancelled"] = "1"
+    return "/visits" + ("?" + urlencode(q) if q else "")
 
 
 def _redirect_admin_visits_to_canon(request: Request, *, visit_id: int | None = None) -> RedirectResponse:
@@ -60,12 +71,16 @@ def admin_visits_legacy_redirect(
 def admin_visits(
     request: Request,
     mine: str | None = Query(None),
+    show_cancelled: str | None = Query(None),
     current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
     mine_raw = (mine or "").strip().lower()
     visits_mine_only = mine_raw in ("1", "true", "yes", "only")
+    visits_show_cancelled = parse_bool(show_cancelled)
     stmt = select(Visit).options(selectinload(Visit.client), selectinload(Visit.services))
+    if not visits_show_cancelled:
+        stmt = stmt.where(Visit.is_cancelled.is_(False))
     if visits_mine_only:
         stmt = stmt.where(
             or_(
@@ -82,6 +97,11 @@ def admin_visits(
             current_user=current_user,
             visits=visits,
             visits_mine_only=visits_mine_only,
+            visits_show_cancelled=visits_show_cancelled,
+            visits_url_scope_all=_visits_list_url(mine_only=False, show_cancelled=visits_show_cancelled),
+            visits_url_scope_mine=_visits_list_url(mine_only=True, show_cancelled=visits_show_cancelled),
+            visits_url_active_only=_visits_list_url(mine_only=visits_mine_only, show_cancelled=False),
+            visits_url_include_cancelled=_visits_list_url(mine_only=visits_mine_only, show_cancelled=True),
         ),
     )
 
@@ -179,7 +199,7 @@ def _visit_cancel_revert_stock(db: Session, visit: Visit) -> tuple[bool, str]:
     usages = list(getattr(visit, "kit_usages", []) or [])
     if not usages:
         return True, ""
-    kit_rows: list[tuple[Kit, int]] = []
+    kit_rows: list[tuple[Kit, int, dict[str, int] | None]] = []
     for u in usages:
         kit = getattr(u, "kit", None) or db.get(Kit, u.kit_id)
         if not kit:
@@ -187,15 +207,16 @@ def _visit_cancel_revert_stock(db: Session, visit: Visit) -> tuple[bool, str]:
         pieces = int(u.pieces_used or 0)
         if pieces <= 0:
             continue
+        bd = parse_usage_breakdown_json(getattr(u, "usage_breakdown_json", None))
         new_avail = int(kit.pieces_available + pieces)
         if int(kit.pieces_total) >= 0 and new_avail > int(kit.pieces_total):
             return (
                 False,
                 f"Нельзя отменить визит: возврат превысит остаток 'всего' по комплекту {kit.sku}.",
             )
-        kit_rows.append((kit, pieces))
-    for kit, pieces in kit_rows:
-        kit.pieces_available = int(kit.pieces_available + pieces)
+        kit_rows.append((kit, pieces, bd))
+    for kit, pieces, bd in kit_rows:
+        return_stock_to_kit(db, kit_id=int(kit.id), breakdown=bd, pieces_used=pieces)
         if kit.pieces_available > 0:
             kit.is_in_stock = True
     return True, ""
@@ -205,7 +226,7 @@ def _visit_cancel_revert_stock(db: Session, visit: Visit) -> tuple[bool, str]:
 @router.post("/admin/visits/{visit_id}/cancel")
 async def admin_visit_cancel(
     visit_id: int,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_assigned_roles(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     visit = db.scalar(

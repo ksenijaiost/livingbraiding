@@ -85,6 +85,8 @@ from app.routes.media import router as media_router  # noqa: E402
 app.include_router(media_router)
 from app.routes.techspec_media import router as techspec_media_router  # noqa: E402
 app.include_router(techspec_media_router)
+from app.routes.super_admin_purge import router as super_admin_purge_router  # noqa: E402
+app.include_router(super_admin_purge_router)
 from app.routes.auth_routes import router as auth_routes_router  # noqa: E402
 app.include_router(auth_routes_router)
 

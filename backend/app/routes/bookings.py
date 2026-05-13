@@ -46,6 +46,15 @@ from app.db.models import (
 from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_bool, parse_float, parse_int
+from app.kit_blank_stock_core import (
+    blank_stock_qty_map,
+    build_usage_breakdown_keyed,
+    consume_blank_stock_for_reserve,
+    kit_inventory_is_keyed,
+    max_take_by_key_for_client,
+    return_reserve_row_to_stock,
+    sync_kit_pieces_available_from_blank_lines,
+)
 from app.kit_inlay_visit import (
     get_kit_max_reserves_per_kit,
     kit_reserve_slots_used,
@@ -87,7 +96,7 @@ def _booking_kind_label(k: str) -> str:
 
 def _booking_status_label(s: str) -> str:
     if s == BookingStatus.ACTIVE.value:
-        return "активна"
+        return "⌛ активна"
     if s == BookingStatus.DONE.value:
         return "✅ выполнена"
     if s == BookingStatus.CANCELLED.value:
@@ -387,6 +396,7 @@ def try_auto_complete_booking(db: Session, booking_id: int) -> None:
             FieldChange("status", _booking_status_label(old_status.value), _booking_status_label(BookingStatus.DONE.value))
         ],
     )
+    release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=None)
 
 
 def _amount_hint_from_booking(b: Booking) -> str:
@@ -521,11 +531,15 @@ _BOOKING_VISIT_KIT_DETAIL_KEYS: frozenset[str] = frozenset(
         "visit_kit_mode",
         "visit_stock_kit_id",
         "visit_stock_kit_pieces",
+        "visit_stock_breakdown_json",
+        "visit_stock_use_entire",
         "visit_own_need_correction",
         "visit_own_need_extra_blanks",
         "visit_extra_blanks_mode",
         "visit_extra_stock_kit_id",
         "visit_extra_stock_kit_pieces",
+        "visit_extra_stock_breakdown_json",
+        "visit_extra_stock_use_entire",
         "visit_order_blanks_qty",
         "visit_order_blanks_desc",
         "visit_extra_order_blanks_qty",
@@ -550,6 +564,9 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
         "corr_circle",
         "visit_own_need_correction",
         "visit_own_need_extra_blanks",
+        "visit_stock_use_entire",
+        "visit_extra_stock_use_entire",
+        "sale_stock_use_entire",
     )
     d: dict[str, object] = {}
     keys: tuple[str, ...]
@@ -559,11 +576,15 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
             "visit_kit_mode",
             "visit_stock_kit_id",
             "visit_stock_kit_pieces",
+            "visit_stock_breakdown_json",
+            "visit_stock_use_entire",
             "visit_own_need_correction",
             "visit_own_need_extra_blanks",
             "visit_extra_blanks_mode",
             "visit_extra_stock_kit_id",
             "visit_extra_stock_kit_pieces",
+            "visit_extra_stock_breakdown_json",
+            "visit_extra_stock_use_entire",
             "visit_order_blanks_qty",
             "visit_order_blanks_desc",
             "visit_extra_order_blanks_qty",
@@ -586,6 +607,8 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
                 "sale_kit_mode",
                 "sale_stock_kit_id",
                 "sale_stock_kit_pieces",
+                "sale_stock_breakdown_json",
+                "sale_stock_use_entire",
                 "sale_kit_order_master_ids",
                 "sale_order_blanks_qty",
                 "sale_order_blanks_desc",
@@ -672,8 +695,44 @@ def _sync_booking_staff_rows_for_sale(db: Session, *, booking_id: int, fp: dict[
     db.flush()
 
 
-def _apply_booking_auto_reserves(db: Session, *, booking_client_id: int, fp: dict[str, str], changed_by_user_id: int) -> None:
-    def _reserve_kit(kit_id_raw: str | None, pieces_field: str | None) -> None:
+def release_booking_kit_reserves(db: Session, *, booking_id: int, changed_by_user_id: int | None) -> None:
+    """Вернуть заготовки на склад и удалить строки резерва, привязанные к брони."""
+    rows = list(
+        db.scalars(
+            select(KitReserve).where(KitReserve.booking_id == int(booking_id)).order_by(KitReserve.id.asc())
+        ).all()
+    )
+    for r in rows:
+        kit = db.get(Kit, r.kit_id)
+        if kit is None:
+            db.delete(r)
+            continue
+        before = SimpleNamespace(pieces_available=kit.pieces_available)
+        return_reserve_row_to_stock(db, kit, r)
+        kit.updated_at = utcnow_naive()
+        if changed_by_user_id is not None:
+            kit.updated_by_user_id = changed_by_user_id
+        db.delete(r)
+        write_audit_rows(
+            db,
+            log_model=KitAuditLog,
+            entity_field="kit_id",
+            entity_id=kit.id,
+            changed_by_user_id=changed_by_user_id,
+            changes=diff_fields(before, kit, ("pieces_available",)),
+        )
+
+
+def _apply_booking_auto_reserves(
+    db: Session, *, booking_id: int, booking_client_id: int, fp: dict[str, str], changed_by_user_id: int
+) -> None:
+    def _reserve_kit(
+        kit_id_raw: str | None,
+        pieces_field: str | None,
+        *,
+        use_entire_field: str | None = None,
+        breakdown_json_field: str | None = None,
+    ) -> None:
         if not kit_id_raw:
             return
         kit_id_raw = str(kit_id_raw).strip()
@@ -684,12 +743,82 @@ def _apply_booking_auto_reserves(db: Session, *, booking_client_id: int, fp: dic
         kit = db.get(Kit, kit_id)
         if not kit:
             return
+        if kit_inventory_is_keyed(db, kit.id):
+            sm = blank_stock_qty_map(db, kit.id)
+            max_by_key = max_take_by_key_for_client(
+                db, kit=kit, client_id=booking_client_id, stock_map=sm
+            )
+            if sum(max_by_key.values()) <= 0:
+                return
+            use_entire = bool(use_entire_field and parse_bool(fp.get(use_entire_field)))
+            raw_j = (str(fp.get(breakdown_json_field) or "").strip() if breakdown_json_field else "")
+            usage_by_key: dict[str, int] | None = None
+            if raw_j:
+                try:
+                    d = json.loads(raw_j)
+                    if isinstance(d, dict):
+                        usage_by_key = {str(k): int(v) for k, v in d.items() if int(v) > 0}
+                except Exception:
+                    usage_by_key = None
+            pq = "" if use_entire else (str(fp.get(pieces_field) or "").strip() if pieces_field else "")
+            try:
+                blanks_used = parse_int(pq, min=0, field_name="reserve_pieces") if pq else 0
+            except ValueError:
+                blanks_used = 0
+            try:
+                bd = build_usage_breakdown_keyed(
+                    use_entire=use_entire,
+                    blanks_used=blanks_used,
+                    usage_by_key=usage_by_key,
+                    max_by_key=max_by_key,
+                )
+            except ValueError:
+                return
+            slot_rows = sum(1 for _k, n in bd.items() if int(n) > 0)
+            if slot_rows <= 0:
+                return
+            if kit_reserve_slots_used(db, kit.id) + slot_rows > get_kit_max_reserves_per_kit(db):
+                return
+            before = SimpleNamespace(pieces_available=kit.pieces_available)
+            for kk, n in bd.items():
+                qn = int(n)
+                if qn <= 0:
+                    continue
+                consume_blank_stock_for_reserve(
+                    db, kit, kit_key=kk, qty=qn, sync_after=False
+                )
+                db.add(
+                    KitReserve(
+                        kit_id=kit.id,
+                        kit_key=str(kk)[:80],
+                        pieces_reserved=qn,
+                        reserved_at=utcnow_naive(),
+                        reserved_by_user_id=changed_by_user_id,
+                        reserved_for_client_id=booking_client_id,
+                        reserved_for_user_id=None,
+                        booking_id=int(booking_id),
+                    )
+                )
+            sync_kit_pieces_available_from_blank_lines(db, kit)
+            kit.updated_at = utcnow_naive()
+            kit.updated_by_user_id = changed_by_user_id
+            write_audit_rows(
+                db,
+                log_model=KitAuditLog,
+                entity_field="kit_id",
+                entity_id=kit.id,
+                changed_by_user_id=changed_by_user_id,
+                changes=diff_fields(before, kit, ("pieces_available",)),
+            )
+            return
+
         avail = int(kit.pieces_available or 0)
         if avail <= 0:
             return
         if kit_reserve_slots_used(db, kit.id) >= get_kit_max_reserves_per_kit(db):
             return
-        pq = str(fp.get(pieces_field) or "").strip() if pieces_field else ""
+        use_entire = bool(use_entire_field and parse_bool(fp.get(use_entire_field)))
+        pq = "" if use_entire else (str(fp.get(pieces_field) or "").strip() if pieces_field else "")
         try:
             qty = parse_int(pq, min=1, field_name="reserve_pieces") if pq else avail
         except ValueError:
@@ -707,6 +836,7 @@ def _apply_booking_auto_reserves(db: Session, *, booking_client_id: int, fp: dic
                 reserved_by_user_id=changed_by_user_id,
                 reserved_for_client_id=booking_client_id,
                 reserved_for_user_id=None,
+                booking_id=int(booking_id),
             )
         )
         write_audit_rows(
@@ -719,12 +849,27 @@ def _apply_booking_auto_reserves(db: Session, *, booking_client_id: int, fp: dic
         )
 
     if (fp.get("visit_kit_mode") or "") == "IN_STOCK":
-        _reserve_kit(fp.get("visit_stock_kit_id"), "visit_stock_kit_pieces")
+        _reserve_kit(
+            fp.get("visit_stock_kit_id"),
+            "visit_stock_kit_pieces",
+            use_entire_field="visit_stock_use_entire",
+            breakdown_json_field="visit_stock_breakdown_json",
+        )
     if (fp.get("visit_kit_mode") or "") == "OWN" and (fp.get("visit_own_need_extra_blanks") or ""):
         if (fp.get("visit_extra_blanks_mode") or "") == "IN_STOCK":
-            _reserve_kit(fp.get("visit_extra_stock_kit_id"), "visit_extra_stock_kit_pieces")
+            _reserve_kit(
+                fp.get("visit_extra_stock_kit_id"),
+                "visit_extra_stock_kit_pieces",
+                use_entire_field="visit_extra_stock_use_entire",
+                breakdown_json_field="visit_extra_stock_breakdown_json",
+            )
     if (fp.get("product_kind") or "") == "KIT" and (fp.get("sale_kit_mode") or "") == "IN_STOCK":
-        _reserve_kit(fp.get("sale_stock_kit_id"), "sale_stock_kit_pieces")
+        _reserve_kit(
+            fp.get("sale_stock_kit_id"),
+            "sale_stock_kit_pieces",
+            use_entire_field="sale_stock_use_entire",
+            breakdown_json_field="sale_stock_breakdown_json",
+        )
 
 
 def _masters_for_visit_form(db: Session) -> list[User]:
@@ -750,11 +895,15 @@ def admin_booking_new_get(
         "visit_kit_mode",
         "visit_stock_kit_id",
         "visit_stock_kit_pieces",
+        "visit_stock_breakdown_json",
+        "visit_stock_use_entire",
         "visit_own_need_correction",
         "visit_own_need_extra_blanks",
         "visit_extra_blanks_mode",
         "visit_extra_stock_kit_id",
         "visit_extra_stock_kit_pieces",
+        "visit_extra_stock_breakdown_json",
+        "visit_extra_stock_use_entire",
         "visit_order_blanks_qty",
         "visit_order_blanks_desc",
         "visit_extra_order_blanks_qty",
@@ -769,6 +918,8 @@ def admin_booking_new_get(
         "sale_kit_mode",
         "sale_stock_kit_id",
         "sale_stock_kit_pieces",
+        "sale_stock_breakdown_json",
+        "sale_stock_use_entire",
         "sale_kit_order_master_ids",
         "sale_order_blanks_qty",
         "sale_order_blanks_desc",
@@ -994,7 +1145,13 @@ async def admin_booking_new_post(
             db.add(BookingMaster(booking_id=booking.id, master_id=mid))
 
     _sync_booking_staff_rows_for_sale(db, booking_id=booking.id, fp=fp, form_raw=form_raw)
-    _apply_booking_auto_reserves(db, booking_client_id=booking.client_id, fp=fp, changed_by_user_id=current_user.id)
+    _apply_booking_auto_reserves(
+        db,
+        booking_id=booking.id,
+        booking_client_id=booking.client_id,
+        fp=fp,
+        changed_by_user_id=current_user.id,
+    )
     _refresh_sale_order_master_ids_in_fp(db, booking_id=booking.id, fp=fp)
     booking.details_json = json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False)
     db.commit()
@@ -1026,6 +1183,15 @@ def admin_booking_detail(
     linked_visit_id = db.scalar(select(Visit.id).where(Visit.booking_id == booking_id).limit(1))
     linked_sale_id = db.scalar(select(ProductSale.id).where(ProductSale.booking_id == booking_id).limit(1))
     linked_work_id = db.scalar(select(WorkForInventory.id).where(WorkForInventory.booking_id == booking_id).limit(1))
+
+    booking_kit_reserves = list(
+        db.scalars(
+            select(KitReserve)
+            .where(KitReserve.booking_id == booking_id)
+            .options(selectinload(KitReserve.kit))
+            .order_by(KitReserve.id.asc())
+        ).all()
+    )
 
     sale_staff = list(
         db.scalars(
@@ -1134,6 +1300,7 @@ def admin_booking_detail(
             work_create_url=work_create_url,
             visit_create_url=visit_create_url,
             sale_create_url=sale_create_url,
+            booking_kit_reserves=booking_kit_reserves,
         ),
     )
 
@@ -1398,7 +1565,14 @@ async def admin_booking_edit_post(
             db.add(BookingMaster(booking_id=b.id, master_id=mid))
 
     _sync_booking_staff_rows_for_sale(db, booking_id=b.id, fp=fp, form_raw=form_raw)
-    _apply_booking_auto_reserves(db, booking_client_id=b.client_id, fp=fp, changed_by_user_id=current_user.id)
+    release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
+    _apply_booking_auto_reserves(
+        db,
+        booking_id=b.id,
+        booking_client_id=b.client_id,
+        fp=fp,
+        changed_by_user_id=current_user.id,
+    )
     _refresh_sale_order_master_ids_in_fp(db, booking_id=b.id, fp=fp)
     b.details_json = json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False)
     after_details_json = b.details_json
@@ -1538,6 +1712,7 @@ def admin_booking_cancel(
     b.cancelled_reason = reason_norm[:2000]
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
+    release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
     db.commit()
     write_audit_rows(
         db,
@@ -1567,6 +1742,7 @@ def admin_booking_mark_done(
     b.status = BookingStatus.DONE
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
+    release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
     write_audit_rows(
         db,
         log_model=BookingAuditLog,

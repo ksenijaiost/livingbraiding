@@ -36,12 +36,13 @@ from app.kit_inlay_visit import (
     AMORTIZATION_LEVEL_RUBLES,
     collect_questionnaire_prefill_from_form,
     get_salon_cut_pct,
+    kit_reserve_hint_by_id,
+    kit_suggest_dict_for_kit_id,
     list_master_visit_services_catalog,
     master_visit_step1_prefill_from_form,
     parse_kit_inlay_form,
     save_kit_inlay_visit,
 )
-from app.kit_inlay_visit import kit_reserve_hint_by_id
 from app.mix_rates import mix_rates_meta_json_dict
 from app.ru_labels import ru_master_level
 from app.routes.bookings import try_auto_complete_booking
@@ -103,6 +104,18 @@ def _amount_hint_from_booking(b: Booking) -> str:
         return ""
     digits = re.sub(r"\D", "", m.group(1))
     return digits if digits else ""
+
+
+def _visit_kit_preview_client_id(
+    form_prefill: dict[str, str], selected_client: Client | None
+) -> int | None:
+    if selected_client is not None:
+        return int(selected_client.id)
+    raw = (form_prefill.get("existing_client_id") or "").strip()
+    try:
+        return parse_int(raw, min=1, field_name="existing_client_id")
+    except ValueError:
+        return None
 
 
 def _prefill_visit_stock_kit_from_booking(db: Session, b: Booking, form_prefill: dict[str, str]) -> None:
@@ -185,6 +198,15 @@ def _master_visit_step1_template_response(
         "kanekalon": float(pk.price_per_gram) if pk else 0.0,
         "kudri": float(pku.price_per_gram) if pku else 0.0,
     }
+    cid_prev = _visit_kit_preview_client_id(form_prefill, selected_client)
+    stock_kit_preview: dict[str, Any] | None = None
+    sk_raw = (form_prefill.get("stock_kit_id") or "").strip()
+    if sk_raw.isdigit():
+        stock_kit_preview = kit_suggest_dict_for_kit_id(db, int(sk_raw), for_client_id=cid_prev)
+    extra_stock_kit_preview: dict[str, Any] | None = None
+    ex_raw = (form_prefill.get("own_extra_stock_kit_id") or "").strip()
+    if ex_raw.isdigit():
+        extra_stock_kit_preview = kit_suggest_dict_for_kit_id(db, int(ex_raw), for_client_id=cid_prev)
     return templates.TemplateResponse(
         "master_visit_step1.html",
         _ctx(
@@ -198,6 +220,8 @@ def _master_visit_step1_template_response(
             stock_kit_reserve_hint=_kit_reserve_hint_from_form(db, form_prefill, "stock_kit_id"),
             extra_stock_kit_selected_label=_kit_stock_label_from_form(db, form_prefill, "own_extra_stock_kit_id"),
             extra_stock_kit_reserve_hint=_kit_reserve_hint_from_form(db, form_prefill, "own_extra_stock_kit_id"),
+            stock_kit_preview=stock_kit_preview,
+            extra_stock_kit_preview=extra_stock_kit_preview,
             salon_cut_pct=salon_cut_pct,
             material_price_per_gram_json=json.dumps(material_price_per_gram, ensure_ascii=False),
             mix_complexity_rates_json=json.dumps(mix_rates_meta_json_dict(db), ensure_ascii=False),

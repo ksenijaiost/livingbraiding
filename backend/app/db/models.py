@@ -528,10 +528,30 @@ class Kit(Base):
         cascade="all, delete-orphan",
         order_by="KitReserve.id",
     )
+    blank_stock_lines: Mapped[list["KitBlankStock"]] = relationship(
+        back_populates="kit",
+        cascade="all, delete-orphan",
+        order_by="KitBlankStock.kit_key",
+    )
 
     @property
     def is_reserved(self) -> bool:
         return bool(self.reserves)
+
+
+class KitBlankStock(Base):
+    """Остаток заготовок по ключу состава (composition_json / kit_key в прайсе)."""
+
+    __tablename__ = "kit_blank_stock"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kit_id: Mapped[int] = mapped_column(ForeignKey("kits.id", ondelete="CASCADE"), nullable=False)
+    kit_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    qty: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    kit: Mapped["Kit"] = relationship(back_populates="blank_stock_lines")
+
+    __table_args__ = (UniqueConstraint("kit_id", "kit_key", name="uq_kit_blank_stock_kit_key"),)
 
 
 class KitReserve(Base):
@@ -546,11 +566,15 @@ class KitReserve(Base):
     reserved_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     reserved_for_client_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("clients.id"), nullable=True)
     reserved_for_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    booking_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("bookings.id", ondelete="SET NULL"), nullable=True)
+    # Ключ состава; NULL — старый резерв «без разбивки по видам» (только scalar pieces_available).
+    kit_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     kit: Mapped["Kit"] = relationship(back_populates="reserves")
     reserved_by_user: Mapped["User"] = relationship(foreign_keys=[reserved_by_user_id])
     reserved_for_client: Mapped["Client | None"] = relationship(foreign_keys=[reserved_for_client_id])
     reserved_for_user: Mapped["User | None"] = relationship(foreign_keys=[reserved_for_user_id])
+    booking: Mapped["Booking | None"] = relationship(back_populates="kit_reserves")
 
 
 class KitAuthorStaff(Base):
@@ -652,6 +676,7 @@ class Booking(Base):
         back_populates="booking",
         cascade="all, delete-orphan",
     )
+    kit_reserves: Mapped[list["KitReserve"]] = relationship(back_populates="booking")
 
 
 class BookingMaster(Base):
@@ -766,6 +791,7 @@ class ProductSale(Base):
     # KIT
     kit_id: Mapped[int | None] = mapped_column(ForeignKey("kits.id"), nullable=True)
     kit_pieces_sold: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    kit_breakdown_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # RUBBER
     rubber_description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -1004,6 +1030,8 @@ class Visit(Base):
     duration_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True)
+    # Основной комплект «из наличия»: уже оплачен (напр. при брони) — не входит в себестоимость визита.
+    kit_paid_separately: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
     client_type: Mapped[VisitClientType] = mapped_column(Enum(VisitClientType), nullable=False)
     price_type: Mapped[VisitPriceType] = mapped_column(Enum(VisitPriceType), nullable=False)
@@ -1326,6 +1354,7 @@ class VisitKitUsage(Base):
     # snapshot: what we subtract from profit for this usage
     cost_amount: Mapped[float] = mapped_column(Float, nullable=False)
     note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    usage_breakdown_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     visit: Mapped[Visit] = relationship(back_populates="kit_usages")
     kit: Mapped[Kit] = relationship()

@@ -41,6 +41,35 @@
   </div>
 {% endif %}
 
+{% if not is_new and blank_stock_rows %}
+  <div style="margin-top:16px;padding:12px;border-radius:8px;border:1px solid #e2e8f0;background:#f8fafc;">
+    <div style="font-weight:600;margin-bottom:8px;">Остаток по видам заготовок</div>
+    <p class="muted" style="font-size:13px;margin:0 0 10px;">Ключи из состава комплекта и каталога «Заказ» → «Заготовки поштучно». После сохранения непустых строк включается складской учёт по видам (списание в визите/брони — по разбивке).</p>
+    <table style="width:100%;max-width:720px;border-collapse:collapse;font-size:14px;">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
+          <th style="padding:6px 8px;">Ключ</th>
+          <th style="padding:6px 8px;">Подпись</th>
+          <th style="padding:6px 8px;">Цена за шт., ₽</th>
+          <th style="padding:6px 8px;">Остаток, шт.</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in blank_stock_rows %}
+          <tr style="border-bottom:1px solid #e5e7eb;">
+            <td style="padding:8px;font-family:monospace;">{{ row.key }}</td>
+            <td style="padding:8px;">{{ row.label }}</td>
+            <td style="padding:8px;">{% if row.price is not none %}{{ row.price|round(2) }}{% else %}—{% endif %}</td>
+            <td style="padding:8px;">
+              <input type="number" min="0" step="1" name="blank_stock_qty__{{ row.key }}" value="{{ fp.get('blank_stock_qty__' ~ row.key, row.qty) }}" style="width:100px;" />
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
 <div class="row" style="margin-top:12px;">
   <div>
     <label>Вес, г</label>

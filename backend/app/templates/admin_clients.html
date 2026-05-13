@@ -3,9 +3,15 @@
   <div class="card">
     <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
       <h2 style="margin-top: 0;">Клиенты</h2>
-      {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
-        <a href="/clients/new"><button type="button">Новый клиент</button></a>
-      {% endif %}
+      <div style="display:flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+        {% if UserRole.ADMIN_SUPER in current_user.roles %}
+          <a href="/clients/export"><button type="button" class="secondary">Выгрузить в Excel (CSV)</button></a>
+          <span class="muted" style="font-size: 12px; max-width: 14rem;">Все клиенты в базе, не только результаты поиска ниже.</span>
+        {% endif %}
+        {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
+          <a href="/clients/new"><button type="button">Новый клиент</button></a>
+        {% endif %}
+      </div>
     </div>
 
     {% if created_ok %}

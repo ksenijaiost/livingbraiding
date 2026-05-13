@@ -165,12 +165,38 @@ def require_role(*roles: UserRole):
     return _dep
 
 
+def require_assigned_roles(*roles: UserRole):
+    """Доступ, если одна из ролей назначена пользователю (в `user.roles`), не только активная."""
+
+    allowed = frozenset(roles)
+
+    def _dep(user: Annotated[AuthUser, Depends(get_current_user)]) -> AuthUser:
+        if UserRole.TECHSPEC in user.roles:
+            return user
+        if not allowed.intersection(user.roles):
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return user
+
+    return _dep
+
+
 def require_techspec_user():
     """Только пользователи с ролью TECHSPEC (опасные операции: бэкап/восстановление медиа)."""
 
     def _dep(user: Annotated[AuthUser, Depends(get_current_user)]) -> AuthUser:
         if UserRole.TECHSPEC not in user.roles:
             raise HTTPException(status_code=403, detail="Forbidden")
+        return user
+
+    return _dep
+
+
+def require_admin_super_assigned():
+    """Только у кого в профиле есть роль ADMIN_SUPER (без обхода для TECHSPEC)."""
+
+    def _dep(user: Annotated[AuthUser, Depends(get_current_user)]) -> AuthUser:
+        if UserRole.ADMIN_SUPER not in user.roles:
+            raise HTTPException(status_code=403, detail="Только для суперадмина.")
         return user
 
     return _dep

@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime
+
+import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.db import models as _orm_models  # noqa: F401 — register models on Base
+from app.db.base import Base
+from app.db.models import Kit, KitBlankStock
+from app.kit_blank_stock_core import (
+    build_usage_breakdown_keyed,
+    decrement_blank_stock_keys,
+    distribute_scalar_to_keys,
+    keyed_cost_selected,
+    sync_kit_pieces_available_from_blank_lines,
+)
+
+
+def test_distribute_scalar_to_keys_matches_weights() -> None:
+    comp = {"DE": 2, "SE": 1}
+    got = distribute_scalar_to_keys(comp, 5)
+    assert got == {"DE": 3, "SE": 2}
+
+
+def test_keyed_cost_selected_linear_in_piece_count() -> None:
+    comp = {"DE": 2, "SE": 1}
+    per_piece_share = 60.0 / 3.0  # cost_total / sum(comp)
+    assert keyed_cost_selected({"DE": 2}, comp=comp, kit_cost_total=60.0) == pytest.approx(2 * per_piece_share)
+    assert keyed_cost_selected({"DE": 1, "SE": 2}, comp=comp, kit_cost_total=60.0) == pytest.approx(3 * per_piece_share)
+
+
+def test_build_usage_breakdown_keyed_explicit_usage() -> None:
+    max_by = {"DE": 5, "SE": 3}
+    bd = build_usage_breakdown_keyed(
+        use_entire=False,
+        blanks_used=0,
+        usage_by_key={"DE": 2, "SE": 1},
+        max_by_key=max_by,
+    )
+    assert bd == {"DE": 2, "SE": 1}
+
+
+@pytest.fixture()
+def memory_db() -> Session:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    with SessionLocal() as db:
+        yield db
+
+
+def test_decrement_two_keys_and_sync_pieces_available(memory_db: Session) -> None:
+    db = memory_db
+    kit = Kit(
+        sku="T-KIT-1",
+        title="Test kit",
+        pieces_total=10,
+        pieces_available=0,
+        stock_price_total=100.0,
+        discount_percent=0,
+        cost_total=30.0,
+        composition_json=json.dumps({"DE": 1, "SE": 1}),
+        created_at=datetime(2024, 1, 1, 12, 0, 0),
+    )
+    db.add(kit)
+    db.flush()
+    db.add_all(
+        [
+            KitBlankStock(kit_id=kit.id, kit_key="DE", qty=4),
+            KitBlankStock(kit_id=kit.id, kit_key="SE", qty=2),
+        ]
+    )
+    db.commit()
+    db.refresh(kit)
+
+    decrement_blank_stock_keys(db, kit.id, {"DE": 2, "SE": 1})
+    sync_kit_pieces_available_from_blank_lines(db, kit)
+    db.commit()
+
+    rows = {
+        r.kit_key: int(r.qty)
+        for r in db.scalars(select(KitBlankStock).where(KitBlankStock.kit_id == kit.id)).all()
+    }
+    assert rows == {"DE": 2, "SE": 1}
+    db.refresh(kit)
+    assert int(kit.pieces_available) == 3

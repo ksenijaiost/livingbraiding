@@ -309,8 +309,34 @@ def parse_kit_author_user_ids_from_form(form: Any) -> list[int]:
 
 
 def sync_kit_authors(db: Session, kit: Kit, form: Any) -> None:
-    uids = parse_kit_author_user_ids_from_form(form)
-    kit.author_external = _g_bool(form, "author_external")
+    sync_kit_authors_from_user_ids(
+        db,
+        kit,
+        author_user_ids=parse_kit_author_user_ids_from_form(form),
+        author_external=_g_bool(form, "author_external"),
+    )
+
+
+def sync_kit_authors_from_user_ids(
+    db: Session,
+    kit: Kit,
+    *,
+    author_user_ids: list[int] | None,
+    author_external: bool,
+) -> None:
+    """Те же правила, что у формы: только активные мастера."""
+    uids: list[int] = []
+    seen: set[int] = set()
+    for x in author_user_ids or []:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            continue
+        if i <= 0 or i in seen:
+            continue
+        seen.add(i)
+        uids.append(i)
+    kit.author_external = bool(author_external)
     for uid in uids:
         u = db.get(User, uid)
         if not u or not u.is_active:
@@ -350,7 +376,7 @@ def kit_new_error_prefill(form: Any) -> dict[str, Any]:
 
 def kit_edit_error_prefill(form: Any) -> dict[str, Any]:
     d = parse_kit_admin_form(form, for_create=False)
-    return {
+    out: dict[str, Any] = {
         "sku": d.sku,
         "title": d.title,
         "blank_type_de": "on" if d.blank_type_de else "",
@@ -371,6 +397,13 @@ def kit_edit_error_prefill(form: Any) -> dict[str, Any]:
         "author_external": "on" if _g_bool(form, "author_external") else "",
         "kit_author_ids": parse_kit_author_user_ids_from_form(form),
     }
+    try:
+        for name in list(form.keys()):
+            if isinstance(name, str) and name.startswith("blank_stock_qty__"):
+                out[name] = _g_str(form, name)
+    except Exception:
+        pass
+    return out
 
 
 def kit_to_form_prefill(kit: Kit) -> dict[str, Any]:

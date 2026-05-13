@@ -23,6 +23,10 @@ class KitFromStock(BaseModel):
         False,
         description="Если true — списать все доступные заготовки (blanks_used может быть 0)",
     )
+    usage_by_key: dict[str, int] | None = Field(
+        default=None,
+        description="Списание по ключам состава (kit_key); None — прежняя скалярная модель",
+    )
 
 
 class KitNew(BaseModel):

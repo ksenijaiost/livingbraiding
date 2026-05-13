@@ -720,6 +720,7 @@ function initAdminBookingForm() {
     if (own) own.style.display = (m === "OWN") ? "block" : "none";
     if (order) order.style.display = (m === "ORDER") ? "block" : "none";
     syncOwnKitExtras();
+    syncBookingEntireKitPieceInputs();
   }
 
   // --- Sale kind / modes ---
@@ -735,6 +736,7 @@ function initAdminBookingForm() {
     var order = byId("sale_kit_order_block");
     if (stock) stock.style.display = (show && m === "IN_STOCK") ? "block" : "none";
     if (order) order.style.display = (show && m === "ORDER") ? "block" : "none";
+    syncBookingEntireKitPieceInputs();
   }
 
   function syncSaleRubberTypeFields() {
@@ -878,8 +880,28 @@ function initAdminBookingForm() {
   }
 
   // --- Kit suggest ---
+  function bookingKitSuggestUrl(q) {
+    var params = new URLSearchParams();
+    params.set("q", q || "");
+    var cidEl = byId("existing_client_id") || byId("client_id");
+    var cid = cidEl && cidEl.value ? String(cidEl.value).trim() : "";
+    if (cid && /^\d+$/.test(cid)) params.set("client_id", cid);
+    return "/master/kits/suggest?" + params.toString();
+  }
+  function bookingKitSuggestLine(k) {
+    if (!k) return "";
+    var free = parseInt(String(k.pieces_available || "0"), 10) || 0;
+    var rc = parseInt(String(k.reserved_for_selected_client || "0"), 10) || 0;
+    var sku = k.sku || ("#" + k.id);
+    var title = k.title || "";
+    var part = "остаток свободно " + free;
+    if (rc > 0) part += ", резерв клиента: " + rc + " шт.";
+    var line = sku + " — " + title + " (" + part + ")";
+    if (k.missing_sale_price) line = "⚠️ " + line;
+    return line;
+  }
   async function kitSuggest(q, ulId, onPick) {
-    var res = await fetch("/master/kits/suggest?q=" + encodeURIComponent(q || ""));
+    var res = await fetch(bookingKitSuggestUrl(q || ""));
     if (!res.ok) return;
     var data = {};
     try { data = await res.json(); } catch (e) { data = {}; }
@@ -892,7 +914,7 @@ function initAdminBookingForm() {
       var b = document.createElement("button");
       b.type = "button";
       b.className = "secondary";
-      b.textContent = (k.sku || ("#" + k.id)) + " — " + (k.title || "");
+      b.textContent = bookingKitSuggestLine(k);
       b.addEventListener("click", function () { onPick(k); });
       li.appendChild(b);
       ul.appendChild(li);
@@ -915,7 +937,24 @@ function initAdminBookingForm() {
     var box = byId(boxId);
     var line = byId(lineId);
     if (box) box.style.display = "block";
-    if (line) line.innerHTML = 'Выбрано: <strong>' + escapeHtml((kit.sku || ("#" + kit.id)) + " — " + (kit.title || "")) + "</strong>";
+    if (line) {
+      var text = bookingKitSuggestLine(kit);
+      line.innerHTML = 'Выбрано: <strong>' + escapeHtml(text) + "</strong>";
+    }
+  }
+
+  function syncBookingEntireKitPieceInputs() {
+    [
+      ["visit_stock_use_entire", "visit_stock_kit_pieces"],
+      ["visit_extra_stock_use_entire", "visit_extra_stock_kit_pieces"],
+      ["sale_stock_use_entire", "sale_stock_kit_pieces"]
+    ].forEach(function (pr) {
+      var cb = document.querySelector('input[name="' + pr[0] + '"]');
+      var inp = document.querySelector('input[name="' + pr[1] + '"]');
+      if (!cb || !inp) return;
+      inp.disabled = !!cb.checked;
+      if (cb.checked) inp.value = "";
+    });
   }
 
   // --- Bind listeners ---
@@ -963,6 +1002,29 @@ function initAdminBookingForm() {
     var ul = byId("sale_kit_suggest_list");
     if (ul) ul.innerHTML = "";
   });
+
+  [
+    ["visit_kit_stock_find_btn", "visit_kit_search_q", "visit_kit_suggest_list", "visit_stock_kit_id", "visit_selected_kit_box", "visit_selected_kit_line"],
+    ["visit_extra_kit_stock_find_btn", "visit_extra_kit_search_q", "visit_extra_kit_suggest_list", "visit_extra_stock_kit_id", "visit_extra_selected_kit_box", "visit_extra_selected_kit_line"],
+    ["sale_kit_stock_find_btn", "sale_kit_search_q", "sale_kit_suggest_list", "sale_stock_kit_id", "sale_selected_kit_box", "sale_selected_kit_line"]
+  ].forEach(function (row) {
+    var btn = byId(row[0]);
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      var inp = byId(row[1]);
+      var q = inp ? String(inp.value || "").trim() : "";
+      kitSuggest(q, row[2], function (k) {
+        setSelectedKit(row[3], row[4], row[5], k);
+        var ul = byId(row[2]);
+        if (ul) ul.innerHTML = "";
+      });
+    });
+  });
+  ["visit_stock_use_entire", "visit_extra_stock_use_entire", "sale_stock_use_entire"].forEach(function (name) {
+    var cb = document.querySelector('input[name="' + name + '"]');
+    if (cb) cb.addEventListener("change", syncBookingEntireKitPieceInputs);
+  });
+  syncBookingEntireKitPieceInputs();
 
   // --- init ---
   syncKind();
@@ -1301,6 +1363,14 @@ function initKitClearReservesUI() {
       line2.textContent = (item.when || "") + " · " + (item.author || "");
       right.appendChild(line1);
       right.appendChild(line2);
+      if (item.booking_line) {
+        var line3 = document.createElement("div");
+        line3.className = "muted";
+        line3.style.fontSize = "12px";
+        line3.style.marginTop = "2px";
+        line3.textContent = item.booking_line;
+        right.appendChild(line3);
+      }
       wrap.appendChild(cb);
       wrap.appendChild(right);
       box.appendChild(wrap);

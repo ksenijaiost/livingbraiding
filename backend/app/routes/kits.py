@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import UploadFile
 from sqlalchemy import select
@@ -19,6 +19,7 @@ from app.db.models import (
     Kit,
     KitAuditLog,
     KitAuthorStaff,
+    KitBlankStock,
     KitReserve,
     User,
     UserRole,
@@ -26,6 +27,12 @@ from app.db.models import (
 from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime, get_display_timezone, timezone_label
 from app.forms_parse import parse_bool, parse_int
+from app.kit_bulk_import import (
+    MAX_BULK_JSON_BYTES,
+    MAX_BULK_KITS,
+    import_single_kit_row,
+    parse_bulk_kits_json,
+)
 from app.kit_crud import (
     apply_kit_admin_form,
     calc_kit_stock_price_total_from_composition,
@@ -40,6 +47,21 @@ from app.kit_crud import (
     validate_kit_admin_form,
 )
 from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
+from app.kit_blank_stock_core import (
+    blank_stock_edit_rows_for_kit,
+    blank_stock_qty_map,
+    build_usage_breakdown_keyed,
+    composition_keys_intersection_catalog,
+    consume_blank_stock_for_reserve,
+    kit_inventory_is_keyed,
+    load_catalog_kit_maps,
+    max_take_by_key_for_client,
+    parse_composition_totals,
+    read_blank_stock_qty_from_admin_form,
+    replace_blank_stock_for_kit,
+    return_reserve_row_to_stock,
+    sync_kit_pieces_available_from_blank_lines,
+)
 from app.kit_inlay_visit import (
     get_kit_max_reserves_per_kit,
     kit_reserve_hint_by_id,
@@ -67,6 +89,7 @@ def _redirect_admin_kits_to_canon(request: Request, *, suffix: str = "") -> Redi
 
 _KITS_STAFF = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _KITS_ADMIN = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER))
+_KITS_SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
 
 
 def _kit_stock_label_from_form(db: Session, form_map: dict[str, str], field: str) -> str | None:
@@ -121,6 +144,8 @@ def _kit_reservation_tooltip(kit: Kit, db: Session) -> str:
             who.append(f"сотр.: {r.reserved_for_user.display_name}")
         if r.reserved_by_user:
             who.append(f"забронировал: {r.reserved_by_user.display_name}")
+        if r.booking_id:
+            who.append(f"бронь #{int(r.booking_id)}")
         when = format_naive_utc_datetime(r.reserved_at, tz)
         chunks.append(
             f"{r.pieces_reserved} шт. ({', '.join(who) if who else 'цель не указана'}) · {when} ({timezone_label(tz)})"
@@ -142,17 +167,28 @@ def _kit_clear_modal_items(kit: Kit, display_tz: str) -> list[dict[str, Any]]:
             author = (r.reserved_by_user.display_name or r.reserved_by_user.username or "").strip() or "—"
         else:
             author = "—"
-        out.append({"id": r.id, "pieces": int(r.pieces_reserved or 0), "target": target, "when": when, "author": author})
+        booking_line = f"бронь #{int(r.booking_id)}" if r.booking_id else None
+        out.append(
+            {
+                "id": r.id,
+                "pieces": int(r.pieces_reserved or 0),
+                "target": target,
+                "when": when,
+                "author": author,
+                "booking_line": booking_line,
+            }
+        )
     return out
 
 
 @master_kits_router.get("/suggest")
 def master_kits_suggest(
     q: str = "",
+    client_id: int | None = Query(default=None, ge=1),
     current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    return JSONResponse({"kits": suggest_kits_for_stock(db, q)})
+    return JSONResponse({"kits": suggest_kits_for_stock(db, q, for_client_id=client_id)})
 
 
 @router.get("", response_class=HTMLResponse)
@@ -218,6 +254,7 @@ def admin_kit_new_get(
             staff_for_kit_authors=list_masters_for_kit_author_pick(db),
             computed_stock_price_total=None,
             computed_stock_price_missing_keys=[],
+            blank_stock_rows=[],
         ),
     )
 
@@ -267,6 +304,67 @@ async def admin_kit_new_post(
         )
 
 
+@router.get("/bulk-import", response_class=HTMLResponse)
+def admin_kits_bulk_import_get(
+    request: Request,
+    current_user: AuthUser = _KITS_SUPER,
+):
+    return templates.TemplateResponse(
+        "admin_kits_bulk_import.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            results=None,
+            top_error=None,
+            payload_prefill="",
+            max_bytes=MAX_BULK_JSON_BYTES,
+            max_kits=MAX_BULK_KITS,
+        ),
+    )
+
+
+@router.post("/bulk-import", response_class=HTMLResponse)
+async def admin_kits_bulk_import_post(
+    request: Request,
+    current_user: AuthUser = _KITS_SUPER,
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    payload = str(form.get("payload") or "")
+    try:
+        rows = parse_bulk_kits_json(payload)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            "admin_kits_bulk_import.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                results=None,
+                top_error=str(exc),
+                payload_prefill=payload,
+                max_bytes=MAX_BULK_JSON_BYTES,
+                max_kits=MAX_BULK_KITS,
+            ),
+            status_code=400,
+        )
+    reserved: set[str] = set()
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        results.append(import_single_kit_row(db, row, reserved_skus=reserved, changed_by_user_id=current_user.id))
+    return templates.TemplateResponse(
+        "admin_kits_bulk_import.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            results=results,
+            top_error=None,
+            payload_prefill=payload,
+            max_bytes=MAX_BULK_JSON_BYTES,
+            max_kits=MAX_BULK_KITS,
+        ),
+    )
+
+
 @router.get("/{kit_id}", response_class=HTMLResponse)
 def admin_kit_detail(
     request: Request,
@@ -282,6 +380,7 @@ def admin_kit_detail(
             selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
             selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_user),
             selectinload(Kit.reserves).selectinload(KitReserve.reserved_by_user),
+            selectinload(Kit.reserves).selectinload(KitReserve.booking),
             selectinload(Kit.author_staff_links).selectinload(KitAuthorStaff.user),
         )
         .where(Kit.id == kit_id)
@@ -299,12 +398,19 @@ def admin_kit_detail(
     )
     display_tz = get_display_timezone(db)
     computed_price, computed_missing = calc_kit_stock_price_total_from_composition(db, kit)
+    comp_keys = parse_composition_totals(kit)
+    composition_blank_stock_warning = (
+        bool(comp_keys)
+        and int(kit.pieces_available or 0) > 0
+        and not kit_inventory_is_keyed(db, int(kit_id))
+    )
     return templates.TemplateResponse(
         "admin_kit_detail.html",
         _ctx(
             request,
             current_user=current_user,
             kit=kit,
+            composition_blank_stock_warning=composition_blank_stock_warning,
             computed_stock_price_total=computed_price,
             computed_stock_price_missing_keys=computed_missing,
             audit_rows=audit_rows,
@@ -344,6 +450,7 @@ def admin_kit_edit_get(
             staff_for_kit_authors=list_masters_for_kit_author_pick(db),
             computed_stock_price_total=computed_price,
             computed_stock_price_missing_keys=computed_missing,
+            blank_stock_rows=blank_stock_edit_rows_for_kit(db, kit),
         ),
     )
 
@@ -470,6 +577,16 @@ async def admin_kit_edit_post(
         except ValueError as exc:
             raise ValueError(str(exc)) from None
         sync_kit_authors(db, kit, form)
+        blank_qty = read_blank_stock_qty_from_admin_form(form)
+        if blank_qty:
+            comp = parse_composition_totals(kit)
+            _, meta, _ = load_catalog_kit_maps(db)
+            allowed = set(composition_keys_intersection_catalog(comp, meta)) if comp else set()
+            if not allowed and comp:
+                allowed = set(comp.keys())
+            if not allowed:
+                raise ValueError("Нет ключей состава для остатков по видам (заполните composition_json).")
+            replace_blank_stock_for_kit(db, kit, quantities=blank_qty, allowed_keys=allowed)
         after_auth_ids = sorted([l.user_id for l in (kit.author_staff_links or [])])
         kit.updated_at = utcnow_naive()
         kit.updated_by_user_id = current_user.id
@@ -535,6 +652,7 @@ async def admin_kit_edit_post(
                 staff_for_kit_authors=list_masters_for_kit_author_pick(db),
                 computed_stock_price_total=computed_price,
                 computed_stock_price_missing_keys=computed_missing,
+                blank_stock_rows=blank_stock_edit_rows_for_kit(db, kit),
             ),
             status_code=400,
         )
@@ -582,11 +700,10 @@ async def admin_kit_reserve_post(
             if row is None or row.kit_id != kit.id:
                 return _err("Некорректный выбор резервов.")
             rows.append(row)
-        total_back = sum(int(r.pieces_reserved or 0) for r in rows)
         before = SimpleNamespace(pieces_available=kit.pieces_available)
         for r in rows:
+            return_reserve_row_to_stock(db, kit, r)
             db.delete(r)
-        kit.pieces_available = int(kit.pieces_available or 0) + total_back
         kit.updated_at = utcnow_naive()
         kit.updated_by_user_id = current_user.id
         write_audit_rows(
@@ -613,7 +730,7 @@ async def admin_kit_reserve_post(
             if current_user.role == UserRole.MASTER and row.reserved_by_user_id != current_user.id:
                 return _err("Снять резерв может автор резерва или администратор.")
             before = SimpleNamespace(pieces_available=kit.pieces_available)
-            kit.pieces_available = int(kit.pieces_available or 0) + int(row.pieces_reserved or 0)
+            return_reserve_row_to_stock(db, kit, row)
             kit.updated_at = utcnow_naive()
             kit.updated_by_user_id = current_user.id
             db.delete(row)
@@ -631,25 +748,7 @@ async def admin_kit_reserve_post(
 
     reserve_full = parse_bool(form.get("reserve_full"))
     qty_raw = str(form.get("reserve_pieces") or "").strip()
-    if reserve_full and qty_raw:
-        return _err("Выберите либо «весь остаток», либо укажите количество заготовок.")
-    if not reserve_full and not qty_raw:
-        return _err("Укажите «весь остаток» или количество заготовок.")
-    avail = int(kit.pieces_available or 0)
-    if avail <= 0:
-        return _err("Нет свободного остатка для резерва.")
-    if kit_reserve_slots_used(db, kit.id) >= max_slots:
-        return _err(f"Достигнут лимит резервов на комплект ({max_slots}). Увеличьте лимит в настройках.")
-
-    if reserve_full:
-        qty = avail
-    else:
-        try:
-            qty = parse_int(qty_raw, min=1, field_name="reserve_pieces")
-        except ValueError:
-            return _err("Некорректное количество заготовок.")
-    if qty > avail:
-        return _err(f"Нельзя зарезервировать больше свободного остатка ({avail}).")
+    raw_j = str(form.get("reserve_breakdown_json") or "").strip()
 
     cid_raw = str(form.get("reserved_for_client_id") or "").strip()
     uid_raw = str(form.get("reserved_for_user_id") or "").strip()
@@ -672,6 +771,92 @@ async def admin_kit_reserve_post(
         u = db.get(User, uid)
         if not u or not user_has_any_role(db, uid, UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
             return _err("Сотрудник не найден.")
+
+    if kit_inventory_is_keyed(db, kit.id):
+        if reserve_full and qty_raw and not raw_j:
+            return _err("Выберите либо «весь остаток», либо количество, либо отправьте разбивку по видам.")
+        if not raw_j and not reserve_full and not qty_raw:
+            return _err("Укажите «весь остаток», количество или разбивку по видам (JSON).")
+        sm = blank_stock_qty_map(db, kit.id)
+        max_by = max_take_by_key_for_client(db, kit=kit, client_id=cid, stock_map=sm)
+        if sum(max_by.values()) <= 0:
+            return _err("Нет свободного остатка для резерва.")
+        usage_by_key: dict[str, int] | None = None
+        if raw_j:
+            try:
+                d = json.loads(raw_j)
+                if isinstance(d, dict):
+                    usage_by_key = {str(k): int(v) for k, v in d.items() if int(v) > 0}
+            except Exception:
+                usage_by_key = None
+        try:
+            blanks_used = parse_int(qty_raw, min=0, field_name="reserve_pieces") if qty_raw else 0
+        except ValueError:
+            blanks_used = 0
+        try:
+            bd = build_usage_breakdown_keyed(
+                use_entire=reserve_full,
+                blanks_used=blanks_used,
+                usage_by_key=usage_by_key,
+                max_by_key=max_by,
+            )
+        except ValueError as exc:
+            return _err(str(exc))
+        n_rows = sum(1 for _k, n in bd.items() if int(n) > 0)
+        if n_rows <= 0:
+            return _err("Укажите ненулевой резерв.")
+        if kit_reserve_slots_used(db, kit.id) + n_rows > max_slots:
+            return _err(f"Достигнут лимит резервов на комплект ({max_slots}). Увеличьте лимит в настройках.")
+        before = SimpleNamespace(pieces_available=kit.pieces_available)
+        for kk, n in bd.items():
+            qn = int(n)
+            if qn <= 0:
+                continue
+            consume_blank_stock_for_reserve(db, kit, kit_key=str(kk), qty=qn, sync_after=False)
+            db.add(
+                KitReserve(
+                    kit_id=kit.id,
+                    kit_key=str(kk)[:80],
+                    pieces_reserved=qn,
+                    reserved_at=utcnow_naive(),
+                    reserved_by_user_id=current_user.id,
+                    reserved_for_client_id=cid,
+                    reserved_for_user_id=uid,
+                )
+            )
+        sync_kit_pieces_available_from_blank_lines(db, kit)
+        kit.updated_at = utcnow_naive()
+        kit.updated_by_user_id = current_user.id
+        write_audit_rows(
+            db,
+            log_model=KitAuditLog,
+            entity_field="kit_id",
+            entity_id=kit.id,
+            changed_by_user_id=current_user.id,
+            changes=diff_fields(before, kit, ("pieces_available",)),
+        )
+        db.commit()
+        return RedirectResponse(url=redirect_base + "?msg=reserved", status_code=303)
+
+    if reserve_full and qty_raw:
+        return _err("Выберите либо «весь остаток», либо укажите количество заготовок.")
+    if not reserve_full and not qty_raw:
+        return _err("Укажите «весь остаток» или количество заготовок.")
+    avail = int(kit.pieces_available or 0)
+    if avail <= 0:
+        return _err("Нет свободного остатка для резерва.")
+    if kit_reserve_slots_used(db, kit.id) >= max_slots:
+        return _err(f"Достигнут лимит резервов на комплект ({max_slots}). Увеличьте лимит в настройках.")
+
+    if reserve_full:
+        qty = avail
+    else:
+        try:
+            qty = parse_int(qty_raw, min=1, field_name="reserve_pieces")
+        except ValueError:
+            return _err("Некорректное количество заготовок.")
+    if qty > avail:
+        return _err(f"Нельзя зарезервировать больше свободного остатка ({avail}).")
 
     before = SimpleNamespace(pieces_available=kit.pieces_available)
     kit.pieces_available = avail - qty
@@ -700,6 +885,22 @@ async def admin_kit_reserve_post(
 
 
 # --- Старые GET-URL: /admin/kits/... -> 308 -> /kits/... (query сохраняется) ---
+
+
+@legacy_kits_admin_router.get("/bulk-import", response_class=HTMLResponse)
+def admin_kits_bulk_import_get_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _KITS_SUPER,
+):
+    return _redirect_admin_kits_to_canon(request, suffix="/bulk-import")
+
+
+@legacy_kits_admin_router.post("/bulk-import", response_class=HTMLResponse)
+def admin_kits_bulk_import_post_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _KITS_SUPER,
+):
+    return _redirect_admin_kits_to_canon(request, suffix="/bulk-import")
 
 
 @legacy_kits_admin_router.get("/{kit_id}/edit", response_class=HTMLResponse)

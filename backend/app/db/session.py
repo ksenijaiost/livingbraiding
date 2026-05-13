@@ -27,11 +27,20 @@ def _ensure_sqlite_parent_dir(database_url: str) -> None:
 
 def _make_engine():
     settings = get_settings()
-    connect_args = {}
+    connect_args: dict = {}
+    engine_kw: dict = {"future": True}
     if settings.database_url.startswith("sqlite"):
         _ensure_sqlite_parent_dir(settings.database_url)
         connect_args = {"check_same_thread": False}
-    return create_engine(settings.database_url, future=True, connect_args=connect_args)
+    else:
+        # После простоя PostgreSQL / прокси часто закрывают TCP+SSL; без этого пул отдаёт «мёртвое»
+        # соединение → OperationalError до первого refresh. pre_ping проверяет канал при checkout;
+        # pool_recycle укладывается в типичные idle-timeout (например RDS ~300 с).
+        engine_kw["pool_pre_ping"] = True
+        engine_kw["pool_recycle"] = 280
+    if connect_args:
+        engine_kw["connect_args"] = connect_args
+    return create_engine(settings.database_url, **engine_kw)
 
 
 engine = _make_engine()
