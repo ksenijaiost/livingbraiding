@@ -60,6 +60,42 @@ Run server:
 ..\.\.venv\Scripts\python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8010
 ```
 
+### Production (Linux, без Docker)
+
+Если вы запускаете только `uvicorn …`, а `alembic upgrade head` делаете вручную **после**, новый код может упасть при старте: ORM уже читает колонки, которых ещё нет в БД.
+
+Используйте один скрипт — **сначала миграции, потом сервер** ([`scripts/start_uvicorn.sh`](scripts/start_uvicorn.sh)):
+
+```bash
+cd /path/to/livingbraiding/backend
+source /path/to/venv/bin/activate   # чтобы были python и alembic из venv
+chmod +x scripts/start_uvicorn.sh   # один раз
+./scripts/start_uvicorn.sh
+```
+
+По умолчанию `--host 0.0.0.0 --port 80`. Иначе: `HOST=127.0.0.1 PORT=8010 ./scripts/start_uvicorn.sh`.
+
+В **systemd** вместо прямого `ExecStart=uvicorn …` укажите этот скрипт (или `ExecStartPre=` с `alembic upgrade head`, затем `ExecStart=` с uvicorn).
+
+#### DigitalOcean App Platform (и аналоги)
+
+Платформа по умолчанию запускает только `uvicorn …` — миграции **не** выполнятся, пока вы **явно** не зададите команду запуска.
+
+1. **Settings** → **Run Command** (или аналог): укажите скрипт, а не сырой uvicorn. Примеры (зависит от того, что у сервиса задано как *Root Directory* / рабочий каталог):
+   - если приложение собирается из корня репозитория и код лежит в `backend/`:
+     ```bash
+     bash backend/scripts/start_uvicorn.sh
+     ```
+   - если корень сервиса уже `backend/` (в логах часто `/app/backend/`):
+     ```bash
+     bash scripts/start_uvicorn.sh
+     ```
+   Можно вызывать через `bash …` — тогда `chmod +x` не обязателен; иначе добавьте исполняемый бит и закоммитьте файл.
+
+2. **Сбой миграций:** в скрипте стоит `set -e` — если `alembic upgrade head` завершится с ошибкой, контейнер не поднимется (цикл перезапусков). Смотрите логи деплоя/рантайма, исправьте миграцию или схему и задеплойте снова.
+
+3. **Порт:** в скрипте по умолчанию `PORT=80`. Если в настройках App Platform другой HTTP-порт, задайте переменную окружения `PORT` или поправьте команду запуска вместе с настройками платформы.
+
 Open:
 
 - `http://127.0.0.1:8010/`
