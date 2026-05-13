@@ -189,3 +189,14 @@ def require_techspec_user():
         return user
 
     return _dep
+
+
+def require_admin_super_assigned():
+    """Только у кого в профиле есть роль ADMIN_SUPER (без обхода для TECHSPEC)."""
+
+    def _dep(user: Annotated[AuthUser, Depends(get_current_user)]) -> AuthUser:
+        if UserRole.ADMIN_SUPER not in user.roles:
+            raise HTTPException(status_code=403, detail="Только для суперадмина.")
+        return user
+
+    return _dep

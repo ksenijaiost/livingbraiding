@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 42rem; border-color: #fecaca; background: #fff7ed;">
+    <h1 style="margin-top: 0;">Удаление данных (суперадмин)</h1>
+    <p class="muted" style="font-size: 14px;">
+      Необратимое удаление тестовых записей: визит, бронь, клиент (со всем связанным), продажа товара, работа с товарами.
+      Для клиента по очереди удаляются визиты, продажи, работы, брони; снимаются резервы комплектов; проводки ЗП по этим сущностям сторнируются, по визитам/продажам комплект возвращается на склад (если возможно).
+    </p>
+    {% if msg == "deleted" %}
+      <p style="color: #166534; font-weight: 600;">Готово: объект удалён.</p>
+    {% endif %}
+    {% if error %}
+      <p style="color: #b91c1c; font-weight: 600;">{{ error }}</p>
+    {% endif %}
+
+    <form method="post" action="/admin/super/purge" id="super-purge-form" style="margin-top: 1rem;">
+      <div style="margin-bottom: 12px;">
+        <label for="entity">Что удалить</label>
+        <select name="entity" id="entity" required style="width: 100%; max-width: 24rem;">
+          <option value="client">Клиент (и все его визиты, брони, продажи, работы)</option>
+          <option value="visit">Визит</option>
+          <option value="booking">Бронь</option>
+          <option value="product_sale">Продажа товара (розница)</option>
+          <option value="work">Работа с товарами</option>
+        </select>
+      </div>
+      <div style="margin-bottom: 12px;">
+        <label for="entity_id">ID (число из URL карточки)</label>
+        <input type="number" name="entity_id" id="entity_id" min="1" step="1" required style="width: 100%; max-width: 12rem;" />
+      </div>
+
+      <div style="margin: 16px 0; padding: 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;">
+        <p style="margin: 0 0 10px; font-weight: 600;">Двойное подтверждение — введите фразы <em>точно</em>, без кавычек:</p>
+        <div style="margin-bottom: 10px;">
+          <label for="c1">Фраза 1</label>
+          <input type="text" name="confirm_phrase_1" id="c1" autocomplete="off" placeholder="{{ phrase1 }}" style="width: 100%; font-family: monospace;" />
+          <span class="muted" style="font-size: 12px;">Ожидается: <code>{{ phrase1 }}</code></span>
+        </div>
+        <div style="margin-bottom: 10px;">
+          <label for="c2">Фраза 2</label>
+          <input type="text" name="confirm_phrase_2" id="c2" autocomplete="off" placeholder="{{ phrase2 }}" style="width: 100%; font-family: monospace;" />
+          <span class="muted" style="font-size: 12px;">Ожидается: <code>{{ phrase2 }}</code></span>
+        </div>
+        <label style="display: flex; align-items: flex-start; gap: 8px; font-weight: normal; cursor: pointer;">
+          <input type="checkbox" name="ack_irreversible" value="on" required style="margin-top: 3px;" />
+          <span>Я понимаю, что восстановить данные будет нельзя.</span>
+        </label>
+      </div>
+
+      <p>
+        <button type="submit" id="super-purge-submit" style="background:#b91c1c;border:1px solid #991b1b;color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;">Удалить навсегда</button>
+        <a href="/"><button type="button" class="secondary">Отмена</button></a>
+      </p>
+    </form>
+  </div>
+  <script>
+    (function () {
+      var p1 = {{ phrase1 | tojson }};
+      var p2 = {{ phrase2 | tojson }};
+      var form = document.getElementById('super-purge-form');
+      if (!form) return;
+      form.addEventListener('submit', function (e) {
+        var a = (document.getElementById('c1') || {}).value || '';
+        var b = (document.getElementById('c2') || {}).value || '';
+        if (a.trim() !== p1 || b.trim() !== p2) {
+          e.preventDefault();
+          alert('Фразы подтверждения не совпадают с требуемыми. Скопируйте их из подсказки под полем.');
+          return;
+        }
+        if (!window.confirm('Последний шаг: отправить запрос на безвозвратное удаление?')) {
+          e.preventDefault();
+        }
+      });
+    })();
+  </script>
+{% endblock %}
