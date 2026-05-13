@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import CatalogProduct, Kit, KitBlankStock, KitReserve
+from app.db.models import CatalogProduct, Kit, KitBlankStock, KitBlanksCondition, KitReserve
 from app.kit_crud import kit_key_excluded_from_client_price
 
 
@@ -79,7 +79,7 @@ def load_catalog_kit_maps(
             continue
         price_map[k] = float(r.price)
         meta_by_key[k] = meta
-        label_by_key[k] = (r.title or k).strip() or k
+        label_by_key[k] = (r.name or k).strip() or k
     return price_map, meta_by_key, label_by_key
 
 
@@ -532,3 +532,24 @@ def parse_usage_breakdown_json(raw: str | None) -> dict[str, int] | None:
         if n > 0:
             out[str(k)] = n
     return out or None
+
+
+def infer_kit_blanks_condition_from_totals(db: Session, kit_totals: dict[str, int]) -> KitBlanksCondition:
+    """По составу и меткам is_bu в каталоге: только новые / только Б/У / смешанный."""
+    _, meta_by_key, _ = load_catalog_kit_maps(db)
+    has_new = False
+    has_bu = False
+    for k, q in kit_totals.items():
+        if int(q or 0) <= 0:
+            continue
+        kk = str(k).strip()
+        m = meta_by_key.get(kk) or {}
+        if bool(m.get("is_bu")):
+            has_bu = True
+        else:
+            has_new = True
+    if has_new and has_bu:
+        return KitBlanksCondition.MIXED
+    if has_bu:
+        return KitBlanksCondition.USED
+    return KitBlanksCondition.NEW

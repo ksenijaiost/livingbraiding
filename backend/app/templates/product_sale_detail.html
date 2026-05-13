@@ -107,15 +107,23 @@
           {% endif %}
         {% elif sale.kind.value == 'KIT' %}
           <p style="margin:6px 0;"><strong>Тип</strong>: Комплект из наличия</p>
-          <p style="margin:6px 0;">
-            <strong>Комплект</strong>:
-            {% if sale.kit %}
-              {{ sale.kit.sku }} — {{ sale.kit.title }}
-            {% else %}
-              <span class="muted">не найден</span>
-            {% endif %}
-          </p>
-          <p style="margin:6px 0;"><strong>Списано заготовок</strong>: {{ sale.kit_pieces_sold or 0 }}</p>
+          {% for kl in kit_sale_lines_detail %}
+            <div class="card" style="margin-top:10px;background:#f8fafc;">
+              <p style="margin:6px 0;">
+                <strong>Комплект</strong>
+                {% if kit_sale_lines_detail|length > 1 %}({{ loop.index }}){% endif %}:
+                {% if kl.kit %}
+                  {{ kl.kit.sku }} — {{ kl.kit.title }}
+                {% else %}
+                  <span class="muted">не найден</span>
+                {% endif %}
+              </p>
+              <p style="margin:6px 0;"><strong>Списано заготовок</strong>: {{ kl.pieces_sold or 0 }}</p>
+            </div>
+          {% endfor %}
+          {% if not kit_sale_lines_detail %}
+            <p style="margin:6px 0;" class="muted">Строки комплектов не сохранены.</p>
+          {% endif %}
         {% elif sale.kind.value == 'RUBBER' %}
           <p style="margin:6px 0;"><strong>Тип</strong>: Хвост/резинка</p>
           <div class="card" style="margin-top:10px;background:#f8fafc;">

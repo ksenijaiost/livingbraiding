@@ -13,6 +13,7 @@ class ZakazBlankDef:
     include_in_kit_form: bool
     ignore_in_client_calc: bool = False
     exclude_from_inventory_piece_count: bool = False
+    is_bu: bool = False
 
 
 _BLANKS: tuple[ZakazBlankDef, ...] = (
@@ -23,7 +24,7 @@ _BLANKS: tuple[ZakazBlankDef, ...] = (
     ZakazBlankDef("SE_TIP_ADDON", "S.E. доплёт кончиков", "SE", 0.0, 5.0, True, True, False),
     ZakazBlankDef("SE_TRIM_SHORT", "S.E. стрижка короткой косы", "SE", 0.0, 2.0, True, True, True),
     ZakazBlankDef("SE_TRIM_LONG", "S.E. стрижка длинной косы", "SE", 0.0, 2.5, True, True, True),
-    ZakazBlankDef(None, "S.E. коса Б/У", "SE", 50.0, 0.0, False, True, False),
+    ZakazBlankDef("SE_BRAID_USED", "S.E. коса Б/У", "SE", 50.0, 0.0, True, False, False, True),
     ZakazBlankDef("DE_BRAID_SHORT", "D.E. коса короткая", "DE", 150.0, 25.0, True),
     ZakazBlankDef("DE_BRAID_LONG", "D.E. коса", "DE", 150.0, 30.0, True),
     ZakazBlankDef("DE_BRAID_NEW_FMT", "D.E. ажурная коса", "DE", 200.0, 35.0, True),
@@ -36,7 +37,7 @@ _BLANKS: tuple[ZakazBlankDef, ...] = (
     ZakazBlankDef("DE_CURL_MAX", "D.E. кудря max", "DE", 250.0, 25.0, True),
     ZakazBlankDef("DE_MICRO_BRAIDS_4X", "D.E. микрокосы 4х", "DE", 250.0, 35.0, True),
     ZakazBlankDef("DE_MICRO_BRAID_6X", "D.E. микрокоса 6х", "DE", 300.0, 40.0, True),
-    ZakazBlankDef(None, "D.E. дред Б/У", "DE", 150.0, 0.0, False, True, False),
+    ZakazBlankDef("DE_DREAD_USED", "D.E. дред Б/У", "DE", 150.0, 0.0, True, False, False, True),
 )
 
 

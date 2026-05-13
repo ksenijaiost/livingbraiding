@@ -83,6 +83,14 @@ class AmortizationLevel(str, enum.Enum):
     MAX = "MAX"  # 500 ₽
 
 
+class KitBlanksCondition(str, enum.Enum):
+    """Состояние заготовок в комплекте (карточка склада)."""
+
+    NEW = "NEW"  # только новые
+    USED = "USED"  # только Б/У
+    MIXED = "MIXED"  # новые и Б/У (50/50 в смысле «смешанный набор»)
+
+
 class QuestionnaireFieldType(str, enum.Enum):
     """Тип поля опросника (анкета мастера, шаг 4)."""
 
@@ -484,6 +492,11 @@ class Kit(Base):
     # Карточка склада (шаг 3.3): типы заготовок — можно один или оба.
     blank_type_de: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     blank_type_se: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    blanks_condition: Mapped[KitBlanksCondition] = mapped_column(
+        Enum(KitBlanksCondition, native_enum=False, length=16),
+        nullable=False,
+        default=KitBlanksCondition.NEW,
+    )
     photo_1: Mapped[str | None] = mapped_column(String(300), nullable=True)
     weight_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
     length_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -792,6 +805,7 @@ class ProductSale(Base):
     kit_id: Mapped[int | None] = mapped_column(ForeignKey("kits.id"), nullable=True)
     kit_pieces_sold: Mapped[int | None] = mapped_column(Integer, nullable=True)
     kit_breakdown_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kit_lines_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # RUBBER
     rubber_description: Mapped[str | None] = mapped_column(Text, nullable=True)

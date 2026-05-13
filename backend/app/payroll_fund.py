@@ -9,6 +9,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.time_utils import utcnow_naive
+from app.kit_blank_stock_core import (
+    apply_discount_capped,
+    keyed_client_price_selected,
+    keyed_cost_selected,
+    kit_inventory_is_keyed,
+    load_catalog_kit_maps,
+    parse_composition_totals,
+)
 from app.db.models import (
     Kit,
     MaterialPriceCurrent,
@@ -317,17 +325,65 @@ def replace_work_accruals(
             )
 
 
+def _product_sale_kit_line_price_deduction(
+    db: Session,
+    *,
+    kit: Kit,
+    pieces_sold: int,
+    breakdown: dict[str, int] | None,
+) -> float:
+    """Доля цены комплекта (как при списании с визита: по ключам или пропорционально), после скидки."""
+    raw_price = kit.stock_price_total
+    if raw_price is None or float(raw_price) <= 0:
+        return 0.0
+    n = int(pieces_sold)
+    if n <= 0:
+        return 0.0
+    if kit_inventory_is_keyed(db, int(kit.id)) and breakdown:
+        price_map, meta_by_key, _labels = load_catalog_kit_maps(db)
+        comp = parse_composition_totals(kit)
+        selected_price = keyed_client_price_selected(
+            breakdown, price_map=price_map, meta_by_key=meta_by_key
+        )
+        selected_cost = keyed_cost_selected(
+            breakdown, comp=comp, kit_cost_total=max(0.0, float(kit.cost_total or 0.0))
+        )
+        _disc, net = apply_discount_capped(
+            selected_price,
+            discount_percent=int(kit.discount_percent or 0),
+            cost_floor=selected_cost,
+        )
+        return float(net)
+    price = float(raw_price)
+    total_pieces = max(int(kit.pieces_total or 0), 1)
+    kit_cost_full = max(0.0, float(kit.cost_total or 0.0))
+    max_disc_margin = max(0.0, price - kit_cost_full)
+    pct = max(0, min(100, int(kit.discount_percent or 0)))
+    discount_full = price * (pct / 100.0)
+    discount_full = min(discount_full, max_disc_margin, price)
+    net_full = max(0.0, price - discount_full)
+    k = float(n) / float(total_pieces)
+    return float(net_full * k)
+
+
 def compute_product_sale_studio_margin(db: Session, sale: ProductSale) -> float:
     amt = float(sale.amount_from_client or 0)
     kind = sale.kind
-    if kind == ProductSaleKind.KIT and sale.kit_id and sale.kit_pieces_sold:
-        kit = sale.kit or db.get(Kit, sale.kit_id)
-        if kit and kit.stock_price_total is not None and float(kit.stock_price_total) > 0:
-            pt = max(int(kit.pieces_total or 0), 1)
-            per = float(kit.stock_price_total) / pt
-            cost = per * int(sale.kit_pieces_sold)
-            return money_q2(max(0.0, amt - cost))
-        return money_q2(max(0.0, amt))
+    if kind == ProductSaleKind.KIT:
+        from app.product_sales import _sale_kit_line_tuples_from_sale
+
+        lines = _sale_kit_line_tuples_from_sale(sale)
+        if not lines:
+            return money_q2(max(0.0, amt))
+        total_deduction = 0.0
+        for kid, ps, bd in lines:
+            kit = db.get(Kit, int(kid))
+            if not kit:
+                continue
+            total_deduction += _product_sale_kit_line_price_deduction(
+                db, kit=kit, pieces_sold=int(ps), breakdown=bd
+            )
+        return money_q2(max(0.0, amt - total_deduction))
     if kind == ProductSaleKind.MATERIAL:
         # Маржа материала выставляется в finalize_material_sale_fields (роутер / sync).
         return money_q2(float(sale.studio_margin_amount or 0))

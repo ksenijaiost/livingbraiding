@@ -1,16 +1,37 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, require_admin_super_assigned
 from app.db.session import get_db
-from app.super_admin_purge import CONFIRM_PHRASE_1, CONFIRM_PHRASE_2, parse_purge_entity, run_purge
+from app.super_admin_purge import (
+    CONFIRM_PHRASE_1,
+    CONFIRM_PHRASE_2,
+    build_purge_preview,
+    parse_purge_entity,
+    run_purge,
+)
 from app.webui import ctx as _ctx, templates
 
 router = APIRouter(prefix="/admin/super", tags=["super_admin_purge"])
 _SUPER = Depends(require_admin_super_assigned())
+
+
+@router.get("/purge/preview")
+def super_purge_preview(
+    entity: str = Query(""),
+    entity_id: str = Query(""),
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    try:
+        e, eid = parse_purge_entity(entity, entity_id)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)})
+    data = build_purge_preview(db, e, eid)
+    return JSONResponse(data)
 
 
 @router.get("/purge", response_class=HTMLResponse)

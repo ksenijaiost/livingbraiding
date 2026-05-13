@@ -332,6 +332,299 @@ def _parse_kit_breakdown_form(form: Any) -> dict[str, int] | None:
     return out or None
 
 
+def _normalized_breakdown_dict(bd: Any) -> dict[str, int] | None:
+    if not isinstance(bd, dict):
+        return None
+    out: dict[str, int] = {}
+    for k, v in bd.items():
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            out[str(k)] = n
+    return out or None
+
+
+def _product_sale_kit_lines_initial(
+    db: Session,
+    fp: dict[str, str],
+    sale: ProductSale | None = None,
+) -> list[dict[str, Any]]:
+    """Строки UI «несколько комплектов» для new/edit (и репоста формы)."""
+    raw = (fp.get("sale_kit_lines_json") or "").strip()
+    if raw:
+        try:
+            arr = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            arr = None
+        if isinstance(arr, list) and arr:
+            out: list[dict[str, Any]] = []
+            for item in arr:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    kid = int(item.get("kit_id") or 0)
+                except (TypeError, ValueError):
+                    kid = 0
+                mode = str(item.get("mode") or "PIECES").strip().upper()
+                if mode not in ("PIECES", "ALL"):
+                    mode = "PIECES"
+                try:
+                    pi = int(item.get("pieces") or 0)
+                except (TypeError, ValueError):
+                    pi = 0
+                if kid > 0:
+                    out.append({"kit_id": kid, "mode": mode, "pieces": max(0, pi), "label": ""})
+            if out:
+                return _product_sale_kit_lines_attach_labels(db, out)
+    if sale is not None and sale.kind == ProductSaleKind.KIT:
+        kjs = getattr(sale, "kit_lines_json", None) or ""
+        if str(kjs).strip():
+            try:
+                arr = json.loads(kjs)
+            except (json.JSONDecodeError, TypeError):
+                arr = None
+            if isinstance(arr, list) and arr:
+                out2: list[dict[str, Any]] = []
+                for item in arr:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        kid = int(item.get("kit_id") or 0)
+                        ps = int(item.get("pieces_sold") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if kid <= 0:
+                        continue
+                    out2.append({"kit_id": kid, "mode": "PIECES", "pieces": max(0, ps), "label": ""})
+                if out2:
+                    return _product_sale_kit_lines_attach_labels(db, out2)
+        if sale.kit_id and sale.kit_pieces_sold:
+            rows = [
+                {
+                    "kit_id": int(sale.kit_id),
+                    "mode": "PIECES",
+                    "pieces": int(sale.kit_pieces_sold or 0),
+                    "label": "",
+                }
+            ]
+            return _product_sale_kit_lines_attach_labels(db, rows)
+    kid_s = (fp.get("kit_id") or "").strip()
+    if kid_s.isdigit():
+        mode = (fp.get("kit_mode") or "PIECES").strip().upper()
+        if mode not in ("PIECES", "ALL"):
+            mode = "PIECES"
+        ps_s = (fp.get("kit_pieces_sold") or "").strip()
+        try:
+            pi = int(ps_s) if ps_s else 0
+        except ValueError:
+            pi = 0
+        return _product_sale_kit_lines_attach_labels(
+            db,
+            [{"kit_id": int(kid_s), "mode": mode, "pieces": max(0, pi), "label": ""}],
+        )
+    return _product_sale_kit_lines_attach_labels(
+        db, [{"kit_id": None, "mode": "PIECES", "pieces": 0, "label": ""}]
+    )
+
+
+def _product_sale_kit_lines_attach_labels(
+    db: Session, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    for row in rows:
+        kid = row.get("kit_id")
+        if not kid:
+            row["label"] = ""
+            continue
+        kobj = db.get(Kit, int(kid))
+        row["label"] = (
+            f"{kobj.sku} — {kobj.title}" if kobj else f"id {int(kid)}"
+        )
+    return rows
+
+
+def _product_sale_kit_lines_for_detail(db: Session, sale: ProductSale) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    raw = getattr(sale, "kit_lines_json", None) or ""
+    if str(raw).strip():
+        try:
+            arr = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            arr = None
+        if isinstance(arr, list):
+            for item in arr:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    kid = int(item.get("kit_id") or 0)
+                    ps = int(item.get("pieces_sold") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if kid <= 0 or ps <= 0:
+                    continue
+                kit = db.get(Kit, kid)
+                out.append({"kit": kit, "pieces_sold": ps})
+    if not out and sale.kit_id and sale.kit_pieces_sold:
+        kit = sale.kit or db.get(Kit, int(sale.kit_id))
+        out.append({"kit": kit, "pieces_sold": int(sale.kit_pieces_sold)})
+    return out
+
+
+def _parse_sale_kit_lines_structured(form: Any) -> list[dict[str, Any]]:
+    raw = (_g_str(form, "sale_kit_lines_json") or "").strip()
+    if raw:
+        try:
+            arr = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Некорректный список комплектов в продаже.") from exc
+        if not isinstance(arr, list):
+            raise ValueError("Ожидается список комплектов.")
+        lines: list[dict[str, Any]] = []
+        for item in arr:
+            if not isinstance(item, dict):
+                continue
+            try:
+                kid = int(item.get("kit_id") or 0)
+            except (TypeError, ValueError):
+                kid = 0
+            if kid <= 0:
+                continue
+            mode = str(item.get("mode") or "PIECES").strip().upper()
+            if mode not in ("PIECES", "ALL"):
+                mode = "PIECES"
+            try:
+                pieces_in = int(item.get("pieces") or 0)
+            except (TypeError, ValueError):
+                pieces_in = 0
+            lines.append(
+                {
+                    "kit_id": kid,
+                    "mode": mode,
+                    "pieces": max(0, pieces_in),
+                    "breakdown": _normalized_breakdown_dict(item.get("breakdown")),
+                }
+            )
+        if lines:
+            return lines
+    kid = 0
+    try:
+        kid = parse_int(_g_str(form, "kit_id"), min=1, field_name="kit_id")
+    except ValueError:
+        kid = 0
+    if kid <= 0:
+        return []
+    mode = (_g_str(form, "kit_mode") or "PIECES").strip().upper()
+    if mode not in ("PIECES", "ALL"):
+        mode = "PIECES"
+    pieces = _g_int(form, "kit_pieces_sold", 0) if mode == "PIECES" else 0
+    return [
+        {
+            "kit_id": kid,
+            "mode": mode,
+            "pieces": max(0, pieces),
+            "breakdown": _parse_kit_breakdown_form(form),
+        }
+    ]
+
+
+def _apply_parsed_kit_sale_lines(
+    db: Session,
+    client: Client,
+    parsed_lines: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    saved: list[dict[str, Any]] = []
+    for pl in parsed_lines:
+        kid = int(pl["kit_id"])
+        kit = db.get(Kit, kid)
+        if not kit:
+            raise ValueError("Комплект не найден.")
+        if kit.stock_price_total is None or float(kit.stock_price_total) <= 0:
+            raise ValueError(
+                "У этого комплекта не задана цена продажи — укажите цену в карточке комплекта (администратор)."
+            )
+        mode = str(pl.get("mode") or "PIECES").upper()
+        if mode not in ("PIECES", "ALL"):
+            mode = "PIECES"
+        _release_all_reserved_to_stock_for_client(db, kit=kit, client_id=client.id)
+        require_composition_stock_rows_or_scalar_ok(db, kit)
+        avail = int(kit.pieces_available or 0)
+        if kit_inventory_is_keyed(db, kit.id):
+            sm = blank_stock_qty_map(db, kit.id)
+            max_by = max_take_by_key_for_client(db, kit=kit, client_id=int(client.id), stock_map=sm)
+            if sum(max_by.values()) <= 0:
+                raise ValueError("Нет доступных заготовок для продажи по этому комплекту.")
+            usage = pl.get("breakdown")
+            use_entire = mode == "ALL"
+            blanks_used = int(pl.get("pieces") or 0) if mode == "PIECES" else 0
+            bd = build_usage_breakdown_keyed(
+                use_entire=use_entire,
+                blanks_used=blanks_used,
+                usage_by_key=usage,
+                max_by_key=max_by,
+            )
+            ntot = sum(int(v) for v in bd.values())
+            _apply_kit_delta(db, kit.id, -int(ntot), breakdown=bd)
+            saved.append({"kit_id": int(kit.id), "pieces_sold": int(ntot), "breakdown": bd})
+        else:
+            pieces_to_sell = avail
+            if mode == "PIECES":
+                pieces_to_sell = int(pl.get("pieces") or 0)
+                if pieces_to_sell <= 0:
+                    raise ValueError("Укажите количество заготовок больше 0.")
+            else:
+                pieces_to_sell = avail
+            if pieces_to_sell <= 0:
+                raise ValueError("Нет доступных заготовок для продажи по этому комплекту.")
+            if pieces_to_sell > avail:
+                raise ValueError("Нельзя продать больше заготовок, чем есть в наличии.")
+            _apply_kit_delta(db, kit.id, -int(pieces_to_sell))
+            saved.append({"kit_id": int(kit.id), "pieces_sold": int(pieces_to_sell), "breakdown": None})
+    if not saved:
+        raise ValueError("Выберите хотя бы один комплект из наличия.")
+    return saved
+
+
+def _sale_kit_line_tuples_from_sale(sale: ProductSale) -> list[tuple[int, int, dict[str, int] | None]]:
+    raw = getattr(sale, "kit_lines_json", None) or ""
+    if str(raw).strip():
+        try:
+            arr = json.loads(raw)
+        except Exception:
+            arr = []
+        if isinstance(arr, list) and arr:
+            out: list[tuple[int, int, dict[str, int] | None]] = []
+            for item in arr:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    kid = int(item.get("kit_id") or 0)
+                    ps = int(item.get("pieces_sold") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if kid <= 0 or ps <= 0:
+                    continue
+                bd = item.get("breakdown")
+                bdm = _normalized_breakdown_dict(bd) if bd is not None else None
+                out.append((kid, ps, bdm))
+            if out:
+                return out
+    if sale.kit_id and sale.kit_pieces_sold:
+        return [
+            (
+                int(sale.kit_id),
+                int(sale.kit_pieces_sold),
+                parse_usage_breakdown_json(getattr(sale, "kit_breakdown_json", None)),
+            )
+        ]
+    return []
+
+
+def _revert_kit_sale_stock(db: Session, sale: ProductSale) -> None:
+    for kid, ps, bd in _sale_kit_line_tuples_from_sale(sale):
+        _apply_kit_delta(db, kid, int(ps), breakdown=bd)
+
+
 def _apply_material_from_form(
     db: Session,
     sale: ProductSale,
@@ -551,16 +844,7 @@ def _render_new(
         eid_i = 0
     if eid_i > 0:
         selected_client = db.get(Client, eid_i)
-    selected_kit_label: str | None = None
-    kid = (fp.get("kit_id") or "").strip()
-    try:
-        kid_i = parse_int(kid, min=1, field_name="kit_id") if kid else 0
-    except ValueError:
-        kid_i = 0
-    if kid_i > 0:
-        kobj = db.get(Kit, kid_i)
-        if kobj:
-            selected_kit_label = f"{kobj.sku} — {kobj.title}"
+    sale_kit_lines_initial = _product_sale_kit_lines_initial(db, fp, sale=None)
     default_date = (fp.get("performed_date") or "").strip() or date.today().isoformat()
     return templates.TemplateResponse(
         "product_sale_new.html",
@@ -570,7 +854,7 @@ def _render_new(
             error=error,
             fp=fp,
             selected_client=selected_client,
-            selected_kit_label=selected_kit_label,
+            sale_kit_lines_initial=sale_kit_lines_initial,
             default_date=default_date,
             material_services=material_services,
             material_services_meta_json=_material_services_meta_json(material_services),
@@ -665,6 +949,8 @@ def product_sale_detail(
                 edit_block_msg="",
                 ru_kind="",
                 material_mix_complexity_ru="—",
+                kit_sale_lines_detail=[],
+                linked_work_ids=[],
             ),
             status_code=404,
         )
@@ -707,6 +993,9 @@ def product_sale_detail(
                 getattr(sale, "material_mix_complexity", None)
             ),
             linked_work_ids=linked_work_ids,
+            kit_sale_lines_detail=_product_sale_kit_lines_for_detail(db, sale)
+            if sale.kind == ProductSaleKind.KIT
+            else [],
         ),
     )
 
@@ -728,6 +1017,7 @@ def product_sale_edit_form(
         )
     )
     if not sale:
+        sk_init_404 = _product_sale_kit_lines_initial(db, {}, sale=None)
         return templates.TemplateResponse(
             "product_sale_edit.html",
             _ctx(
@@ -740,12 +1030,14 @@ def product_sale_edit_form(
                 default_date=date.today().isoformat(),
                 material_services=_prodazha_materiala_services(db),
                 material_services_meta_json="{}",
+                sale_kit_lines_initial=sk_init_404,
             ),
             status_code=404,
         )
     ok, msg = _sale_edit_allowed(db, sale)
     if not ok:
         ms403 = _prodazha_materiala_services(db)
+        sk_init_403 = _product_sale_kit_lines_initial(db, {}, sale=sale)
         return templates.TemplateResponse(
             "product_sale_edit.html",
             _ctx(
@@ -758,6 +1050,7 @@ def product_sale_edit_form(
                 default_date=sale.performed_date.date().isoformat(),
                 material_services=ms403,
                 material_services_meta_json=_material_services_meta_json(ms403),
+                sale_kit_lines_initial=sk_init_403,
             ),
             status_code=403,
         )
@@ -788,10 +1081,12 @@ def product_sale_edit_form(
         "kit_id": str(sale.kit_id or ""),
         "kit_mode": "PIECES",
         "kit_pieces_sold": "" if sale.kit_pieces_sold is None else str(sale.kit_pieces_sold),
+        "sale_kit_lines_json": getattr(sale, "kit_lines_json", None) or "",
         "rubber_description": sale.rubber_description or "",
         "rubber_price_override": "" if sale.rubber_price_override is None else str(sale.rubber_price_override),
         "other_description": sale.other_description or "",
     }
+    sale_kit_lines_initial = _product_sale_kit_lines_initial(db, fp, sale=sale)
     return templates.TemplateResponse(
         "product_sale_edit.html",
         _ctx(
@@ -804,6 +1099,7 @@ def product_sale_edit_form(
             default_date=sale.performed_date.date().isoformat(),
             material_services=ms,
             material_services_meta_json=_material_services_meta_json(ms),
+            sale_kit_lines_initial=sale_kit_lines_initial,
         ),
     )
 
@@ -843,6 +1139,8 @@ async def product_sale_edit_save(
         "material_cost_review_pending",
         "kit_id",
         "kit_pieces_sold",
+        "kit_breakdown_json",
+        "kit_lines_json",
         "rubber_description",
         "rubber_price_override",
         "other_description",
@@ -894,13 +1192,8 @@ async def product_sale_edit_save(
     )
 
     # revert stock impact from previous state (if any)
-    if sale.kind == ProductSaleKind.KIT and sale.kit_id and sale.kit_pieces_sold:
-        _apply_kit_delta(
-            db,
-            sale.kit_id,
-            int(sale.kit_pieces_sold),
-            breakdown=parse_usage_breakdown_json(getattr(sale, "kit_breakdown_json", None)),
-        )
+    if sale.kind == ProductSaleKind.KIT:
+        _revert_kit_sale_stock(db, sale)
 
     # overwrite common fields
     sale.client_id = client.id
@@ -927,6 +1220,7 @@ async def product_sale_edit_save(
     sale.kit_id = None
     sale.kit_pieces_sold = None
     sale.kit_breakdown_json = None
+    sale.kit_lines_json = None
     sale.rubber_description = None
     sale.rubber_price_override = None
     sale.other_description = None
@@ -941,63 +1235,22 @@ async def product_sale_edit_save(
             )
 
     elif kind == ProductSaleKind.KIT:
-        kid_raw = _g_str(form, "kit_id")
         try:
-            kid = parse_int(kid_raw, min=1, field_name="kit_id")
-        except ValueError:
-            kid = 0
-        if kid <= 0:
-            raise ValueError("Выберите комплект из наличия.")
-        kit = db.get(Kit, kid)
-        if not kit:
-            raise ValueError("Комплект не найден.")
-        if kit.stock_price_total is None or float(kit.stock_price_total) <= 0:
-            raise ValueError(
-                "У этого комплекта не задана цена продажи — списание невозможно. Укажите цену в карточке комплекта (администратор)."
-            )
-        mode = (_g_str(form, "kit_mode") or "PIECES").strip().upper()
-        if mode not in ("PIECES", "ALL"):
-            raise ValueError("Некорректный режим продажи комплекта.")
-        _release_all_reserved_to_stock_for_client(db, kit=kit, client_id=client.id)
-        require_composition_stock_rows_or_scalar_ok(db, kit)
-        avail = int(kit.pieces_available or 0)
-        if kit_inventory_is_keyed(db, kit.id):
-            sm = blank_stock_qty_map(db, kit.id)
-            max_by = max_take_by_key_for_client(db, kit=kit, client_id=int(client.id), stock_map=sm)
-            if sum(max_by.values()) <= 0:
-                raise ValueError("Нет доступных заготовок для продажи по этому комплекту.")
-            usage = _parse_kit_breakdown_form(form)
-            use_entire = mode == "ALL"
-            blanks_used = _g_int(form, "kit_pieces_sold", 0) if mode == "PIECES" else 0
-            bd = build_usage_breakdown_keyed(
-                use_entire=use_entire,
-                blanks_used=blanks_used,
-                usage_by_key=usage,
-                max_by_key=max_by,
-            )
-            ntot = sum(int(v) for v in bd.values())
-            _apply_kit_delta(db, kit.id, -int(ntot), breakdown=bd)
-            sale.kit_id = kit.id
-            sale.kit_pieces_sold = int(ntot)
-            sale.kit_breakdown_json = json.dumps(bd, ensure_ascii=False)
-        else:
-            pieces_to_sell = avail
-            if mode == "PIECES":
-                pieces_to_sell = _g_int(form, "kit_pieces_sold", 0)
-                if pieces_to_sell <= 0:
-                    raise ValueError("Укажите количество заготовок больше 0.")
-            else:
-                pieces_to_sell = avail
-
-            if pieces_to_sell <= 0:
-                raise ValueError("Нет доступных заготовок для продажи по этому комплекту.")
-
-            if pieces_to_sell > avail:
-                raise ValueError("Нельзя продать больше заготовок, чем есть в наличии.")
-            _apply_kit_delta(db, kit.id, -int(pieces_to_sell))
-            sale.kit_id = kit.id
-            sale.kit_pieces_sold = int(pieces_to_sell)
-            sale.kit_breakdown_json = None
+            parsed_lines = _parse_sale_kit_lines_structured(form)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
+        if not parsed_lines:
+            raise ValueError("Выберите хотя бы один комплект из наличия.")
+        try:
+            saved = _apply_parsed_kit_sale_lines(db, client, parsed_lines)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
+        sale.kit_id = int(saved[0]["kit_id"])
+        sale.kit_pieces_sold = int(sum(int(x["pieces_sold"]) for x in saved))
+        sale.kit_breakdown_json = (
+            json.dumps(saved[0]["breakdown"], ensure_ascii=False) if saved[0].get("breakdown") else None
+        )
+        sale.kit_lines_json = json.dumps(saved, ensure_ascii=False)
 
     elif kind == ProductSaleKind.RUBBER:
         desc = (_g_str(form, "rubber_description") or "").strip()
@@ -1069,6 +1322,7 @@ async def product_sale_edit_save(
                 "kit_id",
                 "kit_pieces_sold",
                 "kit_breakdown_json",
+                "kit_lines_json",
                 "rubber_description",
                 "rubber_price_override",
                 "other_description",
@@ -1106,13 +1360,8 @@ async def product_sale_void(
     storno_source_accruals(db, PayrollFundSourceKind.PRODUCT_SALE, sale.id, current_user.id)
 
     # revert stock impact
-    if sale.kind == ProductSaleKind.KIT and sale.kit_id and sale.kit_pieces_sold:
-        _apply_kit_delta(
-            db,
-            sale.kit_id,
-            int(sale.kit_pieces_sold),
-            breakdown=parse_usage_breakdown_json(getattr(sale, "kit_breakdown_json", None)),
-        )
+    if sale.kind == ProductSaleKind.KIT:
+        _revert_kit_sale_stock(db, sale)
 
     before = SimpleNamespace(is_voided=sale.is_voided, voided_at=sale.voided_at, voided_by_user_id=sale.voided_by_user_id)
     sale.is_voided = True
@@ -1161,6 +1410,7 @@ async def product_sale_new_post(
         "kit_id": _g_str(form, "kit_id"),
         "kit_mode": _g_str(form, "kit_mode") or "PIECES",
         "kit_pieces_sold": _g_str(form, "kit_pieces_sold"),
+        "sale_kit_lines_json": _g_str(form, "sale_kit_lines_json"),
         # rubber
         "rubber_description": _g_str(form, "rubber_description"),
         "rubber_price_override": _g_str(form, "rubber_price_override"),
@@ -1224,77 +1474,22 @@ async def product_sale_new_post(
             return _fail(str(e))
 
     elif kind == ProductSaleKind.KIT:
-        kid_raw = (fp["kit_id"] or "").strip()
         try:
-            kid = parse_int(kid_raw, min=1, field_name="kit_id")
-        except ValueError:
-            kid = 0
-        if kid <= 0:
-            return _fail("Выберите комплект из наличия.")
-        kit = db.get(Kit, kid)
-        if not kit:
-            return _fail("Комплект не найден.")
-        if kit.stock_price_total is None or float(kit.stock_price_total) <= 0:
-            return _fail(
-                "У этого комплекта не задана цена продажи — укажите цену в карточке комплекта (администратор)."
-            )
-
-        mode = (fp["kit_mode"] or "PIECES").strip().upper()
-        if mode not in ("PIECES", "ALL"):
-            return _fail("Некорректный режим продажи комплекта.")
-
-        _release_all_reserved_to_stock_for_client(db, kit=kit, client_id=client.id)
-        try:
-            require_composition_stock_rows_or_scalar_ok(db, kit)
+            parsed_lines = _parse_sale_kit_lines_structured(form)
         except ValueError as e:
             return _fail(str(e))
-        avail = int(kit.pieces_available or 0)
-        if kit_inventory_is_keyed(db, kit.id):
-            sm = blank_stock_qty_map(db, kit.id)
-            max_by = max_take_by_key_for_client(db, kit=kit, client_id=int(client.id), stock_map=sm)
-            if sum(max_by.values()) <= 0:
-                return _fail("Нет доступных заготовок для продажи по этому комплекту.")
-            usage = _parse_kit_breakdown_form(form)
-            use_entire = mode == "ALL"
-            blanks_used = _g_int(form, "kit_pieces_sold", 0) if mode == "PIECES" else 0
-            try:
-                bd = build_usage_breakdown_keyed(
-                    use_entire=use_entire,
-                    blanks_used=blanks_used,
-                    usage_by_key=usage,
-                    max_by_key=max_by,
-                )
-            except ValueError as e:
-                return _fail(str(e))
-            ntot = sum(int(v) for v in bd.values())
-            try:
-                _apply_kit_delta(db, kit.id, -int(ntot), breakdown=bd)
-            except ValueError as e:
-                return _fail(str(e))
-            row.kit_id = kit.id
-            row.kit_pieces_sold = int(ntot)
-            row.kit_breakdown_json = json.dumps(bd, ensure_ascii=False)
-        else:
-            pieces_to_sell = avail
-            if mode == "PIECES":
-                pieces_to_sell = _g_int(form, "kit_pieces_sold", 0)
-                if pieces_to_sell <= 0:
-                    return _fail("Укажите количество заготовок больше 0.")
-            else:
-                pieces_to_sell = avail
-
-            if pieces_to_sell <= 0:
-                return _fail("Нет доступных заготовок для продажи по этому комплекту.")
-
-            if pieces_to_sell > avail:
-                return _fail("Нельзя продать больше заготовок, чем есть в наличии.")
-
-            kit.pieces_available = int(kit.pieces_available or 0) - int(pieces_to_sell)
-            if kit.pieces_available < 0:
-                return _fail("Недостаточно заготовок в наличии для этой операции.")
-            row.kit_id = kit.id
-            row.kit_pieces_sold = int(pieces_to_sell)
-            row.kit_breakdown_json = None
+        if not parsed_lines:
+            return _fail("Выберите хотя бы один комплект из наличия.")
+        try:
+            saved = _apply_parsed_kit_sale_lines(db, client, parsed_lines)
+        except ValueError as e:
+            return _fail(str(e))
+        row.kit_id = int(saved[0]["kit_id"])
+        row.kit_pieces_sold = int(sum(int(x["pieces_sold"]) for x in saved))
+        row.kit_breakdown_json = (
+            json.dumps(saved[0]["breakdown"], ensure_ascii=False) if saved[0].get("breakdown") else None
+        )
+        row.kit_lines_json = json.dumps(saved, ensure_ascii=False)
 
     elif kind == ProductSaleKind.RUBBER:
         desc = (fp["rubber_description"] or "").strip()

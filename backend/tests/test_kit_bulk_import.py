@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 
 from app.db import models as _orm_models  # noqa: F401
 from app.db.base import Base
-from app.db.models import Kit
+from app.db.models import Kit, KitBlanksCondition
 from app.kit_bulk_import import allocate_unique_kit_sku, import_single_kit_row, parse_bulk_kits_json
 
 
@@ -118,3 +118,17 @@ def test_import_two_same_sku_gets_suffix(memory_db: Session) -> None:
     assert r1["ok"] and r2["ok"]
     assert r1["saved_sku"] == "SAME"
     assert r2["saved_sku"] == "SAME❗повтор"
+
+
+def test_import_blanks_condition_used(memory_db: Session) -> None:
+    db = memory_db
+    r = import_single_kit_row(
+        db,
+        _minimal_kit_row(sku="S-BU", blanks_condition="USED"),
+        reserved_skus=set(),
+        changed_by_user_id=1,
+    )
+    assert r["ok"] is True
+    k = db.get(Kit, int(r["kit_id"]))
+    assert k is not None
+    assert k.blanks_condition == KitBlanksCondition.USED

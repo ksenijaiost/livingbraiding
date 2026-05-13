@@ -1,0 +1,24 @@
+{
+  "service_fields": {
+    "bases_count": 2,
+    "blanks_count": 5,
+    "service_comment": "Заготовки с двух комплектов"
+  },
+  "kit": {
+    "kind": "STOCK",
+    "from_stocks": [
+      {
+        "sku": "K-2024-0142",
+        "blanks_used": 2,
+        "use_entire_kit": false
+      },
+      {
+        "sku": "K-2024-0999",
+        "blanks_used": 0,
+        "use_entire_kit": true
+      }
+    ],
+    "new_kit": null,
+    "own": null
+  }
+}

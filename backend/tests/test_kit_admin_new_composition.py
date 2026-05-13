@@ -6,6 +6,7 @@ import pytest
 from starlette.datastructures import FormData
 
 from app.kit_composition import KIT_INVENTORY_PIECE_EXCLUDE_KEYS, composition_json_from_totals
+from app.db.models import KitBlanksCondition
 from app.kit_crud import (
     apply_kit_admin_form,
     parse_kit_admin_form,
@@ -36,6 +37,7 @@ def test_parse_kit_admin_form_create_uses_inventory_count_excluding_trims() -> N
             ("stock_price_total", "100"),
             ("cost_total", "40"),
             ("discount_percent", "0"),
+            ("blanks_condition", "MIXED"),
             ("kit_qty_0_SE_TRIM_SHORT", "2"),
             ("kit_qty_0_BODY", "4"),
         ]
@@ -44,6 +46,7 @@ def test_parse_kit_admin_form_create_uses_inventory_count_excluding_trims() -> N
     assert d.composition_totals == {"SE_TRIM_SHORT": 2, "BODY": 4}
     assert d.pieces_total == 4
     assert d.pieces_available == 4
+    assert d.blanks_condition == KitBlanksCondition.MIXED
     validate_kit_admin_form(d, for_create=True)
 
 
@@ -69,6 +72,7 @@ def test_apply_kit_and_composition_roundtrip(memory_db) -> None:
             ("stock_price_total", "200"),
             ("cost_total", "80"),
             ("discount_percent", "0"),
+            ("blanks_condition", "USED"),
             ("kit_qty_0_ITEMX", "3"),
         ]
     )
@@ -82,6 +86,7 @@ def test_apply_kit_and_composition_roundtrip(memory_db) -> None:
     memory_db.refresh(kit)
     assert kit.pieces_total == 3
     assert kit.pieces_available == 3
+    assert kit.blanks_condition == KitBlanksCondition.USED
     comp = json.loads(kit.composition_json or "[]")
     assert comp == [{"key": "ITEMX", "qty": 3}]
 
