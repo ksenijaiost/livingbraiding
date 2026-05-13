@@ -8,28 +8,42 @@
     <p class="muted">Доступно только суперадминистратору. Корень JSON — <strong>массив</strong> объектов; допускается только <strong>строгий JSON</strong> (без <code>//</code> и хвостовых запятых). Лимиты: до {{ (max_bytes // 1024)|int }} KB текста, не более {{ max_kits }} комплектов за один запрос.</p>
     <p class="muted">Если артикул уже занят в базе или в этом же файле, к сохранённому артикулу добавляется суффикс <strong>❗повтор</strong>, при необходимости <strong>❗повтор2</strong> и далее (до 80 символов).</p>
 
-    <h3 class="lb-mt-0">Обязательные поля</h3>
-    <p class="muted" style="font-size:14px;">Помимо <code>sku</code> для каждого объекта в массиве должны быть заданы:</p>
-    <ul class="muted" style="font-size:14px;line-height:1.5;">
-      <li><code>title</code> — название (непустая строка).</li>
-      <li><code>pieces_initial</code> — целое число <strong>&gt; 0</strong> (скалярный остаток «штук комплекта» при создании).</li>
-      <li><code>stock_price_total</code> — число <strong>&gt; 0</strong> (цена комплекта на складе, ₽).</li>
-      <li><code>cost_total</code> — число <strong>&gt; 0</strong> (себестоимость, ₽).</li>
-      <li><code>blank_type_de</code> и/или <code>blank_type_se</code> — хотя бы одно <code>true</code>.</li>
-    </ul>
-    <p class="muted" style="font-size:14px;"><code>discount_percent</code> не обязателен (по умолчанию 0); не должен превышать допустимую маржу относительно цены и себестоимости.</p>
-    <p class="muted" style="font-size:14px;"><code>blanks_condition</code> не обязателен (по умолчанию <code>NEW</code>): <code>NEW</code> — новый набор, <code>USED</code> — б/у, <code>MIXED</code> — смешанный («50 на 50»).</p>
+    <h3 class="lb-mt-0">Поля JSON и подписи в карточке комплекта:</h3>
+    <p class="muted" style="font-size:14px;">Обязательность и автоподстановки — в колонке «Обязательность». Для необязательных полей там стоит «—».</p>
 
-    <h3><code>composition</code> и <code>blank_stock</code></h3>
-    <p class="muted" style="font-size:14px;">Ключи — это <code>kit_key</code> из каталога «Заказ» → «Заготовки поштучно» (должна быть активная позиция с таким ключом в <code>meta_json</code>). Ниже — эталонный список ключей из кода приложения; в вашей базе могут быть добавлены другие ключи или отсутствовать часть строк — ориентируйтесь на каталог.</p>
-    <p class="muted" style="font-size:14px;"><strong><code>composition</code></strong> задаёт состав одного комплекта (сколько каких заготовок в наборе). Допустимы два вида:</p>
-    <ul class="muted" style="font-size:14px;line-height:1.5;">
-      <li>объект <code>"КЛЮЧ": целое_qty</code> — только положительные целые, повтор ключей суммируются;</li>
-      <li>массив объектов <code>[{"key":"SE_BRAID_LONG","qty":2}, …]</code>.</li>
-    </ul>
-    <p class="muted" style="font-size:14px;"><strong><code>blank_stock</code></strong> — только объект <code>"КЛЮЧ": целое_остаток</code> (≥ 0; нули отбрасываются). Ключи должны входить в пересечение «есть в <code>composition</code>» и «есть в каталоге с этим <code>kit_key</code>».</p>
-    <p class="muted" style="font-size:14px;"><strong>Условие:</strong> если задан непустой <code>composition</code> и <code>pieces_initial</code> &gt; 0, обязателен непустой <code>blank_stock</code> (остатки по видам для keyed-склада).</p>
-    <p class="muted" style="font-size:14px;">Для б/у в каталоге заведены отдельные ключи <code>SE_BRAID_USED</code> и <code>DE_DREAD_USED</code> (см. таблицу ниже) — их можно указывать в <code>composition</code> и <code>blank_stock</code> так же, как остальные <code>kit_key</code>.</p>
+    <table style="width:100%;max-width:960px;border-collapse:collapse;font-size:14px;margin:12px 0 20px;">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
+          <th style="padding:6px 8px;">Поле JSON</th>
+          <th style="padding:6px 8px;">Обязательность</th>
+          <th style="padding:6px 8px;">Как в UI</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">sku</td><td style="padding:8px;">Да</td><td style="padding:8px;"><strong>Артикул</strong> (непустая строка)</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">title</td><td style="padding:8px;">Да</td><td style="padding:8px;"><strong>Название</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_type_de<br/>blank_type_se</td><td style="padding:8px;">Да</td><td style="padding:8px;">Тип заготовок — <strong>D.E.</strong> и/или <strong>S.E.</strong> (хотя бы одно <code>true</code>)</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">cost_total</td><td style="padding:8px;">Да</td><td style="padding:8px;"><strong>Себестоимость (всего), ₽</strong> — число &gt; 0</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">pieces_initial</td><td style="padding:8px;">Да / —</td><td style="padding:8px;"><strong>Количество заготовок</strong> при создании. Обязательно, если нет <code>composition</code>. Если <code>composition</code> задан и поле не указано — <strong>авто</strong>: сумма количеств по составу.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">stock_price_total</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Цена на складе (всего), ₽</strong>. Если не указано и задан <code>composition</code> — <strong>авто</strong> по прайсу «Заказ» → «Заготовки поштучно» (нужны цены в каталоге по всем ключам состава); иначе укажите вручную число &gt; 0.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">composition</td><td style="padding:8px;">—</td><td style="padding:8px;">Состав → <code>composition_json</code>. Объект <code>"КЛЮЧ": qty</code> или массив <code>[{"key","qty"},…]</code>. Без состава нельзя посчитать сумму заготовок и цену по ключам автоматически.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_stock</td><td style="padding:8px;">—</td><td style="padding:8px;">Остатки по <code>kit_key</code> (объект <code>"КЛЮЧ": остаток</code>). Если <code>composition</code> задан, а <code>blank_stock</code> нет или пустой — <strong>авто</strong>: те же количества, что в составе. Иначе укажите явно, чтобы задать другой фактический остаток по видам.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">discount_percent</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Скидка (всего), %</strong> (по умолчанию 0; не выше допустимой маржи к цене и себестоимости)</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blanks_condition</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Состояние заготовок</strong> — <code>NEW</code> / <code>USED</code> / <code>MIXED</code> (по умолчанию <code>NEW</code>)</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">weight_grams</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Вес, г</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">length_cm</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Длина, см</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">materials_text</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Материалы</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">color_text</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Цвет</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">description</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Описание комплекта</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">notes</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Примечание</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">author_external</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Извне</strong> (не сотрудник студии)</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">author_user_ids</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Мастера</strong> — массив id пользователей</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Ключи заготовок (<code>kit_key</code>)</h3>
+    <p class="muted" style="font-size:14px;">Ключи в <code>composition</code> и <code>blank_stock</code> — это <code>kit_key</code> из каталога «Заказ» → «Заготовки поштучно» (активная позиция с таким ключом в <code>meta_json</code>). Ниже эталонный список из кода приложения; в вашей базе набор может отличаться — ориентируйтесь на каталог.</p>
+    <p class="muted" style="font-size:14px;">Для б/у в каталоге могут быть отдельные ключи, например <code>SE_BRAID_USED</code> и <code>DE_DREAD_USED</code>.</p>
 
     <table style="width:100%;max-width:900px;border-collapse:collapse;font-size:13px;margin:12px 0 16px;">
       <thead>
@@ -67,41 +81,6 @@
       <div class="error lb-mb-12">{{ top_error }}</div>
     {% endif %}
 
-    <h3 class="lb-mt-0">Поля JSON и подписи в карточке комплекта</h3>
-    <p class="muted" style="font-size:14px;">Остальные поля — по желанию. Подробнее про состав и склад по ключам — в блоке выше.</p>
-
-    <table style="width:100%;max-width:900px;border-collapse:collapse;font-size:14px;margin-bottom:16px;">
-      <thead>
-        <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
-          <th style="padding:6px 8px;">Поле JSON</th>
-          <th style="padding:6px 8px;">Как в UI</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">sku</td><td style="padding:8px;"><strong>Артикул</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">title</td><td style="padding:8px;"><strong>Название</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_type_de</td><td style="padding:8px;">Тип заготовок — <strong>D.E.</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_type_se</td><td style="padding:8px;">Тип заготовок — <strong>S.E.</strong> (хотя бы один из DE/SE — true)</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">pieces_initial</td><td style="padding:8px;"><strong>Количество заготовок</strong> (при создании карточки)</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">stock_price_total</td><td style="padding:8px;"><strong>Цена комплекта на складе (всего), ₽</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">cost_total</td><td style="padding:8px;"><strong>Себестоимость (всего), ₽</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">discount_percent</td><td style="padding:8px;"><strong>Скидка (всего), %</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blanks_condition</td><td style="padding:8px;"><strong>Состояние заготовок</strong> — <code>NEW</code> / <code>USED</code> / <code>MIXED</code> (по умолчанию <code>NEW</code>)</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">weight_grams</td><td style="padding:8px;"><strong>Вес, г</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">length_cm</td><td style="padding:8px;"><strong>Длина, см</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">has_decorations</td><td style="padding:8px;"><strong>Украшения</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">materials_text</td><td style="padding:8px;"><strong>Материалы</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">color_text</td><td style="padding:8px;"><strong>Цвет</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blanks_kinds_text</td><td style="padding:8px;"><strong>Виды заготовок</strong> (текст; не путать с ключами склада)</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">description</td><td style="padding:8px;"><strong>Описание комплекта</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">notes</td><td style="padding:8px;"><strong>Примечание</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">author_external</td><td style="padding:8px;"><strong>Извне (не сотрудник студии)</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">author_user_ids</td><td style="padding:8px;"><strong>Мастера</strong> — массив id (как чекбоксы авторов)</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">composition</td><td style="padding:8px;">Опционально: состав → <code>composition_json</code>. Форматы и список ключей — в блоке выше. При непустом составе и <code>pieces_initial</code> &gt; 0 нужен <code>blank_stock</code>.</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_stock</td><td style="padding:8px;">Опционально: объект остатков по <code>kit_key</code> (см. выше). Без <code>composition</code> не используется для keyed-склада.</td></tr>
-      </tbody>
-    </table>
-
     <h3>Пример JSON</h3>
     <p class="muted" style="font-size:13px;">Ключи в <code>composition</code> / <code>blank_stock</code> должны совпадать с вашим каталогом. Второй объект — без состава (только <code>pieces_initial</code>).</p>
     <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;overflow:auto;font-size:13px;max-height:320px;">[
@@ -126,10 +105,8 @@
     },
     "weight_grams": 420,
     "length_cm": 65,
-    "has_decorations": true,
     "materials_text": "Канекалон бренд X",
     "color_text": "1B/30 омбре",
-    "blanks_kinds_text": "Дреды средние, термо длина",
     "description": "Комплект для витрины",
     "notes": "Импортировано пакетом",
     "author_external": false,

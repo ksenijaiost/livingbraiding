@@ -125,17 +125,11 @@
       <dt class="muted">Длина</dt>
       <dd style="margin:0;">{% if kit.length_cm is not none %}{{ kit.length_cm }} см{% else %}—{% endif %}</dd>
 
-      <dt class="muted">Украшения</dt>
-      <dd style="margin:0;">{% if kit.has_decorations %}да{% else %}нет{% endif %}</dd>
-
       <dt class="muted">Материалы</dt>
       <dd style="margin:0; white-space:pre-wrap;">{{ kit.materials_text or '—' }}</dd>
 
       <dt class="muted">Цвет</dt>
       <dd style="margin:0;">{{ kit.color_text or '—' }}</dd>
-
-      <dt class="muted">Виды заготовок</dt>
-      <dd style="margin:0; white-space:pre-wrap;">{{ kit.blanks_kinds_text or '—' }}</dd>
 
       <dt class="muted">Состояние заготовок</dt>
       <dd style="margin:0;">
