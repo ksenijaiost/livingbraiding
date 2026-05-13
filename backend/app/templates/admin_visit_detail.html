@@ -2,11 +2,20 @@
 {% block content %}
   <div class="card">
     <p><a href="/visits">← Все визиты</a></p>
-    <h2 style="margin-top: 0;">Визит #{{ visit.id }}. Дата: {{ visit.performed_date.strftime("%d.%m.%Y") }}</h2>
-    <p class="muted">
-      Создан: {{ visit.created_at.strftime("%d.%m.%Y %H:%M") }}
-      {% if visit_creator_label %}· {{ visit_creator_label }}{% endif %}
-    </p>
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;">
+      <div>
+        <h2 style="margin: 0 0 8px;">Визит #{{ visit.id }}. Дата: {{ visit.performed_date.strftime("%d.%m.%Y") }}</h2>
+        <p class="muted" style="margin:0;">
+          Создан: {{ visit.created_at.strftime("%d.%m.%Y %H:%M") }}
+          {% if visit_creator_label %}· {{ visit_creator_label }}{% endif %}
+        </p>
+      </div>
+      {% if not visit_edit_blocked and not visit.is_cancelled %}
+        <div style="flex-shrink:0;">
+          <a href="#visit-change-client"><button type="button">Изменить</button></a>
+        </div>
+      {% endif %}
+    </div>
     {% if visit.is_cancelled %}
       <div class="error" style="margin:12px 0;">
         <strong>ВИЗИТ ОТМЕНЁН</strong>
@@ -23,7 +32,9 @@
         <div class="error" style="margin:12px 0;">Нельзя отменить: конфликт при возврате заготовок на склад (проверьте движения по комплекту).</div>
       {% endif %}
     {% endif %}
-    <p class="muted" style="font-size: 12px; margin-top: 4px;">История изменений доступна только суперадмину.</p>
+    {% if not visit_super_priv %}
+      <p class="muted" style="font-size: 12px; margin-top: 8px;">История изменений и аннулирование визита доступны суперадмину или техспецу.</p>
+    {% endif %}
 
     {% if client_err %}
       <div class="error" style="margin:12px 0;">
@@ -48,6 +59,26 @@
     <p class="muted">
       Свой: {% if visit.client_type.value == 'SELF' %}да{% else %}нет{% endif %}
     </p>
+
+    {% if not visit_edit_blocked and not visit.is_cancelled %}
+      <div id="visit-change-client" class="card" style="margin-top: 12px; background: #f8fafc; border: 1px solid #e2e8f0;">
+        <h4 style="margin: 0 0 10px; font-size: 1rem;">Смена клиента у визита</h4>
+        <p class="muted" style="font-size: 13px; margin: 0 0 10px;">Укажите id клиента из карточки (страница клиента, строка «id …»). Действие пишется в историю изменений.</p>
+        <form method="post" action="/visits/{{ visit.id }}/client" style="max-width: 420px;">
+          <label>Новый клиент, id</label>
+          <input name="new_client_id" type="number" min="1" step="1" required placeholder="например, 12" />
+          {% if visit_client_change_confirm_required %}
+            <label style="margin-top:10px; font-weight:normal;">
+              <input type="checkbox" name="confirm_late" value="1" />
+              Подтверждаю смену после истечения окна редактирования (суперадмин / техспец)
+            </label>
+          {% endif %}
+          <div style="margin-top: 12px;">
+            <button type="submit">Сохранить клиента</button>
+          </div>
+        </form>
+      </div>
+    {% endif %}
 
     {% if visit.photo_1 or visit.photo_2 or visit.photo_3 %}
       <h3 style="margin-top: 18px;">Фото</h3>
@@ -151,7 +182,7 @@
       <p class="muted">{{ kit_usages_note }}</p>
     {% endif %}
 
-    {% if current_user and UserRole.ADMIN_SUPER in current_user.roles and not visit.is_cancelled and not visit_closed_period %}
+    {% if current_user and visit_super_priv and not visit.is_cancelled and not visit_closed_period %}
       <div class="card" style="margin-top: 14px; border-color:#fecaca; background:#fff1f2;">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
           <strong>Аннулирование</strong>
@@ -171,7 +202,7 @@
       </div>
     {% endif %}
 
-    {% if current_user and UserRole.ADMIN_SUPER in current_user.roles %}
+    {% if current_user and visit_super_priv %}
       <h3>История изменений</h3>
       {% set n = (audit_rows|length if audit_rows else 0) %}
       {% if n > 0 %}

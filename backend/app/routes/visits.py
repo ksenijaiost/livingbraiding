@@ -168,6 +168,7 @@ def admin_visit_detail(
 
     v_policy = visit_client_change_policy(visit, current_user, db)
     visit_closed_period = is_in_closed_payroll_period(db, visit.created_at)
+    visit_super_priv = UserRole.ADMIN_SUPER in current_user.roles or UserRole.TECHSPEC in current_user.roles
 
     return templates.TemplateResponse(
         "admin_visit_detail.html",
@@ -189,7 +190,9 @@ def admin_visit_detail(
             msg=msg,
             visit_edit_blocked=not v_policy.can_change,
             visit_edit_block_msg=v_policy.message_when_blocked,
+            visit_client_change_confirm_required=v_policy.super_outside_window,
             visit_closed_period=visit_closed_period,
+            visit_super_priv=visit_super_priv,
         ),
     )
 
