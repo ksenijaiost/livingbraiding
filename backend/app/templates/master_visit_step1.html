@@ -307,6 +307,12 @@
           <label>Или заготовок списать</label>
           <input type="number" name="stock_blanks_used" id="stock_blanks_used" min="0" value="{{ fp.get('stock_blanks_used', '') }}" />
         </div>
+        <div style="margin-top: 10px;">
+          <label style="font-weight: normal; font-size: 14px;">
+            <input type="checkbox" name="kit_paid_separately" id="kit_paid_separately_cb" {% if fp.get('kit_paid_separately') == 'on' %}checked{% endif %} />
+            Комплект из наличия уже оплачен (не включать его стоимость в себестоимость визита)
+          </label>
+        </div>
       </div>
 
       <div id="blk-own" class="card" style="margin-top: 10px; display: none;">
@@ -832,6 +838,10 @@
       el.addEventListener('input', syncVisitPreview);
       el.addEventListener('change', syncVisitPreview);
     });
+    const _kitPaid = document.getElementById('kit_paid_separately_cb');
+    if (_kitPaid) {
+      _kitPaid.addEventListener('change', syncVisitPreview);
+    }
 
     document.getElementById('visit-form').addEventListener('submit', function (e) {
       const mode = document.querySelector('input[name="client_mode"]:checked').value;
@@ -921,9 +931,11 @@
     const materialPricePerGram = {{ (material_price_per_gram_json or '{}') | safe }};
     const mixComplexityRatesPerGram = {{ (mix_complexity_rates_json or '{}') | safe }};
     const amortizationRublesByLevel = {{ (amortization_rubles_json or '{}') | safe }};
+    const stockKitPreviewInitial = {{ stock_kit_preview | tojson }};
+    const extraStockKitPreviewInitial = {{ extra_stock_kit_preview | tojson }};
 
-    let selectedMainStockKit = null;
-    let selectedExtraStockKit = null;
+    let selectedMainStockKit = stockKitPreviewInitial;
+    let selectedExtraStockKit = extraStockKitPreviewInitial;
 
     function money2(x) { return Math.round((parseFloat(x) || 0) * 100) / 100; }
     function numVal(sel) {
@@ -974,9 +986,15 @@
       if (sum !== 100) return null;
       return rows;
     }
+    function kitEffectiveAvailablePieces(kit) {
+      if (!kit) return 0;
+      const free = parseInt(String(kit.pieces_available ?? 0), 10) || 0;
+      const rc = parseInt(String(kit.reserved_for_selected_client ?? 0), 10) || 0;
+      return free + rc;
+    }
     function kitUsageCost(kit, useEntireSel, blanksSel) {
       if (!kit) return { piecesUsed: 0, cost: 0, warn: '' };
-      const avail = parseInt(String(kit.pieces_available || 0), 10) || 0;
+      const avail = kitEffectiveAvailablePieces(kit);
       const total = parseInt(String(kit.pieces_total || 0), 10) || 0;
       const gross = parseFloat(String(kit.stock_price_total || 0)) || 0;
       const dPct = Math.max(0, Math.min(100, parseInt(String(kit.discount_percent ?? 0), 10) || 0));
@@ -1017,7 +1035,9 @@
       const needKit = !!(getSelectedService() && getSelectedService().requires_kit_block);
       if (needKit && kk === 'STOCK') {
         const r = kitUsageCost(selectedMainStockKit, 'input[name="stock_use_entire"]', 'input[name="stock_blanks_used"]');
-        kitCostTotal += r.cost;
+        let mainCost = r.cost;
+        if (isChecked('#kit_paid_separately_cb')) mainCost = 0;
+        kitCostTotal += mainCost;
         if (r.warn) warn = r.warn;
       }
       if (needKit && kk === 'OWN' && isChecked('#own_extra_blanks')) {
@@ -1373,6 +1393,7 @@
       ownCorrectionPanelSync();
       if (v === 'STOCK') void prefetchVisitStockKitsIfReady('main');
       syncVisitStockEntireUi();
+      syncVisitPreview();
     }
     function ownExtra() {
       const on = document.getElementById('own_extra_blanks').checked;

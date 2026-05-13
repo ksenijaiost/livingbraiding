@@ -1,4 +1,4 @@
-"""Связь резерва комплекта с бронью (для UI и снятия при отмене/смене).
+"""Резерв комплекта ↔ бронь; визит — флаг «комплект уже оплачен».
 
 Revision ID: 0002_kit_reserve_booking
 Revises: 0001_init
@@ -26,8 +26,14 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
+    op.add_column(
+        "visits",
+        sa.Column("kit_paid_separately", sa.Boolean(), nullable=False, server_default="0"),
+    )
+    op.alter_column("visits", "kit_paid_separately", server_default=None)
 
 
 def downgrade() -> None:
+    op.drop_column("visits", "kit_paid_separately")
     op.drop_constraint("fk_kit_reserves_booking_id", "kit_reserves", type_="foreignkey")
     op.drop_column("kit_reserves", "booking_id")

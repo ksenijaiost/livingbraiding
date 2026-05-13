@@ -60,11 +60,12 @@
           </div>
         </div>
         <div id="amount_from_client_block" style="margin-top: 10px; display:none;">
-          <label>Сколько взяли с клиента</label>
+          <label>Сколько взяли с клиента <span class="muted" style="font-weight:normal;">(необязательно)</span></label>
           <div style="display:flex; gap: 8px; align-items:center;">
             <input name="amount_from_client" type="number" step="1" min="0" value="{{ fp.amount_from_client or '' }}" style="max-width: 12rem;" />
             <span class="muted">₽</span>
           </div>
+          <p class="muted" style="font-size: 12px; margin: 6px 0 0;">Можно оставить пустым и указать оплату позже на визите.</p>
           <div class="muted" style="font-size: 12px; margin-top: 6px;" id="price_hint_line"></div>
         </div>
       </div>

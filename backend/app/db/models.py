@@ -1007,6 +1007,8 @@ class Visit(Base):
     duration_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True)
+    # Основной комплект «из наличия»: уже оплачен (напр. при брони) — не входит в себестоимость визита.
+    kit_paid_separately: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
     client_type: Mapped[VisitClientType] = mapped_column(Enum(VisitClientType), nullable=False)
     price_type: Mapped[VisitPriceType] = mapped_column(Enum(VisitPriceType), nullable=False)

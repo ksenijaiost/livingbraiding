@@ -515,6 +515,7 @@ def parse_kit_inlay_form(
         stock_kit_id=stock_id if stock_id else None,
         stock_use_entire=g_bool("stock_use_entire"),
         stock_blanks_used=g_int("stock_blanks_used", 0),
+        kit_paid_separately=g_bool("kit_paid_separately"),
         # В текущем шаге анкеты «Новый комплект» недоступен, поэтому поля не парсим.
         new_title="",
         new_description=None,
@@ -569,6 +570,7 @@ class KitInlayFormInput:
     stock_kit_id: int | None
     stock_use_entire: bool
     stock_blanks_used: int
+    kit_paid_separately: bool
     # NEW
     new_title: str
     new_description: str | None
@@ -890,6 +892,9 @@ def save_kit_inlay_visit(
 
     if service_requires_kit_block(service):
         kind = inp.kit_kind.upper()
+        exclude_main_stock_cost = (
+            kind == "STOCK" and bool(inp.kit_paid_separately) and inp.stock_kit_id is not None
+        )
         if kind == "STOCK" and inp.stock_kit_id:
             n, cost, sf = _apply_stock_kit_usage(
                 db,
@@ -898,9 +903,11 @@ def save_kit_inlay_visit(
                 blanks_used=inp.stock_blanks_used,
                 client_id=inp.existing_client_id,
             )
-            usages.append((inp.stock_kit_id, n, cost))
-            kit_cost_total += cost
-            kit_studio_fund += sf
+            usage_cost = 0.0 if exclude_main_stock_cost else cost
+            usage_sf = 0.0 if exclude_main_stock_cost else sf
+            usages.append((inp.stock_kit_id, n, usage_cost))
+            kit_cost_total += usage_cost
+            kit_studio_fund += usage_sf
         if kind == "OWN" and inp.own_extra_blanks and inp.own_extra_stock_kit_id:
             n, cost, sf = _apply_stock_kit_usage(
                 db,
@@ -1010,6 +1017,7 @@ def save_kit_inlay_visit(
         salon_profit=salon_profit,
         masters_pool=masters_pool,
         comment=None,
+        kit_paid_separately=bool(inp.kit_paid_separately),
     )
     db.add(visit)
     db.flush()
@@ -1162,6 +1170,50 @@ def kit_reserved_for_visit_label(kit: Kit) -> str | None:
     return "; ".join(bits)
 
 
+def kit_suggest_dict_for_kit(k: Kit, *, for_client_id: int | None) -> dict[str, Any]:
+    """Одна строка подсказки «из наличия» (как в suggest_kits_for_stock)."""
+    cid = int(for_client_id) if for_client_id is not None and int(for_client_id) > 0 else None
+    res_label = kit_reserved_for_visit_label(k)
+    sp = k.stock_price_total
+    has_price = sp is not None and float(sp) > 0
+    dp = int(k.discount_percent or 0)
+    reserved_for_c = 0
+    if cid is not None:
+        for r in k.reserves or []:
+            if (r.reserved_for_client_id or 0) == cid:
+                reserved_for_c += int(r.pieces_reserved or 0)
+    return {
+        "id": k.id,
+        "sku": k.sku,
+        "title": k.title,
+        "pieces_total": int(k.pieces_total or 0),
+        "pieces_available": k.pieces_available,
+        "reserved_for_selected_client": reserved_for_c,
+        "stock_price_total": float(sp or 0.0),
+        "discount_percent": dp,
+        "missing_sale_price": not has_price,
+        "is_reserved": bool(k.reserves),
+        "reserved_for_label": res_label,
+    }
+
+
+def kit_suggest_dict_for_kit_id(
+    db: Session, kit_id: int, *, for_client_id: int | None
+) -> dict[str, Any] | None:
+    """Загрузка комплекта по id для префилла формы визита (предпросмотр себестоимости)."""
+    k = db.scalar(
+        select(Kit)
+        .where(Kit.id == kit_id)
+        .options(
+            selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
+            selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_user),
+        )
+    )
+    if not k:
+        return None
+    return kit_suggest_dict_for_kit(k, for_client_id=for_client_id)
+
+
 def kit_reserve_hint_by_id(db: Session, kit_id: int | None) -> str | None:
     if not kit_id:
         return None
@@ -1220,30 +1272,7 @@ def suggest_kits_for_stock(
     rows = list(db.scalars(stmt).all())
     out: list[dict[str, Any]] = []
     for k in rows:
-        res_label = kit_reserved_for_visit_label(k)
-        sp = k.stock_price_total
-        has_price = sp is not None and float(sp) > 0
-        dp = int(k.discount_percent or 0)
-        reserved_for_c = 0
-        if cid is not None:
-            for r in k.reserves or []:
-                if (r.reserved_for_client_id or 0) == cid:
-                    reserved_for_c += int(r.pieces_reserved or 0)
-        out.append(
-            {
-                "id": k.id,
-                "sku": k.sku,
-                "title": k.title,
-                "pieces_total": int(k.pieces_total or 0),
-                "pieces_available": k.pieces_available,
-                "reserved_for_selected_client": reserved_for_c,
-                "stock_price_total": float(sp or 0.0),
-                "discount_percent": dp,
-                "missing_sale_price": not has_price,
-                "is_reserved": bool(k.reserves),
-                "reserved_for_label": res_label,
-            }
-        )
+        out.append(kit_suggest_dict_for_kit(k, for_client_id=cid))
     if cid is not None:
         out.sort(
             key=lambda d: (
