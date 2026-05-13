@@ -8,12 +8,64 @@
     <p class="muted">Доступно только суперадминистратору. Корень JSON — <strong>массив</strong> объектов; допускается только <strong>строгий JSON</strong> (без <code>//</code> и хвостовых запятых). Лимиты: до {{ (max_bytes // 1024)|int }} KB текста, не более {{ max_kits }} комплектов за один запрос.</p>
     <p class="muted">Если артикул уже занят в базе или в этом же файле, к сохранённому артикулу добавляется суффикс <strong>❗повтор</strong>, при необходимости <strong>❗повтор2</strong> и далее (до 80 символов).</p>
 
+    <h3 class="lb-mt-0">Обязательные поля</h3>
+    <p class="muted" style="font-size:14px;">Помимо <code>sku</code> для каждого объекта в массиве должны быть заданы:</p>
+    <ul class="muted" style="font-size:14px;line-height:1.5;">
+      <li><code>title</code> — название (непустая строка).</li>
+      <li><code>pieces_initial</code> — целое число <strong>&gt; 0</strong> (скалярный остаток «штук комплекта» при создании).</li>
+      <li><code>stock_price_total</code> — число <strong>&gt; 0</strong> (цена комплекта на складе, ₽).</li>
+      <li><code>cost_total</code> — число <strong>&gt; 0</strong> (себестоимость, ₽).</li>
+      <li><code>blank_type_de</code> и/или <code>blank_type_se</code> — хотя бы одно <code>true</code>.</li>
+    </ul>
+    <p class="muted" style="font-size:14px;"><code>discount_percent</code> не обязателен (по умолчанию 0); не должен превышать допустимую маржу относительно цены и себестоимости.</p>
+
+    <h3><code>composition</code> и <code>blank_stock</code></h3>
+    <p class="muted" style="font-size:14px;">Ключи — это <code>kit_key</code> из каталога «Заказ» → «Заготовки поштучно» (должна быть активная позиция с таким ключом в <code>meta_json</code>). Ниже — эталонный список ключей из кода приложения; в вашей базе могут быть добавлены другие ключи или отсутствовать часть строк — ориентируйтесь на каталог.</p>
+    <p class="muted" style="font-size:14px;"><strong><code>composition</code></strong> задаёт состав одного комплекта (сколько каких заготовок в наборе). Допустимы два вида:</p>
+    <ul class="muted" style="font-size:14px;line-height:1.5;">
+      <li>объект <code>"КЛЮЧ": целое_qty</code> — только положительные целые, повтор ключей суммируются;</li>
+      <li>массив объектов <code>[{"key":"SE_BRAID_LONG","qty":2}, …]</code>.</li>
+    </ul>
+    <p class="muted" style="font-size:14px;"><strong><code>blank_stock</code></strong> — только объект <code>"КЛЮЧ": целое_остаток</code> (≥ 0; нули отбрасываются). Ключи должны входить в пересечение «есть в <code>composition</code>» и «есть в каталоге с этим <code>kit_key</code>».</p>
+    <p class="muted" style="font-size:14px;"><strong>Условие:</strong> если задан непустой <code>composition</code> и <code>pieces_initial</code> &gt; 0, обязателен непустой <code>blank_stock</code> (остатки по видам для keyed-склада).</p>
+    <p class="muted" style="font-size:14px;">Позиции «Б/У» в справочнике без отдельного <code>kit_key</code> в этот список не входят.</p>
+
+    <table style="width:100%;max-width:900px;border-collapse:collapse;font-size:13px;margin:12px 0 16px;">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
+          <th style="padding:6px 8px;">Ключ (<code>kit_key</code>)</th>
+          <th style="padding:6px 8px;">Подпись</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_BRAID_SHORT</td><td style="padding:6px 8px;">S.E. коса короткая</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_BRAID_LONG</td><td style="padding:6px 8px;">S.E. коса</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_BRAID_FREE_TIP</td><td style="padding:6px 8px;">S.E. ажурная коса</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_DREAD</td><td style="padding:6px 8px;">S.E. дред</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_TIP_ADDON</td><td style="padding:6px 8px;">S.E. доплёт кончиков</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_TRIM_SHORT</td><td style="padding:6px 8px;">S.E. стрижка короткой косы</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_TRIM_LONG</td><td style="padding:6px 8px;">S.E. стрижка длинной косы</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_BRAID_SHORT</td><td style="padding:6px 8px;">D.E. коса короткая</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_BRAID_LONG</td><td style="padding:6px 8px;">D.E. коса</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_BRAID_NEW_FMT</td><td style="padding:6px 8px;">D.E. ажурная коса</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_CURL</td><td style="padding:6px 8px;">D.E. термокудря</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_FREE_TIP</td><td style="padding:6px 8px;">D.E. дредокудря</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_SHORT</td><td style="padding:6px 8px;">D.E. дред короткий</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_LONG</td><td style="padding:6px 8px;">D.E. дред</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_TRIM</td><td style="padding:6px 8px;">D.E. стрижка</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_MAX</td><td style="padding:6px 8px;">D.E. дред max</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_CURL_MAX</td><td style="padding:6px 8px;">D.E. кудря max</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_MICRO_BRAIDS_4X</td><td style="padding:6px 8px;">D.E. микрокосы 4х</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_MICRO_BRAID_6X</td><td style="padding:6px 8px;">D.E. микрокоса 6х</td></tr>
+      </tbody>
+    </table>
+
     {% if top_error %}
       <div class="error lb-mb-12">{{ top_error }}</div>
     {% endif %}
 
     <h3 class="lb-mt-0">Поля JSON и подписи в карточке комплекта</h3>
-    <p class="muted" style="font-size:14px;">Ключи <code>composition</code> и <code>blank_stock</code> — это <code>kit_key</code> из каталога «Заказ» → «Заготовки поштучно» (колонка «Ключ» в блоке «Остаток по видам заготовок» при редактировании).</p>
+    <p class="muted" style="font-size:14px;">Остальные поля — по желанию. Подробнее про состав и склад по ключам — в блоке выше.</p>
 
     <table style="width:100%;max-width:900px;border-collapse:collapse;font-size:14px;margin-bottom:16px;">
       <thead>
@@ -41,13 +93,13 @@
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">notes</td><td style="padding:8px;"><strong>Примечание</strong></td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">author_external</td><td style="padding:8px;"><strong>Извне (не сотрудник студии)</strong></td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">author_user_ids</td><td style="padding:8px;"><strong>Мастера</strong> — массив id (как чекбоксы авторов)</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">composition</td><td style="padding:8px;">Состав для прайса (объект или массив <code>key</code>/<code>qty</code>); в БД — <code>composition_json</code>. Если задан и <code>pieces_initial</code> &gt; 0, нужен <code>blank_stock</code>.</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_stock</td><td style="padding:8px;">Остатки по видам — как колонка <strong>«Остаток, шт.»</strong> в таблице по ключам.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">composition</td><td style="padding:8px;">Опционально: состав → <code>composition_json</code>. Форматы и список ключей — в блоке выше. При непустом составе и <code>pieces_initial</code> &gt; 0 нужен <code>blank_stock</code>.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_stock</td><td style="padding:8px;">Опционально: объект остатков по <code>kit_key</code> (см. выше). Без <code>composition</code> не используется для keyed-склада.</td></tr>
       </tbody>
     </table>
 
     <h3>Пример JSON</h3>
-    <p class="muted" style="font-size:13px;">Подставьте реальные ключи из вашего каталога заготовок. Второй объект — без состава по ключам (только скалярный остаток).</p>
+    <p class="muted" style="font-size:13px;">Ключи в <code>composition</code> / <code>blank_stock</code> должны совпадать с вашим каталогом. Второй объект — без состава (только <code>pieces_initial</code>).</p>
     <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;overflow:auto;font-size:13px;max-height:320px;">[
   {
     "sku": "KIT-BULK-001",
@@ -59,16 +111,14 @@
     "cost_total": 5500,
     "discount_percent": 0,
     "composition": {
-      "DE": 1,
-      "SE": 2,
-      "SE_TIP_ADDON": 1,
-      "THERMO_LONG": 1
+      "SE_BRAID_LONG": 2,
+      "DE_BRAID_SHORT": 1,
+      "SE_TIP_ADDON": 1
     },
     "blank_stock": {
-      "DE": 6,
-      "SE": 10,
-      "SE_TIP_ADDON": 2,
-      "THERMO_LONG": 4
+      "SE_BRAID_LONG": 10,
+      "DE_BRAID_SHORT": 5,
+      "SE_TIP_ADDON": 3
     },
     "weight_grams": 420,
     "length_cm": 65,
