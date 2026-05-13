@@ -112,6 +112,7 @@
 
           <div id="visit_kit_stock_block" style="margin-top: 12px; display:none;">
             <input type="hidden" name="visit_stock_kit_id" id="visit_stock_kit_id" value="{{ fp.get('visit_stock_kit_id','') }}" />
+            <input type="hidden" name="visit_stock_breakdown_json" id="visit_stock_breakdown_json" value="{{ fp.get('visit_stock_breakdown_json','') }}" />
             <label>Комплект из наличия</label>
             <div class="row" style="align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:6px;">
               <div style="flex:1; min-width:160px;">
@@ -210,6 +211,7 @@
 
           <div id="visit_extra_stock_block" style="margin-top: 12px; display:none;">
             <input type="hidden" name="visit_extra_stock_kit_id" id="visit_extra_stock_kit_id" value="{{ fp.get('visit_extra_stock_kit_id','') }}" />
+            <input type="hidden" name="visit_extra_stock_breakdown_json" id="visit_extra_stock_breakdown_json" value="{{ fp.get('visit_extra_stock_breakdown_json','') }}" />
             <label>Из наличия</label>
             <div class="row" style="align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:6px;">
               <div style="flex:1; min-width:160px;">
@@ -279,6 +281,7 @@
 
             <div id="sale_kit_stock_block" style="margin-top: 12px; display:none;">
               <input type="hidden" name="sale_stock_kit_id" id="sale_stock_kit_id" value="{{ fp.get('sale_stock_kit_id','') }}" />
+              <input type="hidden" name="sale_stock_breakdown_json" id="sale_stock_breakdown_json" value="{{ fp.get('sale_stock_breakdown_json','') }}" />
               <label>Комплект из наличия</label>
               <div class="row" style="align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:6px;">
                 <div style="flex:1; min-width:160px;">

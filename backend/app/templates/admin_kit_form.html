@@ -10,6 +10,7 @@
 
     <form method="post" action="{{ form_action }}" enctype="multipart/form-data">
       {% set field_prefix = "" %}
+      {% set blank_stock_rows = blank_stock_rows|default([]) %}
       {% include "partials/kit_admin_form_fields.html" %}
 
       <p style="margin-top: 16px;">

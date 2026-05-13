@@ -63,6 +63,11 @@
         <strong>⚠️ Нет цены продажи.</strong> Списание комплекта в визите, заказе или продаже товара невозможно, пока администратор не укажет цену (редактирование карточки).
       </div>
     {% endif %}
+    {% if composition_blank_stock_warning %}
+      <div class="card" style="margin-bottom:14px; background:#fef3c7; border-color:#fbbf24; color:#92400e;">
+        <strong>⚠️ Остатки по видам не заведены.</strong> В карточке есть состав (composition_json) и положительный остаток, но не заполнена таблица «Остаток по видам» в <a href="/kits/{{ kit.id }}/edit">редактировании</a>. Списание «из наличия» в визите для этого комплекта будет заблокировано, пока администратор не введёт остатки по ключам.
+      </div>
+    {% endif %}
 
     <h2 style="margin:16px 0 12px; display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
       {% if missing_price %}<span title="Нет цены продажи">⚠️</span>{% endif %}

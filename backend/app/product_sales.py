@@ -43,6 +43,18 @@ from app.db.models import (
     WorkForInventory,
     WorkKind,
 )
+from app.kit_blank_stock_core import (
+    blank_stock_qty_map,
+    build_usage_breakdown_keyed,
+    decrement_blank_stock_keys,
+    increment_blank_stock_keys,
+    kit_inventory_is_keyed,
+    max_take_by_key_for_client,
+    parse_usage_breakdown_json,
+    release_client_kit_reserves_into_free_pool,
+    require_composition_stock_rows_or_scalar_ok,
+    sync_kit_pieces_available_from_blank_lines,
+)
 from app.product_sale_material import (
     finalize_material_sale_fields,
     material_retail_has_pricing_path,
@@ -136,10 +148,27 @@ def _sale_edit_allowed(db: Session, sale: ProductSale) -> tuple[bool, str]:
     return True, ""
 
 
-def _apply_kit_delta(db: Session, kit_id: int, delta: int) -> None:
+def _apply_kit_delta(
+    db: Session,
+    kit_id: int,
+    delta: int,
+    *,
+    breakdown: dict[str, int] | None = None,
+) -> None:
     kit = db.get(Kit, kit_id)
     if not kit:
         raise ValueError("Комплект не найден.")
+    if kit_inventory_is_keyed(db, int(kit_id)) and breakdown:
+        s = sum(int(v) for v in breakdown.values() if int(v) > 0)
+        if s != abs(int(delta)):
+            raise ValueError("Внутренняя ошибка: разбивка списания не совпадает с количеством.")
+        pos = {k: int(v) for k, v in breakdown.items() if int(v) > 0}
+        if int(delta) < 0:
+            decrement_blank_stock_keys(db, int(kit_id), pos)
+        else:
+            increment_blank_stock_keys(db, int(kit_id), pos)
+        sync_kit_pieces_available_from_blank_lines(db, kit)
+        return
     new_avail = int(kit.pieces_available + delta)
     if new_avail < 0:
         raise ValueError("Недостаточно заготовок в наличии для этой операции.")
@@ -209,13 +238,10 @@ def _release_all_reserved_to_stock_for_client(
     kit: Kit,
     client_id: int,
 ) -> int:
-    """Снимает весь резерв клиента по комплекту и возвращает его в pieces_available."""
-    total = _sum_reserved_for_client(db, kit_id=int(kit.id), client_id=int(client_id))
-    if total <= 0:
-        return 0
-    return _release_reserved_pieces_to_stock_for_client(
-        db, kit=kit, client_id=int(client_id), pieces=int(total)
-    )
+    """Снимает весь резерв клиента по комплекту и возвращает его на склад."""
+    release_client_kit_reserves_into_free_pool(db, kit=kit, client_id=int(client_id))
+    db.flush()
+    return 0
 
 
 def _ru_kind(k: ProductSaleKind) -> str:
@@ -283,6 +309,27 @@ def _g_optional_float(form: Any, name: str) -> float | None:
         return parse_optional_float(s, field_name=name)
     except ValueError:
         return None
+
+
+def _parse_kit_breakdown_form(form: Any) -> dict[str, int] | None:
+    raw = _g_str(form, "kit_breakdown_json")
+    if not raw:
+        return None
+    try:
+        d = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(d, dict):
+        return None
+    out: dict[str, int] = {}
+    for k, v in d.items():
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            out[str(k)] = n
+    return out or None
 
 
 def _apply_material_from_form(
@@ -848,7 +895,12 @@ async def product_sale_edit_save(
 
     # revert stock impact from previous state (if any)
     if sale.kind == ProductSaleKind.KIT and sale.kit_id and sale.kit_pieces_sold:
-        _apply_kit_delta(db, sale.kit_id, int(sale.kit_pieces_sold))
+        _apply_kit_delta(
+            db,
+            sale.kit_id,
+            int(sale.kit_pieces_sold),
+            breakdown=parse_usage_breakdown_json(getattr(sale, "kit_breakdown_json", None)),
+        )
 
     # overwrite common fields
     sale.client_id = client.id
@@ -874,6 +926,7 @@ async def product_sale_edit_save(
     sale.material_cost_review_pending = False
     sale.kit_id = None
     sale.kit_pieces_sold = None
+    sale.kit_breakdown_json = None
     sale.rubber_description = None
     sale.rubber_price_override = None
     sale.other_description = None
@@ -906,23 +959,45 @@ async def product_sale_edit_save(
         if mode not in ("PIECES", "ALL"):
             raise ValueError("Некорректный режим продажи комплекта.")
         _release_all_reserved_to_stock_for_client(db, kit=kit, client_id=client.id)
+        require_composition_stock_rows_or_scalar_ok(db, kit)
         avail = int(kit.pieces_available or 0)
-        pieces_to_sell = avail
-        if mode == "PIECES":
-            pieces_to_sell = _g_int(form, "kit_pieces_sold", 0)
-            if pieces_to_sell <= 0:
-                raise ValueError("Укажите количество заготовок больше 0.")
+        if kit_inventory_is_keyed(db, kit.id):
+            sm = blank_stock_qty_map(db, kit.id)
+            max_by = max_take_by_key_for_client(db, kit=kit, client_id=int(client.id), stock_map=sm)
+            if sum(max_by.values()) <= 0:
+                raise ValueError("Нет доступных заготовок для продажи по этому комплекту.")
+            usage = _parse_kit_breakdown_form(form)
+            use_entire = mode == "ALL"
+            blanks_used = _g_int(form, "kit_pieces_sold", 0) if mode == "PIECES" else 0
+            bd = build_usage_breakdown_keyed(
+                use_entire=use_entire,
+                blanks_used=blanks_used,
+                usage_by_key=usage,
+                max_by_key=max_by,
+            )
+            ntot = sum(int(v) for v in bd.values())
+            _apply_kit_delta(db, kit.id, -int(ntot), breakdown=bd)
+            sale.kit_id = kit.id
+            sale.kit_pieces_sold = int(ntot)
+            sale.kit_breakdown_json = json.dumps(bd, ensure_ascii=False)
         else:
             pieces_to_sell = avail
+            if mode == "PIECES":
+                pieces_to_sell = _g_int(form, "kit_pieces_sold", 0)
+                if pieces_to_sell <= 0:
+                    raise ValueError("Укажите количество заготовок больше 0.")
+            else:
+                pieces_to_sell = avail
 
-        if pieces_to_sell <= 0:
-            raise ValueError("Нет доступных заготовок для продажи по этому комплекту.")
+            if pieces_to_sell <= 0:
+                raise ValueError("Нет доступных заготовок для продажи по этому комплекту.")
 
-        if pieces_to_sell > avail:
-            raise ValueError("Нельзя продать больше заготовок, чем есть в наличии.")
-        _apply_kit_delta(db, kit.id, -int(pieces_to_sell))
-        sale.kit_id = kit.id
-        sale.kit_pieces_sold = int(pieces_to_sell)
+            if pieces_to_sell > avail:
+                raise ValueError("Нельзя продать больше заготовок, чем есть в наличии.")
+            _apply_kit_delta(db, kit.id, -int(pieces_to_sell))
+            sale.kit_id = kit.id
+            sale.kit_pieces_sold = int(pieces_to_sell)
+            sale.kit_breakdown_json = None
 
     elif kind == ProductSaleKind.RUBBER:
         desc = (_g_str(form, "rubber_description") or "").strip()
@@ -993,6 +1068,7 @@ async def product_sale_edit_save(
                 "material_cost_review_pending",
                 "kit_id",
                 "kit_pieces_sold",
+                "kit_breakdown_json",
                 "rubber_description",
                 "rubber_price_override",
                 "other_description",
@@ -1031,7 +1107,12 @@ async def product_sale_void(
 
     # revert stock impact
     if sale.kind == ProductSaleKind.KIT and sale.kit_id and sale.kit_pieces_sold:
-        _apply_kit_delta(db, sale.kit_id, int(sale.kit_pieces_sold))
+        _apply_kit_delta(
+            db,
+            sale.kit_id,
+            int(sale.kit_pieces_sold),
+            breakdown=parse_usage_breakdown_json(getattr(sale, "kit_breakdown_json", None)),
+        )
 
     before = SimpleNamespace(is_voided=sale.is_voided, voided_at=sale.voided_at, voided_by_user_id=sale.voided_by_user_id)
     sale.is_voided = True
@@ -1162,30 +1243,58 @@ async def product_sale_new_post(
         if mode not in ("PIECES", "ALL"):
             return _fail("Некорректный режим продажи комплекта.")
 
-        # Если на этого клиента есть резерв — используем его в приоритете.
-        # Если списано меньше резерва, остаток резерва снимается (возвращается в свободный остаток).
         _release_all_reserved_to_stock_for_client(db, kit=kit, client_id=client.id)
+        try:
+            require_composition_stock_rows_or_scalar_ok(db, kit)
+        except ValueError as e:
+            return _fail(str(e))
         avail = int(kit.pieces_available or 0)
-        pieces_to_sell = avail
-        if mode == "PIECES":
-            pieces_to_sell = _g_int(form, "kit_pieces_sold", 0)
-            if pieces_to_sell <= 0:
-                return _fail("Укажите количество заготовок больше 0.")
+        if kit_inventory_is_keyed(db, kit.id):
+            sm = blank_stock_qty_map(db, kit.id)
+            max_by = max_take_by_key_for_client(db, kit=kit, client_id=int(client.id), stock_map=sm)
+            if sum(max_by.values()) <= 0:
+                return _fail("Нет доступных заготовок для продажи по этому комплекту.")
+            usage = _parse_kit_breakdown_form(form)
+            use_entire = mode == "ALL"
+            blanks_used = _g_int(form, "kit_pieces_sold", 0) if mode == "PIECES" else 0
+            try:
+                bd = build_usage_breakdown_keyed(
+                    use_entire=use_entire,
+                    blanks_used=blanks_used,
+                    usage_by_key=usage,
+                    max_by_key=max_by,
+                )
+            except ValueError as e:
+                return _fail(str(e))
+            ntot = sum(int(v) for v in bd.values())
+            try:
+                _apply_kit_delta(db, kit.id, -int(ntot), breakdown=bd)
+            except ValueError as e:
+                return _fail(str(e))
+            row.kit_id = kit.id
+            row.kit_pieces_sold = int(ntot)
+            row.kit_breakdown_json = json.dumps(bd, ensure_ascii=False)
         else:
-            # «Весь комплект» = весь доступный свободный остаток (резерв клиента уже снят выше).
             pieces_to_sell = avail
+            if mode == "PIECES":
+                pieces_to_sell = _g_int(form, "kit_pieces_sold", 0)
+                if pieces_to_sell <= 0:
+                    return _fail("Укажите количество заготовок больше 0.")
+            else:
+                pieces_to_sell = avail
 
-        if pieces_to_sell <= 0:
-            return _fail("Нет доступных заготовок для продажи по этому комплекту.")
+            if pieces_to_sell <= 0:
+                return _fail("Нет доступных заготовок для продажи по этому комплекту.")
 
-        if pieces_to_sell > avail:
-            return _fail("Нельзя продать больше заготовок, чем есть в наличии.")
+            if pieces_to_sell > avail:
+                return _fail("Нельзя продать больше заготовок, чем есть в наличии.")
 
-        kit.pieces_available = int(kit.pieces_available or 0) - int(pieces_to_sell)
-        if kit.pieces_available < 0:
-            return _fail("Недостаточно заготовок в наличии для этой операции.")
-        row.kit_id = kit.id
-        row.kit_pieces_sold = int(pieces_to_sell)
+            kit.pieces_available = int(kit.pieces_available or 0) - int(pieces_to_sell)
+            if kit.pieces_available < 0:
+                return _fail("Недостаточно заготовок в наличии для этой операции.")
+            row.kit_id = kit.id
+            row.kit_pieces_sold = int(pieces_to_sell)
+            row.kit_breakdown_json = None
 
     elif kind == ProductSaleKind.RUBBER:
         desc = (fp["rubber_description"] or "").strip()

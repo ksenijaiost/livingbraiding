@@ -23,6 +23,7 @@ from app.db.models import (
 )
 from app.forms_parse import parse_int
 from app.payroll_fund import PayrollFundSourceKind, storno_source_accruals
+from app.kit_blank_stock_core import parse_usage_breakdown_json, return_reserve_row_to_stock
 from app.routes.bookings import release_booking_kit_reserves
 from app.routes.visits import _visit_cancel_revert_stock
 from app.time_utils import utcnow_naive
@@ -42,25 +43,14 @@ def release_client_kit_reserves(db: Session, *, client_id: int, changed_by_user_
         ).all()
     )
     for r in rows:
-        kit = db.get(Kit, r.kit_id)
-        if kit is None:
-            db.delete(r)
-            continue
-        before = SimpleNamespace(pieces_available=kit.pieces_available)
-        kit.pieces_available = int(kit.pieces_available or 0) + int(r.pieces_reserved or 0)
-        kit.updated_at = utcnow_naive()
-        if changed_by_user_id is not None:
-            kit.updated_by_user_id = changed_by_user_id
+        if r.kit_id and r.pieces_reserved:
+            kit = db.get(Kit, int(r.kit_id))
+            if kit is not None:
+                return_reserve_row_to_stock(db, kit, r)
+                kit.updated_at = utcnow_naive()
+                if changed_by_user_id is not None:
+                    kit.updated_by_user_id = changed_by_user_id
         db.delete(r)
-        if changed_by_user_id is not None:
-            write_audit_rows(
-                db,
-                log_model=KitAuditLog,
-                entity_field="kit_id",
-                entity_id=kit.id,
-                changed_by_user_id=changed_by_user_id,
-                changes=diff_fields(before, kit, ("pieces_available",)),
-            )
 
 
 def purge_visit_hard(db: Session, visit_id: int, *, actor_user_id: int | None) -> None:
@@ -98,7 +88,12 @@ def purge_product_sale_hard(db: Session, sale_id: int, *, actor_user_id: int | N
     if not sale.is_voided:
         storno_source_accruals(db, PayrollFundSourceKind.PRODUCT_SALE, sale.id, actor_user_id)
         if sale.kind == ProductSaleKind.KIT and sale.kit_id and sale.kit_pieces_sold:
-            _apply_kit_delta(db, int(sale.kit_id), int(sale.kit_pieces_sold))
+            _apply_kit_delta(
+                db,
+                int(sale.kit_id),
+                int(sale.kit_pieces_sold),
+                breakdown=parse_usage_breakdown_json(getattr(sale, "kit_breakdown_json", None)),
+            )
     db.delete(sale)
 
 

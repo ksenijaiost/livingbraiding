@@ -79,6 +79,8 @@ def _kit_reserve_target_short(reserve: KitReserve) -> str:
     if not parts:
         return "цель не указана"
     return " и ".join(parts)
+
+
 from app.questionnaire.answer_validate import (
     extract_questionnaire_raw_from_form,
     validate_and_coerce_answers,
@@ -103,6 +105,21 @@ from app.thermo_visit import (
     parse_thermo_from_form,
     persist_new_thermo_template_if_needed,
     service_requires_thermo_flow,
+)
+from app.kit_blank_stock_core import (
+    apply_discount_capped,
+    blank_stock_qty_map,
+    build_usage_breakdown_keyed,
+    keyed_client_price_selected,
+    keyed_cost_selected,
+    kit_inventory_is_keyed,
+    load_catalog_kit_maps,
+    max_take_by_key_for_client,
+    parse_composition_totals,
+    release_client_kit_reserves_into_free_pool,
+    require_composition_stock_rows_or_scalar_ok,
+    decrement_blank_stock_keys,
+    sync_kit_pieces_available_from_blank_lines,
 )
 from app.payroll_fund import post_visit_accruals
 from app.user_roles import user_has_role
@@ -158,12 +175,37 @@ def _validate_stock_selection(
     use_entire: bool,
     blanks_used: int,
     client_id: int | None = None,
+    usage_by_key: dict[str, int] | None = None,
 ) -> Kit:
     """Проверка без списания (для сборки JSON)."""
-    kit = db.get(Kit, kit_id)
+    kit = db.scalar(
+        select(Kit)
+        .where(Kit.id == int(kit_id))
+        .options(selectinload(Kit.reserves), selectinload(Kit.blank_stock_lines))
+    )
     if not kit or kit.is_archived or not kit.is_active:
         raise ValueError("Комплект не найден или недоступен")
-    avail = kit.pieces_available
+    require_composition_stock_rows_or_scalar_ok(db, kit)
+
+    if kit_inventory_is_keyed(db, int(kit_id)):
+        stock_map = blank_stock_qty_map(db, int(kit_id))
+        if not stock_map or sum(stock_map.values()) <= 0:
+            raise ValueError("Нет заготовок на складе по этому комплекту (остатки по видам).")
+        max_by_key = max_take_by_key_for_client(db, kit=kit, client_id=client_id, stock_map=stock_map)
+        if sum(max_by_key.values()) <= 0:
+            raise ValueError("Нет заготовок на складе по этому комплекту")
+        try:
+            build_usage_breakdown_keyed(
+                use_entire=use_entire,
+                blanks_used=blanks_used,
+                usage_by_key=usage_by_key,
+                max_by_key=max_by_key,
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
+        return kit
+
+    avail = int(kit.pieces_available or 0)
     cid = int(client_id or 0)
     reserved_for_client = 0
     if cid > 0:
@@ -196,14 +238,20 @@ def _apply_stock_kit_usage(
     use_entire: bool,
     blanks_used: int,
     client_id: int | None = None,
-) -> tuple[int, float, float]:
-    """Списание: (pieces_used, cost_amount_for_visit, studio_fund_amount).
+    usage_by_key: dict[str, int] | None = None,
+) -> tuple[int, float, float, dict[str, int]]:
+    """Списание: (pieces_used, cost_amount_for_visit, studio_fund_amount, usage_by_key_out).
 
     cost_amount_for_visit — доля (цена − скидка) по списанным заготовкам (в расход визита/заказа).
     studio_fund — остаток после вычета себестоимости (себестоимость уже включает ЗП авторов).
     """
     kit = _validate_stock_selection(
-        db, kit_id=kit_id, use_entire=use_entire, blanks_used=blanks_used, client_id=client_id
+        db,
+        kit_id=kit_id,
+        use_entire=use_entire,
+        blanks_used=blanks_used,
+        client_id=client_id,
+        usage_by_key=usage_by_key,
     )
     raw_price = kit.stock_price_total
     if raw_price is None or float(raw_price) <= 0:
@@ -211,11 +259,38 @@ def _apply_stock_kit_usage(
             "У комплекта не задана цена продажи. Укажите цену в карточке комплекта (администратор), затем снова выберите комплект."
         )
     price = float(raw_price)
+
+    if kit_inventory_is_keyed(db, int(kit.id)):
+        price_map, meta_by_key, _labels = load_catalog_kit_maps(db)
+        comp = parse_composition_totals(kit)
+        release_client_kit_reserves_into_free_pool(db, kit=kit, client_id=client_id)
+        db.flush()
+        stock_map = blank_stock_qty_map(db, int(kit.id))
+        max_by_key = max_take_by_key_for_client(db, kit=kit, client_id=client_id, stock_map=stock_map)
+        bd = build_usage_breakdown_keyed(
+            use_entire=use_entire,
+            blanks_used=blanks_used,
+            usage_by_key=usage_by_key,
+            max_by_key=max_by_key,
+        )
+        ntot = sum(int(v) for v in bd.values())
+        if ntot <= 0:
+            raise ValueError("Укажите количество заготовок или «весь комплект»")
+        decrement_blank_stock_keys(db, int(kit.id), bd)
+        sync_kit_pieces_available_from_blank_lines(db, kit)
+        selected_price = keyed_client_price_selected(bd, price_map=price_map, meta_by_key=meta_by_key)
+        selected_cost = keyed_cost_selected(bd, comp=comp, kit_cost_total=max(0.0, float(kit.cost_total or 0.0)))
+        _disc, net = apply_discount_capped(
+            selected_price, discount_percent=int(kit.discount_percent or 0), cost_floor=selected_cost
+        )
+        studio_fund = max(0.0, net - selected_cost)
+        if kit.pieces_available <= 0:
+            kit.is_in_stock = False
+        return int(ntot), float(net), float(studio_fund), bd
+
     total_pieces = int(kit.pieces_total) if kit.pieces_total else 1
     if total_pieces <= 0:
         total_pieces = 1
-    # Если на этого клиента есть резерв — используем его в приоритете.
-    # Если списано меньше резерва, остаток резерва снимается (возвращается в свободный остаток).
     avail = int(kit.pieces_available or 0)
     cid = int(client_id or 0)
     if cid > 0:
@@ -256,7 +331,7 @@ def _apply_stock_kit_usage(
     kit.pieces_available = avail - n
     if kit.pieces_available <= 0:
         kit.is_in_stock = False
-    return n, cost, studio_fund
+    return n, cost, studio_fund, {}
 
 
 def read_visit_master_form_state(form: Any) -> tuple[list[int], dict[int, str]]:
@@ -389,6 +464,27 @@ def _parse_optional_nonneg_int(g: Callable[[str, str], str], name: str) -> int |
     return max(0, v)
 
 
+def _parse_stock_breakdown_json(g: Callable[[str, str], str], field: str) -> dict[str, int] | None:
+    raw = (g(field, "") or "").strip()
+    if not raw:
+        return None
+    try:
+        d = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(d, dict):
+        return None
+    out: dict[str, int] = {}
+    for k, v in d.items():
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            out[str(k).strip()] = n
+    return out or None
+
+
 def parse_kit_inlay_form(
     form: Any, *, single_master_default_id: int | None = None
 ) -> KitInlayFormInput:
@@ -515,6 +611,7 @@ def parse_kit_inlay_form(
         stock_kit_id=stock_id if stock_id else None,
         stock_use_entire=g_bool("stock_use_entire"),
         stock_blanks_used=g_int("stock_blanks_used", 0),
+        stock_usage_by_key=_parse_stock_breakdown_json(g, "stock_breakdown_json"),
         kit_paid_separately=g_bool("kit_paid_separately"),
         # В текущем шаге анкеты «Новый комплект» недоступен, поэтому поля не парсим.
         new_title="",
@@ -529,6 +626,7 @@ def parse_kit_inlay_form(
         own_extra_stock_kit_id=extra_stock_id if extra_stock_id else None,
         own_extra_stock_use_entire=g_bool("own_extra_stock_use_entire"),
         own_extra_stock_blanks_used=g_int("own_extra_stock_blanks_used", 0),
+        own_extra_stock_usage_by_key=_parse_stock_breakdown_json(g, "own_extra_stock_breakdown_json"),
         own_corr_trim_qty=g_int("own_corr_trim_qty", 0),
         own_corr_hourly_hours=max(0.0, g_float("own_corr_hourly_hours", 0)),
         own_corr_kit_description=g("own_corr_kit_description", ""),
@@ -570,6 +668,7 @@ class KitInlayFormInput:
     stock_kit_id: int | None
     stock_use_entire: bool
     stock_blanks_used: int
+    stock_usage_by_key: dict[str, int] | None
     kit_paid_separately: bool
     # NEW
     new_title: str
@@ -585,6 +684,7 @@ class KitInlayFormInput:
     own_extra_stock_kit_id: int | None
     own_extra_stock_use_entire: bool
     own_extra_stock_blanks_used: int
+    own_extra_stock_usage_by_key: dict[str, int] | None
     own_corr_trim_qty: int
     own_corr_hourly_hours: float
     own_corr_kit_description: str
@@ -630,6 +730,7 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
             use_entire=inp.stock_use_entire,
             blanks_used=inp.stock_blanks_used,
             client_id=inp.existing_client_id,
+            usage_by_key=inp.stock_usage_by_key,
         )
         return KitBlock(
             kind="STOCK",
@@ -637,6 +738,7 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
                 sku=kit_row.sku,
                 blanks_used=0 if inp.stock_use_entire else inp.stock_blanks_used,
                 use_entire_kit=inp.stock_use_entire,
+                usage_by_key=inp.stock_usage_by_key,
             ),
             new_kit=None,
             own=None,
@@ -677,6 +779,7 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
                 use_entire=inp.own_extra_stock_use_entire,
                 blanks_used=inp.own_extra_stock_blanks_used,
                 client_id=inp.existing_client_id,
+                usage_by_key=inp.own_extra_stock_usage_by_key,
             )
             extra = KitOwnExtra(
                 source="STOCK",
@@ -684,6 +787,7 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
                     sku=ek.sku,
                     blanks_used=0 if inp.own_extra_stock_use_entire else inp.own_extra_stock_blanks_used,
                     use_entire_kit=inp.own_extra_stock_use_entire,
+                    usage_by_key=inp.own_extra_stock_usage_by_key,
                 ),
                 new_kit=None,
             )
@@ -887,7 +991,7 @@ def save_kit_inlay_visit(
     salon_pct = get_salon_cut_pct(db)
 
     kit_cost_total = 0.0
-    usages: list[tuple[int, int, float]] = []
+    usages: list[tuple[int, int, float, dict[str, int]]] = []
     kit_studio_fund = 0.0
 
     if service_requires_kit_block(service):
@@ -896,27 +1000,29 @@ def save_kit_inlay_visit(
             kind == "STOCK" and bool(inp.kit_paid_separately) and inp.stock_kit_id is not None
         )
         if kind == "STOCK" and inp.stock_kit_id:
-            n, cost, sf = _apply_stock_kit_usage(
+            n, cost, sf, bd = _apply_stock_kit_usage(
                 db,
                 kit_id=inp.stock_kit_id,
                 use_entire=inp.stock_use_entire,
                 blanks_used=inp.stock_blanks_used,
                 client_id=inp.existing_client_id,
+                usage_by_key=inp.stock_usage_by_key,
             )
             usage_cost = 0.0 if exclude_main_stock_cost else cost
             usage_sf = 0.0 if exclude_main_stock_cost else sf
-            usages.append((inp.stock_kit_id, n, usage_cost))
+            usages.append((inp.stock_kit_id, n, usage_cost, bd))
             kit_cost_total += usage_cost
             kit_studio_fund += usage_sf
         if kind == "OWN" and inp.own_extra_blanks and inp.own_extra_stock_kit_id:
-            n, cost, sf = _apply_stock_kit_usage(
+            n, cost, sf, bd = _apply_stock_kit_usage(
                 db,
                 kit_id=inp.own_extra_stock_kit_id,
                 use_entire=inp.own_extra_stock_use_entire,
                 blanks_used=inp.own_extra_stock_blanks_used,
                 client_id=inp.existing_client_id,
+                usage_by_key=inp.own_extra_stock_usage_by_key,
             )
-            usages.append((inp.own_extra_stock_kit_id, n, cost))
+            usages.append((inp.own_extra_stock_kit_id, n, cost, bd))
             kit_cost_total += cost
             kit_studio_fund += sf
 
@@ -1038,7 +1144,8 @@ def save_kit_inlay_visit(
         )
     )
 
-    for kid, pieces, camount in usages:
+    for kid, pieces, camount, bd in usages:
+        uj = json.dumps(bd, ensure_ascii=False) if bd else None
         db.add(
             VisitKitUsage(
                 visit_id=visit.id,
@@ -1046,6 +1153,7 @@ def save_kit_inlay_visit(
                 pieces_used=pieces,
                 cost_amount=camount,
                 note=None,
+                usage_breakdown_json=uj,
             )
         )
 
@@ -1170,7 +1278,7 @@ def kit_reserved_for_visit_label(kit: Kit) -> str | None:
     return "; ".join(bits)
 
 
-def kit_suggest_dict_for_kit(k: Kit, *, for_client_id: int | None) -> dict[str, Any]:
+def kit_suggest_dict_for_kit(db: Session, k: Kit, *, for_client_id: int | None) -> dict[str, Any]:
     """Одна строка подсказки «из наличия» (как в suggest_kits_for_stock)."""
     cid = int(for_client_id) if for_client_id is not None and int(for_client_id) > 0 else None
     res_label = kit_reserved_for_visit_label(k)
@@ -1182,7 +1290,7 @@ def kit_suggest_dict_for_kit(k: Kit, *, for_client_id: int | None) -> dict[str, 
         for r in k.reserves or []:
             if (r.reserved_for_client_id or 0) == cid:
                 reserved_for_c += int(r.pieces_reserved or 0)
-    return {
+    out: dict[str, Any] = {
         "id": k.id,
         "sku": k.sku,
         "title": k.title,
@@ -1194,7 +1302,36 @@ def kit_suggest_dict_for_kit(k: Kit, *, for_client_id: int | None) -> dict[str, 
         "missing_sale_price": not has_price,
         "is_reserved": bool(k.reserves),
         "reserved_for_label": res_label,
+        "inventory_keyed": kit_inventory_is_keyed(db, int(k.id)),
+        "per_key": [],
+        "composition_requires_blank_stock": False,
     }
+    comp = parse_composition_totals(k)
+    if comp and int(k.pieces_available or 0) > 0 and not kit_inventory_is_keyed(db, int(k.id)):
+        out["composition_requires_blank_stock"] = True
+    csum = sum(max(0, int(v)) for v in comp.values()) if comp else 0
+    out["composition_sum"] = int(csum) if csum > 0 else 0
+    out["cost_total"] = float(k.cost_total or 0.0)
+    if not out["inventory_keyed"]:
+        return out
+    sm = blank_stock_qty_map(db, int(k.id))
+    price_map, _meta, label_by_key = load_catalog_kit_maps(db)
+    max_by = max_take_by_key_for_client(db, kit=k, client_id=cid, stock_map=sm)
+    hints: list[dict[str, Any]] = []
+    for kk in sorted(sm.keys()):
+        p = price_map.get(kk)
+        hints.append(
+            {
+                "key": kk,
+                "qty_free": int(sm.get(kk, 0)),
+                "qty_max_for_client": int(max_by.get(kk, 0)),
+                "price_per_piece": float(p) if p is not None else None,
+                "label": label_by_key.get(kk, kk),
+                "composition_qty": int(comp.get(kk, 0)),
+            }
+        )
+    out["per_key"] = hints
+    return out
 
 
 def kit_suggest_dict_for_kit_id(
@@ -1211,7 +1348,7 @@ def kit_suggest_dict_for_kit_id(
     )
     if not k:
         return None
-    return kit_suggest_dict_for_kit(k, for_client_id=for_client_id)
+    return kit_suggest_dict_for_kit(db, k, for_client_id=for_client_id)
 
 
 def kit_reserve_hint_by_id(db: Session, kit_id: int | None) -> str | None:
@@ -1272,7 +1409,7 @@ def suggest_kits_for_stock(
     rows = list(db.scalars(stmt).all())
     out: list[dict[str, Any]] = []
     for k in rows:
-        out.append(kit_suggest_dict_for_kit(k, for_client_id=cid))
+        out.append(kit_suggest_dict_for_kit(db, k, for_client_id=cid))
     if cid is not None:
         out.sort(
             key=lambda d: (

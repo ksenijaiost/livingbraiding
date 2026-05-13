@@ -283,6 +283,7 @@
         </p>
         <div style="margin-top: 8px;">
           <input type="hidden" name="stock_kit_id" id="stock_kit_id" value="{{ fp.get('stock_kit_id', '') }}" />
+          <input type="hidden" name="stock_breakdown_json" id="stock_breakdown_json" value="{{ fp.get('stock_breakdown_json', '') }}" />
           <label>Комплект *</label>
           <div class="row" style="align-items: flex-end;">
             <div style="flex:1;">
@@ -362,6 +363,7 @@
         <div id="blk-own-extra" style="display: none; margin-top: 8px;">
           <p class="muted" style="margin:0 0 8px;font-size:12px;">Доп. заготовки списываются из наличия — выбери комплект.</p>
           <input type="hidden" name="own_extra_stock_kit_id" id="own_extra_stock_kit_id" value="{{ fp.get('own_extra_stock_kit_id', '') }}" />
+          <input type="hidden" name="own_extra_stock_breakdown_json" id="own_extra_stock_breakdown_json" value="{{ fp.get('own_extra_stock_breakdown_json', '') }}" />
           <label>Комплект *</label>
           <div class="row" style="align-items: flex-end;">
             <div style="flex:1;">
@@ -986,6 +988,56 @@
       if (sum !== 100) return null;
       return rows;
     }
+    function distributeIntegerByWeights(weights, total) {
+      const keys = Object.keys(weights || {});
+      const out = {};
+      keys.forEach((k) => {
+        out[k] = 0;
+      });
+      if (total <= 0) return out;
+      let s = 0;
+      keys.forEach((k) => {
+        s += Math.max(0, parseInt(String(weights[k] || 0), 10) || 0);
+      });
+      if (s <= 0) {
+        if (!keys.length) return out;
+        const sorted = keys.slice().sort((a, b) => String(a).localeCompare(String(b)));
+        const base = Math.floor(total / sorted.length);
+        let rem = total - base * sorted.length;
+        sorted.forEach((k, i) => {
+          out[k] = base + (i < rem ? 1 : 0);
+        });
+        return out;
+      }
+      const raw = {};
+      keys.forEach((k) => {
+        const w = Math.max(0, parseInt(String(weights[k] || 0), 10) || 0);
+        raw[k] = (total * w) / s;
+      });
+      const floored = {};
+      let assigned = 0;
+      keys.forEach((k) => {
+        floored[k] = Math.floor(raw[k]);
+        assigned += floored[k];
+      });
+      let rem = total - assigned;
+      const order = keys.slice().sort((a, b) => {
+        const da = -(raw[a] - floored[a]);
+        const db = -(raw[b] - floored[b]);
+        if (da !== db) return da - db;
+        return String(a).localeCompare(String(b));
+      });
+      keys.forEach((k) => {
+        out[k] = floored[k];
+      });
+      let i = 0;
+      while (rem > 0 && order.length) {
+        out[order[i % order.length]] += 1;
+        rem -= 1;
+        i += 1;
+      }
+      return out;
+    }
     function kitEffectiveAvailablePieces(kit) {
       if (!kit) return 0;
       const free = parseInt(String(kit.pieces_available ?? 0), 10) || 0;
@@ -993,7 +1045,74 @@
       return free + rc;
     }
     function kitUsageCost(kit, useEntireSel, blanksSel) {
-      if (!kit) return { piecesUsed: 0, cost: 0, warn: '' };
+      if (!kit) return { piecesUsed: 0, cost: 0, warn: '', kitParts: '' };
+      if (kit.inventory_keyed && Array.isArray(kit.per_key) && kit.per_key.length) {
+        const maxBy = {};
+        for (const row of kit.per_key) {
+          maxBy[row.key] = Math.max(0, parseInt(String(row.qty_max_for_client), 10) || 0);
+        }
+        const capSum = Object.values(maxBy).reduce((a, b) => a + b, 0);
+        const useEntire = isChecked(useEntireSel);
+        const blanks = Math.max(0, intVal(blanksSel));
+        let take = {};
+        if (useEntire) {
+          for (const row of kit.per_key) {
+            const key = row.key;
+            take[key] = maxBy[key] || 0;
+          }
+        } else {
+          if (blanks <= 0) return { piecesUsed: 0, cost: 0, warn: '', kitParts: '' };
+          if (blanks > capSum) {
+            return {
+              piecesUsed: blanks,
+              cost: 0,
+              warn: 'Слишком много заготовок для доступного остатка по видам.',
+              kitParts: '',
+            };
+          }
+          const wsum = Object.values(maxBy).reduce((a, b) => a + b, 0);
+          take = distributeIntegerByWeights(
+            wsum > 0 ? maxBy : Object.fromEntries(Object.keys(maxBy).map((k) => [k, 1])),
+            blanks,
+          );
+          for (const k of Object.keys(maxBy)) {
+            if ((take[k] || 0) > (maxBy[k] || 0)) {
+              return {
+                piecesUsed: blanks,
+                cost: 0,
+                warn: 'Не удалось распределить количество по видам заготовок.',
+                kitParts: '',
+              };
+            }
+          }
+        }
+        const piecesUsed = Object.values(take).reduce((a, b) => a + b, 0);
+        if (piecesUsed <= 0) return { piecesUsed: 0, cost: 0, warn: '', kitParts: '' };
+        let selCatalog = 0;
+        let warn = '';
+        const parts = [];
+        for (const row of kit.per_key) {
+          const q = take[row.key] || 0;
+          if (q <= 0) continue;
+          const p = row.price_per_piece;
+          if (p == null || isNaN(parseFloat(p))) warn = 'Нет цены в каталоге по одному из ключей — проверьте прайс.';
+          else selCatalog += q * parseFloat(p);
+          const lbl = (row.label || row.key || '').trim();
+          parts.push(lbl + ' ×' + q);
+        }
+        const dPct = Math.max(0, Math.min(100, parseInt(String(kit.discount_percent ?? 0), 10) || 0));
+        const rawDisc = selCatalog * dPct / 100.0;
+        const csum = Math.max(1, parseInt(String(kit.composition_sum || 0), 10) || 1);
+        const ct = parseFloat(String(kit.cost_total || 0)) || 0;
+        const per = ct / csum;
+        const ntot = piecesUsed;
+        const costFloor = per * ntot;
+        const maxM = Math.max(0, selCatalog - costFloor);
+        const disc = Math.min(rawDisc, maxM, selCatalog);
+        const net = Math.max(0, selCatalog - disc);
+        const kitParts = parts.length ? ('по выбранным заготовкам: ' + parts.join(', ')) : '';
+        return { piecesUsed, cost: net, warn, kitParts };
+      }
       const avail = kitEffectiveAvailablePieces(kit);
       const total = parseInt(String(kit.pieces_total || 0), 10) || 0;
       const gross = parseFloat(String(kit.stock_price_total || 0)) || 0;
@@ -1002,9 +1121,9 @@
       const useEntire = isChecked(useEntireSel);
       const blanks = Math.max(0, intVal(blanksSel));
       const piecesUsed = useEntire ? avail : blanks;
-      if (piecesUsed <= 0) return { piecesUsed: 0, cost: 0, warn: '' };
-      if (total <= 0 || price <= 0) return { piecesUsed, cost: 0, warn: 'Нет цены/кол-ва заготовок у комплекта для расчёта себестоимости.' };
-      return { piecesUsed, cost: price * (piecesUsed / total), warn: '' };
+      if (piecesUsed <= 0) return { piecesUsed: 0, cost: 0, warn: '', kitParts: '' };
+      if (total <= 0 || price <= 0) return { piecesUsed, cost: 0, warn: 'Нет цены/кол-ва заготовок у комплекта для расчёта себестоимости.', kitParts: '' };
+      return { piecesUsed, cost: price * (piecesUsed / total), warn: '', kitParts: '' };
     }
     function syncVisitPreview() {
       const payEl = document.getElementById('visit_preview_master_lines');
@@ -1031,6 +1150,8 @@
 
       let kitCostTotal = 0;
       let warn = '';
+      let stockKitParts = '';
+      let extraKitParts = '';
       const kk = (document.querySelector('input[name="kit_kind"]:checked') || {}).value || '';
       const needKit = !!(getSelectedService() && getSelectedService().requires_kit_block);
       if (needKit && kk === 'STOCK') {
@@ -1039,11 +1160,13 @@
         if (isChecked('#kit_paid_separately_cb')) mainCost = 0;
         kitCostTotal += mainCost;
         if (r.warn) warn = r.warn;
+        if (r.kitParts) stockKitParts = r.kitParts;
       }
       if (needKit && kk === 'OWN' && isChecked('#own_extra_blanks')) {
         const r2 = kitUsageCost(selectedExtraStockKit, 'input[name="own_extra_stock_use_entire"]', 'input[name="own_extra_stock_blanks_used"]');
         kitCostTotal += r2.cost;
         if (r2.warn) warn = r2.warn;
+        if (r2.kitParts) extraKitParts = r2.kitParts;
       }
 
       const costTotal = mat + kitCostTotal + addons + mixCost + amort;
@@ -1066,6 +1189,12 @@
       }
 
       let costLine = 'Себестоимость (итого): ' + money2(costTotal) + ' ₽ (материал + комплект + доп. продажи + смешка + амортизация)';
+      if (stockKitParts || extraKitParts) {
+        const bits = [];
+        if (stockKitParts) bits.push('комплект: ' + stockKitParts);
+        if (extraKitParts) bits.push('доп. из наличия: ' + extraKitParts);
+        costLine += ' · в т.ч. ' + bits.join(' · ');
+      }
       if (warn) costLine += ' · ' + warn;
       costEl.textContent = costLine;
     }

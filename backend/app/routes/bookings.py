@@ -46,6 +46,15 @@ from app.db.models import (
 from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_bool, parse_float, parse_int
+from app.kit_blank_stock_core import (
+    blank_stock_qty_map,
+    build_usage_breakdown_keyed,
+    consume_blank_stock_for_reserve,
+    kit_inventory_is_keyed,
+    max_take_by_key_for_client,
+    return_reserve_row_to_stock,
+    sync_kit_pieces_available_from_blank_lines,
+)
 from app.kit_inlay_visit import (
     get_kit_max_reserves_per_kit,
     kit_reserve_slots_used,
@@ -522,12 +531,14 @@ _BOOKING_VISIT_KIT_DETAIL_KEYS: frozenset[str] = frozenset(
         "visit_kit_mode",
         "visit_stock_kit_id",
         "visit_stock_kit_pieces",
+        "visit_stock_breakdown_json",
         "visit_stock_use_entire",
         "visit_own_need_correction",
         "visit_own_need_extra_blanks",
         "visit_extra_blanks_mode",
         "visit_extra_stock_kit_id",
         "visit_extra_stock_kit_pieces",
+        "visit_extra_stock_breakdown_json",
         "visit_extra_stock_use_entire",
         "visit_order_blanks_qty",
         "visit_order_blanks_desc",
@@ -565,12 +576,14 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
             "visit_kit_mode",
             "visit_stock_kit_id",
             "visit_stock_kit_pieces",
+            "visit_stock_breakdown_json",
             "visit_stock_use_entire",
             "visit_own_need_correction",
             "visit_own_need_extra_blanks",
             "visit_extra_blanks_mode",
             "visit_extra_stock_kit_id",
             "visit_extra_stock_kit_pieces",
+            "visit_extra_stock_breakdown_json",
             "visit_extra_stock_use_entire",
             "visit_order_blanks_qty",
             "visit_order_blanks_desc",
@@ -594,6 +607,7 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
                 "sale_kit_mode",
                 "sale_stock_kit_id",
                 "sale_stock_kit_pieces",
+                "sale_stock_breakdown_json",
                 "sale_stock_use_entire",
                 "sale_kit_order_master_ids",
                 "sale_order_blanks_qty",
@@ -694,7 +708,7 @@ def release_booking_kit_reserves(db: Session, *, booking_id: int, changed_by_use
             db.delete(r)
             continue
         before = SimpleNamespace(pieces_available=kit.pieces_available)
-        kit.pieces_available = int(kit.pieces_available or 0) + int(r.pieces_reserved or 0)
+        return_reserve_row_to_stock(db, kit, r)
         kit.updated_at = utcnow_naive()
         if changed_by_user_id is not None:
             kit.updated_by_user_id = changed_by_user_id
@@ -717,6 +731,7 @@ def _apply_booking_auto_reserves(
         pieces_field: str | None,
         *,
         use_entire_field: str | None = None,
+        breakdown_json_field: str | None = None,
     ) -> None:
         if not kit_id_raw:
             return
@@ -728,6 +743,75 @@ def _apply_booking_auto_reserves(
         kit = db.get(Kit, kit_id)
         if not kit:
             return
+        if kit_inventory_is_keyed(db, kit.id):
+            sm = blank_stock_qty_map(db, kit.id)
+            max_by_key = max_take_by_key_for_client(
+                db, kit=kit, client_id=booking_client_id, stock_map=sm
+            )
+            if sum(max_by_key.values()) <= 0:
+                return
+            use_entire = bool(use_entire_field and parse_bool(fp.get(use_entire_field)))
+            raw_j = (str(fp.get(breakdown_json_field) or "").strip() if breakdown_json_field else "")
+            usage_by_key: dict[str, int] | None = None
+            if raw_j:
+                try:
+                    d = json.loads(raw_j)
+                    if isinstance(d, dict):
+                        usage_by_key = {str(k): int(v) for k, v in d.items() if int(v) > 0}
+                except Exception:
+                    usage_by_key = None
+            pq = "" if use_entire else (str(fp.get(pieces_field) or "").strip() if pieces_field else "")
+            try:
+                blanks_used = parse_int(pq, min=0, field_name="reserve_pieces") if pq else 0
+            except ValueError:
+                blanks_used = 0
+            try:
+                bd = build_usage_breakdown_keyed(
+                    use_entire=use_entire,
+                    blanks_used=blanks_used,
+                    usage_by_key=usage_by_key,
+                    max_by_key=max_by_key,
+                )
+            except ValueError:
+                return
+            slot_rows = sum(1 for _k, n in bd.items() if int(n) > 0)
+            if slot_rows <= 0:
+                return
+            if kit_reserve_slots_used(db, kit.id) + slot_rows > get_kit_max_reserves_per_kit(db):
+                return
+            before = SimpleNamespace(pieces_available=kit.pieces_available)
+            for kk, n in bd.items():
+                qn = int(n)
+                if qn <= 0:
+                    continue
+                consume_blank_stock_for_reserve(
+                    db, kit, kit_key=kk, qty=qn, sync_after=False
+                )
+                db.add(
+                    KitReserve(
+                        kit_id=kit.id,
+                        kit_key=str(kk)[:80],
+                        pieces_reserved=qn,
+                        reserved_at=utcnow_naive(),
+                        reserved_by_user_id=changed_by_user_id,
+                        reserved_for_client_id=booking_client_id,
+                        reserved_for_user_id=None,
+                        booking_id=int(booking_id),
+                    )
+                )
+            sync_kit_pieces_available_from_blank_lines(db, kit)
+            kit.updated_at = utcnow_naive()
+            kit.updated_by_user_id = changed_by_user_id
+            write_audit_rows(
+                db,
+                log_model=KitAuditLog,
+                entity_field="kit_id",
+                entity_id=kit.id,
+                changed_by_user_id=changed_by_user_id,
+                changes=diff_fields(before, kit, ("pieces_available",)),
+            )
+            return
+
         avail = int(kit.pieces_available or 0)
         if avail <= 0:
             return
@@ -769,6 +853,7 @@ def _apply_booking_auto_reserves(
             fp.get("visit_stock_kit_id"),
             "visit_stock_kit_pieces",
             use_entire_field="visit_stock_use_entire",
+            breakdown_json_field="visit_stock_breakdown_json",
         )
     if (fp.get("visit_kit_mode") or "") == "OWN" and (fp.get("visit_own_need_extra_blanks") or ""):
         if (fp.get("visit_extra_blanks_mode") or "") == "IN_STOCK":
@@ -776,12 +861,14 @@ def _apply_booking_auto_reserves(
                 fp.get("visit_extra_stock_kit_id"),
                 "visit_extra_stock_kit_pieces",
                 use_entire_field="visit_extra_stock_use_entire",
+                breakdown_json_field="visit_extra_stock_breakdown_json",
             )
     if (fp.get("product_kind") or "") == "KIT" and (fp.get("sale_kit_mode") or "") == "IN_STOCK":
         _reserve_kit(
             fp.get("sale_stock_kit_id"),
             "sale_stock_kit_pieces",
             use_entire_field="sale_stock_use_entire",
+            breakdown_json_field="sale_stock_breakdown_json",
         )
 
 
@@ -808,12 +895,14 @@ def admin_booking_new_get(
         "visit_kit_mode",
         "visit_stock_kit_id",
         "visit_stock_kit_pieces",
+        "visit_stock_breakdown_json",
         "visit_stock_use_entire",
         "visit_own_need_correction",
         "visit_own_need_extra_blanks",
         "visit_extra_blanks_mode",
         "visit_extra_stock_kit_id",
         "visit_extra_stock_kit_pieces",
+        "visit_extra_stock_breakdown_json",
         "visit_extra_stock_use_entire",
         "visit_order_blanks_qty",
         "visit_order_blanks_desc",
@@ -829,6 +918,7 @@ def admin_booking_new_get(
         "sale_kit_mode",
         "sale_stock_kit_id",
         "sale_stock_kit_pieces",
+        "sale_stock_breakdown_json",
         "sale_stock_use_entire",
         "sale_kit_order_master_ids",
         "sale_order_blanks_qty",

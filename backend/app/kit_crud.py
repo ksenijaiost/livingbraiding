@@ -350,7 +350,7 @@ def kit_new_error_prefill(form: Any) -> dict[str, Any]:
 
 def kit_edit_error_prefill(form: Any) -> dict[str, Any]:
     d = parse_kit_admin_form(form, for_create=False)
-    return {
+    out: dict[str, Any] = {
         "sku": d.sku,
         "title": d.title,
         "blank_type_de": "on" if d.blank_type_de else "",
@@ -371,6 +371,13 @@ def kit_edit_error_prefill(form: Any) -> dict[str, Any]:
         "author_external": "on" if _g_bool(form, "author_external") else "",
         "kit_author_ids": parse_kit_author_user_ids_from_form(form),
     }
+    try:
+        for name in list(form.keys()):
+            if isinstance(name, str) and name.startswith("blank_stock_qty__"):
+                out[name] = _g_str(form, name)
+    except Exception:
+        pass
+    return out
 
 
 def kit_to_form_prefill(kit: Kit) -> dict[str, Any]:

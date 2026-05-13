@@ -33,6 +33,7 @@ from app.ui_visit_display import (
 )
 from app.visit_edit_policy import is_in_closed_payroll_period, visit_client_change_policy
 from app.audit import diff_fields, write_audit_rows
+from app.kit_blank_stock_core import parse_usage_breakdown_json, return_stock_to_kit
 from app.webui import templates, ctx as _ctx
 
 
@@ -198,7 +199,7 @@ def _visit_cancel_revert_stock(db: Session, visit: Visit) -> tuple[bool, str]:
     usages = list(getattr(visit, "kit_usages", []) or [])
     if not usages:
         return True, ""
-    kit_rows: list[tuple[Kit, int]] = []
+    kit_rows: list[tuple[Kit, int, dict[str, int] | None]] = []
     for u in usages:
         kit = getattr(u, "kit", None) or db.get(Kit, u.kit_id)
         if not kit:
@@ -206,15 +207,16 @@ def _visit_cancel_revert_stock(db: Session, visit: Visit) -> tuple[bool, str]:
         pieces = int(u.pieces_used or 0)
         if pieces <= 0:
             continue
+        bd = parse_usage_breakdown_json(getattr(u, "usage_breakdown_json", None))
         new_avail = int(kit.pieces_available + pieces)
         if int(kit.pieces_total) >= 0 and new_avail > int(kit.pieces_total):
             return (
                 False,
                 f"Нельзя отменить визит: возврат превысит остаток 'всего' по комплекту {kit.sku}.",
             )
-        kit_rows.append((kit, pieces))
-    for kit, pieces in kit_rows:
-        kit.pieces_available = int(kit.pieces_available + pieces)
+        kit_rows.append((kit, pieces, bd))
+    for kit, pieces, bd in kit_rows:
+        return_stock_to_kit(db, kit_id=int(kit.id), breakdown=bd, pieces_used=pieces)
         if kit.pieces_available > 0:
             kit.is_in_stock = True
     return True, ""
