@@ -27,6 +27,12 @@ from app.db.models import (
 from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime, get_display_timezone, timezone_label
 from app.forms_parse import parse_bool, parse_int
+from app.kit_bulk_import import (
+    MAX_BULK_JSON_BYTES,
+    MAX_BULK_KITS,
+    import_single_kit_row,
+    parse_bulk_kits_json,
+)
 from app.kit_crud import (
     apply_kit_admin_form,
     calc_kit_stock_price_total_from_composition,
@@ -83,6 +89,7 @@ def _redirect_admin_kits_to_canon(request: Request, *, suffix: str = "") -> Redi
 
 _KITS_STAFF = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _KITS_ADMIN = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER))
+_KITS_SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
 
 
 def _kit_stock_label_from_form(db: Session, form_map: dict[str, str], field: str) -> str | None:
@@ -295,6 +302,67 @@ async def admin_kit_new_post(
             ),
             status_code=400,
         )
+
+
+@router.get("/bulk-import", response_class=HTMLResponse)
+def admin_kits_bulk_import_get(
+    request: Request,
+    current_user: AuthUser = _KITS_SUPER,
+):
+    return templates.TemplateResponse(
+        "admin_kits_bulk_import.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            results=None,
+            top_error=None,
+            payload_prefill="",
+            max_bytes=MAX_BULK_JSON_BYTES,
+            max_kits=MAX_BULK_KITS,
+        ),
+    )
+
+
+@router.post("/bulk-import", response_class=HTMLResponse)
+async def admin_kits_bulk_import_post(
+    request: Request,
+    current_user: AuthUser = _KITS_SUPER,
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    payload = str(form.get("payload") or "")
+    try:
+        rows = parse_bulk_kits_json(payload)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            "admin_kits_bulk_import.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                results=None,
+                top_error=str(exc),
+                payload_prefill=payload,
+                max_bytes=MAX_BULK_JSON_BYTES,
+                max_kits=MAX_BULK_KITS,
+            ),
+            status_code=400,
+        )
+    reserved: set[str] = set()
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        results.append(import_single_kit_row(db, row, reserved_skus=reserved, changed_by_user_id=current_user.id))
+    return templates.TemplateResponse(
+        "admin_kits_bulk_import.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            results=results,
+            top_error=None,
+            payload_prefill=payload,
+            max_bytes=MAX_BULK_JSON_BYTES,
+            max_kits=MAX_BULK_KITS,
+        ),
+    )
 
 
 @router.get("/{kit_id}", response_class=HTMLResponse)
@@ -817,6 +885,22 @@ async def admin_kit_reserve_post(
 
 
 # --- Старые GET-URL: /admin/kits/... -> 308 -> /kits/... (query сохраняется) ---
+
+
+@legacy_kits_admin_router.get("/bulk-import", response_class=HTMLResponse)
+def admin_kits_bulk_import_get_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _KITS_SUPER,
+):
+    return _redirect_admin_kits_to_canon(request, suffix="/bulk-import")
+
+
+@legacy_kits_admin_router.post("/bulk-import", response_class=HTMLResponse)
+def admin_kits_bulk_import_post_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _KITS_SUPER,
+):
+    return _redirect_admin_kits_to_canon(request, suffix="/bulk-import")
 
 
 @legacy_kits_admin_router.get("/{kit_id}/edit", response_class=HTMLResponse)

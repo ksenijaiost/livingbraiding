@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <div class="lb-flex-between-center">
+      <h2 class="lb-mt-0">Массовая загрузка комплектов (JSON)</h2>
+      <a href="/kits"><button type="button" class="secondary">К списку комплектов</button></a>
+    </div>
+    <p class="muted">Доступно только суперадминистратору. Корень JSON — <strong>массив</strong> объектов; допускается только <strong>строгий JSON</strong> (без <code>//</code> и хвостовых запятых). Лимиты: до {{ (max_bytes // 1024)|int }} KB текста, не более {{ max_kits }} комплектов за один запрос.</p>
+    <p class="muted">Если артикул уже занят в базе или в этом же файле, к сохранённому артикулу добавляется суффикс <strong>❗повтор</strong>, при необходимости <strong>❗повтор2</strong> и далее (до 80 символов).</p>
+
+    {% if top_error %}
+      <div class="error lb-mb-12">{{ top_error }}</div>
+    {% endif %}
+
+    <h3 class="lb-mt-0">Поля JSON и подписи в карточке комплекта</h3>
+    <p class="muted" style="font-size:14px;">Ключи <code>composition</code> и <code>blank_stock</code> — это <code>kit_key</code> из каталога «Заказ» → «Заготовки поштучно» (колонка «Ключ» в блоке «Остаток по видам заготовок» при редактировании).</p>
+
+    <table style="width:100%;max-width:900px;border-collapse:collapse;font-size:14px;margin-bottom:16px;">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
+          <th style="padding:6px 8px;">Поле JSON</th>
+          <th style="padding:6px 8px;">Как в UI</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">sku</td><td style="padding:8px;"><strong>Артикул</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">title</td><td style="padding:8px;"><strong>Название</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_type_de</td><td style="padding:8px;">Тип заготовок — <strong>D.E.</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_type_se</td><td style="padding:8px;">Тип заготовок — <strong>S.E.</strong> (хотя бы один из DE/SE — true)</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">pieces_initial</td><td style="padding:8px;"><strong>Количество заготовок</strong> (при создании карточки)</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">stock_price_total</td><td style="padding:8px;"><strong>Цена комплекта на складе (всего), ₽</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">cost_total</td><td style="padding:8px;"><strong>Себестоимость (всего), ₽</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">discount_percent</td><td style="padding:8px;"><strong>Скидка (всего), %</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">weight_grams</td><td style="padding:8px;"><strong>Вес, г</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">length_cm</td><td style="padding:8px;"><strong>Длина, см</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">has_decorations</td><td style="padding:8px;"><strong>Украшения</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">materials_text</td><td style="padding:8px;"><strong>Материалы</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">color_text</td><td style="padding:8px;"><strong>Цвет</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blanks_kinds_text</td><td style="padding:8px;"><strong>Виды заготовок</strong> (текст; не путать с ключами склада)</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">description</td><td style="padding:8px;"><strong>Описание комплекта</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">notes</td><td style="padding:8px;"><strong>Примечание</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">author_external</td><td style="padding:8px;"><strong>Извне (не сотрудник студии)</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">author_user_ids</td><td style="padding:8px;"><strong>Мастера</strong> — массив id (как чекбоксы авторов)</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">composition</td><td style="padding:8px;">Состав для прайса (объект или массив <code>key</code>/<code>qty</code>); в БД — <code>composition_json</code>. Если задан и <code>pieces_initial</code> &gt; 0, нужен <code>blank_stock</code>.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_stock</td><td style="padding:8px;">Остатки по видам — как колонка <strong>«Остаток, шт.»</strong> в таблице по ключам.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Пример JSON</h3>
+    <p class="muted" style="font-size:13px;">Подставьте реальные ключи из вашего каталога заготовок. Второй объект — без состава по ключам (только скалярный остаток).</p>
+    <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;overflow:auto;font-size:13px;max-height:320px;">[
+  {
+    "sku": "KIT-BULK-001",
+    "title": "Пример: несколько видов в составе и на складе",
+    "blank_type_de": true,
+    "blank_type_se": true,
+    "pieces_initial": 20,
+    "stock_price_total": 12000,
+    "cost_total": 5500,
+    "discount_percent": 0,
+    "composition": {
+      "DE": 1,
+      "SE": 2,
+      "SE_TIP_ADDON": 1,
+      "THERMO_LONG": 1
+    },
+    "blank_stock": {
+      "DE": 6,
+      "SE": 10,
+      "SE_TIP_ADDON": 2,
+      "THERMO_LONG": 4
+    },
+    "weight_grams": 420,
+    "length_cm": 65,
+    "has_decorations": true,
+    "materials_text": "Канекалон бренд X",
+    "color_text": "1B/30 омбре",
+    "blanks_kinds_text": "Дреды средние, термо длина",
+    "description": "Комплект для витрины",
+    "notes": "Импортировано пакетом",
+    "author_external": false,
+    "author_user_ids": []
+  },
+  {
+    "sku": "KIT-BULK-002",
+    "title": "Только скалярный остаток, без состава по ключам",
+    "blank_type_de": true,
+    "blank_type_se": false,
+    "pieces_initial": 8,
+    "stock_price_total": 3200,
+    "cost_total": 1500,
+    "discount_percent": 5
+  }
+]</pre>
+
+    <form method="post" action="/kits/bulk-import" style="margin-top:20px;">
+      <label for="payload"><strong>JSON для загрузки</strong></label>
+      <textarea id="payload" name="payload" rows="18" style="width:100%;font-family:monospace;font-size:13px;margin-top:8px;" required>{{ payload_prefill }}</textarea>
+      <div style="margin-top:12px;">
+        <button type="submit">Загрузить</button>
+      </div>
+    </form>
+
+    {% if results is not none %}
+      <h3 style="margin-top:24px;">Результат</h3>
+      <table style="width:100%;max-width:960px;border-collapse:collapse;font-size:14px;">
+        <thead>
+          <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
+            <th style="padding:6px 8px;">Артикул в файле</th>
+            <th style="padding:6px 8px;">Сохранённый артикул</th>
+            <th style="padding:6px 8px;">ID</th>
+            <th style="padding:6px 8px;">Статус</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in results %}
+            <tr style="border-bottom:1px solid #e5e7eb;{% if r.saved_sku and r.input_sku != r.saved_sku %}background:#fffbeb;{% elif not r.ok %}background:#fef2f2;{% endif %}">
+              <td style="padding:8px;font-family:monospace;">{{ r.input_sku }}</td>
+              <td style="padding:8px;font-family:monospace;">{% if r.saved_sku %}{{ r.saved_sku }}{% else %}—{% endif %}</td>
+              <td style="padding:8px;">{% if r.kit_id %}<a href="/kits/{{ r.kit_id }}">{{ r.kit_id }}</a>{% else %}—{% endif %}</td>
+              <td style="padding:8px;">{% if r.ok %}<span class="lb-flash-ok">OK</span> {% endif %}{{ r.message }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+{% endblock %}

@@ -5,7 +5,12 @@
     <div class="lb-flex-between-center">
       <h2 class="lb-mt-0">Комплекты</h2>
       {% if is_admin_kit %}
-        <a href="/kits/new"><button type="button">Новый комплект</button></a>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <a href="/kits/new"><button type="button">Новый комплект</button></a>
+          {% if current_user.role.value == 'ADMIN_SUPER' %}
+            <a href="/kits/bulk-import"><button type="button" class="secondary">Массовая загрузка (JSON)</button></a>
+          {% endif %}
+        </div>
       {% endif %}
     </div>
     <p class="muted">Склад: артикулы и остатки. Резерв — кто и для кого (клиент и/или сотрудник); время и автор фиксируются автоматически.</p>

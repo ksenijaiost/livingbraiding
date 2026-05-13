@@ -309,8 +309,34 @@ def parse_kit_author_user_ids_from_form(form: Any) -> list[int]:
 
 
 def sync_kit_authors(db: Session, kit: Kit, form: Any) -> None:
-    uids = parse_kit_author_user_ids_from_form(form)
-    kit.author_external = _g_bool(form, "author_external")
+    sync_kit_authors_from_user_ids(
+        db,
+        kit,
+        author_user_ids=parse_kit_author_user_ids_from_form(form),
+        author_external=_g_bool(form, "author_external"),
+    )
+
+
+def sync_kit_authors_from_user_ids(
+    db: Session,
+    kit: Kit,
+    *,
+    author_user_ids: list[int] | None,
+    author_external: bool,
+) -> None:
+    """Те же правила, что у формы: только активные мастера."""
+    uids: list[int] = []
+    seen: set[int] = set()
+    for x in author_user_ids or []:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            continue
+        if i <= 0 or i in seen:
+            continue
+        seen.add(i)
+        uids.append(i)
+    kit.author_external = bool(author_external)
     for uid in uids:
         u = db.get(User, uid)
         if not u or not u.is_active:
