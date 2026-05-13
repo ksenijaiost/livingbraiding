@@ -47,6 +47,7 @@ from app.kit_crud import (
     validate_kit_admin_form,
 )
 from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
+from app.kit_composition import KIT_INVENTORY_PIECE_EXCLUDE_KEYS, composition_json_from_totals
 from app.kit_blank_stock_core import (
     blank_stock_edit_rows_for_kit,
     blank_stock_qty_map,
@@ -71,6 +72,7 @@ from app.kit_inlay_visit import (
 from app.user_roles import select_users_with_any_role, user_has_any_role
 from app.webui import templates, ctx as _ctx
 from app.time_utils import utcnow_naive
+from app.work_products import _kit_de_items, _kit_se_items
 
 
 router = APIRouter(prefix="/kits", tags=["kits"])
@@ -90,6 +92,29 @@ def _redirect_admin_kits_to_canon(request: Request, *, suffix: str = "") -> Redi
 _KITS_STAFF = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _KITS_ADMIN = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _KITS_SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
+
+
+def _kit_qty_prefill_from_admin_fp(fp: dict[str, Any]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for k, v in fp.items():
+        if isinstance(k, str) and k.startswith("kit_qty_"):
+            out[k] = str(v) if v is not None else "0"
+    return out
+
+
+def kit_admin_new_table_state_json(*, kit_qty_prefill: dict[str, str]) -> str:
+    return json.dumps(
+        {
+            "mode": "admin_kit_new",
+            "currentUserId": 0,
+            "masters": [{"id": 0, "name": "Количество в комплекте"}],
+            "seItems": [{"key": k, "label": lbl} for k, lbl in _kit_se_items()],
+            "deItems": [{"key": k, "label": lbl} for k, lbl in _kit_de_items()],
+            "prefill": kit_qty_prefill,
+            "excludeFromInventoryPieceCount": sorted(KIT_INVENTORY_PIECE_EXCLUDE_KEYS),
+        },
+        ensure_ascii=False,
+    )
 
 
 def _kit_stock_label_from_form(db: Session, form_map: dict[str, str], field: str) -> str | None:
@@ -255,6 +280,7 @@ def admin_kit_new_get(
             computed_stock_price_total=None,
             computed_stock_price_missing_keys=[],
             blank_stock_rows=[],
+            kit_table_state_json=kit_admin_new_table_state_json(kit_qty_prefill={}),
         ),
     )
 
@@ -274,6 +300,7 @@ async def admin_kit_new_post(
             raise ValueError("Комплект с таким артикулом уже есть")
         kit = Kit()
         apply_kit_admin_form(kit, d)
+        kit.composition_json = composition_json_from_totals(d.composition_totals)
         try:
             p1 = get_nonempty_upload(form, "photo_1")
             if p1 is not None:
@@ -286,6 +313,7 @@ async def admin_kit_new_post(
         db.commit()
         return RedirectResponse(url=f"/kits/{kit.id}?msg=created", status_code=303)
     except ValueError as exc:
+        fp_err = kit_new_error_prefill(form)
         return templates.TemplateResponse(
             "admin_kit_form.html",
             _ctx(
@@ -293,12 +321,16 @@ async def admin_kit_new_post(
                 current_user=current_user,
                 is_new=True,
                 kit=None,
-                fp=kit_new_error_prefill(form),
+                fp=fp_err,
                 form_action="/kits/new",
                 error=str(exc),
                 staff_for_kit_authors=list_masters_for_kit_author_pick(db),
                 computed_stock_price_total=None,
                 computed_stock_price_missing_keys=[],
+                blank_stock_rows=[],
+                kit_table_state_json=kit_admin_new_table_state_json(
+                    kit_qty_prefill=_kit_qty_prefill_from_admin_fp(fp_err)
+                ),
             ),
             status_code=400,
         )

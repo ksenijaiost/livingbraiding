@@ -46,6 +46,10 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.user_roles import select_users_with_role, user_has_role
+from app.kit_composition import (
+    KIT_INVENTORY_PIECE_EXCLUDE_KEYS,
+    composition_json_from_totals,
+)
 from app.kit_inlay_visit import _materials_cost_and_snapshot
 from app.work_products_compute import compute_work_financials
 from app.forms_parse import parse_bool, parse_date_iso, parse_float, parse_int
@@ -230,10 +234,6 @@ def _kit_qty_prefill_from_form(form: Any) -> dict[str, str]:
             continue
         out[k] = _g_str(form, k, "0")
     return out
-
-
-# Стрижки в ЗП, но не учитываются в «количестве заготовок» для склада / предпросмотра.
-KIT_INVENTORY_PIECE_EXCLUDE_KEYS = frozenset({"SE_TRIM_SHORT", "SE_TRIM_LONG", "DE_TRIM"})
 
 
 def _material_prices_per_gram(db: Session) -> tuple[float, float]:
@@ -572,11 +572,6 @@ def _kit_item_labels_map() -> dict[str, str]:
 
 def _fmt_money(v: float) -> str:
     return f"{float(v):.2f} ₽"
-
-
-def _kit_composition_json(kit_totals: dict[str, int]) -> str | None:
-    items = [{"key": k, "qty": int(q)} for k, q in kit_totals.items() if int(q) > 0]
-    return json.dumps(items, ensure_ascii=False) if items else None
 
 
 def _kit_client_stock_price_total(db: Session, *, kit_totals: dict[str, int], extra_costs_amount: float) -> float:
@@ -1075,7 +1070,7 @@ async def work_new_post(
                     sku = f"{sku}-{int(utcnow_naive().timestamp())}"
 
             full_cost = float(cost_total_amount) + float(master_total)
-            comp_json = _kit_composition_json(kit_totals)
+            comp_json = composition_json_from_totals(kit_totals)
             stock_price_total = _kit_client_stock_price_total(
                 db, kit_totals=kit_totals, extra_costs_amount=float(extra_costs_amount)
             )

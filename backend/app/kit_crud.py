@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -11,7 +12,10 @@ from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
 
 from app.db.models import CatalogProduct, Kit, KitAuthorStaff, User, UserRole
+from app.kit_composition import kit_inventory_piece_count
 from app.user_roles import select_users_with_role, user_has_role
+
+_KIT_QTY_FIELD = re.compile(r"^kit_qty_(\d+)_(.+)$")
 
 # Ключи, исключённые из цены клиента до появления флагов в каталоге (оставляем для совместимости).
 LEGACY_KIT_CLIENT_PRICE_EXCLUDE_KEYS: frozenset[str] = frozenset(
@@ -109,15 +113,50 @@ class KitAdminFormData:
     stock_price_total: float | None
     cost_total: float | None
     discount_percent: int
+    composition_totals: dict[str, int] = field(default_factory=dict)
+
+
+def parse_kit_qty_totals_from_form(form: Any) -> dict[str, int]:
+    """Суммирует kit_qty_<userId>_<itemKey> по itemKey (как в «Работа с товарами»)."""
+    totals: dict[str, int] = {}
+    try:
+        keys_iter = list(form.keys())
+    except Exception:
+        keys_iter = []
+    for name in keys_iter:
+        if not isinstance(name, str):
+            continue
+        m = _KIT_QTY_FIELD.match(name)
+        if not m:
+            continue
+        item_key = m.group(2)
+        if not item_key:
+            continue
+        raw = _g_str(form, name, "0")
+        try:
+            q = int(raw or "0")
+        except ValueError:
+            q = 0
+        q = max(0, q)
+        if q > 0:
+            totals[item_key] = totals.get(item_key, 0) + q
+    return totals
 
 
 def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
-    pieces_initial = _g_int(form, "pieces_initial", 0) if for_create else 0
-    pieces_total = _g_int(form, "pieces_total", 0) if not for_create else pieces_initial
-    pieces_available = _g_int(form, "pieces_available", 0) if not for_create else pieces_initial
+    composition_totals: dict[str, int] = {}
     if for_create:
-        pieces_total = max(0, pieces_initial)
-        pieces_available = pieces_total
+        composition_totals = parse_kit_qty_totals_from_form(form)
+        inv = kit_inventory_piece_count(composition_totals)
+        if composition_totals and any(q > 0 for q in composition_totals.values()):
+            pieces_total = pieces_available = inv
+        else:
+            pieces_initial = _g_int(form, "pieces_initial", 0)
+            pieces_total = max(0, pieces_initial)
+            pieces_available = pieces_total
+    else:
+        pieces_total = _g_int(form, "pieces_total", 0)
+        pieces_available = _g_int(form, "pieces_available", 0)
 
     return KitAdminFormData(
         sku=_g_str(form, "sku"),
@@ -137,6 +176,7 @@ def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
         stock_price_total=_g_float_opt(form, "stock_price_total"),
         cost_total=_g_float_opt(form, "cost_total"),
         discount_percent=_g_discount_percent_from_form_field(form, "discount_percent", 0),
+        composition_totals=dict(composition_totals),
     )
 
 
@@ -255,8 +295,16 @@ def validate_kit_admin_form(d: KitAdminFormData, *, for_create: bool) -> None:
         raise ValueError("Укажите название")
     if not d.blank_type_de and not d.blank_type_se:
         raise ValueError("Выберите тип заготовок: D.E и/или S.E.")
+    if for_create:
+        if not d.composition_totals and d.pieces_total <= 0:
+            raise ValueError(
+                "Для нового комплекта укажите в таблице видов заготовок хотя бы одно ненулевое количество."
+            )
     if d.pieces_total <= 0:
-        raise ValueError("Укажите количество заготовок (больше 0)")
+        raise ValueError(
+            "Количество заготовок на складе по комплекту должно быть больше 0 "
+            "(заполните виды в таблице; стрижки в состав не входят)."
+        )
     if not for_create and d.pieces_available > d.pieces_total:
         raise ValueError("Остаток не может быть больше количества заготовок")
     if d.stock_price_total is None:
@@ -351,13 +399,11 @@ def sync_kit_authors_from_user_ids(
 def kit_new_error_prefill(form: Any) -> dict[str, Any]:
     """Восстановление полей формы «новый комплект» после ошибки валидации."""
     d = parse_kit_admin_form(form, for_create=True)
-    pi = _g_int(form, "pieces_initial", 0)
-    return {
+    out: dict[str, Any] = {
         "sku": d.sku,
         "title": d.title,
         "blank_type_de": "on" if d.blank_type_de else "",
         "blank_type_se": "on" if d.blank_type_se else "",
-        "pieces_initial": pi if pi > 0 else "",
         "weight_grams": _g_str(form, "weight_grams"),
         "length_cm": _g_str(form, "length_cm"),
         "has_decorations": "on" if d.has_decorations else "",
@@ -372,6 +418,13 @@ def kit_new_error_prefill(form: Any) -> dict[str, Any]:
         "author_external": "on" if _g_bool(form, "author_external") else "",
         "kit_author_ids": parse_kit_author_user_ids_from_form(form),
     }
+    try:
+        for name in list(form.keys()):
+            if isinstance(name, str) and name.startswith("kit_qty_"):
+                out[name] = _g_str(form, name, "0")
+    except Exception:
+        pass
+    return out
 
 
 def kit_edit_error_prefill(form: Any) -> dict[str, Any]:
