@@ -18,6 +18,7 @@
       <li><code>blank_type_de</code> и/или <code>blank_type_se</code> — хотя бы одно <code>true</code>.</li>
     </ul>
     <p class="muted" style="font-size:14px;"><code>discount_percent</code> не обязателен (по умолчанию 0); не должен превышать допустимую маржу относительно цены и себестоимости.</p>
+    <p class="muted" style="font-size:14px;"><code>blanks_condition</code> не обязателен (по умолчанию <code>NEW</code>): <code>NEW</code> — новый набор, <code>USED</code> — б/у, <code>MIXED</code> — смешанный («50 на 50»).</p>
 
     <h3><code>composition</code> и <code>blank_stock</code></h3>
     <p class="muted" style="font-size:14px;">Ключи — это <code>kit_key</code> из каталога «Заказ» → «Заготовки поштучно» (должна быть активная позиция с таким ключом в <code>meta_json</code>). Ниже — эталонный список ключей из кода приложения; в вашей базе могут быть добавлены другие ключи или отсутствовать часть строк — ориентируйтесь на каталог.</p>
@@ -28,7 +29,7 @@
     </ul>
     <p class="muted" style="font-size:14px;"><strong><code>blank_stock</code></strong> — только объект <code>"КЛЮЧ": целое_остаток</code> (≥ 0; нули отбрасываются). Ключи должны входить в пересечение «есть в <code>composition</code>» и «есть в каталоге с этим <code>kit_key</code>».</p>
     <p class="muted" style="font-size:14px;"><strong>Условие:</strong> если задан непустой <code>composition</code> и <code>pieces_initial</code> &gt; 0, обязателен непустой <code>blank_stock</code> (остатки по видам для keyed-склада).</p>
-    <p class="muted" style="font-size:14px;">Позиции «Б/У» в справочнике без отдельного <code>kit_key</code> в этот список не входят.</p>
+    <p class="muted" style="font-size:14px;">Для б/у в каталоге заведены отдельные ключи <code>SE_BRAID_USED</code> и <code>DE_DREAD_USED</code> (см. таблицу ниже) — их можно указывать в <code>composition</code> и <code>blank_stock</code> так же, как остальные <code>kit_key</code>.</p>
 
     <table style="width:100%;max-width:900px;border-collapse:collapse;font-size:13px;margin:12px 0 16px;">
       <thead>
@@ -40,6 +41,7 @@
       <tbody>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_BRAID_SHORT</td><td style="padding:6px 8px;">S.E. коса короткая</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_BRAID_LONG</td><td style="padding:6px 8px;">S.E. коса</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_BRAID_USED</td><td style="padding:6px 8px;">S.E. коса б/у</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_BRAID_FREE_TIP</td><td style="padding:6px 8px;">S.E. ажурная коса</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_DREAD</td><td style="padding:6px 8px;">S.E. дред</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_TIP_ADDON</td><td style="padding:6px 8px;">S.E. доплёт кончиков</td></tr>
@@ -52,6 +54,7 @@
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_FREE_TIP</td><td style="padding:6px 8px;">D.E. дредокудря</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_SHORT</td><td style="padding:6px 8px;">D.E. дред короткий</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_LONG</td><td style="padding:6px 8px;">D.E. дред</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_USED</td><td style="padding:6px 8px;">D.E. дред б/у</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_TRIM</td><td style="padding:6px 8px;">D.E. стрижка</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_MAX</td><td style="padding:6px 8px;">D.E. дред max</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_CURL_MAX</td><td style="padding:6px 8px;">D.E. кудря max</td></tr>
@@ -83,6 +86,7 @@
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">stock_price_total</td><td style="padding:8px;"><strong>Цена комплекта на складе (всего), ₽</strong></td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">cost_total</td><td style="padding:8px;"><strong>Себестоимость (всего), ₽</strong></td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">discount_percent</td><td style="padding:8px;"><strong>Скидка (всего), %</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blanks_condition</td><td style="padding:8px;"><strong>Состояние заготовок</strong> — <code>NEW</code> / <code>USED</code> / <code>MIXED</code> (по умолчанию <code>NEW</code>)</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">weight_grams</td><td style="padding:8px;"><strong>Вес, г</strong></td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">length_cm</td><td style="padding:8px;"><strong>Длина, см</strong></td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">has_decorations</td><td style="padding:8px;"><strong>Украшения</strong></td></tr>

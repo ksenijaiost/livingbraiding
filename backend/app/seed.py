@@ -26,6 +26,7 @@ from app.db.models import (
     CatalogProduct,
     CategoryQuestionnaireField,
     Kit,
+    KitBlanksCondition,
     MaterialPriceCurrent,
     MaterialType,
     QuestionnaireFieldType,
@@ -637,6 +638,7 @@ def _ensure_zakaz_products_catalog(db: Session) -> None:
             "ignore_in_calc": bool(row.ignore_in_client_calc or row.key is None),
             "master_pay": float(row.work_pay),
             "is_used_in_kit_form": bool(row.include_in_kit_form),
+            "is_bu": bool(row.is_bu),
         }
         _upsert_catalog_product(
             db,
@@ -781,6 +783,7 @@ def _ensure_vsy_golova_catalog_and_kits(db: Session, *, include_demo_kits: bool)
                 pieces_available=70,
                 blank_type_de=True,
                 blank_type_se=False,
+                blanks_condition=KitBlanksCondition.NEW,
                 stock_price_total=3500.0,
                 discount_percent=0,
                 cost_total=2800.0,
@@ -798,6 +801,7 @@ def _ensure_vsy_golova_catalog_and_kits(db: Session, *, include_demo_kits: bool)
                 pieces_available=10,
                 blank_type_de=True,
                 blank_type_se=True,
+                blanks_condition=KitBlanksCondition.NEW,
                 stock_price_total=800.0,
                 discount_percent=0,
                 cost_total=600.0,

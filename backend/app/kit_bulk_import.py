@@ -8,7 +8,7 @@ from typing import Any, TypedDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Kit
+from app.db.models import Kit, KitBlanksCondition
 from app.kit_blank_stock_core import (
     composition_keys_intersection_catalog,
     load_catalog_kit_maps,
@@ -24,6 +24,23 @@ from app.kit_crud import (
 
 MAX_BULK_JSON_BYTES = 512 * 1024
 MAX_BULK_KITS = 500
+
+
+def _blanks_condition_from_bulk_row(row: dict[str, Any]) -> KitBlanksCondition:
+    raw = row.get("blanks_condition")
+    if raw is None or str(raw).strip() == "":
+        return KitBlanksCondition.NEW
+    s = str(raw).strip().upper()
+    mapping = {
+        "NEW": KitBlanksCondition.NEW,
+        "USED": KitBlanksCondition.USED,
+        "MIXED": KitBlanksCondition.MIXED,
+    }
+    if s in mapping:
+        return mapping[s]
+    raise ValueError(
+        "blanks_condition: ожидается NEW, USED или MIXED (новый / б/у / смешанный набор)."
+    )
 
 
 class BulkImportRowResult(TypedDict):
@@ -217,6 +234,7 @@ def row_to_kit_admin_data(row: dict[str, Any], *, saved_sku: str) -> KitAdminFor
         stock_price_total=sp,
         cost_total=ct,
         discount_percent=disc,
+        blanks_condition=_blanks_condition_from_bulk_row(row),
         composition_totals={},
     )
 

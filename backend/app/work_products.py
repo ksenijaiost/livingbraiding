@@ -46,6 +46,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.user_roles import select_users_with_role, user_has_role
+from app.kit_blank_stock_core import infer_kit_blanks_condition_from_totals
 from app.kit_composition import (
     KIT_INVENTORY_PIECE_EXCLUDE_KEYS,
     composition_json_from_totals,
@@ -1093,6 +1094,7 @@ async def work_new_post(
             kit = Kit(
                 sku=sku[:80],
                 title=title[:200],
+                blanks_condition=infer_kit_blanks_condition_from_totals(db, kit_totals),
                 description=None,
                 is_active=True,
                 pieces_total=kit_pieces_inventory,

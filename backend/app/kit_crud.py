@@ -11,7 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
 
-from app.db.models import CatalogProduct, Kit, KitAuthorStaff, User, UserRole
+from app.db.models import CatalogProduct, Kit, KitAuthorStaff, KitBlanksCondition, User, UserRole
 from app.kit_composition import kit_inventory_piece_count
 from app.user_roles import select_users_with_role, user_has_role
 
@@ -74,6 +74,20 @@ def _g_int(form: Any, name: str, default: int = 0) -> int:
         return default
 
 
+def _parse_kit_blanks_condition_from_form(form: Any, name: str = "blanks_condition") -> KitBlanksCondition:
+    raw = (_g_str(form, name, "") or "").strip().upper()
+    if not raw:
+        return KitBlanksCondition.NEW
+    mapping = {
+        "NEW": KitBlanksCondition.NEW,
+        "USED": KitBlanksCondition.USED,
+        "MIXED": KitBlanksCondition.MIXED,
+    }
+    if raw in mapping:
+        return mapping[raw]
+    raise ValueError("Состояние заготовок в комплекте: выберите «Новый», «Б/У» или «50 на 50».")
+
+
 def _g_float_opt(form: Any, name: str) -> float | None:
     raw = _g_str(form, name, "")
     if not raw:
@@ -113,6 +127,7 @@ class KitAdminFormData:
     stock_price_total: float | None
     cost_total: float | None
     discount_percent: int
+    blanks_condition: KitBlanksCondition = KitBlanksCondition.NEW
     composition_totals: dict[str, int] = field(default_factory=dict)
 
 
@@ -176,6 +191,7 @@ def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
         stock_price_total=_g_float_opt(form, "stock_price_total"),
         cost_total=_g_float_opt(form, "cost_total"),
         discount_percent=_g_discount_percent_from_form_field(form, "discount_percent", 0),
+        blanks_condition=_parse_kit_blanks_condition_from_form(form),
         composition_totals=dict(composition_totals),
     )
 
@@ -415,6 +431,7 @@ def kit_new_error_prefill(form: Any) -> dict[str, Any]:
         "stock_price_total": _g_str(form, "stock_price_total"),
         "cost_total": _g_str(form, "cost_total"),
         "discount_percent": _g_str(form, "discount_percent"),
+        "blanks_condition": d.blanks_condition.value,
         "author_external": "on" if _g_bool(form, "author_external") else "",
         "kit_author_ids": parse_kit_author_user_ids_from_form(form),
     }
@@ -447,6 +464,7 @@ def kit_edit_error_prefill(form: Any) -> dict[str, Any]:
         "stock_price_total": _g_str(form, "stock_price_total"),
         "cost_total": _g_str(form, "cost_total"),
         "discount_percent": _g_str(form, "discount_percent"),
+        "blanks_condition": d.blanks_condition.value,
         "author_external": "on" if _g_bool(form, "author_external") else "",
         "kit_author_ids": parse_kit_author_user_ids_from_form(form),
     }
@@ -485,6 +503,7 @@ def kit_to_form_prefill(kit: Kit) -> dict[str, Any]:
         "stock_price_total": sp,
         "cost_total": ct,
         "discount_percent": disc,
+        "blanks_condition": getattr(kit, "blanks_condition", KitBlanksCondition.NEW).value,
         "author_external": "on" if kit.author_external else "",
         "kit_author_ids": [
             l.user_id
@@ -499,6 +518,7 @@ def kit_to_form_prefill(kit: Kit) -> dict[str, Any]:
 def apply_kit_admin_form(kit: Kit, d: KitAdminFormData) -> None:
     kit.sku = d.sku[:80]
     kit.title = d.title[:200]
+    kit.blanks_condition = d.blanks_condition
     kit.blank_type_de = d.blank_type_de
     kit.blank_type_se = d.blank_type_se
     kit.pieces_total = d.pieces_total

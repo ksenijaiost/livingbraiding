@@ -9,14 +9,28 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import models as _orm_models  # noqa: F401 — register models on Base
 from app.db.base import Base
-from app.db.models import Kit, KitBlankStock
+from app.db.models import CatalogProduct, Kit, KitBlankStock, KitBlanksCondition
 from app.kit_blank_stock_core import (
     build_usage_breakdown_keyed,
     decrement_blank_stock_keys,
     distribute_scalar_to_keys,
+    infer_kit_blanks_condition_from_totals,
     keyed_cost_selected,
     sync_kit_pieces_available_from_blank_lines,
 )
+
+
+def _catalog_blank(db: Session, kit_key: str, *, is_bu: bool = False) -> None:
+    db.add(
+        CatalogProduct(
+            is_active=True,
+            category_name="Заказ",
+            subcategory_name="Заготовки поштучно",
+            name=kit_key,
+            price=10.0,
+            meta_json=json.dumps({"kit_key": kit_key, "is_bu": is_bu}),
+        )
+    )
 
 
 def test_distribute_scalar_to_keys_matches_weights() -> None:
@@ -50,6 +64,17 @@ def memory_db() -> Session:
     SessionLocal = sessionmaker(bind=engine)
     with SessionLocal() as db:
         yield db
+
+
+def test_infer_kit_blanks_condition_only_new_only_used_mixed(memory_db: Session) -> None:
+    db = memory_db
+    assert infer_kit_blanks_condition_from_totals(db, {"A": 1}) == KitBlanksCondition.NEW
+    _catalog_blank(db, "N1", is_bu=False)
+    _catalog_blank(db, "U1", is_bu=True)
+    db.commit()
+    assert infer_kit_blanks_condition_from_totals(db, {"N1": 2}) == KitBlanksCondition.NEW
+    assert infer_kit_blanks_condition_from_totals(db, {"U1": 1}) == KitBlanksCondition.USED
+    assert infer_kit_blanks_condition_from_totals(db, {"N1": 1, "U1": 1}) == KitBlanksCondition.MIXED
 
 
 def test_decrement_two_keys_and_sync_pieces_available(memory_db: Session) -> None:

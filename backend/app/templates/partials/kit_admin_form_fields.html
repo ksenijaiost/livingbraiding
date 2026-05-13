@@ -92,6 +92,24 @@
   <label>Виды заготовок</label>
   <textarea name="{{ field_prefix }}blanks_kinds_text" rows="2" placeholder="Виды кос, дредов и т.д.">{{ fp.get('blanks_kinds_text', '') }}</textarea>
 </div>
+
+<p style="margin:12px 0 6px;"><strong>Состояние заготовок в комплекте</strong> <span class="muted">*</span></p>
+<div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center;">
+  {% set bc = (fp.get('blanks_condition') or 'NEW')|upper %}
+  <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
+    <input type="radio" name="{{ field_prefix }}blanks_condition" value="NEW" {% if bc == 'NEW' %}checked{% endif %} />
+    <span>Новый</span>
+  </label>
+  <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
+    <input type="radio" name="{{ field_prefix }}blanks_condition" value="USED" {% if bc == 'USED' %}checked{% endif %} />
+    <span>Б/У</span>
+  </label>
+  <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
+    <input type="radio" name="{{ field_prefix }}blanks_condition" value="MIXED" {% if bc == 'MIXED' %}checked{% endif %} />
+    <span>50 на 50</span>
+  </label>
+</div>
+
 <div style="margin-top:8px;">
   <label>Описание комплекта</label>
   <textarea name="{{ field_prefix }}description" rows="2" placeholder="Если нужно как-то ещё описать комплект, это можно сделать тут">{{ fp.get('description', '') }}</textarea>

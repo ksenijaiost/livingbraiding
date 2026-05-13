@@ -137,6 +137,12 @@
       <dt class="muted">Виды заготовок</dt>
       <dd style="margin:0; white-space:pre-wrap;">{{ kit.blanks_kinds_text or '—' }}</dd>
 
+      <dt class="muted">Состояние заготовок</dt>
+      <dd style="margin:0;">
+        {% set _bc = kit.blanks_condition.value if kit.blanks_condition is not none else 'NEW' %}
+        {% if _bc == 'USED' %}Б/У{% elif _bc == 'MIXED' %}50 на 50{% else %}Новый{% endif %}
+      </dd>
+
       <dt class="muted">Описание</dt>
       <dd style="margin:0; white-space:pre-wrap;">{{ kit.description or '—' }}</dd>
 
