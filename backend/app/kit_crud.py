@@ -118,10 +118,8 @@ class KitAdminFormData:
     pieces_available: int
     weight_grams: float | None
     length_cm: float | None
-    has_decorations: bool
     materials_text: str | None
     color_text: str | None
-    blanks_kinds_text: str | None
     notes: str | None
     description: str | None
     stock_price_total: float | None
@@ -182,10 +180,8 @@ def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
         pieces_available=max(0, pieces_available),
         weight_grams=_g_float_opt(form, "weight_grams"),
         length_cm=_g_float_opt(form, "length_cm"),
-        has_decorations=_g_bool(form, "has_decorations"),
         materials_text=_g_str(form, "materials_text") or None,
         color_text=_g_str(form, "color_text") or None,
-        blanks_kinds_text=_g_str(form, "blanks_kinds_text") or None,
         notes=_g_str(form, "notes") or None,
         description=_g_str(form, "description") or None,
         stock_price_total=_g_float_opt(form, "stock_price_total"),
@@ -288,6 +284,32 @@ def calc_kit_stock_price_total_from_composition(
     return float(total), []
 
 
+def try_fill_kit_admin_stock_price_total_from_composition(
+    db: Session,
+    d: KitAdminFormData,
+    *,
+    composition_totals: dict[str, int],
+) -> None:
+    """Если цена не введена, подставить сумму по прайсу «Заказ» → «Заготовки поштучно» по составу."""
+    cur = d.stock_price_total
+    if cur is not None and float(cur) > 0:
+        return
+    totals = {str(k): int(v) for k, v in (composition_totals or {}).items() if int(v) > 0}
+    if not totals:
+        return
+    tmp = Kit()
+    tmp.composition_json = json.dumps(totals, ensure_ascii=False, sort_keys=True)
+    price, missing = calc_kit_stock_price_total_from_composition(db, tmp)
+    if missing:
+        raise ValueError(
+            "Цена на складе не указана; автоподстановка по прайсу невозможна — нет цен для ключей: "
+            + ", ".join(missing)
+        )
+    if price is None or float(price) <= 0:
+        return
+    d.stock_price_total = float(price)
+
+
 def _g_discount_percent_from_form_field(form: Any, name: str, default: int = 0) -> int:
     raw = _g_str(form, name, "")
     if not raw:
@@ -324,7 +346,10 @@ def validate_kit_admin_form(d: KitAdminFormData, *, for_create: bool) -> None:
     if not for_create and d.pieces_available > d.pieces_total:
         raise ValueError("Остаток не может быть больше количества заготовок")
     if d.stock_price_total is None:
-        raise ValueError("Укажите цену комплекта на складе (всего), ₽")
+        raise ValueError(
+            "Укажите цену комплекта на складе (₽) или заполните состав для автоподстановки по прайсу "
+            "«Заказ» → «Заготовки поштучно» (все ключи состава должны иметь цену в каталоге)."
+        )
     if d.stock_price_total <= 0:
         raise ValueError("Цена на складе должна быть больше 0")
     if d.cost_total is None or d.cost_total <= 0:
@@ -422,10 +447,8 @@ def kit_new_error_prefill(form: Any) -> dict[str, Any]:
         "blank_type_se": "on" if d.blank_type_se else "",
         "weight_grams": _g_str(form, "weight_grams"),
         "length_cm": _g_str(form, "length_cm"),
-        "has_decorations": "on" if d.has_decorations else "",
         "materials_text": d.materials_text or "",
         "color_text": d.color_text or "",
-        "blanks_kinds_text": d.blanks_kinds_text or "",
         "description": d.description or "",
         "notes": d.notes or "",
         "stock_price_total": _g_str(form, "stock_price_total"),
@@ -455,10 +478,8 @@ def kit_edit_error_prefill(form: Any) -> dict[str, Any]:
         "pieces_available": d.pieces_available,
         "weight_grams": _g_str(form, "weight_grams"),
         "length_cm": _g_str(form, "length_cm"),
-        "has_decorations": "on" if d.has_decorations else "",
         "materials_text": d.materials_text or "",
         "color_text": d.color_text or "",
-        "blanks_kinds_text": d.blanks_kinds_text or "",
         "description": d.description or "",
         "notes": d.notes or "",
         "stock_price_total": _g_str(form, "stock_price_total"),
@@ -494,10 +515,8 @@ def kit_to_form_prefill(kit: Kit) -> dict[str, Any]:
         "pieces_available": kit.pieces_available,
         "weight_grams": w,
         "length_cm": ln,
-        "has_decorations": "on" if kit.has_decorations else "",
         "materials_text": kit.materials_text or "",
         "color_text": kit.color_text or "",
-        "blanks_kinds_text": kit.blanks_kinds_text or "",
         "description": kit.description or "",
         "notes": kit.notes or "",
         "stock_price_total": sp,
@@ -525,10 +544,8 @@ def apply_kit_admin_form(kit: Kit, d: KitAdminFormData) -> None:
     kit.pieces_available = d.pieces_available
     kit.weight_grams = d.weight_grams
     kit.length_cm = d.length_cm
-    kit.has_decorations = d.has_decorations
     kit.materials_text = d.materials_text
     kit.color_text = (d.color_text[:200] if d.color_text else None)
-    kit.blanks_kinds_text = d.blanks_kinds_text
     kit.notes = d.notes
     kit.description = d.description
     kit.stock_price_total = d.stock_price_total

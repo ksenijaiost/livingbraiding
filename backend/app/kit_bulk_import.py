@@ -19,6 +19,7 @@ from app.kit_crud import (
     KitAdminFormData,
     apply_kit_admin_form,
     sync_kit_authors_from_user_ids,
+    try_fill_kit_admin_stock_price_total_from_composition,
     validate_kit_admin_form,
 )
 
@@ -193,6 +194,29 @@ def _float_at(row: dict[str, Any], key: str) -> float | None:
         raise ValueError(f"Поле «{key}» должно быть числом.") from None
 
 
+def _int_opt_at(row: dict[str, Any], key: str) -> int | None:
+    v = row.get(key)
+    if v is None or v == "":
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"Поле «{key}» должно быть целым числом.") from None
+
+
+def _float_opt_at(row: dict[str, Any], key: str) -> float | None:
+    v = row.get(key)
+    if v is None or v == "":
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        raise ValueError(f"Поле «{key}» должно быть числом.") from None
+
+
 def _str_opt(row: dict[str, Any], key: str) -> str | None:
     v = row.get(key)
     if v is None:
@@ -201,15 +225,20 @@ def _str_opt(row: dict[str, Any], key: str) -> str | None:
     return s or None
 
 
-def row_to_kit_admin_data(row: dict[str, Any], *, saved_sku: str) -> KitAdminFormData:
+def row_to_kit_admin_data(
+    row: dict[str, Any],
+    *,
+    saved_sku: str,
+    pieces_initial: int,
+    stock_price_total: float | None,
+) -> KitAdminFormData:
     sku = saved_sku.strip()
     title = _str_opt(row, "title")
     if not title:
         raise ValueError("Укажите название (title).")
-    pieces_initial = _int_at(row, "pieces_initial")
     if pieces_initial <= 0:
-        raise ValueError("Количество заготовок (pieces_initial) должно быть больше 0.")
-    sp = _float_at(row, "stock_price_total")
+        raise ValueError("Количество заготовок (pieces_initial или сумма composition) должно быть больше 0.")
+    sp = stock_price_total
     ct = _float_at(row, "cost_total")
     disc_raw = row.get("discount_percent", 0)
     try:
@@ -225,10 +254,8 @@ def row_to_kit_admin_data(row: dict[str, Any], *, saved_sku: str) -> KitAdminFor
         pieces_available=max(0, pieces_initial),
         weight_grams=_float_at(row, "weight_grams"),
         length_cm=_float_at(row, "length_cm"),
-        has_decorations=_bool_at(row, "has_decorations", False),
         materials_text=_str_opt(row, "materials_text"),
         color_text=_str_opt(row, "color_text"),
-        blanks_kinds_text=_str_opt(row, "blanks_kinds_text"),
         notes=_str_opt(row, "notes"),
         description=_str_opt(row, "description"),
         stock_price_total=sp,
@@ -274,19 +301,35 @@ def import_single_kit_row(
         }
     try:
         saved_sku = allocate_unique_kit_sku(db, input_sku, reserved_skus)
-        d = row_to_kit_admin_data(row, saved_sku=saved_sku)
-        validate_kit_admin_form(d, for_create=True)
-
         comp = _composition_dict_from_json(row.get("composition"))
         blank_qty = _blank_stock_dict(row.get("blank_stock"))
-        pieces_initial = int(d.pieces_total)
+        if comp and not blank_qty:
+            blank_qty = dict(comp)
 
-        if comp and pieces_initial > 0:
-            if not blank_qty:
-                raise ValueError(
-                    "Задан состав (composition), но не указан остаток по видам (blank_stock). "
-                    "Заполните blank_stock так же, как колонки «Остаток, шт.» в карточке комплекта."
-                )
+        pi_raw = _int_opt_at(row, "pieces_initial")
+        if pi_raw is None:
+            if comp:
+                pieces_initial = sum(int(v) for v in comp.values() if int(v) > 0)
+            else:
+                raise ValueError("Укажите pieces_initial или composition с количествами.")
+        else:
+            pieces_initial = pi_raw
+        if pieces_initial <= 0:
+            raise ValueError(
+                "Количество заготовок должно быть больше 0 (pieces_initial или сумма по composition)."
+            )
+
+        sp = _float_opt_at(row, "stock_price_total")
+        d = row_to_kit_admin_data(
+            row,
+            saved_sku=saved_sku,
+            pieces_initial=pieces_initial,
+            stock_price_total=sp,
+        )
+        if d.stock_price_total is None and comp:
+            try_fill_kit_admin_stock_price_total_from_composition(db, d, composition_totals=comp)
+
+        validate_kit_admin_form(d, for_create=True)
 
         kit = Kit()
         apply_kit_admin_form(kit, d)

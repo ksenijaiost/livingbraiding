@@ -78,8 +78,6 @@
   </div>
 </div>
 
-<label style="margin-top:12px;"><input type="checkbox" name="{{ field_prefix }}has_decorations" {% if fp.get('has_decorations') %}checked{% endif %} /> Украшения</label>
-
 <div style="margin-top:12px;">
   <label>Материалы</label>
   <textarea name="{{ field_prefix }}materials_text" rows="2" placeholder="Список использованных материалов (например, названия канекалона)">{{ fp.get('materials_text', '') }}</textarea>
@@ -87,10 +85,6 @@
 <div style="margin-top:8px;">
   <label>Цвет</label>
   <input name="{{ field_prefix }}color_text" maxlength="200" placeholder="Цвет материала с пачки и/или словесное описание" value="{{ fp.get('color_text', '') }}" />
-</div>
-<div style="margin-top:8px;">
-  <label>Виды заготовок</label>
-  <textarea name="{{ field_prefix }}blanks_kinds_text" rows="2" placeholder="Виды кос, дредов и т.д.">{{ fp.get('blanks_kinds_text', '') }}</textarea>
 </div>
 
 <p style="margin:12px 0 6px;"><strong>Состояние заготовок в комплекте</strong> <span class="muted">*</span></p>
@@ -116,7 +110,7 @@
 </div>
 <div style="margin-top:8px;">
   <label>Примечание</label>
-  <textarea name="{{ field_prefix }}notes" rows="3" placeholder="Тут можно рассказать про украшения в комплекте, какие-то важные нюансы">{{ fp.get('notes', '') }}</textarea>
+  <textarea name="{{ field_prefix }}notes" rows="3" placeholder="Важные нюансы, украшения и т.п. — сюда или в доп. расходы при работе">{{ fp.get('notes', '') }}</textarea>
 </div>
 
 <div style="margin-top:12px;">
@@ -158,7 +152,8 @@
 <div class="row" style="margin-top:12px;">
   <div>
     <label>Цена комплекта на складе (всего), ₽ <span class="muted">*</span></label>
-    <input name="{{ field_prefix }}stock_price_total" type="text" inputmode="decimal" required placeholder="например, 3500" value="{{ fp.get('stock_price_total', '') }}" />
+    <input name="{{ field_prefix }}stock_price_total" type="text" inputmode="decimal" placeholder="например, 3500 или пусто — по прайсу заготовок" value="{{ fp.get('stock_price_total', '') }}" />
+    <div class="muted" style="font-size:12px;margin-top:4px;">Если оставить пустым и задан состав комплекта — подставится сумма по каталогу «Заказ» → «Заготовки поштучно» (при наличии цен по всем ключам).</div>
     {% if kit and kit.stock_price_snapshot_text %}
       <details style="margin-top:6px;">
         <summary class="muted" style="cursor:pointer;">Рассчитано по составу</summary>

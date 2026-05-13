@@ -44,6 +44,7 @@ from app.kit_crud import (
     parse_discount_percent_from_form,
     parse_kit_admin_form,
     sync_kit_authors,
+    try_fill_kit_admin_stock_price_total_from_composition,
     validate_kit_admin_form,
 )
 from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
@@ -295,6 +296,7 @@ async def admin_kit_new_post(
     form = await request.form()
     try:
         d = parse_kit_admin_form(form, for_create=True)
+        try_fill_kit_admin_stock_price_total_from_composition(db, d, composition_totals=d.composition_totals)
         validate_kit_admin_form(d, for_create=True)
         if db.scalar(select(Kit.id).where(Kit.sku == d.sku)):
             raise ValueError("Комплект с таким артикулом уже есть")
@@ -592,6 +594,7 @@ async def admin_kit_edit_post(
             author_staff_ids=sorted([l.user_id for l in (kit.author_staff_links or [])]),
         )
         d = parse_kit_admin_form(form, for_create=False)
+        try_fill_kit_admin_stock_price_total_from_composition(db, d, composition_totals=parse_composition_totals(kit))
         validate_kit_admin_form(d, for_create=False)
         if d.sku != kit.sku:
             oid = db.scalar(select(Kit.id).where(Kit.sku == d.sku, Kit.id != kit.id))

@@ -97,16 +97,19 @@ def test_import_scalar_kit(memory_db: Session) -> None:
     assert k.composition_json is None
 
 
-def test_import_composition_without_blank_stock_fails(memory_db: Session) -> None:
+def test_import_composition_defaults_blank_stock_and_pieces(memory_db: Session) -> None:
     db = memory_db
-    row = _minimal_kit_row(
-        sku="S2",
-        composition={"DE": 1},
-    )
+    row = _minimal_kit_row(sku="S2", composition={"DE": 2})
+    del row["pieces_initial"]
     r = import_single_kit_row(db, row, reserved_skus=set(), changed_by_user_id=1)
-    assert r["ok"] is False
-    msg = (r["message"] or "").lower()
-    assert "blank_stock" in msg or "остаток" in msg
+    assert r["ok"] is True, r.get("message")
+    k = db.get(Kit, int(r["kit_id"]))
+    assert k is not None
+    assert int(k.pieces_total) == 2
+    from app.kit_blank_stock_core import blank_stock_qty_map
+
+    sm = blank_stock_qty_map(db, k.id)
+    assert sm.get("DE") == 2
 
 
 def test_import_two_same_sku_gets_suffix(memory_db: Session) -> None:
