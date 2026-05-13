@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.audit import diff_fields, write_audit_rows
@@ -178,3 +178,135 @@ def parse_purge_entity(entity: str, entity_id_raw: str) -> tuple[str, int]:
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
     return e, int(eid)
+
+
+def _fmt_dt(dt) -> str:
+    if dt is None:
+        return "—"
+    try:
+        return dt.strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return str(dt)
+
+
+def build_purge_preview(db: Session, entity: str, entity_id: int) -> dict:
+    """Краткое описание объекта для экрана подтверждения удаления (суперадмин)."""
+    kind = (entity or "").strip().lower()
+    eid = int(entity_id)
+
+    if kind == "visit":
+        visit = db.scalar(
+            select(Visit)
+            .options(
+                selectinload(Visit.client),
+                selectinload(Visit.services),
+            )
+            .where(Visit.id == eid)
+        )
+        if visit is None:
+            return {"ok": False, "error": "Визит не найден."}
+        cname = (visit.client.name or "").strip() if visit.client else "—"
+        phone = (visit.client.phone or "").strip() if visit.client else ""
+        svc = " · ".join(
+            (s.service_name or "").strip()
+            for s in (visit.services or [])
+            if (s.service_name or "").strip()
+        ) or "—"
+        cancelled = "да" if visit.is_cancelled else "нет"
+        lines = [
+            f"Клиент: {cname}" + (f", {phone}" if phone else ""),
+            f"Дата визита: {_fmt_dt(visit.performed_date)}",
+            f"Услуги: {svc}",
+            f"Сумма от клиента: {float(visit.amount_from_client or 0):.2f} ₽",
+            f"Отменён: {cancelled}",
+        ]
+        return {"ok": True, "heading": f"Визит #{eid}", "lines": lines}
+
+    if kind == "booking":
+        b = db.scalar(
+            select(Booking)
+            .options(selectinload(Booking.client), selectinload(Booking.planned_service))
+            .where(Booking.id == eid)
+        )
+        if b is None:
+            return {"ok": False, "error": "Бронь не найдена."}
+        cname = (b.client.name or "").strip() if b.client else "—"
+        phone = (b.client.phone or "").strip() if b.client else ""
+        svc = ""
+        if b.planned_service:
+            svc = (b.planned_service.name or "").strip()
+        lines = [
+            f"Клиент: {cname}" + (f", {phone}" if phone else ""),
+            f"План: {_fmt_dt(b.planned_date)}",
+            f"Тип: {b.kind.value if b.kind else '—'}, статус: {b.status.value if b.status else '—'}",
+        ]
+        if svc:
+            lines.append(f"Запланированная услуга: {svc}")
+        if (b.quoted_price_text or "").strip():
+            lines.append(f"Ориентир цены: {(b.quoted_price_text or '').strip()}")
+        return {"ok": True, "heading": f"Бронь #{eid}", "lines": lines}
+
+    if kind == "product_sale":
+        s = db.scalar(select(ProductSale).options(selectinload(ProductSale.client)).where(ProductSale.id == eid))
+        if s is None:
+            return {"ok": False, "error": "Продажа не найдена."}
+        cname = (s.client.name or "").strip() if s.client else "—"
+        phone = (s.client.phone or "").strip() if s.client else ""
+        voided = "да" if s.is_voided else "нет"
+        lines = [
+            f"Клиент: {cname}" + (f", {phone}" if phone else ""),
+            f"Дата: {_fmt_dt(s.performed_date)}",
+            f"Вид: {s.kind.value if s.kind else '—'}",
+            f"Сумма: {int(s.amount_from_client or 0)} ₽",
+            f"Аннулирована: {voided}",
+        ]
+        return {"ok": True, "heading": f"Продажа товара #{eid}", "lines": lines}
+
+    if kind == "work":
+        w = db.scalar(
+            select(WorkForInventory).options(selectinload(WorkForInventory.client)).where(WorkForInventory.id == eid)
+        )
+        if w is None:
+            return {"ok": False, "error": "Работа не найдена."}
+        cpart = "—"
+        if w.client:
+            cpart = (w.client.name or "").strip()
+            ph = (w.client.phone or "").strip()
+            if ph:
+                cpart += f", {ph}"
+        elif w.client_id:
+            cpart = f"id клиента {w.client_id}"
+        voided = "да" if w.is_voided else "нет"
+        num = (w.display_number or "").strip() or f"#{w.id}"
+        lines = [
+            f"Номер записи: {num}",
+            f"Клиент: {cpart}",
+            f"Дата: {_fmt_dt(w.performed_date or w.created_at)}",
+            f"Вид: {w.kind.value if w.kind else '—'}, сфера: {w.scope.value if w.scope else '—'}",
+            f"Аннулирована: {voided}",
+        ]
+        if w.created_kit_id:
+            lines.append(f"Созданный комплект (kit id): {w.created_kit_id}")
+        return {"ok": True, "heading": f"Работа с товарами #{eid}", "lines": lines}
+
+    if kind == "client":
+        c = db.get(Client, eid)
+        if c is None:
+            return {"ok": False, "error": "Клиент не найден."}
+        phone = (c.phone or "").strip()
+        lines = [
+            f"Имя: {(c.name or '').strip() or '—'}" + (f", тел. {phone}" if phone else ""),
+        ]
+        if (c.telegram or "").strip():
+            lines.append(f"Telegram: {(c.telegram or '').strip()}")
+        cid = int(c.id)
+        v_n = int(db.scalar(select(func.count()).select_from(Visit).where(Visit.client_id == cid)) or 0)
+        b_n = int(db.scalar(select(func.count()).select_from(Booking).where(Booking.client_id == cid)) or 0)
+        s_n = int(db.scalar(select(func.count()).select_from(ProductSale).where(ProductSale.client_id == cid)) or 0)
+        w_n = int(db.scalar(select(func.count()).select_from(WorkForInventory).where(WorkForInventory.client_id == cid)) or 0)
+        lines.append(
+            f"Связано (будет удалено/отвязано): визитов {v_n}, броней {b_n}, продаж {s_n}, работ {w_n}"
+        )
+        return {"ok": True, "heading": f"Клиент #{eid}", "lines": lines}
+
+    return {"ok": False, "error": "Неизвестный тип объекта."}

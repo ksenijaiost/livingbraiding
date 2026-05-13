@@ -29,6 +29,12 @@
         <input type="number" name="entity_id" id="entity_id" min="1" step="1" required style="width: 100%; max-width: 12rem;" />
       </div>
 
+      <div id="purge-preview-wrap" style="display: none; margin-bottom: 16px; padding: 12px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px;">
+        <div id="purge-preview-title" style="font-weight: 600; margin-bottom: 8px;"></div>
+        <ul id="purge-preview-list" style="margin: 0; padding-left: 1.25rem; font-size: 14px; line-height: 1.45;"></ul>
+        <p id="purge-preview-err" style="display: none; color: #b91c1c; font-weight: 600; margin: 0;"></p>
+      </div>
+
       <div style="margin: 16px 0; padding: 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;">
         <p style="margin: 0 0 10px; font-weight: 600;">Двойное подтверждение — введите фразы <em>точно</em>, без кавычек:</p>
         <div style="margin-bottom: 10px;">
@@ -58,6 +64,85 @@
       var p1 = {{ phrase1 | tojson }};
       var p2 = {{ phrase2 | tojson }};
       var form = document.getElementById('super-purge-form');
+      var previewTimer = null;
+      var lastConfirmExtra = '';
+
+      function setPreviewVisible(show) {
+        var w = document.getElementById('purge-preview-wrap');
+        if (w) w.style.display = show ? 'block' : 'none';
+      }
+
+      function runPurgePreview() {
+        var entEl = document.getElementById('entity');
+        var idEl = document.getElementById('entity_id');
+        var titleEl = document.getElementById('purge-preview-title');
+        var listEl = document.getElementById('purge-preview-list');
+        var errEl = document.getElementById('purge-preview-err');
+        if (!entEl || !idEl || !titleEl || !listEl || !errEl) return;
+
+        var ent = entEl.value || '';
+        var idRaw = String(idEl.value || '').trim();
+        lastConfirmExtra = '';
+        errEl.style.display = 'none';
+        errEl.textContent = '';
+        listEl.innerHTML = '';
+        titleEl.textContent = '';
+
+        if (!idRaw) {
+          setPreviewVisible(false);
+          return;
+        }
+        var idNum = parseInt(idRaw, 10);
+        if (isNaN(idNum) || idNum < 1) {
+          setPreviewVisible(false);
+          return;
+        }
+
+        setPreviewVisible(true);
+        titleEl.textContent = 'Загрузка…';
+
+        var url = '/admin/super/purge/preview?entity=' + encodeURIComponent(ent) + '&entity_id=' + encodeURIComponent(idRaw);
+        fetch(url, { credentials: 'same-origin' })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            titleEl.textContent = '';
+            listEl.innerHTML = '';
+            if (!data || !data.ok) {
+              errEl.style.display = 'block';
+              errEl.textContent = (data && data.error) ? data.error : 'Не удалось загрузить описание.';
+              lastConfirmExtra = '';
+              return;
+            }
+            titleEl.textContent = data.heading || '';
+            (data.lines || []).forEach(function (line) {
+              var li = document.createElement('li');
+              li.textContent = line;
+              listEl.appendChild(li);
+            });
+            lastConfirmExtra = [data.heading].concat(data.lines || []).filter(Boolean).join('\n');
+          })
+          .catch(function () {
+            titleEl.textContent = '';
+            errEl.style.display = 'block';
+            errEl.textContent = 'Ошибка сети при загрузке описания.';
+            lastConfirmExtra = '';
+          });
+      }
+
+      function schedulePurgePreview() {
+        if (previewTimer) clearTimeout(previewTimer);
+        previewTimer = setTimeout(runPurgePreview, 320);
+      }
+
+      var entSel = document.getElementById('entity');
+      var idInp = document.getElementById('entity_id');
+      if (entSel) entSel.addEventListener('change', schedulePurgePreview);
+      if (idInp) {
+        idInp.addEventListener('input', schedulePurgePreview);
+        idInp.addEventListener('change', schedulePurgePreview);
+      }
+      runPurgePreview();
+
       if (!form) return;
       form.addEventListener('submit', function (e) {
         var a = (document.getElementById('c1') || {}).value || '';
@@ -67,7 +152,11 @@
           alert('Фразы подтверждения не совпадают с требуемыми. Скопируйте их из подсказки под полем.');
           return;
         }
-        if (!window.confirm('Последний шаг: отправить запрос на безвозвратное удаление?')) {
+        var msg = 'Последний шаг: отправить запрос на безвозвратное удаление?';
+        if (lastConfirmExtra) {
+          msg += '\n\n— — —\n' + lastConfirmExtra;
+        }
+        if (!window.confirm(msg)) {
           e.preventDefault();
         }
       });
