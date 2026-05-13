@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.datastructures import UploadFile
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import AuthUser, require_role
+from app.auth import AuthUser, require_admin_super_assigned, require_role
 from app.client_validation import (
     CLIENT_AGE_GROUP_OPTIONS,
     client_age_group_label,
@@ -36,6 +36,7 @@ from app.db.models import (
     Visit,
     VisitKitUsage,
 )
+from app.client_export import build_all_clients_csv_bytes
 from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.audit import diff_fields, write_audit_rows
@@ -60,6 +61,7 @@ def _redirect_admin_clients_to_canon(request: Request, *, suffix: str = "") -> R
 
 _CLIENTS_STAFF = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER))
 _CLIENTS_ADMINS = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER))
+_SUPER_EXPORT = Depends(require_admin_super_assigned())
 
 
 def _admin_client_form_page(
@@ -93,6 +95,26 @@ def _admin_client_form_page(
         ),
         status_code=status_code,
     )
+
+
+@router.get("/export")
+def admin_clients_export_csv(
+    _current_user: AuthUser = _SUPER_EXPORT,
+    db: Session = Depends(get_db),
+):
+    """Полный список клиентов в CSV (UTF-8 BOM, `;`) — только суперадмин."""
+    body = build_all_clients_csv_bytes(db)
+    fn = f"clients_{date.today().isoformat()}.csv"
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'},
+    )
+
+
+@legacy_clients_admin_router.get("/export")
+def admin_clients_export_csv_legacy_redirect(request: Request):
+    return _redirect_admin_clients_to_canon(request, suffix="/export")
 
 
 @router.get("", response_class=HTMLResponse)
