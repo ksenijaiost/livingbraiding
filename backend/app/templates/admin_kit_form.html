@@ -10,6 +10,9 @@
 
     <form method="post" action="{{ form_action }}" enctype="multipart/form-data">
       {% set field_prefix = "" %}
+      {% if is_new %}
+        <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
+      {% endif %}
       {% set blank_stock_rows = blank_stock_rows|default([]) %}
       {% include "partials/kit_admin_form_fields.html" %}
 

@@ -24,10 +24,7 @@
 </div>
 
 {% if is_new %}
-  <div style="margin-top:12px;">
-    <label>Количество заготовок <span class="muted">*</span></label>
-    <input name="{{ field_prefix }}pieces_initial" type="number" min="1" required value="{{ fp.get('pieces_initial', '') }}" />
-  </div>
+  {% include "partials/kit_admin_composition_table.html" %}
 {% else %}
   <div class="row" style="margin-top:12px;">
     <div>

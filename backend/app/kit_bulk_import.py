@@ -217,6 +217,7 @@ def row_to_kit_admin_data(row: dict[str, Any], *, saved_sku: str) -> KitAdminFor
         stock_price_total=sp,
         cost_total=ct,
         discount_percent=disc,
+        composition_totals={},
     )
 
 
