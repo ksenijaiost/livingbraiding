@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import UploadFile
 from sqlalchemy import select
@@ -161,10 +161,11 @@ def _kit_clear_modal_items(kit: Kit, display_tz: str) -> list[dict[str, Any]]:
 @master_kits_router.get("/suggest")
 def master_kits_suggest(
     q: str = "",
+    client_id: int | None = Query(default=None, ge=1),
     current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    return JSONResponse({"kits": suggest_kits_for_stock(db, q)})
+    return JSONResponse({"kits": suggest_kits_for_stock(db, q, for_client_id=client_id)})
 
 
 @router.get("", response_class=HTMLResponse)

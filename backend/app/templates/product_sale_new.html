@@ -267,7 +267,12 @@
       const qEl = document.getElementById('kit_search_q');
       if (qEl && qEl.disabled) return;
       const q = document.getElementById('kit_search_q').value.trim();
-      const res = await fetch('/master/kits/suggest?q=' + encodeURIComponent(q));
+      const params = new URLSearchParams();
+      params.set('q', q);
+      const cidEl = document.getElementById('existing_client_id');
+      const cid = cidEl && (cidEl.value || '').trim();
+      if (cid && /^\d+$/.test(cid)) params.set('client_id', cid);
+      const res = await fetch('/master/kits/suggest?' + params.toString());
       if (!res.ok) return;
       const data = await res.json();
       const ul = document.getElementById('kit_suggest_list');

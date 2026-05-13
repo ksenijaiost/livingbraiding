@@ -563,6 +563,10 @@
       if (draft) {
         document.getElementById('existing_client_id').value = '';
         document.getElementById('client_suggest_list').innerHTML = '';
+        const skl = document.getElementById('stock_kit_suggest_list');
+        if (skl) skl.innerHTML = '';
+        const ekl = document.getElementById('extra_stock_kit_suggest_list');
+        if (ekl) ekl.innerHTML = '';
         if (typeof syncVisitClientUi === 'function') syncVisitClientUi();
         nameInp.setAttribute('required', 'required');
       } else {
@@ -599,6 +603,10 @@
     function clearVisitClientSelection() {
       document.getElementById('existing_client_id').value = '';
       document.getElementById('client_suggest_list').innerHTML = '';
+      const skl = document.getElementById('stock_kit_suggest_list');
+      if (skl) skl.innerHTML = '';
+      const ekl = document.getElementById('extra_stock_kit_suggest_list');
+      if (ekl) ekl.innerHTML = '';
       const q = document.getElementById('client_search_q');
       q.value = '';
       q.focus();
@@ -612,6 +620,8 @@
       document.getElementById('client_suggest_list').innerHTML = '';
       syncVisitClientUi();
       syncVisitThermoSection();
+      void prefetchVisitStockKitsIfReady('main');
+      void prefetchVisitStockKitsIfReady('extra');
     }
     async function clientSuggest() {
       const qEl = document.getElementById('client_search_q');
@@ -652,8 +662,23 @@
 
     let stockKitTimer = null;
     let extraStockKitTimer = null;
+    function visitKitSuggestUrl(q) {
+      const params = new URLSearchParams();
+      params.set('q', q || '');
+      const cidEl = document.getElementById('existing_client_id');
+      const cid = cidEl && (cidEl.value || '').trim();
+      if (cid && /^\d+$/.test(cid)) params.set('client_id', cid);
+      return '/master/kits/suggest?' + params.toString();
+    }
+    function stockLineForVisitKit(k) {
+      const free = parseInt(String(k.pieces_available ?? '0'), 10) || 0;
+      const rc = parseInt(String(k.reserved_for_selected_client ?? '0'), 10) || 0;
+      let part = 'остаток свободно ' + free;
+      if (rc > 0) part += ', резерв для этого клиента: ' + rc + ' шт.';
+      return (k.sku || '') + ' — ' + (k.title || '') + ' (' + part + ')';
+    }
     async function fetchKitSuggest(q) {
-      const res = await fetch('/master/kits/suggest?q=' + encodeURIComponent(q));
+      const res = await fetch(visitKitSuggestUrl(q));
       if (!res.ok) return [];
       const data = await res.json();
       return data.kits || [];
@@ -667,7 +692,7 @@
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'secondary';
-        let line = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+        let line = stockLineForVisitKit(k);
         if (k.is_reserved) line += ' · резерв';
         if (k.missing_sale_price) line = '⚠️ ' + line;
         b.textContent = line;
@@ -691,7 +716,7 @@
     }
     function selectMainStockKit(k) {
       document.getElementById('stock_kit_id').value = String(k.id);
-      let label = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+      let label = stockLineForVisitKit(k);
       if (k.missing_sale_price) label = '⚠️ ' + label + ' (нет цены — укажите в админке перед сохранением визита)';
       document.getElementById('selected_stock_kit_box').style.display = 'block';
       document.getElementById('selected_stock_kit_line').innerHTML =
@@ -703,7 +728,7 @@
     }
     function selectExtraStockKit(k) {
       document.getElementById('own_extra_stock_kit_id').value = String(k.id);
-      let label = (k.sku || '') + ' — ' + (k.title || '') + ' (остаток ' + (k.pieces_available ?? '') + ')';
+      let label = stockLineForVisitKit(k);
       if (k.missing_sale_price) label = '⚠️ ' + label + ' (нет цены — укажите в админке перед сохранением визита)';
       document.getElementById('selected_extra_stock_kit_box').style.display = 'block';
       document.getElementById('selected_extra_stock_kit_line').innerHTML =
@@ -722,6 +747,33 @@
       const q = document.getElementById('extra_stock_kit_search_q').value.trim();
       const kits = await fetchKitSuggest(q);
       renderKitSuggestList('extra_stock_kit_suggest_list', kits, selectExtraStockKit);
+    }
+    /** Подгрузить подсказки комплектов с учётом client_id (в т.ч. только в резерве), если блок уже на экране. */
+    async function prefetchVisitStockKitsIfReady(kind) {
+      const cidEl = document.getElementById('existing_client_id');
+      const cid = cidEl && (cidEl.value || '').trim();
+      if (!cid || !/^\d+$/.test(cid)) return;
+      const kitWrap = document.getElementById('kit-section-wrap');
+      if (!kitWrap || kitWrap.style.display === 'none') return;
+      if (kind === 'main') {
+        const kk = document.querySelector('input[name="kit_kind"]:checked');
+        if (!kk || kk.value !== 'STOCK') return;
+        const blk = document.getElementById('blk-stock');
+        if (!blk || blk.style.display === 'none') return;
+        const qEl = document.getElementById('stock_kit_search_q');
+        const q = qEl ? qEl.value.trim() : '';
+        const kits = await fetchKitSuggest(q);
+        renderKitSuggestList('stock_kit_suggest_list', kits, selectMainStockKit);
+      } else {
+        const ownExtra = document.getElementById('own_extra_blanks');
+        if (!ownExtra || !ownExtra.checked) return;
+        const blk = document.getElementById('blk-own-extra');
+        if (!blk || blk.style.display === 'none') return;
+        const qEl = document.getElementById('extra_stock_kit_search_q');
+        const q = qEl ? qEl.value.trim() : '';
+        const kits = await fetchKitSuggest(q);
+        renderKitSuggestList('extra_stock_kit_suggest_list', kits, selectExtraStockKit);
+      }
     }
     function scheduleStockKitSuggest() {
       clearTimeout(stockKitTimer);
@@ -1003,6 +1055,10 @@
       const svc = getSelectedService();
       const need = !!(svc && svc.requires_kit_block);
       wrap.style.display = need ? 'block' : 'none';
+      if (need) {
+        void prefetchVisitStockKitsIfReady('main');
+        void prefetchVisitStockKitsIfReady('extra');
+      }
     }
 
     function visitClientDiscountPct() {
@@ -1295,10 +1351,12 @@
       document.getElementById('blk-stock').style.display = v === 'STOCK' ? 'block' : 'none';
       document.getElementById('blk-own').style.display = v === 'OWN' ? 'block' : 'none';
       ownCorrectionPanelSync();
+      if (v === 'STOCK') void prefetchVisitStockKitsIfReady('main');
     }
     function ownExtra() {
       const on = document.getElementById('own_extra_blanks').checked;
       document.getElementById('blk-own-extra').style.display = on ? 'block' : 'none';
+      if (on) void prefetchVisitStockKitsIfReady('extra');
     }
     const ownCorrWash = document.getElementById('own_corr_wash');
     if (ownCorrWash) ownCorrWash.addEventListener('change', function () { syncOwnCorrWashCircle(); });

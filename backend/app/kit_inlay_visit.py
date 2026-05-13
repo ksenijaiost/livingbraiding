@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Callable
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import exists, func, or_, select
 from starlette.datastructures import UploadFile
 from sqlalchemy.orm import Session, selectinload
 
@@ -1178,15 +1178,32 @@ def kit_reserve_hint_by_id(db: Session, kit_id: int | None) -> str | None:
     return kit_reserved_for_visit_label(k)
 
 
-def suggest_kits_for_stock(db: Session, q: str, *, limit: int = 30) -> list[dict[str, Any]]:
-    """Подсказки для мастера: комплекты в наличии, фильтр по артикулу или названию."""
+def suggest_kits_for_stock(
+    db: Session, q: str, *, limit: int = 30, for_client_id: int | None = None
+) -> list[dict[str, Any]]:
+    """Подсказки для мастера: комплекты в наличии, фильтр по артикулу или названию.
+
+    Если передан ``for_client_id``, в выборку попадают также комплекты с нулевым свободным
+    остатком, но с активным резервом именно на этого клиента (ручной резерв со склада).
+    Такие позиции сортируются в начало списка (по объёму резерва), при пустом запросе
+    лимит строк чуть увеличивается, чтобы резервы не «вытеснялись» комплектами только из наличия.
+    """
     needle = (q or "").strip()
+    cid = int(for_client_id) if for_client_id is not None and int(for_client_id) > 0 else None
+    stock_clause = Kit.pieces_available > 0
+    if cid is not None:
+        reserve_for_client = exists().where(
+            KitReserve.kit_id == Kit.id,
+            KitReserve.reserved_for_client_id == cid,
+            KitReserve.pieces_reserved > 0,
+        )
+        stock_clause = or_(Kit.pieces_available > 0, reserve_for_client)
     stmt = (
         select(Kit)
         .where(
             Kit.is_archived.is_(False),
             Kit.is_active.is_(True),
-            Kit.pieces_available > 0,
+            stock_clause,
         )
         .options(
             selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
@@ -1197,7 +1214,9 @@ def suggest_kits_for_stock(db: Session, q: str, *, limit: int = 30) -> list[dict
         stmt = stmt.where(
             or_(Kit.sku.ilike(f"%{needle}%"), Kit.title.ilike(f"%{needle}%"))
         )
-    stmt = stmt.order_by(Kit.sku.asc()).limit(limit)
+    # Пустой запрос + клиент: нужно уместить и «просто в наличии», и «только в резерве» — чуть шире лимит.
+    eff_limit = max(limit, 60) if (cid is not None and not needle) else limit
+    stmt = stmt.order_by(Kit.sku.asc()).limit(eff_limit)
     rows = list(db.scalars(stmt).all())
     out: list[dict[str, Any]] = []
     for k in rows:
@@ -1205,6 +1224,11 @@ def suggest_kits_for_stock(db: Session, q: str, *, limit: int = 30) -> list[dict
         sp = k.stock_price_total
         has_price = sp is not None and float(sp) > 0
         dp = int(k.discount_percent or 0)
+        reserved_for_c = 0
+        if cid is not None:
+            for r in k.reserves or []:
+                if (r.reserved_for_client_id or 0) == cid:
+                    reserved_for_c += int(r.pieces_reserved or 0)
         out.append(
             {
                 "id": k.id,
@@ -1212,11 +1236,19 @@ def suggest_kits_for_stock(db: Session, q: str, *, limit: int = 30) -> list[dict
                 "title": k.title,
                 "pieces_total": int(k.pieces_total or 0),
                 "pieces_available": k.pieces_available,
+                "reserved_for_selected_client": reserved_for_c,
                 "stock_price_total": float(sp or 0.0),
                 "discount_percent": dp,
                 "missing_sale_price": not has_price,
                 "is_reserved": bool(k.reserves),
                 "reserved_for_label": res_label,
             }
+        )
+    if cid is not None:
+        out.sort(
+            key=lambda d: (
+                -int(d.get("reserved_for_selected_client") or 0),
+                (d.get("sku") or "").lower(),
+            )
         )
     return out

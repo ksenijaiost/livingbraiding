@@ -878,8 +878,16 @@ function initAdminBookingForm() {
   }
 
   // --- Kit suggest ---
+  function bookingKitSuggestUrl(q) {
+    var params = new URLSearchParams();
+    params.set("q", q || "");
+    var cidEl = byId("existing_client_id") || byId("client_id");
+    var cid = cidEl && cidEl.value ? String(cidEl.value).trim() : "";
+    if (cid && /^\d+$/.test(cid)) params.set("client_id", cid);
+    return "/master/kits/suggest?" + params.toString();
+  }
   async function kitSuggest(q, ulId, onPick) {
-    var res = await fetch("/master/kits/suggest?q=" + encodeURIComponent(q || ""));
+    var res = await fetch(bookingKitSuggestUrl(q || ""));
     if (!res.ok) return;
     var data = {};
     try { data = await res.json(); } catch (e) { data = {}; }
