@@ -44,6 +44,7 @@ from app.kit_crud import (
     parse_discount_percent_from_form,
     parse_kit_admin_form,
     sync_kit_authors,
+    try_fill_kit_admin_blank_types_from_composition,
     try_fill_kit_admin_stock_price_total_from_composition,
     validate_kit_admin_form,
 )
@@ -56,6 +57,7 @@ from app.kit_blank_stock_core import (
     composition_keys_intersection_catalog,
     consume_blank_stock_for_reserve,
     kit_inventory_is_keyed,
+    catalog_kit_key_hint_rows,
     load_catalog_kit_maps,
     max_take_by_key_for_client,
     parse_composition_totals,
@@ -296,6 +298,7 @@ async def admin_kit_new_post(
     form = await request.form()
     try:
         d = parse_kit_admin_form(form, for_create=True)
+        try_fill_kit_admin_blank_types_from_composition(d, composition_totals=d.composition_totals)
         try_fill_kit_admin_stock_price_total_from_composition(db, d, composition_totals=d.composition_totals)
         validate_kit_admin_form(d, for_create=True)
         if db.scalar(select(Kit.id).where(Kit.sku == d.sku)):
@@ -342,6 +345,7 @@ async def admin_kit_new_post(
 def admin_kits_bulk_import_get(
     request: Request,
     current_user: AuthUser = _KITS_SUPER,
+    db: Session = Depends(get_db),
 ):
     return templates.TemplateResponse(
         "admin_kits_bulk_import.html",
@@ -353,6 +357,7 @@ def admin_kits_bulk_import_get(
             payload_prefill="",
             max_bytes=MAX_BULK_JSON_BYTES,
             max_kits=MAX_BULK_KITS,
+            catalog_kit_key_hints=catalog_kit_key_hint_rows(db),
         ),
     )
 
@@ -378,6 +383,7 @@ async def admin_kits_bulk_import_post(
                 payload_prefill=payload,
                 max_bytes=MAX_BULK_JSON_BYTES,
                 max_kits=MAX_BULK_KITS,
+                catalog_kit_key_hints=catalog_kit_key_hint_rows(db),
             ),
             status_code=400,
         )
@@ -395,6 +401,7 @@ async def admin_kits_bulk_import_post(
             payload_prefill=payload,
             max_bytes=MAX_BULK_JSON_BYTES,
             max_kits=MAX_BULK_KITS,
+            catalog_kit_key_hints=catalog_kit_key_hint_rows(db),
         ),
     )
 
@@ -594,7 +601,9 @@ async def admin_kit_edit_post(
             author_staff_ids=sorted([l.user_id for l in (kit.author_staff_links or [])]),
         )
         d = parse_kit_admin_form(form, for_create=False)
-        try_fill_kit_admin_stock_price_total_from_composition(db, d, composition_totals=parse_composition_totals(kit))
+        comp_tot = parse_composition_totals(kit)
+        try_fill_kit_admin_blank_types_from_composition(d, composition_totals=comp_tot)
+        try_fill_kit_admin_stock_price_total_from_composition(db, d, composition_totals=comp_tot)
         validate_kit_admin_form(d, for_create=False)
         if d.sku != kit.sku:
             oid = db.scalar(select(Kit.id).where(Kit.sku == d.sku, Kit.id != kit.id))

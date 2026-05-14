@@ -18,6 +18,7 @@ from app.kit_blank_stock_core import (
 from app.kit_crud import (
     KitAdminFormData,
     apply_kit_admin_form,
+    infer_blank_types_from_composition_totals,
     sync_kit_authors_from_user_ids,
     try_fill_kit_admin_stock_price_total_from_composition,
     validate_kit_admin_form,
@@ -231,6 +232,7 @@ def row_to_kit_admin_data(
     saved_sku: str,
     pieces_initial: int,
     stock_price_total: float | None,
+    composition_totals: dict[str, int] | None = None,
 ) -> KitAdminFormData:
     sku = saved_sku.strip()
     title = _str_opt(row, "title")
@@ -245,11 +247,16 @@ def row_to_kit_admin_data(
         disc = int(disc_raw) if disc_raw != "" and disc_raw is not None else 0
     except (TypeError, ValueError):
         raise ValueError("Скидка (discount_percent) — целое число от 0 до 100.") from None
+    comp = dict(composition_totals or {})
+    bde = _bool_at(row, "blank_type_de")
+    bse = _bool_at(row, "blank_type_se")
+    if not bde and not bse and comp:
+        bde, bse = infer_blank_types_from_composition_totals(comp)
     return KitAdminFormData(
         sku=sku,
         title=title,
-        blank_type_de=_bool_at(row, "blank_type_de"),
-        blank_type_se=_bool_at(row, "blank_type_se"),
+        blank_type_de=bde,
+        blank_type_se=bse,
         pieces_total=max(0, pieces_initial),
         pieces_available=max(0, pieces_initial),
         weight_grams=_float_at(row, "weight_grams"),
@@ -262,7 +269,7 @@ def row_to_kit_admin_data(
         cost_total=ct,
         discount_percent=disc,
         blanks_condition=_blanks_condition_from_bulk_row(row),
-        composition_totals={},
+        composition_totals=comp,
     )
 
 
@@ -325,6 +332,7 @@ def import_single_kit_row(
             saved_sku=saved_sku,
             pieces_initial=pieces_initial,
             stock_price_total=sp,
+            composition_totals=comp if comp else None,
         )
         if d.stock_price_total is None and comp:
             try_fill_kit_admin_stock_price_total_from_composition(db, d, composition_totals=comp)

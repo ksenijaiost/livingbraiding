@@ -194,6 +194,12 @@ async def products_catalog_row_edit(
     meta["is_used_in_kit_form"] = parse_bool(form.get("is_used_in_kit_form"))
     meta["ignore_in_calc"] = parse_bool(form.get("ignore_in_calc"))
     meta["is_bu"] = parse_bool(form.get("is_bu"))
+    if row.category_name == "Заказ" and row.subcategory_name == "Заготовки поштучно":
+        kk = str(form.get("kit_key") or "").strip()
+        if kk:
+            meta["kit_key"] = kk[:80]
+        else:
+            meta.pop("kit_key", None)
     row.is_active = parse_bool(form.get("is_active"))
     row.meta_json = json.dumps(meta, ensure_ascii=False)
     db.commit()
@@ -247,6 +253,10 @@ async def products_catalog_row_new(
         "ignore_in_calc": parse_bool(form.get("ignore_in_calc")),
         "is_bu": parse_bool(form.get("is_bu")),
     }
+    if category == "Заказ" and subcategory_name == "Заготовки поштучно":
+        kk = str(form.get("kit_key") or "").strip()
+        if kk:
+            meta["kit_key"] = kk[:80]
     db.add(
         CatalogProduct(
             category_name=category,

@@ -11,6 +11,7 @@ from app.db import models as _orm_models  # noqa: F401
 from app.db.base import Base
 from app.db.models import Kit, KitBlanksCondition
 from app.kit_bulk_import import allocate_unique_kit_sku, import_single_kit_row, parse_bulk_kits_json
+from app.kit_crud import infer_blank_types_from_composition_totals
 
 
 @pytest.fixture()
@@ -78,7 +79,27 @@ def test_allocate_unique_reserved_in_batch(memory_db: Session) -> None:
     assert allocate_unique_kit_sku(db, "BATCH", reserved) == "BATCH❗повтор"
 
 
-def test_import_scalar_kit(memory_db: Session) -> None:
+def test_infer_blank_types_from_composition_keys() -> None:
+    assert infer_blank_types_from_composition_totals({"DE_DREAD_LONG": 1, "SE_BRAID_LONG": 2}) == (True, True)
+    assert infer_blank_types_from_composition_totals({"DE": 3}) == (True, False)
+    assert infer_blank_types_from_composition_totals({"SE": 1}) == (False, True)
+    assert infer_blank_types_from_composition_totals({}) == (False, False)
+
+
+def test_import_blank_types_inferred_from_composition(memory_db: Session) -> None:
+    db = memory_db
+    row = _minimal_kit_row(sku="S-INF-TYPE", pieces_initial=2)
+    del row["blank_type_de"]
+    del row["blank_type_se"]
+    row["composition"] = {"DE_DREAD_LONG": 2}
+    r = import_single_kit_row(db, row, reserved_skus=set(), changed_by_user_id=1)
+    assert r["ok"] is True, r.get("message")
+    k = db.get(Kit, int(r["kit_id"]))
+    assert k is not None
+    assert k.blank_type_de is True
+    assert k.blank_type_se is False
+
+
     db = memory_db
     reserved: set[str] = set()
     r = import_single_kit_row(

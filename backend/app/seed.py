@@ -618,6 +618,28 @@ def _upsert_catalog_product(
     row.sort_order = sort_order
 
 
+def _deactivate_obsolete_zakaz_blank_catalog_rows(db: Session, *, obsolete_kit_keys: frozenset[str]) -> None:
+    """Снять с прайса строки с устаревшими kit_key (переименования / разбиение позиций)."""
+    rows = list(
+        db.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.category_name == "Заказ",
+                CatalogProduct.subcategory_name == "Заготовки поштучно",
+            )
+        ).all()
+    )
+    for r in rows:
+        try:
+            meta = json.loads(r.meta_json or "{}")
+        except Exception:
+            continue
+        if not isinstance(meta, dict):
+            continue
+        k = str(meta.get("kit_key") or "").strip()
+        if k in obsolete_kit_keys:
+            r.is_active = False
+
+
 def _ensure_zakaz_products_catalog(db: Session) -> None:
     """
     Прайс «Заказ» в catalog_products.
@@ -650,6 +672,11 @@ def _ensure_zakaz_products_catalog(db: Session) -> None:
             sort_order=so,
         )
         so += 1
+
+    _deactivate_obsolete_zakaz_blank_catalog_rows(
+        db,
+        obsolete_kit_keys=frozenset({"SE_BRAID_FREE_TIP", "DE_BRAID_NEW_FMT", "DE_DREAD_FREE_TIP"}),
+    )
 
     # ---- Correction ----
     corr_prices_overrides = {

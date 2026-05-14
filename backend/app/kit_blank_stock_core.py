@@ -83,6 +83,12 @@ def load_catalog_kit_maps(
     return price_map, meta_by_key, label_by_key
 
 
+def catalog_kit_key_hint_rows(db: Session) -> list[dict[str, str]]:
+    """Список {key, label} для подсказок (импорт комплектов и т.п.): только строки каталога с kit_key и ценой."""
+    _, _, label_by_key = load_catalog_kit_maps(db)
+    return [{"key": k, "label": v} for k, v in sorted(label_by_key.items(), key=lambda kv: kv[0])]
+
+
 def composition_keys_intersection_catalog(
     comp: dict[str, int], meta_by_key: dict[str, dict[str, Any]]
 ) -> list[str]:

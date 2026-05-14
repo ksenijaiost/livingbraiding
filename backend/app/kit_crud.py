@@ -192,6 +192,39 @@ def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
     )
 
 
+def infer_blank_types_from_composition_totals(totals: dict[str, int]) -> tuple[bool, bool]:
+    """По ключам DE_*, SE_* (или устаревшим DE / SE) определить типы заготовок D.E. / S.E."""
+    de = False
+    se = False
+    for k, q in (totals or {}).items():
+        try:
+            qn = int(q)
+        except (TypeError, ValueError):
+            continue
+        if qn <= 0:
+            continue
+        kk = str(k).strip().upper()
+        if kk.startswith("DE_") or kk == "DE":
+            de = True
+        elif kk.startswith("SE_") or kk == "SE":
+            se = True
+    return de, se
+
+
+def try_fill_kit_admin_blank_types_from_composition(
+    d: KitAdminFormData,
+    *,
+    composition_totals: dict[str, int] | None = None,
+) -> None:
+    """Если D.E./S.E. не отмечены, выставить по составу (ключи kit_key в composition)."""
+    if d.blank_type_de or d.blank_type_se:
+        return
+    totals = composition_totals if composition_totals is not None else (d.composition_totals or {})
+    ide, ise = infer_blank_types_from_composition_totals(totals)
+    d.blank_type_de = ide
+    d.blank_type_se = ise
+
+
 def max_kit_discount_percent_allowed(stock_price: float, cost_total: float) -> int:
     """Макс. целые % скидки: итоговая цена не ниже себестоимости (с ЗП)."""
     price = float(stock_price)
