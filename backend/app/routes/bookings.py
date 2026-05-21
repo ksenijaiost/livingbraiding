@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.audit import FieldChange, diff_fields, write_audit_rows
 from app.auth import AuthUser, require_role
 from app.client_validation import format_created_by_label, strip_or_none
+from app.consultation_booking import can_create_booking_from_consultation
 from app.db.models import (
     Booking,
     BookingAuditLog,
@@ -27,6 +28,8 @@ from app.db.models import (
     BookingStaffKind,
     BookingStatus,
     Client,
+    Consultation,
+    PayrollFundSourceKind,
     Kit,
     KitAuditLog,
     KitReserve,
@@ -343,6 +346,27 @@ def booking_linked_need_sale(b: Booking) -> bool:
     return b.kind == BookingKind.PRODUCT_SALE
 
 
+def _prefill_booking_fp_from_consultation(db: Session, cons: Consultation, fp: dict[str, str]) -> str | None:
+    """Заполнить fp из консультации. Возвращает текст ошибки или None."""
+    fp["client_id"] = str(cons.client_id)
+    if cons.preliminary_cost_text:
+        fp["quoted_price_text"] = cons.preliminary_cost_text
+    if cons.service_id:
+        fp["service_id"] = str(cons.service_id)
+        fp["kind"] = BookingKind.VISIT.value
+        svc = db.get(Service, cons.service_id)
+        if svc:
+            sub = db.get(ServiceSubcategory, svc.subcategory_id)
+            if sub:
+                fp["service_subcategory_id"] = str(sub.id)
+                fp["service_category_id"] = str(sub.category_id)
+    if cons.photo_1:
+        fp["prefill_photo_1"] = cons.photo_1
+    if cons.photo_2:
+        fp["prefill_photo_2"] = cons.photo_2
+    return None
+
+
 def try_auto_complete_booking(db: Session, booking_id: int) -> None:
     b = db.get(Booking, booking_id)
     if not b or b.status != BookingStatus.ACTIVE:
@@ -397,6 +421,11 @@ def try_auto_complete_booking(db: Session, booking_id: int) -> None:
         ],
     )
     release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=None)
+
+    if b.consultation_id:
+        from app.payroll_fund import post_consultation_accrual
+
+        post_consultation_accrual(db, int(b.consultation_id), created_by_user_id=None)
 
 
 def _amount_hint_from_booking(b: Booking) -> str:
@@ -880,9 +909,21 @@ def _masters_for_visit_form(db: Session) -> list[User]:
 def admin_booking_new_get(
     request: Request,
     client_id: int | None = None,
+    consultation_id: int | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
+    consultation: Consultation | None = None
+    consultation_comment: str | None = None
+    if consultation_id:
+        consultation = db.get(Consultation, consultation_id)
+        if consultation is None:
+            raise HTTPException(status_code=404, detail="Консультация не найдена")
+        if not can_create_booking_from_consultation(db, consultation):
+            raise HTTPException(status_code=400, detail="Для этой консультации уже есть активная или выполненная бронь")
+        client_id = consultation.client_id
+        consultation_comment = consultation.comment
+
     selected_client = db.get(Client, client_id) if client_id else None
     masters = _masters_for_visit_form(db)
     service_catalog = list_master_visit_services_catalog(db)
@@ -942,6 +983,8 @@ def admin_booking_new_get(
     for k, v in request.query_params.items():
         if k in allow and v is not None:
             fp[k] = str(v)
+    if consultation:
+        _prefill_booking_fp_from_consultation(db, consultation, fp)
     return templates.TemplateResponse(
         "admin_booking_form.html",
         _ctx(
@@ -960,6 +1003,8 @@ def admin_booking_new_get(
             rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
             fp=fp,
             booking_master_on_ids=[],
+            consultation_id=consultation.id if consultation else None,
+            consultation_comment=consultation_comment,
         ),
     )
 
@@ -1070,6 +1115,8 @@ async def admin_booking_new_post(
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
                 fp=fp,
                 booking_master_on_ids=[],
+                consultation_id=int(fp["consultation_id"]) if str(fp.get("consultation_id") or "").isdigit() else None,
+                consultation_comment=None,
             ),
             status_code=400,
         )
@@ -1112,6 +1159,51 @@ async def admin_booking_new_post(
             status_code=400,
         )
 
+    consultation_id_val: int | None = None
+    cons_raw = str(fp.get("consultation_id") or "").strip()
+    if cons_raw.isdigit():
+        consultation_id_val = int(cons_raw)
+        cons_chk = db.get(Consultation, consultation_id_val)
+        if cons_chk is None:
+            err = "Консультация не найдена."
+        elif not can_create_booking_from_consultation(db, cons_chk):
+            err = "Для этой консультации уже есть активная или выполненная бронь."
+        else:
+            if not photo_1_url and (fp.get("prefill_photo_1") or cons_chk.photo_1):
+                photo_1_url = str(fp.get("prefill_photo_1") or cons_chk.photo_1)
+            if not photo_2_url and (fp.get("prefill_photo_2") or cons_chk.photo_2):
+                photo_2_url = str(fp.get("prefill_photo_2") or cons_chk.photo_2)
+
+    if err:
+        cons_id_ctx = consultation_id_val
+        cons_comment_ctx = None
+        if cons_id_ctx:
+            c0 = db.get(Consultation, cons_id_ctx)
+            cons_comment_ctx = c0.comment if c0 else None
+        return templates.TemplateResponse(
+            "admin_booking_form.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                error=err,
+                is_new=True,
+                booking=None,
+                selected_client=client,
+                masters=masters,
+                staff_users=staff_users,
+                after_reserve=str(request.url),
+                service_catalog=service_catalog,
+                kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                product_kind_options=[k.value for k in ProductSaleKind],
+                rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+                fp=fp,
+                booking_master_on_ids=[],
+                consultation_id=cons_id_ctx,
+                consultation_comment=cons_comment_ctx,
+            ),
+            status_code=400,
+        )
+
     booking = Booking(
         created_by_user_id=current_user.id,
         client_id=client.id,
@@ -1126,6 +1218,7 @@ async def admin_booking_new_post(
         comment=comment,
         planned_service_id=planned_service_id,
         planned_product_kind=planned_product_kind,
+        consultation_id=consultation_id_val,
         details_json=json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False),
     )
     db.add(booking)
@@ -1176,11 +1269,13 @@ def admin_booking_detail(
             selectinload(Booking.cancelled_by_user),
             selectinload(Booking.planned_service).selectinload(Service.subcategory),
             selectinload(Booking.masters).selectinload(BookingMaster.master),
+            selectinload(Booking.consultation),
         )
     )
     if b is None:
         raise HTTPException(status_code=404, detail="Бронь не найдена")
 
+    linked_consultation = b.consultation
     linked_visit_id = db.scalar(select(Visit.id).where(Visit.booking_id == booking_id).limit(1))
     linked_sale_id = db.scalar(select(ProductSale.id).where(ProductSale.booking_id == booking_id).limit(1))
     linked_work_id = db.scalar(select(WorkForInventory.id).where(WorkForInventory.booking_id == booking_id).limit(1))
@@ -1285,6 +1380,7 @@ def admin_booking_detail(
             linked_visit_id=linked_visit_id,
             linked_sale_id=linked_sale_id,
             linked_work_id=linked_work_id,
+            linked_consultation=linked_consultation,
             audit_rows=audit_rows,
             display_tz=display_tz,
             sale_kit_order_users=sale_kit_order_users,
@@ -1714,6 +1810,16 @@ def admin_booking_cancel(
     b.cancelled_reason = reason_norm[:2000]
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
+    if b.consultation_id:
+        from app.payroll_fund import storno_source_accruals
+
+        storno_source_accruals(
+            db,
+            PayrollFundSourceKind.CONSULTATION,
+            int(b.consultation_id),
+            current_user.id,
+        )
+        b.consultation_id = None
     release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
     db.commit()
     write_audit_rows(

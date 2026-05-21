@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card lb-card-max-980" data-lb-booking-form="1">
+    <p class="muted" style="margin-top:0;">
+      <a href="/consultations">← Консультации</a>
+      {% if consultation %}<span class="muted lb-dot-sep">·</span><a href="/consultations/{{ consultation.id }}">Карточка #{{ consultation.id }}</a>{% endif %}
+    </p>
+    <h2 style="margin-top:0;">{% if is_new %}Новая консультация{% else %}Редактирование консультации #{{ consultation.id }}{% endif %}</h2>
+
+    {% if error %}
+      <p class="lb-flash" style="background:#fee2e2;border-color:#fecaca;color:#991b1b;">{{ error }}</p>
+    {% endif %}
+
+    <form method="post" action="{% if is_new %}/consultations/new{% else %}/consultations/{{ consultation.id }}/edit{% endif %}" enctype="multipart/form-data">
+      <input type="hidden" name="client_id" id="client_id" value="{{ selected_client.id if selected_client else fp.get('client_id','') }}" />
+
+      <div class="card" style="background:#f8fafc;">
+        <h3 style="margin-top:0;">Клиент</h3>
+        <div id="booking_client_search_row" style="display:flex;gap:8px;align-items:stretch;margin-top:6px;">
+          <div style="flex:1;min-width:0;">
+            <label>Поиск клиента *</label>
+            <input id="client_search_q" type="search" placeholder="имя или контакт" autocomplete="off" style="width:100%;box-sizing:border-box;" />
+          </div>
+          <div style="align-self:flex-end;padding-top:1.4rem;">
+            <button type="button" id="booking_client_find_btn" class="secondary" style="white-space:nowrap;">Найти</button>
+          </div>
+        </div>
+        <ul id="client_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0;"></ul>
+        <div id="booking_client_selected_panel" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
+            <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;">
+              <span style="font-weight:700;color:#065f46;">Выбран клиент</span>
+              <span id="booking_client_selected_name" style="font-weight:600;color:#047857;">{% if selected_client %}{{ selected_client.name }}{% endif %}</span>
+            </div>
+            <button type="button" id="booking_client_change_btn" class="secondary" style="flex-shrink:0;">Изменить</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:14px;">
+        <label>Вид консультации *</label>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:6px;">
+          {% for code, label in type_choices %}
+            <label>
+              <input type="checkbox" name="consultation_types" value="{{ code }}"
+                {% if types_data.get(code) %}checked{% endif %}
+                {% if code == 'OTHER' %}data-lb-consult-other-toggle="1"{% endif %} />
+              {{ label }}
+            </label>
+          {% endfor %}
+        </div>
+        <div id="consult_other_text_wrap" style="margin-top:8px;{% if not types_data.get('OTHER') %}display:none;{% endif %}">
+          <label>Текст для «Другое»</label>
+          <input type="text" name="other_text" maxlength="500" value="{{ types_data.get('other_text','') }}" style="width:100%;box-sizing:border-box;" />
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <div>
+          <label>Дата консультации *</label>
+          <input type="date" name="consultation_date" value="{{ fp.get('consultation_date','') }}" required />
+        </div>
+        <div>
+          <label>Время</label>
+          <input type="time" name="consultation_time" value="{{ fp.get('consultation_time','') }}" step="60" />
+        </div>
+        <div>
+          <label>Длительность (мин)</label>
+          <input type="number" name="duration_minutes" min="1" max="1440" value="{{ fp.get('duration_minutes','') }}" />
+          <p class="muted" style="margin:4px 0 0;font-size:0.9em;">Можно оставить пустым</p>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <label>Услуга (по которой консультировали)</label>
+        <select name="service_id" style="width:100%;max-width:480px;box-sizing:border-box;">
+          <option value="">— не выбрана —</option>
+          {% for c in service_catalog %}
+            {% for sc in c.subcategories %}
+              <optgroup label="{{ c.name }} → {{ sc.name }}">
+                {% for s in sc.services %}
+                  <option value="{{ s.id }}" {% if fp.get('service_id')|string == s.id|string %}selected{% endif %}>{{ s.name }}</option>
+                {% endfor %}
+              </optgroup>
+            {% endfor %}
+          {% endfor %}
+        </select>
+      </div>
+
+      <div style="margin-top:12px;">
+        <label>Предварительная стоимость (озвученная)</label>
+        <input type="text" name="preliminary_cost_text" maxlength="120" value="{{ fp.get('preliminary_cost_text','') }}" style="width:100%;max-width:320px;" />
+      </div>
+
+      <div style="margin-top:12px;">
+        <label>Комментарий</label>
+        <textarea name="comment" rows="4" maxlength="4000" style="width:100%;box-sizing:border-box;">{{ fp.get('comment','') }}</textarea>
+        <p class="muted" style="margin:4px 0 0;font-size:0.9em;">Пожелания клиента, желаемые даты записи и пр.</p>
+      </div>
+
+      <div style="margin-top:14px;">
+        <label>Фото (до 2)</label>
+        <div class="row">
+          <div>
+            {% if consultation and consultation.photo_1 %}
+              <a href="{{ consultation.photo_1 }}" class="lb-lightbox"><img src="{{ consultation.photo_1 }}" alt="" style="max-width:160px;max-height:160px;border-radius:8px;display:block;margin-bottom:6px;" /></a>
+              <label><input type="checkbox" name="clear_photo_1" value="1" /> Удалить фото 1</label>
+            {% endif %}
+            <input type="file" name="photo_1" accept="image/*" />
+          </div>
+          <div>
+            {% if consultation and consultation.photo_2 %}
+              <a href="{{ consultation.photo_2 }}" class="lb-lightbox"><img src="{{ consultation.photo_2 }}" alt="" style="max-width:160px;max-height:160px;border-radius:8px;display:block;margin-bottom:6px;" /></a>
+              <label><input type="checkbox" name="clear_photo_2" value="1" /> Удалить фото 2</label>
+            {% endif %}
+            <input type="file" name="photo_2" accept="image/*" />
+          </div>
+        </div>
+      </div>
+
+      <p style="margin-top:16px;">
+        <button type="submit">Сохранить</button>
+      </p>
+    </form>
+  </div>
+  <script>
+    (function () {
+      var boxes = document.querySelectorAll('input[data-lb-consult-other-toggle]');
+      var wrap = document.getElementById('consult_other_text_wrap');
+      if (!boxes.length || !wrap) return;
+      function sync() {
+        wrap.style.display = boxes[0].checked ? '' : 'none';
+      }
+      boxes[0].addEventListener('change', sync);
+      sync();
+    })();
+  </script>
+{% endblock %}

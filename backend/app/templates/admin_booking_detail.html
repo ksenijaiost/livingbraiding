@@ -61,6 +61,10 @@
       {% endif %}
     </div>
 
+    {% if linked_consultation %}
+      <p class="lb-my-6"><strong>Консультация</strong>: <a href="/consultations/{{ linked_consultation.id }}">#{{ linked_consultation.id }}</a></p>
+    {% endif %}
+
     <h3 class="lb-mt-18">Связанные записи</h3>
     {% if not booking_can_create_master_records and (need_work or need_visit) %}
       <p class="muted lb-font-13 lb-mt-neg-4 lb-max-720" style="margin-bottom:10px;">

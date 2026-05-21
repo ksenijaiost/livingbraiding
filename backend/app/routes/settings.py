@@ -34,6 +34,9 @@ from app.setting_keys import (
     SALON_CUT_PCT,
 )
 from app.work_rate_keys import (
+    CONSULTATION_PAY_AMOUNT_THRESHOLD,
+    CONSULTATION_PAY_AT_OR_ABOVE_THRESHOLD,
+    CONSULTATION_PAY_BELOW_THRESHOLD,
     CUSTOM_ORDER_BONUS_MULTIPLIER,
     MIX_KANEK,
     MIX_LENGTH,
@@ -106,6 +109,9 @@ def admin_settings_page(
         STUDIO_SHARE_OVERRIDE: studio_share_override,
         **mix_rates_for_admin_form(db),
         CUSTOM_ORDER_BONUS_MULTIPLIER: _wr_float(CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0),
+        CONSULTATION_PAY_BELOW_THRESHOLD: _wr_float(CONSULTATION_PAY_BELOW_THRESHOLD, 200.0),
+        CONSULTATION_PAY_AT_OR_ABOVE_THRESHOLD: _wr_float(CONSULTATION_PAY_AT_OR_ABOVE_THRESHOLD, 300.0),
+        CONSULTATION_PAY_AMOUNT_THRESHOLD: _wr_float(CONSULTATION_PAY_AMOUNT_THRESHOLD, 5000.0),
     }
 
     return templates.TemplateResponse(
@@ -323,6 +329,24 @@ async def admin_settings_work_rates_save(
                 default=1.0,
                 min=0.0,
                 field_name=CUSTOM_ORDER_BONUS_MULTIPLIER,
+            ),
+            CONSULTATION_PAY_BELOW_THRESHOLD: parse_float(
+                form.get(CONSULTATION_PAY_BELOW_THRESHOLD),
+                default=200.0,
+                min=0.0,
+                field_name=CONSULTATION_PAY_BELOW_THRESHOLD,
+            ),
+            CONSULTATION_PAY_AT_OR_ABOVE_THRESHOLD: parse_float(
+                form.get(CONSULTATION_PAY_AT_OR_ABOVE_THRESHOLD),
+                default=300.0,
+                min=0.0,
+                field_name=CONSULTATION_PAY_AT_OR_ABOVE_THRESHOLD,
+            ),
+            CONSULTATION_PAY_AMOUNT_THRESHOLD: parse_float(
+                form.get(CONSULTATION_PAY_AMOUNT_THRESHOLD),
+                default=5000.0,
+                min=0.0,
+                field_name=CONSULTATION_PAY_AMOUNT_THRESHOLD,
             ),
         }
     except ValueError as exc:

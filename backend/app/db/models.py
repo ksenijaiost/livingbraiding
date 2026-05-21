@@ -678,6 +678,12 @@ class Booking(Base):
 
     details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    consultation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("consultations.id"),
+        nullable=True,
+        unique=True,
+    )
+
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     cancelled_by_user: Mapped["User | None"] = relationship(foreign_keys=[cancelled_by_user_id])
@@ -688,6 +694,10 @@ class Booking(Base):
         cascade="all, delete-orphan",
     )
     kit_reserves: Mapped[list["KitReserve"]] = relationship(back_populates="booking")
+    consultation: Mapped["Consultation | None"] = relationship(
+        back_populates="booking",
+        foreign_keys=[consultation_id],
+    )
 
 
 class BookingMaster(Base):
@@ -748,6 +758,56 @@ class BookingAuditLog(Base):
     new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     booking: Mapped["Booking"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class Consultation(Base):
+    """Консультация мастера (бесплатно для клиента), может перейти в бронь."""
+
+    __tablename__ = "consultations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    consultation_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    types_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    service_id: Mapped[int | None] = mapped_column(ForeignKey("services.id"), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preliminary_cost_text: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    photo_1: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    photo_2: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    client: Mapped["Client"] = relationship()
+    service: Mapped["Service | None"] = relationship(foreign_keys=[service_id])
+    booking: Mapped["Booking | None"] = relationship(
+        back_populates="consultation",
+        foreign_keys="Booking.consultation_id",
+        uselist=False,
+    )
+
+
+class ConsultationAuditLog(Base):
+    __tablename__ = "consultation_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    consultation_id: Mapped[int] = mapped_column(
+        ForeignKey("consultations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    consultation: Mapped["Consultation"] = relationship()
     changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
 
 
@@ -970,6 +1030,7 @@ class PayrollFundSourceKind(str, enum.Enum):
     VISIT = "VISIT"
     WORK = "WORK"
     PRODUCT_SALE = "PRODUCT_SALE"
+    CONSULTATION = "CONSULTATION"
     STUDIO_EXPENSE = "STUDIO_EXPENSE"
     MANUAL = "MANUAL"
 

@@ -46,6 +46,9 @@
         {% if sale.booking_id %}
           <p style="margin:6px 0;"><strong>Бронь</strong>: <a href="/bookings/{{ sale.booking_id }}">#{{ sale.booking_id }}</a></p>
         {% endif %}
+        {% if consultation %}
+          <p style="margin:6px 0;"><strong>Консультация</strong>: <a href="/consultations/{{ consultation.id }}">#{{ consultation.id }}</a></p>
+        {% endif %}
         {% if linked_work_ids %}
           <p style="margin:6px 0;">
             <strong>Работа с товарами</strong>:

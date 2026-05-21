@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
+from app.consultation_types import format_types_display
 from app.display_time import format_naive_utc_datetime, timezone_label
 from app.ru_labels import (
     format_price_integer_rub,
@@ -41,6 +42,7 @@ templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_ty
 templates.env.globals["ru_user_role"] = ru_user_role
 templates.env.globals["format_price_integer_rub"] = format_price_integer_rub
 templates.env.globals["format_naive_utc_datetime"] = format_naive_utc_datetime
+templates.env.globals["format_types_display"] = format_types_display
 templates.env.globals["timezone_label"] = timezone_label
 templates.env.globals["UserRole"] = UserRole
 templates.env.globals["master_levels"] = tuple(MasterLevel)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Sequence
 
@@ -18,6 +19,10 @@ from app.kit_blank_stock_core import (
     parse_composition_totals,
 )
 from app.db.models import (
+    Booking,
+    BookingKind,
+    BookingStatus,
+    Consultation,
     Kit,
     MaterialPriceCurrent,
     MaterialType,
@@ -34,8 +39,14 @@ from app.db.models import (
     Visit,
     VisitMaster,
     WorkForInventory,
+    WorkRate,
     WorkScope,
     WorkForInventoryStaff,
+)
+from app.work_rate_keys import (
+    CONSULTATION_PAY_AMOUNT_THRESHOLD,
+    CONSULTATION_PAY_AT_OR_ABOVE_THRESHOLD,
+    CONSULTATION_PAY_BELOW_THRESHOLD,
 )
 
 _REVERSIBLE_ENTRY_KINDS = (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.EXPENSE)
@@ -658,6 +669,111 @@ def sync_operational_payroll_postings(db: Session) -> None:
     for exp in db.scalars(select(StudioExpense).where(StudioExpense.is_voided.is_(False))).all():
         if not has_unreversed_studio_expense_posting(db, exp.id):
             replace_studio_expense_ledger(db, exp, exp.created_by_user_id)
+
+
+def _work_rate_int(db: Session, key: str, default: int) -> int:
+    r = db.scalar(select(WorkRate).where(WorkRate.key == key, WorkRate.is_active.is_(True)).limit(1))
+    if not r:
+        return default
+    try:
+        v = json.loads(r.value_json)
+        return int(v)
+    except Exception:
+        return default
+
+
+def consultation_pay_settings(db: Session) -> tuple[int, int, int]:
+    """(ниже порога, от порога, порог суммы) в рублях."""
+    below = _work_rate_int(db, CONSULTATION_PAY_BELOW_THRESHOLD, 200)
+    above = _work_rate_int(db, CONSULTATION_PAY_AT_OR_ABOVE_THRESHOLD, 300)
+    threshold = _work_rate_int(db, CONSULTATION_PAY_AMOUNT_THRESHOLD, 5000)
+    return below, above, threshold
+
+
+def _booking_has_fulfilled_visit_or_sale(db: Session, booking: Booking) -> bool:
+    if booking.kind == BookingKind.VISIT:
+        vid = db.scalar(
+            select(Visit.id).where(
+                Visit.booking_id == booking.id,
+                Visit.is_cancelled.is_(False),
+            ).limit(1)
+        )
+        return vid is not None
+    if booking.kind == BookingKind.PRODUCT_SALE:
+        sid = db.scalar(
+            select(ProductSale.id).where(
+                ProductSale.booking_id == booking.id,
+                ProductSale.is_voided.is_(False),
+            ).limit(1)
+        )
+        return sid is not None
+    return False
+
+
+def sum_booking_fulfillment_amount(db: Session, booking_id: int) -> int:
+    """Сумма amount_from_client: работы по брони + визит или продажа."""
+    b = db.get(Booking, booking_id)
+    if not b or b.status != BookingStatus.DONE:
+        return 0
+    total = 0
+    for w in db.scalars(
+        select(WorkForInventory).where(
+            WorkForInventory.booking_id == booking_id,
+            WorkForInventory.is_voided.is_(False),
+        )
+    ).all():
+        total += int(w.amount_from_client or 0)
+    if b.kind == BookingKind.VISIT:
+        v_amt = db.scalar(
+            select(Visit.amount_from_client).where(
+                Visit.booking_id == booking_id,
+                Visit.is_cancelled.is_(False),
+            ).limit(1)
+        )
+        if v_amt is not None:
+            total += int(v_amt)
+    elif b.kind == BookingKind.PRODUCT_SALE:
+        s_amt = db.scalar(
+            select(ProductSale.amount_from_client).where(
+                ProductSale.booking_id == booking_id,
+                ProductSale.is_voided.is_(False),
+            ).limit(1)
+        )
+        if s_amt is not None:
+            total += int(s_amt)
+    return total
+
+
+def post_consultation_accrual(
+    db: Session,
+    consultation_id: int,
+    created_by_user_id: int | None,
+) -> None:
+    """ЗП мастеру-консультанту после выполненной брони с визитом/продажей."""
+    if _has_accruals_for_source(db, PayrollFundSourceKind.CONSULTATION, consultation_id):
+        return
+    cons = db.get(Consultation, consultation_id)
+    if not cons:
+        return
+    b = db.scalar(select(Booking).where(Booking.consultation_id == consultation_id).limit(1))
+    if not b or b.status != BookingStatus.DONE:
+        return
+    if not _booking_has_fulfilled_visit_or_sale(db, b):
+        return
+    below, above, threshold = consultation_pay_settings(db)
+    base = sum_booking_fulfillment_amount(db, b.id)
+    pay = float(above if base >= threshold else below)
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.ACCRUAL,
+        side=PayrollFundSide.MASTER,
+        user_id=int(cons.created_by_user_id),
+        amount=pay,
+        source_kind=PayrollFundSourceKind.CONSULTATION,
+        source_id=consultation_id,
+        created_by_user_id=created_by_user_id,
+        comment=f"Консультация #{consultation_id}, бронь #{b.id}, база {base} ₽",
+    )
 
 
 def recent_ledger_rows(db: Session, limit: int = 150) -> list[PayrollFundLedger]:

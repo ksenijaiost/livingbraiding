@@ -113,6 +113,24 @@
             <input name="custom_order_bonus_multiplier" type="number" step="0.01" min="0" value="{{ work_rates.custom_order_bonus_multiplier }}" />
           </div>
 
+          <div class="card lb-card-info lb-mb-12" style="max-width: 28rem;">
+            <div style="font-weight:600; margin-bottom:10px;">ЗП за консультацию (при успешной брони)</div>
+            <div class="lb-stack-10">
+              <div>
+                <label>До порога (₽)</label>
+                <input name="consultation_pay_below_threshold" type="number" step="1" min="0" value="{{ work_rates.consultation_pay_below_threshold }}" class="lb-input-narrow" />
+              </div>
+              <div>
+                <label>От порога и выше (₽)</label>
+                <input name="consultation_pay_at_or_above_threshold" type="number" step="1" min="0" value="{{ work_rates.consultation_pay_at_or_above_threshold }}" class="lb-input-narrow" />
+              </div>
+              <div>
+                <label>Порог суммы визита/продажи + работ (₽)</label>
+                <input name="consultation_pay_amount_threshold" type="number" step="1" min="0" value="{{ work_rates.consultation_pay_amount_threshold }}" class="lb-input-narrow" />
+              </div>
+            </div>
+          </div>
+
           <button type="submit">Сохранить коэффициенты</button>
         </form>
       </div>

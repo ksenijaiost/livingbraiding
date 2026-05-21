@@ -78,6 +78,9 @@
               <div>
                 <strong>Бронь</strong>
                 <div class="muted"><a href="/bookings/{{ row.booking_id }}">#{{ row.booking_id }}</a></div>
+                {% if consultation %}
+                  <div class="muted" style="margin-top:4px;">Консультация: <a href="/consultations/{{ consultation.id }}">#{{ consultation.id }}</a></div>
+                {% endif %}
               </div>
             {% endif %}
             {% if linked_sale_ids %}

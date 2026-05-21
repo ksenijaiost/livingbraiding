@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card lb-card-max-980">
+    <p class="muted lb-mt-0">
+      <a href="/consultations">← Консультации</a>
+      <span class="muted lb-dot-sep">·</span>
+      <a href="/clients/{{ consultation.client.id }}">Клиент</a>
+    </p>
+    <div class="lb-flex-between">
+      <h2 class="lb-m-0">Консультация #{{ consultation.id }}</h2>
+      {% if can_edit %}
+        <a href="/consultations/{{ consultation.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+      {% endif %}
+    </div>
+
+    {% if msg == 'created' %}
+      <p class="lb-flash" style="background:#d1fae5;border-color:#6ee7b7;color:#065f46;">Консультация сохранена.</p>
+    {% endif %}
+
+    <div class="card lb-card-bg-subtle">
+      <p class="lb-my-6"><strong>Клиент</strong>: <a href="/clients/{{ consultation.client.id }}">{{ consultation.client.name }}</a></p>
+      <p class="lb-my-6"><strong>Дата</strong>: {{ format_naive_utc_datetime(consultation.consultation_date, display_tz) }} ({{ timezone_label(display_tz) }})</p>
+      {% if consultation.duration_minutes %}
+        <p class="lb-my-6"><strong>Длительность</strong>: {{ consultation.duration_minutes }} мин</p>
+      {% endif %}
+      <p class="lb-my-6"><strong>Вид</strong>: {{ types_display }}</p>
+      {% if consultation.service %}
+        <p class="lb-my-6"><strong>Услуга</strong>: {{ consultation.service.name }}</p>
+      {% endif %}
+      {% if consultation.preliminary_cost_text %}
+        <p class="lb-my-6"><strong>Предварительная стоимость</strong>: {{ consultation.preliminary_cost_text }}</p>
+      {% endif %}
+      {% if consultation.comment %}
+        <p class="lb-my-6"><strong>Комментарий</strong>:<br />{{ consultation.comment }}</p>
+      {% endif %}
+      <p class="lb-my-6"><strong>Мастер-консультант</strong>:
+        {% if consultation.created_by_user %}{{ consultation.created_by_user.display_name }}{% else %}—{% endif %}
+        · {{ format_naive_utc_datetime(consultation.created_at, display_tz) }}
+      </p>
+    </div>
+
+    <h3 class="lb-mt-18">Бронь</h3>
+    {% if booking %}
+      <p>
+        <a href="/bookings/{{ booking.id }}">Бронь #{{ booking.id }}</a>
+        — статус: <strong>{{ booking_status_label }}</strong>
+      </p>
+    {% else %}
+      <p class="muted">Бронь не создана.</p>
+      {% if can_create_booking %}
+        <p><a href="/bookings/new?consultation_id={{ consultation.id }}&client_id={{ consultation.client_id }}"><button type="button">Создать бронь</button></a></p>
+      {% endif %}
+    {% endif %}
+
+    {% if consultation.photo_1 or consultation.photo_2 %}
+      <h3 class="lb-mt-18">Фото</h3>
+      <div class="lb-row-center-gap">
+        {% if consultation.photo_1 %}
+          <a href="{{ consultation.photo_1 }}" class="lb-lightbox"><img src="{{ consultation.photo_1 }}" alt="" style="max-width:200px;border-radius:8px;" /></a>
+        {% endif %}
+        {% if consultation.photo_2 %}
+          <a href="{{ consultation.photo_2 }}" class="lb-lightbox"><img src="{{ consultation.photo_2 }}" alt="" style="max-width:200px;border-radius:8px;" /></a>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {% if pay_rows %}
+      <h3 class="lb-mt-18">ЗП консультанту</h3>
+      <ul>
+        {% for p in pay_rows %}
+          <li>+{{ format_price_integer_rub(p.amount) }} · {{ format_naive_utc_datetime(p.created_at, display_tz) }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+{% endblock %}

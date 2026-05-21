@@ -1303,7 +1303,17 @@ def work_detail(
         ).all()
     )
     linked_sale_ids: list[int] = []
+    consultation = None
     if w.booking_id:
+        from app.db.models import Booking
+
+        booking_row = db.scalar(
+            select(Booking)
+            .where(Booking.id == int(w.booking_id))
+            .options(selectinload(Booking.consultation))
+        )
+        if booking_row and booking_row.consultation:
+            consultation = booking_row.consultation
         linked_sale_ids = list(
             db.scalars(
                 select(ProductSale.id)
@@ -1330,6 +1340,7 @@ def work_detail(
             audit_rows=audit_rows,
             msg=void_msg,
             linked_sale_ids=linked_sale_ids,
+            consultation=consultation,
         ),
     )
 
