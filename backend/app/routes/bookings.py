@@ -1155,13 +1155,14 @@ async def admin_booking_new_post(
     _refresh_sale_order_master_ids_in_fp(db, booking_id=booking.id, fp=fp)
     booking.details_json = json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False)
     db.commit()
-    return RedirectResponse(url=f"/bookings/{booking.id}", status_code=303)
+    return RedirectResponse(url=f"/bookings/{booking.id}?msg=created", status_code=303)
 
 
 @router.get("/{booking_id}", response_class=HTMLResponse)
 def admin_booking_detail(
     request: Request,
     booking_id: int,
+    msg: str | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
@@ -1280,6 +1281,7 @@ def admin_booking_detail(
             product_kind_label=_product_kind_label(b.planned_product_kind),
             booking_can_create_master_records=booking_can_create_master_records,
             booking_link_master_only_title=booking_link_master_only_title,
+            flash_msg=msg,
             linked_visit_id=linked_visit_id,
             linked_sale_id=linked_sale_id,
             linked_work_id=linked_work_id,

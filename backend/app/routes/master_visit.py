@@ -436,5 +436,9 @@ async def master_visit_new_post(
             error=str(exc),
             status_code=400,
         )
-    return RedirectResponse(url=f"/master/visit/new?saved={visit.id}", status_code=303)
+    url = f"/visits/{visit.id}?msg=created"
+    client_row = db.get(Client, visit.client_id) if visit.client_id else None
+    if client_row and not client_row.is_confirmed:
+        url += "&draft_client=1"
+    return RedirectResponse(url=url, status_code=303)
 

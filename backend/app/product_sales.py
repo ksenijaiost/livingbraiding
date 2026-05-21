@@ -983,6 +983,7 @@ def product_sale_detail(
             request,
             current_user=current_user,
             sale=sale,
+            msg=request.query_params.get("msg"),
             error=None,
             audit_rows=audit_rows,
             can_edit=can_edit,
@@ -1537,5 +1538,5 @@ async def product_sale_new_post(
 
         try_auto_complete_booking(db, int(bid_for_auto_complete))
         db.commit()
-    return RedirectResponse(url="/sales/products?msg=saved", status_code=303)
+    return RedirectResponse(url=f"/sales/products/{row.id}?msg=created", status_code=303)
 

@@ -24,13 +24,20 @@
       </div>
     {% endif %}
     {% if msg %}
-      {% if msg == 'cancelled' %}
+      {% if msg == 'created' %}
+        <div class="ok" style="margin:12px 0;">Визит сохранён.</div>
+      {% elif msg == 'cancelled' %}
         <div class="ok" style="margin:12px 0;">Визит отменён. Складные списания возвращены.</div>
       {% elif msg == 'already_cancelled' %}
         <div class="error" style="margin:12px 0;">Визит уже отменён.</div>
       {% elif msg == 'cancel_conflict' %}
         <div class="error" style="margin:12px 0;">Нельзя отменить: конфликт при возврате заготовок на склад (проверьте движения по комплекту).</div>
       {% endif %}
+    {% endif %}
+    {% if request.query_params.get('draft_client') == '1' and visit.client and not visit.client.is_confirmed %}
+      <p style="margin:12px 0; padding:10px 12px; background:#fffbeb; border-radius:8px; border:1px solid #fbbf24;">
+        <strong>Черновик клиента.</strong> Администратор должен проверить данные и подтвердить клиента в разделе «Клиенты».
+      </p>
     {% endif %}
     {% if not visit_super_priv %}
       <p class="muted" style="font-size: 12px; margin-top: 8px;">История изменений и аннулирование визита доступны суперадмину или техспецу.</p>

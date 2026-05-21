@@ -1160,7 +1160,7 @@ async def work_new_post(
 
             try_auto_complete_booking(db, bid_for_auto_complete)
             db.commit()
-        return RedirectResponse(url="/sales/work?msg=saved", status_code=303)
+        return RedirectResponse(url=f"/sales/work/{work.id}?msg=created", status_code=303)
     except ValueError as exc:
         masters = _list_masters_for_work_form(db)
         work_price_meta = {

@@ -5,6 +5,10 @@
       <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
     {% endif %}
 
+    {% if msg == 'created' %}
+      <div class="ok" style="margin-bottom: 12px;">Продажа сохранена.</div>
+    {% endif %}
+
     {% if sale %}
       <p><a href="/sales/products">← К списку</a></p>
       <div class="row" style="align-items:flex-start;justify-content:space-between;gap:12px;">

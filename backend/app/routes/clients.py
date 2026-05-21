@@ -304,7 +304,7 @@ async def admin_client_new_post(
     db.add(client)
     db.commit()
     db.refresh(client)
-    return RedirectResponse(url=f"/clients/{client.id}?created=1", status_code=303)
+    return RedirectResponse(url=f"/clients/{client.id}?msg=created", status_code=303)
 
 
 @router.get("/{client_id}/edit", response_class=HTMLResponse)
@@ -573,6 +573,7 @@ def admin_client_detail(
     request: Request,
     client_id: int,
     confirmed: str | None = None,
+    msg: str | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
@@ -652,6 +653,7 @@ def admin_client_detail(
             age_group_label=client_age_group_label(client.age_group),
             show_admin_actions=show_admin_actions,
             confirmed_banner=confirmed == "1",
+            created_banner=msg == "created",
             display_tz=display_tz,
         ),
     )

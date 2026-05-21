@@ -33,6 +33,11 @@
       {% endif %}
     </div>
 
+    {% if flash_msg == 'created' %}
+      <p class="lb-flash" style="background:#d1fae5;border-color:#6ee7b7;color:#065f46;">
+        Бронь сохранена.
+      </p>
+    {% endif %}
     {% if request.query_params.get('err') == 'reason' %}
       <p class="lb-flash" style="background:#fee2e2;border-color:#fecaca;color:#991b1b;">
         Укажите причину отмены.

@@ -8,7 +8,9 @@
     </p>
 
     {% if msg %}
-      {% if msg == 'voided' %}
+      {% if msg == 'created' %}
+        <div class="ok" style="margin-bottom: 12px;">Работа сохранена.</div>
+      {% elif msg == 'voided' %}
         <div class="ok" style="margin-bottom: 12px;">Аннулировано.</div>
       {% elif msg == 'already_voided' %}
         <div class="error" style="margin-bottom: 12px;">Уже аннулировано.</div>
