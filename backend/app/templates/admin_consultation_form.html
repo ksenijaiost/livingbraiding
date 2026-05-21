@@ -11,7 +11,7 @@
       <p class="lb-flash" style="background:#fee2e2;border-color:#fecaca;color:#991b1b;">{{ error }}</p>
     {% endif %}
 
-    <form method="post" action="{% if is_new %}/consultations/new{% else %}/consultations/{{ consultation.id }}/edit{% endif %}" enctype="multipart/form-data">
+    <form id="consultation-form" method="post" action="{% if is_new %}/consultations/new{% else %}/consultations/{{ consultation.id }}/edit{% endif %}" enctype="multipart/form-data">
       <input type="hidden" name="client_id" id="client_id" value="{{ selected_client.id if selected_client else fp.get('client_id','') }}" />
 
       <div class="card" style="background:#f8fafc;">
@@ -72,20 +72,44 @@
       </div>
 
       <div style="margin-top:12px;">
-        <label>Услуга (по которой консультировали)</label>
-        <select name="service_id" style="width:100%;max-width:480px;box-sizing:border-box;">
-          <option value="">— не выбрана —</option>
+        <label>Услуги (можно несколько)</label>
+        <input type="hidden" name="planned_service_ids" id="planned_service_ids" value="{{ fp.get('planned_service_ids', '') }}" />
+        <div style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
           {% for c in service_catalog %}
             {% for sc in c.subcategories %}
-              <optgroup label="{{ c.name }} → {{ sc.name }}">
-                {% for s in sc.services %}
-                  <option value="{{ s.id }}" {% if fp.get('service_id')|string == s.id|string %}selected{% endif %}>{{ s.name }}</option>
-                {% endfor %}
-              </optgroup>
+              <div class="muted" style="font-size:12px;margin-top:6px;">{{ c.name }} → {{ sc.name }}</div>
+              {% for s in sc.services %}
+                <label style="display:flex;align-items:center;gap:8px;font-weight:normal;">
+                  <input type="checkbox" class="consultation-service-on" value="{{ s.id }}"
+                    {% if selected_service_ids is defined and s.id in selected_service_ids %}checked{% elif fp.get('service_id')|string == s.id|string %}checked{% endif %} />
+                  {{ s.name }}
+                </label>
+              {% endfor %}
             {% endfor %}
           {% endfor %}
-        </select>
+        </div>
+        <p class="muted" style="font-size:12px;margin:6px 0 0;">При создании брони все отмеченные услуги попадут в план визита.</p>
       </div>
+      <script>
+        (function () {
+          function syncPlannedIds() {
+            var ids = Array.from(document.querySelectorAll('.consultation-service-on:checked')).map(function (x) { return parseInt(x.value, 10); }).filter(function (x) { return x > 0; });
+            var el = document.getElementById('planned_service_ids');
+            if (el) el.value = JSON.stringify(ids);
+            var first = ids[0];
+            var old = document.querySelector('input[name="service_id"]');
+            if (!old) {
+              old = document.createElement('input');
+              old.type = 'hidden';
+              old.name = 'service_id';
+              document.getElementById('consultation-form') && document.getElementById('consultation-form').appendChild(old);
+            }
+            if (old) old.value = first ? String(first) : '';
+          }
+          document.querySelectorAll('.consultation-service-on').forEach(function (cb) { cb.addEventListener('change', syncPlannedIds); });
+          syncPlannedIds();
+        })();
+      </script>
 
       <div style="margin-top:12px;">
         <label>Предварительная стоимость (озвученная)</label>

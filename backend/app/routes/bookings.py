@@ -348,10 +348,25 @@ def booking_linked_need_sale(b: Booking) -> bool:
 
 def _prefill_booking_fp_from_consultation(db: Session, cons: Consultation, fp: dict[str, str]) -> str | None:
     """Заполнить fp из консультации. Возвращает текст ошибки или None."""
+    from app.planned_services_db import consultation_service_ids
+
     fp["client_id"] = str(cons.client_id)
     if cons.preliminary_cost_text:
         fp["quoted_price_text"] = cons.preliminary_cost_text
-    if cons.service_id:
+    svc_ids = consultation_service_ids(db, cons.id)
+    if svc_ids:
+        import json as _json
+
+        fp["planned_service_ids"] = _json.dumps(svc_ids)
+        fp["service_id"] = str(svc_ids[0])
+        fp["kind"] = BookingKind.VISIT.value
+        svc = db.get(Service, svc_ids[0])
+        if svc:
+            sub = db.get(ServiceSubcategory, svc.subcategory_id)
+            if sub:
+                fp["service_subcategory_id"] = str(sub.id)
+                fp["service_category_id"] = str(sub.category_id)
+    elif cons.service_id:
         fp["service_id"] = str(cons.service_id)
         fp["kind"] = BookingKind.VISIT.value
         svc = db.get(Service, cons.service_id)
@@ -365,6 +380,27 @@ def _prefill_booking_fp_from_consultation(db: Session, cons: Consultation, fp: d
     if cons.photo_2:
         fp["prefill_photo_2"] = cons.photo_2
     return None
+
+
+def _parse_booking_visit_planned_services(
+    db: Session, form_raw: Any, fp: dict[str, str]
+) -> tuple[str | None, list[int], int | None]:
+    """Ошибка, список service_id, первый id для planned_service_id."""
+    from app.planned_services_db import parse_service_ids_from_form
+
+    ids = parse_service_ids_from_form(form_raw)
+    svc_raw = str(fp.get("service_id") or "").strip()
+    if not ids and svc_raw:
+        try:
+            ids = [parse_int(svc_raw, min=1, field_name="service_id")]
+        except ValueError:
+            ids = []
+    if not ids:
+        return "Выберите хотя бы одну услугу для брони визита.", [], None
+    for sid in ids:
+        if db.get(Service, sid) is None:
+            return "Услуга не найдена.", [], None
+    return None, ids, ids[0]
 
 
 def try_auto_complete_booking(db: Session, booking_id: int) -> None:
@@ -1011,7 +1047,7 @@ def admin_booking_new_get(
 
 @router.post("/new")
 @legacy_bookings_admin_router.post("/new")
-async def admin_booking_new_post(
+async def admin_booking_new_post(  # noqa: C901
     request: Request,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
@@ -1034,6 +1070,7 @@ async def admin_booking_new_post(
     deposit_amount: int | None = None
     planned_service_id: int | None = None
     planned_product_kind: str | None = None
+    planned_service_ids: list[int] = []
 
     try:
         client_id = parse_int(client_id_raw, min=1, field_name="client_id")
@@ -1065,16 +1102,11 @@ async def admin_booking_new_post(
             err = "Предоплата должна быть числом."
 
     if not err and kind_raw == BookingKind.VISIT.value:
-        svc_raw = str(fp.get("service_id") or "").strip()
-        try:
-            planned_service_id = parse_int(svc_raw, min=1, field_name="service_id")
-        except ValueError:
-            planned_service_id = None
-        if planned_service_id is None:
-            err = "Выберите услугу для брони визита."
-        else:
-            if db.get(Service, planned_service_id) is None:
-                err = "Услуга не найдена."
+        svc_err, planned_service_ids, planned_service_id = _parse_booking_visit_planned_services(
+            db, form_raw, fp
+        )
+        if svc_err:
+            err = svc_err
 
     if not err and kind_raw == BookingKind.PRODUCT_SALE.value:
         pk = str(fp.get("product_kind") or "").strip()
@@ -1223,6 +1255,11 @@ async def admin_booking_new_post(
     )
     db.add(booking)
     db.flush()
+
+    if kind_raw == BookingKind.VISIT.value and planned_service_ids:
+        from app.planned_services_db import sync_booking_planned_services
+
+        sync_booking_planned_services(db, booking.id, planned_service_ids, planned_date=planned_date)
 
     if kind_raw == BookingKind.VISIT.value:
         on_ids: list[int] = []

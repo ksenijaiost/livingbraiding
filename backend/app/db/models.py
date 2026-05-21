@@ -624,6 +624,11 @@ class CatalogProduct(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
+class VisitMastersScope(str, enum.Enum):
+    VISIT = "VISIT"
+    PER_SERVICE = "PER_SERVICE"
+
+
 class BookingKind(str, enum.Enum):
     VISIT = "VISIT"
     PRODUCT_SALE = "PRODUCT_SALE"
@@ -684,6 +689,13 @@ class Booking(Base):
         unique=True,
     )
 
+    masters_scope: Mapped[VisitMastersScope] = mapped_column(
+        Enum(VisitMastersScope, native_enum=False, length=16),
+        nullable=False,
+        default=VisitMastersScope.VISIT,
+    )
+    same_master_shares_all_services: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     cancelled_by_user: Mapped["User | None"] = relationship(foreign_keys=[cancelled_by_user_id])
@@ -697,6 +709,46 @@ class Booking(Base):
     consultation: Mapped["Consultation | None"] = relationship(
         back_populates="booking",
         foreign_keys=[consultation_id],
+    )
+    planned_services: Mapped[list["BookingPlannedService"]] = relationship(
+        back_populates="booking",
+        cascade="all, delete-orphan",
+        order_by="BookingPlannedService.sort_order",
+    )
+
+
+class BookingPlannedService(Base):
+    __tablename__ = "booking_planned_services"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False)
+    service_id: Mapped[int] = mapped_column(ForeignKey("services.id"), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    planned_start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    booking: Mapped["Booking"] = relationship(back_populates="planned_services")
+    service: Mapped["Service"] = relationship()
+    masters: Mapped[list["BookingPlannedServiceMaster"]] = relationship(
+        back_populates="planned_service",
+        cascade="all, delete-orphan",
+    )
+
+
+class BookingPlannedServiceMaster(Base):
+    __tablename__ = "booking_planned_service_masters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    booking_planned_service_id: Mapped[int] = mapped_column(
+        ForeignKey("booking_planned_services.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    planned_service: Mapped["BookingPlannedService"] = relationship(back_populates="masters")
+    master: Mapped["User"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("booking_planned_service_id", "master_id", name="uq_booking_planned_service_master"),
     )
 
 
@@ -791,6 +843,28 @@ class Consultation(Base):
         foreign_keys="Booking.consultation_id",
         uselist=False,
     )
+    planned_services: Mapped[list["ConsultationService"]] = relationship(
+        back_populates="consultation",
+        cascade="all, delete-orphan",
+        order_by="ConsultationService.sort_order",
+    )
+
+
+class ConsultationService(Base):
+    __tablename__ = "consultation_services"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    consultation_id: Mapped[int] = mapped_column(
+        ForeignKey("consultations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    service_id: Mapped[int] = mapped_column(ForeignKey("services.id"), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    consultation: Mapped["Consultation"] = relationship(back_populates="planned_services")
+    service: Mapped["Service"] = relationship()
+
+    __table_args__ = (UniqueConstraint("consultation_id", "service_id", name="uq_consultation_service"),)
 
 
 class ConsultationAuditLog(Base):
@@ -1028,6 +1102,7 @@ class PayrollFundSide(str, enum.Enum):
 
 class PayrollFundSourceKind(str, enum.Enum):
     VISIT = "VISIT"
+    VISIT_SERVICE = "VISIT_SERVICE"
     WORK = "WORK"
     PRODUCT_SALE = "PRODUCT_SALE"
     CONSULTATION = "CONSULTATION"
@@ -1144,6 +1219,13 @@ class Visit(Base):
     salon_cut_pct_at_time: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
     salon_profit: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     masters_pool: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    masters_scope: Mapped[VisitMastersScope] = mapped_column(
+        Enum(VisitMastersScope, native_enum=False, length=16),
+        nullable=False,
+        default=VisitMastersScope.VISIT,
+    )
+    same_master_shares_all_services: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     client: Mapped[Client] = relationship()
     booking: Mapped["Booking | None"] = relationship(foreign_keys=[booking_id])
@@ -1412,8 +1494,62 @@ class VisitService(Base):
     subcategory_name: Mapped[str] = mapped_column(String(160), nullable=False)
     service_name: Mapped[str] = mapped_column(String(200), nullable=False)
 
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_cancelled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    amount_from_client: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    client_discount_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    kanekalon_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    kudri_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    mix_source: Mapped[MixSource | None] = mapped_column(Enum(MixSource), nullable=True)
+    mix_complexity: Mapped[MixComplexity | None] = mapped_column(Enum(MixComplexity), nullable=True)
+    mix_cost_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    mix_bonus_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mix_bonus_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    kanekalon_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    kudri_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    materials_cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    addons_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    addons_details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    amortization_level: Mapped[AmortizationLevel | None] = mapped_column(Enum(AmortizationLevel), nullable=True)
+    amortization_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    studio_fund_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    profit_before_split: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    salon_cut_pct_at_time: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+    salon_profit: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    masters_pool: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    kit_paid_separately: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     visit: Mapped[Visit] = relationship(back_populates="services")
     service: Mapped[Service] = relationship()
+    cancelled_by_user: Mapped["User | None"] = relationship(foreign_keys=[cancelled_by_user_id])
+    masters: Mapped[list["VisitServiceMaster"]] = relationship(
+        back_populates="visit_service",
+        cascade="all, delete-orphan",
+    )
+    kit_usages: Mapped[list["VisitKitUsage"]] = relationship(back_populates="visit_service")
+
+
+class VisitServiceMaster(Base):
+    __tablename__ = "visit_service_masters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    visit_service_id: Mapped[int] = mapped_column(
+        ForeignKey("visit_services.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    percent: Mapped[float] = mapped_column(Float, nullable=False)
+
+    visit_service: Mapped["VisitService"] = relationship(back_populates="masters")
+    master: Mapped["User"] = relationship()
+
+    __table_args__ = (UniqueConstraint("visit_service_id", "master_id", name="uq_visit_service_master"),)
 
 
 class VisitKitUsage(Base):
@@ -1421,6 +1557,7 @@ class VisitKitUsage(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     visit_id: Mapped[int] = mapped_column(ForeignKey("visits.id"), nullable=False)
+    visit_service_id: Mapped[int | None] = mapped_column(ForeignKey("visit_services.id"), nullable=True)
     kit_id: Mapped[int] = mapped_column(ForeignKey("kits.id"), nullable=False)
     pieces_used: Mapped[int] = mapped_column(Integer, nullable=False)
 
@@ -1430,4 +1567,5 @@ class VisitKitUsage(Base):
     usage_breakdown_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     visit: Mapped[Visit] = relationship(back_populates="kit_usages")
+    visit_service: Mapped["VisitService | None"] = relationship(back_populates="kit_usages")
     kit: Mapped[Kit] = relationship()

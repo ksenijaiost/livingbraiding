@@ -21,6 +21,7 @@ from app.db.models import (
     VisitAuditLog,
     VisitKitUsage,
     VisitMaster,
+    VisitService,
 )
 from app.payroll_fund import storno_source_accruals
 from app.payroll_fund import PayrollFundSourceKind
@@ -30,7 +31,9 @@ from app.ui_visit_display import (
     kit_usages_empty_explanation,
     ru_mix_complexity,
     ru_mix_source,
+    visit_services_catalog_line,
 )
+from app.visit_multi_service import recalc_visit_totals
 from app.visit_edit_policy import is_in_closed_payroll_period, visit_client_change_policy
 from app.audit import diff_fields, write_audit_rows
 from app.kit_blank_stock_core import parse_usage_breakdown_json, return_stock_to_kit
@@ -82,14 +85,32 @@ def admin_visits(
     if not visits_show_cancelled:
         stmt = stmt.where(Visit.is_cancelled.is_(False))
     if visits_mine_only:
+        from app.db.models import VisitServiceMaster
+
         stmt = stmt.where(
             or_(
                 Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == current_user.id)),
+                Visit.id.in_(
+                    select(VisitService.visit_id).where(
+                        VisitService.is_cancelled.is_(False),
+                        VisitService.mix_bonus_master_id == current_user.id,
+                    )
+                ),
+                Visit.id.in_(
+                    select(VisitService.visit_id)
+                    .join(VisitServiceMaster, VisitServiceMaster.visit_service_id == VisitService.id)
+                    .where(
+                        VisitService.is_cancelled.is_(False),
+                        VisitServiceMaster.master_id == current_user.id,
+                    )
+                ),
                 Visit.mix_bonus_master_id == current_user.id,
             )
         )
     stmt = stmt.order_by(Visit.performed_date.desc()).limit(200)
     visits = list(db.scalars(stmt).all())
+    for v in visits:
+        v.services_line = visit_services_catalog_line(v)  # type: ignore[attr-defined]
     return templates.TemplateResponse(
         "admin_visits.html",
         _ctx(
@@ -147,7 +168,8 @@ def admin_visit_detail(
         ).all()
     )
 
-    service_displays = [build_service_human_display(vs) for vs in visit.services]
+    sorted_services = sorted(visit.services or [], key=lambda s: (int(s.sort_order or 0), int(s.id or 0)))
+    service_displays = {vs.id: build_service_human_display(vs) for vs in sorted_services}
 
     mix_bonus_master_label: str | None = None
     if visit.mix_bonus_master_id:
@@ -178,6 +200,7 @@ def admin_visit_detail(
             visit=visit,
             audit_rows=audit_rows,
             service_displays=service_displays,
+            sorted_services=sorted_services,
             mix_bonus_master_label=mix_bonus_master_label,
             mix_source_ru=ru_mix_source(visit.mix_source),
             mix_complexity_ru=ru_mix_complexity(getattr(visit, "mix_complexity", None)),
@@ -267,8 +290,78 @@ async def admin_visit_cancel(
         changes=diff_fields(before, visit, ("is_cancelled", "cancelled_at", "cancelled_by_user_id")),
     )
     storno_source_accruals(db, PayrollFundSourceKind.VISIT, visit.id, current_user.id)
+    for vs in db.scalars(select(VisitService).where(VisitService.visit_id == visit.id)).all():
+        storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, vs.id, current_user.id)
     db.commit()
     return RedirectResponse(url=f"/visits/{visit_id}?msg=cancelled", status_code=303)
+
+
+def _visit_service_cancel_revert_stock(db: Session, visit_service_id: int) -> tuple[bool, str]:
+    usages = list(
+        db.scalars(select(VisitKitUsage).where(VisitKitUsage.visit_service_id == visit_service_id)).all()
+    )
+    if not usages:
+        return True, ""
+    kit_rows: list[tuple[Kit, int, dict[str, int] | None]] = []
+    for u in usages:
+        kit = db.get(Kit, u.kit_id)
+        if not kit:
+            return False, "Не найден комплект для отката списания (kit_id)."
+        pieces = int(u.pieces_used or 0)
+        if pieces <= 0:
+            continue
+        bd = parse_usage_breakdown_json(getattr(u, "usage_breakdown_json", None))
+        new_avail = int(kit.pieces_available + pieces)
+        if int(kit.pieces_total) >= 0 and new_avail > int(kit.pieces_total):
+            return (
+                False,
+                f"Нельзя отменить услугу: возврат превысит остаток 'всего' по комплекту {kit.sku}.",
+            )
+        kit_rows.append((kit, pieces, bd))
+    for kit, pieces, bd in kit_rows:
+        return_stock_to_kit(db, kit_id=int(kit.id), breakdown=bd, pieces_used=pieces)
+        if kit.pieces_available > 0:
+            kit.is_in_stock = True
+    return True, ""
+
+
+@router.post("/visits/{visit_id}/services/{vs_id}/cancel")
+async def admin_visit_service_cancel(
+    visit_id: int,
+    vs_id: int,
+    current_user: AuthUser = Depends(require_assigned_roles(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    visit = db.scalar(
+        select(Visit)
+        .options(selectinload(Visit.services), selectinload(Visit.kit_usages))
+        .where(Visit.id == visit_id)
+    )
+    if not visit:
+        raise HTTPException(status_code=404, detail="Визит не найден")
+    vs = db.get(VisitService, vs_id)
+    if not vs or vs.visit_id != visit.id:
+        raise HTTPException(status_code=404, detail="Услуга визита не найдена")
+    if visit.is_cancelled:
+        return RedirectResponse(url=f"/visits/{visit_id}?msg=already_cancelled", status_code=303)
+    if vs.is_cancelled:
+        return RedirectResponse(url=f"/visits/{visit_id}?msg=service_already_cancelled", status_code=303)
+    if is_in_closed_payroll_period(db, visit.created_at):
+        return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_closed_period", status_code=303)
+
+    ok, _err = _visit_service_cancel_revert_stock(db, vs.id)
+    if not ok:
+        return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_conflict", status_code=303)
+
+    storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, vs.id, current_user.id)
+    vs.is_cancelled = True
+    vs.cancelled_at = utcnow_naive()
+    vs.cancelled_by_user_id = current_user.id
+    recalc_visit_totals(visit)
+    visit.updated_at = utcnow_naive()
+    visit.updated_by_user_id = current_user.id
+    db.commit()
+    return RedirectResponse(url=f"/visits/{visit_id}?msg=service_cancelled", status_code=303)
 
 
 @router.post("/visits/{visit_id}/client")

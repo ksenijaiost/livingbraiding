@@ -43,6 +43,8 @@ from app.kit_inlay_visit import (
     parse_kit_inlay_form,
     save_kit_inlay_visit,
 )
+from app.visit_multi_service import parse_multi_service_visit_form, save_visit_with_services
+from app.planned_services_db import booking_planned_service_ids
 from app.mix_rates import mix_rates_meta_json_dict
 from app.ru_labels import ru_master_level
 from app.routes.bookings import try_auto_complete_booking
@@ -315,7 +317,15 @@ def master_visit_new_get(
             form_prefill["client_mode"] = "existing"
             form_prefill["existing_client_id"] = str(b.client_id)
             selected_client = b.client
-            if b.planned_service_id:
+            svc_ids = booking_planned_service_ids(db, b.id)
+            if svc_ids:
+                form_prefill["service_id"] = str(svc_ids[0])
+                import json as _json
+
+                form_prefill["planned_service_ids"] = _json.dumps(svc_ids)
+                for i, sid in enumerate(svc_ids):
+                    form_prefill[f"line_{i}_service_id"] = str(sid)
+            elif b.planned_service_id:
                 form_prefill["service_id"] = str(b.planned_service_id)
             form_prefill["booking_id"] = str(b.id)
             tz = get_display_timezone(db)
@@ -357,13 +367,31 @@ async def master_visit_new_post(
 ):
     form = await request.form()
     try:
-        inp = parse_kit_inlay_form(form, single_master_default_id=current_user.id)
-        visit = save_kit_inlay_visit(
-            db,
-            current_user.id,
-            inp,
-            created_by_label=format_created_by_label(current_user),
+        booking_id_raw = (form.get("booking_id") or "").strip() if hasattr(form.get("booking_id"), "strip") else str(form.get("booking_id") or "").strip()
+        booking_id_val = int(booking_id_raw) if booking_id_raw.isdigit() else None
+        has_multi = any(
+            isinstance(k, str) and k.startswith("line_1_") for k in form.keys()
         )
+        if has_multi:
+            multi = parse_multi_service_visit_form(
+                form,
+                single_master_default_id=current_user.id,
+                booking_id=booking_id_val,
+            )
+            visit = save_visit_with_services(
+                db,
+                current_user.id,
+                multi,
+                created_by_label=format_created_by_label(current_user),
+            )
+        else:
+            inp = parse_kit_inlay_form(form, single_master_default_id=current_user.id)
+            visit = save_kit_inlay_visit(
+                db,
+                current_user.id,
+                inp,
+                created_by_label=format_created_by_label(current_user),
+            )
         # photos (up to 3)
         try:
             p1 = get_nonempty_upload(form, "photo_1")

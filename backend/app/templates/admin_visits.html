@@ -61,7 +61,7 @@
             <td>{{ v.client.name }}</td>
             <td>
               {% if v.services %}
-                {{ (v.services|sort(attribute='id')|first).service_name }}
+                {{ v.services_line }}
               {% else %}—{% endif %}
             </td>
             <td>{{ "%.0f"|format(v.amount_from_client) }}</td>

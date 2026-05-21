@@ -33,11 +33,17 @@ from app.db.models import (
     Client,
     Consultation,
     ConsultationAuditLog,
+    ConsultationService,
     PayrollFundEntryKind,
     PayrollFundLedger,
     PayrollFundSourceKind,
     Service,
     UserRole,
+)
+from app.planned_services_db import (
+    consultation_service_ids,
+    parse_service_ids_from_form,
+    sync_consultation_services,
 )
 from app.db.session import get_db
 from app.display_time import get_display_timezone
@@ -213,6 +219,7 @@ def consultation_new_get(
             type_choices=CONSULTATION_TYPE_CHOICES,
             fp=fp,
             types_data={},
+            selected_service_ids=[],
             error=None,
         ),
     )
@@ -229,7 +236,7 @@ async def consultation_new_post(
     if "consultation_types" not in fp:
         fp["consultation_types"] = form_raw.getlist("consultation_types")
 
-    err, client, consultation_dt, duration_minutes, service_id, types_data = _parse_consultation_form(
+    err, client, consultation_dt, duration_minutes, service_id, types_data, service_ids = _parse_consultation_form(
         db, fp, form_raw
     )
     if err:
@@ -267,6 +274,8 @@ async def consultation_new_post(
         photo_2=photo_2,
     )
     db.add(c)
+    db.flush()
+    sync_consultation_services(db, c.id, service_ids)
     db.commit()
     db.refresh(c)
     return RedirectResponse(url=f"/consultations/{c.id}?msg=created", status_code=303)
@@ -347,12 +356,16 @@ def consultation_edit_get(
     tz = get_display_timezone(db)
     local = c.consultation_date.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
     types_data = types_json_loads(c.types_json)
+    svc_ids = consultation_service_ids(db, c.id)
+    import json as _json
+
     fp = {
         "client_id": str(c.client_id),
         "consultation_date": local.date().isoformat(),
         "consultation_time": local.strftime("%H:%M"),
         "duration_minutes": "" if c.duration_minutes is None else str(c.duration_minutes),
-        "service_id": "" if not c.service_id else str(c.service_id),
+        "service_id": "" if not svc_ids else str(svc_ids[0]),
+        "planned_service_ids": _json.dumps(svc_ids),
         "comment": c.comment or "",
         "preliminary_cost_text": c.preliminary_cost_text or "",
     }
@@ -364,6 +377,7 @@ def consultation_edit_get(
             current_user=current_user,
             is_new=False,
             consultation=c,
+            selected_service_ids=svc_ids,
             selected_client=selected_client,
             service_catalog=list_consultation_services_catalog(db),
             type_choices=CONSULTATION_TYPE_CHOICES,
@@ -404,7 +418,7 @@ async def consultation_edit_post(
         photo_2=c.photo_2,
     )
 
-    err, client, consultation_dt, duration_minutes, service_id, types_data = _parse_consultation_form(
+    err, client, consultation_dt, duration_minutes, service_id, types_data, service_ids = _parse_consultation_form(
         db, fp, form_raw
     )
     if err:
@@ -463,6 +477,7 @@ async def consultation_edit_post(
             ),
         ),
     )
+    sync_consultation_services(db, c.id, service_ids)
     db.commit()
     return RedirectResponse(url=f"/consultations/{c.id}", status_code=303)
 
@@ -517,16 +532,18 @@ def _parse_consultation_form(db, fp, form_raw):
         if terr:
             err = terr
 
+    service_ids = parse_service_ids_from_form(form_raw, list_field="planned_service_ids")
     sid_raw = str(fp.get("service_id") or "").strip()
-    if not err and sid_raw:
-        if sid_raw.isdigit():
-            svc = db.get(Service, int(sid_raw))
-            if not svc:
+    if not service_ids and sid_raw.isdigit():
+        service_ids = [int(sid_raw)]
+    if not err and service_ids:
+        for sid in service_ids:
+            if db.get(Service, sid) is None:
                 err = "Услуга не найдена."
-            else:
-                service_id = int(sid_raw)
+                break
+        service_id = service_ids[0]
 
-    return err, client, consultation_dt, duration_minutes, service_id, types_data
+    return err, client, consultation_dt, duration_minutes, service_id, types_data, service_ids
 
 
 async def _save_consultation_photos(form_raw, photo_1: str | None, photo_2: str | None, existing: Consultation | None = None):

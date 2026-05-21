@@ -141,6 +141,12 @@
         </div>
       </div>
       <div class="card" style="margin-top: 12px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Режим мастеров</div>
+        <label style="margin-right:14px;"><input type="radio" name="masters_scope" value="VISIT" {% if fp.get('masters_scope','VISIT') != 'PER_SERVICE' %}checked{% endif %} /> На весь визит</label>
+        <label><input type="radio" name="masters_scope" value="PER_SERVICE" {% if fp.get('masters_scope') == 'PER_SERVICE' %}checked{% endif %} /> По услугам</label>
+        <label style="display:block;margin-top:8px;"><input type="checkbox" name="same_master_shares_all_services" {% if fp.get('same_master_shares_all_services') == 'on' %}checked{% endif %} /> Одинаковые доли на все услуги</label>
+      </div>
+      <div class="card" style="margin-top: 12px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Мастера на визит</div>
         <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
           <input type="checkbox" name="visit_use_multi_masters" id="visit_use_multi_masters"
@@ -242,6 +248,15 @@
           <label><input type="radio" name="mix_source" value="FROM_STOCK" {% if fp.get('mix_source') == 'FROM_STOCK' %}checked{% endif %} /> Из наличия</label>
           <label><input type="radio" name="mix_source" value="SELF_MIXED" {% if fp.get('mix_source') == 'SELF_MIXED' %}checked{% endif %} /> Сама мешала</label>
         </div>
+        <div id="mix_bonus_master_block" style="margin-top: 10px; display: none;">
+          <label>Мастер — бонус за смешку</label>
+          <select name="mix_bonus_master_id" style="max-width:320px;">
+            <option value="">— выберите —</option>
+            {% for m in masters_for_visit %}
+              <option value="{{ m.id }}" {% if fp.get('mix_bonus_master_id')|string == m.id|string %}selected{% endif %}>{{ m.display_name or m.username }}</option>
+            {% endfor %}
+          </select>
+        </div>
       </div>
         <div id="mix_complexity_block" style="margin-top: 12px; display: none;">
         <div style="font-weight: 600; margin-bottom: 8px;">Сложность смешки *</div>
@@ -254,6 +269,28 @@
           <label style="margin:0;"><input type="radio" name="mix_complexity" value="LENGTH" {% if mxc == 'LENGTH' %}checked{% endif %} /> сложная длина</label>
         </div>
       </div>
+
+      <div id="lb-extra-service-lines" class="card" style="margin-top:14px;background:#f1f5f9;display:none;">
+        <strong class="lb-line-title">Услуга 2</strong>
+        <p class="muted" style="font-size:12px;">Упрощённый блок второй услуги (без комплекта/анкеты). Для полного второго блока — доработка формы.</p>
+        <div class="row" style="margin-top:8px;">
+          <div>
+            <label>ID услуги *</label>
+            <input type="number" name="line_1_service_id" min="1" step="1" value="{{ fp.get('line_1_service_id','') }}" />
+          </div>
+          <div>
+            <label>Сумма с клиента, ₽</label>
+            <input type="number" name="line_1_amount_from_client" min="0" step="1" value="{{ fp.get('line_1_amount_from_client','') }}" />
+          </div>
+        </div>
+        <input type="hidden" name="line_1_kit_kind" value="STOCK" />
+        <input type="hidden" name="line_1_kanekalon_grams" value="0" />
+        <input type="hidden" name="line_1_kudri_grams" value="0" />
+        <input type="hidden" name="line_1_mix_source" value="NO_MIX" />
+      </div>
+      <p style="margin-top:10px;">
+        <button type="button" class="secondary" id="lb-toggle-second-service">Добавить вторую услугу</button>
+      </p>
 
       <h3>Доп. продажи</h3>
       <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">Необязательно. Сумма учитывается как расход при расчёте выручки визита.</p>
@@ -566,6 +603,11 @@
         radios.forEach(function (r) { r.disabled = false; });
       }
       updateMixComplexityBlock();
+      const bonusBlk = document.getElementById('mix_bonus_master_block');
+      const mixSel = document.querySelector('input[name="mix_source"]:checked');
+      if (bonusBlk) {
+        bonusBlk.style.display = mixSel && mixSel.value === 'SELF_MIXED' ? 'block' : 'none';
+      }
     }
     function syncAmountRequired() {
       const self = document.querySelector('input[name="client_is_self"]');
@@ -1669,5 +1711,18 @@
     updateMixBlockUI();
     syncAmountRequired();
     updateServiceDerivedUI();
+    const lbSecond = document.getElementById('lb-toggle-second-service');
+    const lbExtra = document.getElementById('lb-extra-service-lines');
+    if (lbSecond && lbExtra) {
+      if (document.querySelector('input[name="line_1_service_id"]') && document.querySelector('input[name="line_1_service_id"]').value) {
+        lbExtra.style.display = 'block';
+        lbSecond.textContent = 'Скрыть вторую услугу';
+      }
+      lbSecond.addEventListener('click', function () {
+        const show = lbExtra.style.display !== 'block';
+        lbExtra.style.display = show ? 'block' : 'none';
+        lbSecond.textContent = show ? 'Скрыть вторую услугу' : 'Добавить вторую услугу';
+      });
+    }
   </script>
 {% endblock %}

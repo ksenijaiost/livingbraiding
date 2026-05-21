@@ -38,6 +38,9 @@ from app.db.models import (
     UserRole,
     Visit,
     VisitMaster,
+    VisitMastersScope,
+    VisitService,
+    VisitServiceMaster,
     WorkForInventory,
     WorkRate,
     WorkScope,
@@ -152,9 +155,102 @@ def storno_source_accruals(
         )
 
 
+def post_visit_service_accruals(
+    db: Session,
+    visit_service: VisitService,
+    visit: Visit,
+    created_by_user_id: int | None,
+) -> None:
+    """Начисления ЗП по одной строке услуги (VISIT_SERVICE)."""
+    if visit.is_cancelled or visit_service.is_cancelled:
+        return
+    if _has_accruals_for_source(db, PayrollFundSourceKind.VISIT_SERVICE, visit_service.id):
+        return
+
+    studio_amt = money_q2(
+        float(visit_service.salon_profit or 0) + float(visit_service.studio_fund_amount or 0)
+    )
+    if studio_amt > 0:
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.STUDIO,
+            user_id=None,
+            amount=studio_amt,
+            source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+            source_id=visit_service.id,
+            created_by_user_id=created_by_user_id,
+        )
+
+    append_visit_service_master_pool_and_mix_bonus_ledgers(
+        db, visit_service, visit, created_by_user_id
+    )
+
+
+def append_visit_service_master_pool_and_mix_bonus_ledgers(
+    db: Session,
+    visit_service: VisitService,
+    visit: Visit,
+    created_by_user_id: int | None,
+) -> None:
+    mp = float(visit_service.masters_pool or 0)
+    if visit.masters_scope == VisitMastersScope.PER_SERVICE:
+        masters = list(
+            db.scalars(
+                select(VisitServiceMaster)
+                .where(VisitServiceMaster.visit_service_id == visit_service.id)
+                .order_by(VisitServiceMaster.id.asc())
+            ).all()
+        )
+    else:
+        masters = list(
+            db.scalars(select(VisitMaster).where(VisitMaster.visit_id == visit.id).order_by(VisitMaster.id.asc())).all()
+        )
+    for vm in masters:
+        pct = float(vm.percent or 0) / 100.0
+        amt = money_q2(mp * pct)
+        if amt > 0:
+            append_ledger(
+                db,
+                entry_kind=PayrollFundEntryKind.ACCRUAL,
+                side=PayrollFundSide.MASTER,
+                user_id=int(vm.master_id),
+                amount=amt,
+                source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+                source_id=visit_service.id,
+                created_by_user_id=created_by_user_id,
+            )
+
+    bonus_mid = visit_service.mix_bonus_master_id
+    bonus_amt = money_q2(float(visit_service.mix_bonus_amount or 0))
+    if bonus_mid and bonus_amt > 0:
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=int(bonus_mid),
+            amount=bonus_amt,
+            source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+            source_id=visit_service.id,
+            created_by_user_id=created_by_user_id,
+        )
+
+
 def post_visit_accruals(db: Session, visit: Visit, created_by_user_id: int | None) -> None:
     if visit.is_cancelled:
         return
+    services = list(
+        db.scalars(
+            select(VisitService)
+            .where(VisitService.visit_id == visit.id, VisitService.is_cancelled.is_(False))
+            .order_by(VisitService.sort_order.asc(), VisitService.id.asc())
+        ).all()
+    )
+    if services:
+        for vs in services:
+            post_visit_service_accruals(db, vs, visit, created_by_user_id)
+        return
+
     if _has_accruals_for_source(db, PayrollFundSourceKind.VISIT, visit.id):
         return
 

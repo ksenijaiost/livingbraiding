@@ -21,6 +21,9 @@ from app.db.models import (
     UserRole,
     Visit,
     VisitMaster,
+    VisitMastersScope,
+    VisitService,
+    VisitServiceMaster,
     WorkForInventory,
     WorkForInventoryStaff,
     WorkKind,
@@ -171,19 +174,56 @@ def api_calendar_day(
         v_stmt = v_stmt.where(
             or_(
                 Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == current_user.id)),
+                Visit.id.in_(
+                    select(VisitService.visit_id).where(
+                        VisitService.is_cancelled.is_(False),
+                        VisitService.mix_bonus_master_id == current_user.id,
+                    )
+                ),
+                Visit.id.in_(
+                    select(VisitService.visit_id)
+                    .join(VisitServiceMaster, VisitServiceMaster.visit_service_id == VisitService.id)
+                    .where(
+                        VisitService.is_cancelled.is_(False),
+                        VisitServiceMaster.master_id == current_user.id,
+                    )
+                ),
                 Visit.mix_bonus_master_id == current_user.id,
             )
         )
     visits = list(db.scalars(v_stmt).all())
+    vs_ids: list[int] = []
+    for v in visits:
+        for s in v.services or []:
+            if not s.is_cancelled and s.id:
+                vs_ids.append(int(s.id))
     visit_ids = [int(v.id) for v in visits if v.id is not None]
-    visit_payout = _sum_ledger(
+    visit_payout_vs = _sum_ledger(
+        db,
+        side=PayrollFundSide.MASTER,
+        source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+        source_ids=vs_ids,
+        user_id=current_user.id if is_master else None,
+    )
+    visit_payout_legacy = _sum_ledger(
         db,
         side=PayrollFundSide.MASTER,
         source_kind=PayrollFundSourceKind.VISIT,
         source_ids=visit_ids,
         user_id=current_user.id if is_master else None,
     )
-    visit_studio = (
+    visit_studio_vs = (
+        _sum_ledger(
+            db,
+            side=PayrollFundSide.STUDIO,
+            source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+            source_ids=vs_ids,
+            user_id=None,
+        )
+        if is_super
+        else {}
+    )
+    visit_studio_legacy = (
         _sum_ledger(
             db,
             side=PayrollFundSide.STUDIO,
@@ -197,23 +237,54 @@ def api_calendar_day(
 
     visit_items: list[dict[str, Any]] = []
     for v in visits:
-        svc = None
-        try:
-            svc = (sorted(list(v.services or []), key=lambda x: int(x.id or 0))[:1] or [None])[0]
-        except Exception:
-            svc = None
-        svc_name = (svc.service_name if svc else "—") if svc is not None else "—"
         vid = int(v.id)
-        visit_items.append(
-            {
-                "id": vid,
-                "client": (v.client.name if v.client else "—"),
-                "label": svc_name,
-                "url": f"/visits/{vid}",
-                "payout_sum": float(visit_payout.get(vid, 0.0)),
-                "studio_sum": float(visit_studio.get(vid, 0.0)),
-            }
+        client_name = v.client.name if v.client else "—"
+        active_services = sorted(
+            [s for s in (v.services or []) if not s.is_cancelled],
+            key=lambda x: (int(x.sort_order or 0), int(x.id or 0)),
         )
+        if not active_services:
+            visit_items.append(
+                {
+                    "id": vid,
+                    "client": client_name,
+                    "label": "—",
+                    "url": f"/visits/{vid}",
+                    "payout_sum": float(visit_payout_legacy.get(vid, 0.0)),
+                    "studio_sum": float(visit_studio_legacy.get(vid, 0.0)),
+                }
+            )
+            continue
+        for svc in active_services:
+            if is_master:
+                show = svc.mix_bonus_master_id == current_user.id
+                if not show and v.masters_scope == VisitMastersScope.VISIT:
+                    vm_ids = list(
+                        db.scalars(select(VisitMaster.master_id).where(VisitMaster.visit_id == vid)).all()
+                    )
+                    show = current_user.id in vm_ids
+                if not show:
+                    mids = list(
+                        db.scalars(
+                            select(VisitServiceMaster.master_id).where(
+                                VisitServiceMaster.visit_service_id == svc.id
+                            )
+                        ).all()
+                    )
+                    show = current_user.id in mids
+                if not show:
+                    continue
+            sid = int(svc.id)
+            visit_items.append(
+                {
+                    "id": vid,
+                    "client": client_name,
+                    "label": svc.service_name,
+                    "url": f"/visits/{vid}",
+                    "payout_sum": float(visit_payout_vs.get(sid, 0.0)),
+                    "studio_sum": float(visit_studio_vs.get(sid, 0.0)),
+                }
+            )
 
     # ---- Works ----
     w_day = func.coalesce(WorkForInventory.performed_date, WorkForInventory.created_at)
