@@ -22,6 +22,7 @@
       <thead>
         <tr>
           <th rowspan="2">Услуга</th>
+          <th rowspan="2">Время, мин</th>
           <th rowspan="2">Активна</th>
           <th colspan="2">{{ ru_master_level('JUNIOR')|capitalize }}</th>
           <th colspan="2">{{ ru_master_level('MIDDLE')|capitalize }}</th>
@@ -39,6 +40,7 @@
         {% for s in services %}
           <tr>
             <td><strong>{{ s.name }}</strong></td>
+            <td>{{ s.estimated_duration_minutes }}</td>
             <td>{% if s.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
             <td>{% if s.price_junior_from is not none %}{{ s.price_junior_from }}{% else %}<span class="muted">—</span>{% endif %}</td>
             <td>{% if s.price_junior_to is not none %}{{ s.price_junior_to }}{% else %}<span class="muted">—</span>{% endif %}</td>
