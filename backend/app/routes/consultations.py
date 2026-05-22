@@ -13,6 +13,7 @@ from app.audit import diff_fields, write_audit_rows
 from app.auth import AuthUser, require_role
 from app.client_validation import strip_or_none
 from app.consultation_booking import (
+    OPEN_BOOKING_STATUSES,
     booking_for_consultation,
     booking_status_label,
     can_create_booking_from_consultation,
@@ -141,7 +142,7 @@ def consultations_list(
             exists(
                 select(1).where(
                     Booking.consultation_id == Consultation.id,
-                    Booking.status == BookingStatus.ACTIVE,
+                    Booking.status.in_(OPEN_BOOKING_STATUSES),
                 )
             )
         )

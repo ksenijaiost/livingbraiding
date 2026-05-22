@@ -16,13 +16,19 @@
           <form method="get" action="/bookings/{{ booking.id }}/edit" class="lb-m-0">
             <button type="submit">Изменить</button>
           </form>
-          {% if current_user.role.value == "ADMIN_SUPER" and booking.status.value == "ACTIVE" %}
+          {% if booking.status.value == "PENDING_CONFIRMATION" %}
+            <form method="post" action="/bookings/{{ booking.id }}/confirm" class="lb-m-0"
+                  data-lb-confirm="Подтвердить бронь?">
+              <button type="submit">Подтвердить</button>
+            </form>
+          {% endif %}
+          {% if current_user.role.value == "ADMIN_SUPER" and booking.status.value in ["ACTIVE", "PENDING_CONFIRMATION"] %}
             <form method="post" action="/bookings/{{ booking.id }}/mark-done" class="lb-m-0"
                   data-lb-confirm="Отметить бронь выполненной?">
               <button class="secondary" type="submit">Выполнено</button>
             </form>
           {% endif %}
-          {% if booking.status.value == "ACTIVE" %}
+          {% if booking.status.value in ["ACTIVE", "PENDING_CONFIRMATION"] %}
             <form method="post" action="/bookings/{{ booking.id }}/cancel" class="lb-m-0"
                   data-lb-prompt-input="reason" data-lb-prompt-text="Причина отмены брони:">
               <input type="hidden" name="reason" value="" />
@@ -36,6 +42,11 @@
     {% if flash_msg == 'created' %}
       <p class="lb-flash" style="background:#d1fae5;border-color:#6ee7b7;color:#065f46;">
         Бронь сохранена.
+      </p>
+    {% endif %}
+    {% if flash_msg == 'confirmed' %}
+      <p class="lb-flash" style="background:#d1fae5;border-color:#6ee7b7;color:#065f46;">
+        Бронь подтверждена.
       </p>
     {% endif %}
     {% if request.query_params.get('err') == 'reason' %}

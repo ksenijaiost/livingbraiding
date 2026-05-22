@@ -9,6 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_role
+from app.consultation_booking import booking_status_label
 from app.db.models import (
     Booking,
     BookingKind,
@@ -57,16 +58,6 @@ def _booking_kind_label(k: str) -> str:
     if k == BookingKind.PRODUCT_SALE.value:
         return "Продажа (без услуги)"
     return k
-
-
-def _booking_status_label(s: str) -> str:
-    if s == BookingStatus.ACTIVE.value:
-        return "⌛ активна"
-    if s == BookingStatus.DONE.value:
-        return "✅ выполнена"
-    if s == BookingStatus.CANCELLED.value:
-        return "❌ отменена"
-    return s
 
 
 def _work_activity_label(w: WorkForInventory) -> str:
@@ -155,7 +146,7 @@ def api_calendar_day(
                 "client": (b.client.name if b.client else "—"),
                 "kind": kind_l,
                 "label": f"{kind_l} · {time_l}",
-                "status": _booking_status_label(b.status.value),
+                "status": booking_status_label(b.status),
                 "time": time_l,
                 "url": f"/bookings/{int(b.id)}",
                 "payout_sum": 0.0,

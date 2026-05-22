@@ -36,9 +36,9 @@
       {% endif %}
       <span class="muted">·</span>
       {% if booking_status_filter == 'active' %}
-        <strong>активна</strong>
+        <strong>открытая бронь</strong>
       {% else %}
-        <a href="{{ consultations_url_bs_active }}">активна</a>
+        <a href="{{ consultations_url_bs_active }}">открытая бронь</a>
       {% endif %}
       <span class="muted">·</span>
       {% if booking_status_filter == 'none_or_cancelled' %}

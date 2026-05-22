@@ -635,6 +635,7 @@ class BookingKind(str, enum.Enum):
 
 
 class BookingStatus(str, enum.Enum):
+    PENDING_CONFIRMATION = "PENDING_CONFIRMATION"
     ACTIVE = "ACTIVE"
     DONE = "DONE"
     CANCELLED = "CANCELLED"
@@ -659,9 +660,9 @@ class Booking(Base):
         nullable=False,
     )
     status: Mapped[BookingStatus] = mapped_column(
-        Enum(BookingStatus, native_enum=False, length=16),
+        Enum(BookingStatus, native_enum=False, length=24),
         nullable=False,
-        default=BookingStatus.ACTIVE,
+        default=BookingStatus.PENDING_CONFIRMATION,
     )
 
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

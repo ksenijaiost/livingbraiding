@@ -12,16 +12,28 @@ def booking_for_consultation(db: Session, consultation_id: int) -> Booking | Non
     return db.scalar(select(Booking).where(Booking.consultation_id == consultation_id).limit(1))
 
 
+OPEN_BOOKING_STATUSES = frozenset(
+    {BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE}
+)
+
+
 def booking_status_label(status: BookingStatus | None) -> str:
     if status is None:
         return "отсутствует"
+    if status == BookingStatus.PENDING_CONFIRMATION:
+        return "😴 ждёт подтверждения"
     if status == BookingStatus.ACTIVE:
-        return "активна"
+        return "подтверждена"
     if status == BookingStatus.DONE:
         return "выполнена"
     if status == BookingStatus.CANCELLED:
         return "отменена"
     return str(status.value)
+
+
+def booking_is_open(status: BookingStatus) -> bool:
+    """Бронь не отменена и не выполнена — можно работы/визиты/продажи и отмену."""
+    return status in OPEN_BOOKING_STATUSES
 
 
 def can_create_booking_from_consultation(db: Session, c: Consultation) -> bool:
@@ -33,4 +45,8 @@ def can_create_booking_from_consultation(db: Session, c: Consultation) -> bool:
 
 def consultation_has_open_booking(db: Session, consultation_id: int) -> bool:
     b = booking_for_consultation(db, consultation_id)
-    return b is not None and b.status in (BookingStatus.ACTIVE, BookingStatus.DONE)
+    return b is not None and b.status in (
+        BookingStatus.PENDING_CONFIRMATION,
+        BookingStatus.ACTIVE,
+        BookingStatus.DONE,
+    )

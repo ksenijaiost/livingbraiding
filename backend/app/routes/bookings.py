@@ -18,7 +18,11 @@ from sqlalchemy.orm import Session, selectinload
 from app.audit import FieldChange, diff_fields, write_audit_rows
 from app.auth import AuthUser, require_role
 from app.client_validation import format_created_by_label, strip_or_none
-from app.consultation_booking import can_create_booking_from_consultation
+from app.consultation_booking import (
+    booking_is_open,
+    booking_status_label,
+    can_create_booking_from_consultation,
+)
 from app.db.models import (
     Booking,
     BookingAuditLog,
@@ -98,13 +102,10 @@ def _booking_kind_label(k: str) -> str:
 
 
 def _booking_status_label(s: str) -> str:
-    if s == BookingStatus.ACTIVE.value:
-        return "⌛ активна"
-    if s == BookingStatus.DONE.value:
-        return "✅ выполнена"
-    if s == BookingStatus.CANCELLED.value:
-        return "❌ отменена"
-    return s
+    try:
+        return booking_status_label(BookingStatus(s))
+    except ValueError:
+        return s
 
 
 def _product_kind_label(k: str | None) -> str:
@@ -405,7 +406,7 @@ def _parse_booking_visit_planned_services(
 
 def try_auto_complete_booking(db: Session, booking_id: int) -> None:
     b = db.get(Booking, booking_id)
-    if not b or b.status != BookingStatus.ACTIVE:
+    if not b or not booking_is_open(b.status):
         return
     details: dict[str, Any] = {}
     if b.details_json:
@@ -1241,7 +1242,7 @@ async def admin_booking_new_post(  # noqa: C901
         client_id=client.id,
         planned_date=planned_date,
         kind=BookingKind(kind_raw),
-        status=BookingStatus.ACTIVE,
+        status=BookingStatus.PENDING_CONFIRMATION,
         quoted_price_text=quoted_price_text,
         deposit_amount=deposit_amount,
         photo_1=photo_1_url,
@@ -1800,7 +1801,9 @@ def admin_bookings(
 
     stmt = select(Booking).options(selectinload(Booking.client)).order_by(Booking.planned_date.asc(), Booking.id.asc()).limit(1000)
     if show_mode != "all":
-        stmt = stmt.where(Booking.status == BookingStatus.ACTIVE)
+        stmt = stmt.where(
+            Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE))
+        )
     if bookings_mine_only:
         stmt = stmt.where(
             or_(
@@ -1835,7 +1838,7 @@ def admin_booking_cancel(
     b = db.get(Booking, booking_id)
     if b is None:
         raise HTTPException(status_code=404, detail="Бронь не найдена")
-    if b.status != BookingStatus.ACTIVE:
+    if not booking_is_open(b.status):
         return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
     reason_norm = (reason or "").strip()
     if not reason_norm:
@@ -1881,7 +1884,7 @@ def admin_booking_mark_done(
     b = db.get(Booking, booking_id)
     if b is None:
         raise HTTPException(status_code=404, detail="Бронь не найдена")
-    if b.status != BookingStatus.ACTIVE:
+    if not booking_is_open(b.status):
         return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
     old_status = b.status
     b.status = BookingStatus.DONE
@@ -1898,6 +1901,40 @@ def admin_booking_mark_done(
     )
     db.commit()
     return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
+
+
+@router.post("/{booking_id}/confirm")
+@legacy_bookings_admin_router.post("/{booking_id}/confirm")
+def admin_booking_confirm(
+    booking_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    b = db.get(Booking, booking_id)
+    if b is None:
+        raise HTTPException(status_code=404, detail="Бронь не найдена")
+    if b.status != BookingStatus.PENDING_CONFIRMATION:
+        return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
+    old_status = b.status
+    b.status = BookingStatus.ACTIVE
+    b.updated_at = utcnow_naive()
+    b.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=BookingAuditLog,
+        entity_field="booking_id",
+        entity_id=b.id,
+        changed_by_user_id=current_user.id,
+        changes=[
+            FieldChange(
+                "status",
+                _booking_status_label(old_status.value),
+                _booking_status_label(BookingStatus.ACTIVE.value),
+            )
+        ],
+    )
+    db.commit()
+    return RedirectResponse(url=f"/bookings/{booking_id}?msg=confirmed", status_code=303)
 
 
 def _product_sale_activity_label(sale: ProductSale) -> str:
@@ -2044,14 +2081,20 @@ def master_bookings(
         db.scalars(
             select(Booking.id)
             .join(BookingMaster, BookingMaster.booking_id == Booking.id)
-            .where(Booking.status == BookingStatus.ACTIVE, BookingMaster.master_id == current_user.id)
+            .where(
+                Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)),
+                BookingMaster.master_id == current_user.id,
+            )
         ).all()
     )
     sale_ids = list(
         db.scalars(
             select(Booking.id)
             .join(BookingStaff, BookingStaff.booking_id == Booking.id)
-            .where(Booking.status == BookingStatus.ACTIVE, BookingStaff.user_id == current_user.id)
+            .where(
+                Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)),
+                BookingStaff.user_id == current_user.id,
+            )
         ).all()
     )
     ids = sorted(set([int(x) for x in (visit_ids + sale_ids) if x is not None]))

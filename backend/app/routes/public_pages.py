@@ -163,7 +163,9 @@ def home(
         b_stmt = (
             select(Booking.planned_date)
             .where(
-                Booking.status == BookingStatus.ACTIVE,
+                Booking.status.in_(
+                    (BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)
+                ),
                 Booking.planned_date >= month_start_utc,
                 Booking.planned_date < month_end_utc,
             )
