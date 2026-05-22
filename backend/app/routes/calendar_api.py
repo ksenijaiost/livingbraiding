@@ -10,12 +10,17 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_role
 from app.consultation_booking import booking_status_label
+from app.calendar_display import get_calendar_display_hours
+from app.calendar_occupancy import build_occupancy_for_day
 from app.db.models import (
     Booking,
     BookingKind,
     BookingMaster,
+    BookingPlannedService,
     BookingStaff,
     BookingStatus,
+    Service,
+    ServiceSubcategory,
     PayrollFundLedger,
     PayrollFundSide,
     PayrollFundSourceKind,
@@ -34,6 +39,10 @@ from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_date_iso
+from app.ui_service_display import (
+    booking_service_labels_from_booking,
+    format_visit_service_catalog_path,
+)
 
 
 router = APIRouter()
@@ -122,7 +131,18 @@ def api_calendar_day(
     # ---- Bookings ----
     b_stmt = (
         select(Booking)
-        .options(selectinload(Booking.client))
+        .options(
+            selectinload(Booking.client),
+            selectinload(Booking.masters),
+            selectinload(Booking.planned_service)
+            .selectinload(Service.subcategory)
+            .selectinload(ServiceSubcategory.category),
+            selectinload(Booking.planned_services)
+            .selectinload(BookingPlannedService.service)
+            .selectinload(Service.subcategory)
+            .selectinload(ServiceSubcategory.category),
+            selectinload(Booking.planned_services).selectinload(BookingPlannedService.masters),
+        )
         .where(Booking.planned_date >= day_start, Booking.planned_date < day_end)
         .order_by(Booking.planned_date.asc(), Booking.id.asc())
     )
@@ -140,12 +160,16 @@ def api_calendar_day(
     for b in bookings:
         kind_l = _booking_kind_label(b.kind.value)
         time_l = format_naive_utc_datetime(b.planned_date, tz)
+        svc_label = ""
+        if b.kind == BookingKind.VISIT:
+            svc_label = booking_service_labels_from_booking(b)
         booking_items.append(
             {
                 "id": int(b.id),
                 "client": (b.client.name if b.client else "—"),
                 "kind": kind_l,
                 "label": f"{kind_l} · {time_l}",
+                "service_label": svc_label,
                 "status": booking_status_label(b.status),
                 "time": time_l,
                 "url": f"/bookings/{int(b.id)}",
@@ -240,6 +264,7 @@ def api_calendar_day(
                     "id": vid,
                     "client": client_name,
                     "label": "—",
+                    "service_label": "",
                     "url": f"/visits/{vid}",
                     "payout_sum": float(visit_payout_legacy.get(vid, 0.0)),
                     "studio_sum": float(visit_studio_legacy.get(vid, 0.0)),
@@ -271,6 +296,7 @@ def api_calendar_day(
                     "id": vid,
                     "client": client_name,
                     "label": svc.service_name,
+                    "service_label": format_visit_service_catalog_path(svc),
                     "url": f"/visits/{vid}",
                     "payout_sum": float(visit_payout_vs.get(sid, 0.0)),
                     "studio_sum": float(visit_studio_vs.get(sid, 0.0)),
@@ -345,8 +371,14 @@ def api_calendar_day(
             }
         )
 
+    hour_from, hour_to = get_calendar_display_hours(db)
+    occupancy = build_occupancy_for_day(
+        db, day=day, hour_from=hour_from, hour_to=hour_to, bookings=bookings
+    )
+
     resp = {
         "date": day.isoformat(),
+        "occupancy": occupancy,
         "bookings": {"count": len(booking_items), "payout_sum": 0.0, "studio_sum": 0.0, "items": booking_items},
         "visits": {
             "count": len(visit_items),

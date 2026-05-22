@@ -138,6 +138,15 @@ def ensure_prod_seed_data(db: Session) -> None:
     if not kit_mx:
         db.add(Setting(key=KIT_MAX_RESERVES_PER_KIT, value="3"))
 
+    from app.setting_keys import CALENDAR_DISPLAY_HOUR_FROM, CALENDAR_DISPLAY_HOUR_TO
+
+    cal_from = db.get(Setting, CALENDAR_DISPLAY_HOUR_FROM)
+    if not cal_from:
+        db.add(Setting(key=CALENDAR_DISPLAY_HOUR_FROM, value="9"))
+    cal_to = db.get(Setting, CALENDAR_DISPLAY_HOUR_TO)
+    if not cal_to:
+        db.add(Setting(key=CALENDAR_DISPLAY_HOUR_TO, value="21"))
+
     # Default material prices: ₽ за 100 г → ₽/г (админ может поменять в настройках)
     defaults = {
         MaterialType.KANEKALON: 4.0,  # 400 ₽ / 100 г

@@ -26,8 +26,11 @@ from app.forms_parse import parse_bool, parse_float, parse_int
 from app.mix_rates import mix_rates_for_admin_form
 from app.audit import diff_fields, write_audit_rows
 from app.time_utils import utcnow_naive
+from app.calendar_display import get_calendar_display_hours
 from app.setting_keys import (
     AUDIT_RETENTION_MONTHS,
+    CALENDAR_DISPLAY_HOUR_FROM,
+    CALENDAR_DISPLAY_HOUR_TO,
     DISPLAY_TIMEZONE,
     EDIT_WINDOW_DAYS,
     KIT_MAX_RESERVES_PER_KIT,
@@ -78,6 +81,7 @@ def admin_settings_page(
     display_tz = get_display_timezone(db)
     kit_max_row = db.get(Setting, KIT_MAX_RESERVES_PER_KIT)
     kit_max_reserves_per_kit = kit_max_row.value if kit_max_row else "3"
+    cal_hour_from, cal_hour_to = get_calendar_display_hours(db)
 
     def _wr_float(key: str, default: float) -> float:
         r = db.scalar(select(WorkRate).where(WorkRate.key == key, WorkRate.is_active.is_(True)))
@@ -127,6 +131,8 @@ def admin_settings_page(
             kudri_per_100g=kudri_per_100,
             display_timezone=display_tz,
             kit_max_reserves_per_kit=kit_max_reserves_per_kit,
+            calendar_display_hour_from=cal_hour_from,
+            calendar_display_hour_to=cal_hour_to,
             timezone_choices=ALLOWED_TIMEZONES,
             saved=bool(saved),
             work_rates=work_rates,
@@ -144,6 +150,8 @@ def admin_settings_save(
     kanek_per_100g: str = Form(...),
     kudri_per_100g: str = Form(...),
     kit_max_reserves_per_kit: str = Form(...),
+    calendar_display_hour_from: str = Form(...),
+    calendar_display_hour_to: str = Form(...),
     current_user=Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -152,6 +160,10 @@ def admin_settings_save(
         k100 = parse_float(kanek_per_100g, min=0.0, field_name="kanek_per_100g")
         ku100 = parse_float(kudri_per_100g, min=0.0, field_name="kudri_per_100g")
         kmn = parse_int(kit_max_reserves_per_kit, min=1, max=20, field_name=KIT_MAX_RESERVES_PER_KIT)
+        cal_from = parse_int(calendar_display_hour_from, min=0, max=23, field_name=CALENDAR_DISPLAY_HOUR_FROM)
+        cal_to = parse_int(calendar_display_hour_to, min=1, max=24, field_name=CALENDAR_DISPLAY_HOUR_TO)
+        if cal_from >= cal_to:
+            raise ValueError("calendar hours")
     except ValueError:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
 
@@ -201,6 +213,28 @@ def admin_settings_save(
         changed_by_user_id=current_user.id,
         changes=diff_fields(before_kr, kr_row, ("value",)),
     )
+
+    for cal_key, cal_val in (
+        (CALENDAR_DISPLAY_HOUR_FROM, cal_from),
+        (CALENDAR_DISPLAY_HOUR_TO, cal_to),
+    ):
+        cal_row = db.get(Setting, cal_key)
+        before_cal = SimpleNamespace(value=(cal_row.value if cal_row else None))
+        if not cal_row:
+            cal_row = Setting(key=cal_key, value=str(cal_val))
+            db.add(cal_row)
+        else:
+            cal_row.value = str(cal_val)
+        cal_row.updated_at = now
+        cal_row.updated_by_user_id = current_user.id
+        write_audit_rows(
+            db,
+            log_model=SettingAuditLog,
+            entity_field="setting_key",
+            entity_id=cal_row.key,
+            changed_by_user_id=current_user.id,
+            changes=diff_fields(before_cal, cal_row, ("value",)),
+        )
 
     db.commit()
     return RedirectResponse(url="/admin/settings?saved=1", status_code=303)

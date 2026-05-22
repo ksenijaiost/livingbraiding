@@ -13,6 +13,8 @@
       <div class="error">Такое имя уже есть в этой подкатегории.</div>
     {% elif err == "bad_price" %}
       <div class="error">Некорректная цена.</div>
+    {% elif err == "bad_duration" %}
+      <div class="error">Укажите ориентировочное время: целое число минут от 1 до 1440.</div>
     {% endif %}
     <form method="post" action="{% if is_new %}/admin/catalog/services/new{% else %}/admin/catalog/services/{{ svc.id }}/edit{% endif %}">
       {% if is_new %}
@@ -24,6 +26,9 @@
       <label style="display:flex; align-items:center; gap:8px; margin-top: 12px;">
         <input type="checkbox" name="is_active" {% if form_active %}checked{% endif %} />
         Активна
+      </label>
+      <label style="margin-top: 12px; display:block;">Ориентировочное время, мин
+        <input name="estimated_duration_minutes" type="number" min="1" max="1440" step="15" value="{{ form_duration }}" required />
       </label>
       <p class="muted" style="margin: 20px 0 8px;">Прайс (₽), для каждого уровня — «от» и «до». Необязательные поля можно оставить пустыми (в базе будет NULL).</p>
 

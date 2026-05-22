@@ -30,6 +30,15 @@
         <label>Максимум резервов на один комплект (1–20)</label>
         <input name="kit_max_reserves_per_kit" type="number" step="1" min="1" max="20" value="{{ kit_max_reserves_per_kit }}" />
       </div>
+      <div class="lb-mb-12">
+        <label>Час начала календаря (0–23)</label>
+        <input name="calendar_display_hour_from" type="number" step="1" min="0" max="23" value="{{ calendar_display_hour_from }}" />
+      </div>
+      <div class="lb-mb-12">
+        <label>Час окончания календаря (1–24, исключая)</label>
+        <input name="calendar_display_hour_to" type="number" step="1" min="1" max="24" value="{{ calendar_display_hour_to }}" />
+      </div>
+      <p class="muted lb-mb-12">Сетка «Занятость» в модалке дня: от начала до конца (например 9–21 — часы 9:00…20:00).</p>
       <div class="lb-mt-16 lb-pt-12 lb-bt">
         <button type="submit">Сохранить</button>
       </div>

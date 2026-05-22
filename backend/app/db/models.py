@@ -360,6 +360,7 @@ class Service(Base):
     subcategory_id: Mapped[int] = mapped_column(ForeignKey("service_subcategories.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    estimated_duration_minutes: Mapped[int] = mapped_column(Integer, default=120, nullable=False)
 
     # Прайс по уровням мастера (в UI: младший / мастер / старший); любой диапазон может быть NULL.
     price_junior_from: Mapped[float | None] = mapped_column(Float, nullable=True)
