@@ -206,7 +206,7 @@ def upgrade() -> None:
                 """
                 UPDATE visit_services SET
                   sort_order = 0,
-                  is_cancelled = 0,
+                  is_cancelled = (SELECT is_cancelled FROM visits WHERE id = :vid),
                   amount_from_client = (SELECT amount_from_client FROM visits WHERE id = :vid),
                   client_discount_percent = (SELECT client_discount_percent FROM visits WHERE id = :vid),
                   kanekalon_grams = (SELECT kanekalon_grams FROM visits WHERE id = :vid),
