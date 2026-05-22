@@ -27,8 +27,10 @@ def memory_db():
 
 
 def test_booking_status_labels() -> None:
-    assert "😴" in booking_status_label(BookingStatus.PENDING_CONFIRMATION)
-    assert booking_status_label(BookingStatus.ACTIVE) == "подтверждена"
+    assert booking_status_label(BookingStatus.PENDING_CONFIRMATION) == "😴 ждёт подтверждения"
+    assert booking_status_label(BookingStatus.ACTIVE) == "✔️ подтверждена"
+    assert booking_status_label(BookingStatus.DONE) == "✅ выполнена"
+    assert booking_status_label(BookingStatus.CANCELLED) == "❌ отменена"
     assert booking_is_open(BookingStatus.PENDING_CONFIRMATION)
     assert booking_is_open(BookingStatus.ACTIVE)
     assert not booking_is_open(BookingStatus.DONE)

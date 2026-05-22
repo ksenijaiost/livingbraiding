@@ -266,7 +266,7 @@
                 if (hPct <= 0) continue;
                 var bg = seg.color || '#9E88C0';
                 var op = (seg.status === 'DONE') ? '0.55' : '1';
-                h += '<a href=\"' + esc(seg.url || '#') + '\" title=\"Бронь #' + esc(seg.booking_id) + '\" style=\"position:absolute; left:2px; right:2px; top:' + topPct + '%; height:' + hPct + '%; background:' + bg + '; opacity:' + op + '; color:#fff; font-size:11px; text-decoration:none; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:1;\">' + esc(seg.booking_id) + '</a>';
+                h += '<a href=\"' + esc(seg.url || '#') + '\" title=\"Бронь #' + esc(seg.booking_id) + '\" style=\"position:absolute; left:2px; right:2px; top:' + topPct + '%; height:' + hPct + '%; background:' + bg + '; opacity:' + op + '; color:#fff; font-size:11px; text-decoration:none; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:' + (si + 1) + '; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.92);\">' + esc(seg.booking_id) + '</a>';
               }
               h += '</div></div>';
             }
