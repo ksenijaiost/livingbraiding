@@ -287,8 +287,7 @@
               <td><a href="/bookings/{{ b.id }}">#{{ b.id }}</a></td>
               <td>{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</td>
               <td>
-                {% if b.status.value == "DONE" %}✅ выполнена{% endif %}
-                {% if b.status.value == "CANCELLED" %}❌ отменена{% endif %}
+                {{ booking_status_display(b.status) }}
               </td>
               <td style="white-space:nowrap;">
                 <a href="/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>

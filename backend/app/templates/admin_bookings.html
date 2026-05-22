@@ -64,10 +64,7 @@
               <td><a href="/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
               <td>{{ "Визит" if b.kind.value == "VISIT" else "Продажа" }}</td>
               <td>
-                {% if b.status.value == "PENDING_CONFIRMATION" %}<strong>😴 ждёт подтверждения</strong>{% endif %}
-                {% if b.status.value == "ACTIVE" %}<strong>подтверждена</strong>{% endif %}
-                {% if b.status.value == "DONE" %}✅ выполнена{% endif %}
-                {% if b.status.value == "CANCELLED" %}❌ отменена{% endif %}
+                <strong>{{ booking_status_display(b.status) }}</strong>
               </td>
               <td class="lb-nowrap">
                 <a href="/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>

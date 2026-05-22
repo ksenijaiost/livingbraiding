@@ -19,16 +19,29 @@ OPEN_BOOKING_STATUSES = frozenset(
 
 def booking_status_label(status: BookingStatus | None) -> str:
     if status is None:
-        return "отсутствует"
+        return "➖ отсутствует"
     if status == BookingStatus.PENDING_CONFIRMATION:
         return "😴 ждёт подтверждения"
     if status == BookingStatus.ACTIVE:
-        return "подтверждена"
+        return "✔️ подтверждена"
     if status == BookingStatus.DONE:
-        return "выполнена"
+        return "✅ выполнена"
     if status == BookingStatus.CANCELLED:
-        return "отменена"
+        return "❌ отменена"
     return str(status.value)
+
+
+def booking_status_display(status: BookingStatus | object | str | None) -> str:
+    """Подпись статуса для шаблонов: enum брони, строка value или None."""
+    if status is None:
+        return booking_status_label(None)
+    if isinstance(status, BookingStatus):
+        return booking_status_label(status)
+    val = getattr(status, "value", status)
+    try:
+        return booking_status_label(BookingStatus(val))
+    except (ValueError, TypeError):
+        return str(val)
 
 
 def booking_is_open(status: BookingStatus) -> bool:
