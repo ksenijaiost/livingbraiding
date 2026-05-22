@@ -153,15 +153,16 @@
         {% if sorted_services|length > 1 %}
           <p class="muted" style="margin: 8px 0 2px; font-size: 12px;">{{ vs.service_name }}</p>
         {% endif %}
-        {% if not disp %}{% continue %}{% endif %}
-        {% if disp.detail_blocks %}
-          <ul style="margin: 4px 0 10px; padding-left: 1.2rem; line-height: 1.35;">
-            {% for label, val in disp.detail_blocks %}
-              <li style="margin-bottom: 4px;"><span style="color:#6b7280;">{{ label }}:</span> {{ val }}</li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <p class="muted" style="margin: 4px 0;">Нет данных анкеты.</p>
+        {% if disp %}
+          {% if disp.detail_blocks %}
+            <ul style="margin: 4px 0 10px; padding-left: 1.2rem; line-height: 1.35;">
+              {% for label, val in disp.detail_blocks %}
+                <li style="margin-bottom: 4px;"><span style="color:#6b7280;">{{ label }}:</span> {{ val }}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="muted" style="margin: 4px 0;">Нет данных анкеты.</p>
+          {% endif %}
         {% endif %}
       {% endfor %}
     {% else %}
