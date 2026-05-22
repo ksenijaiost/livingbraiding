@@ -1,21 +1,36 @@
-{# Динамические строки состава комплекта. Перед include: script kit_table_state или kit_composition_state #}
+{# Динамические строки состава. Параметры: line_name_prefix, table_id, thead_id, tbody_id, state_element_id, used_only, help_text #}
+{% set line_name_prefix = line_name_prefix | default('kit_line') %}
+{% set table_id = table_id | default('kit_composition_table') %}
+{% set thead_id = thead_id | default('kit_composition_thead') %}
+{% set tbody_id = tbody_id | default('kit_composition_tbody') %}
+{% set state_element_id = state_element_id | default('kit_table_state') %}
+{% set used_only = used_only | default(false) %}
+{% set mount_id = mount_id | default('kit') %}
 <div style="margin-top:12px;padding:12px;border-radius:8px;border:1px solid #e2e8f0;background:#f8fafc;">
   <div style="font-weight:600;margin-bottom:8px;">Состав по видам заготовок</div>
   <p class="muted" style="font-size:13px;margin:0 0 10px;">
-    Выберите вид, отметьте Б/У при необходимости, укажите % цены для б/у и количество по мастерам.
-    Пустая последняя строка не сохраняется. Один вид можно добавить дважды (новая и б/у).
+    {% if help_text %}
+      {{ help_text }}
+    {% elif used_only %}
+      Выберите вид и количество. Все заготовки учитываются как б/у; скидку укажите в предварительном расчёте ниже.
+    {% else %}
+      Выберите вид, отметьте Б/У при необходимости, укажите % цены для б/у и количество по мастерам.
+      Пустая последняя строка не сохраняется. Один вид можно добавить дважды (новая и б/у).
+    {% endif %}
   </p>
   <div style="overflow-x:auto;">
-    <table id="kit_composition_table" style="border-collapse:collapse;font-size:14px;width:100%;">
-      <thead id="kit_composition_thead"></thead>
-      <tbody id="kit_composition_tbody"></tbody>
+    <table id="{{ table_id }}" style="border-collapse:collapse;font-size:14px;width:100%;">
+      <thead id="{{ thead_id }}"></thead>
+      <tbody id="{{ tbody_id }}"></tbody>
     </table>
   </div>
 </div>
+{% if mount_id == 'kit' %}
 <script src="/static/kit_composition_lines.js"></script>
+{% endif %}
 <script>
 (function () {
-  var stateEl = document.getElementById('kit_table_state');
+  var stateEl = document.getElementById('{{ state_element_id }}');
   var state = {};
   try {
     if (stateEl && stateEl.textContent) state = JSON.parse(stateEl.textContent);
@@ -28,8 +43,20 @@
   if (!state.initialLines && state.prefill) {
     state.initialLines = [];
   }
+  var opts = {
+    mountId: '{{ mount_id }}',
+    linePrefix: '{{ line_name_prefix }}',
+    theadId: '{{ thead_id }}',
+    tbodyId: '{{ tbody_id }}',
+    usedOnly: {{ 'true' if used_only else 'false' }}
+  };
+  {% if used_only %}
+  opts.forceMasterIds = [state.currentUserId || 0];
+  opts.seTypeSelector = 'input[name="corr_kit_type_se"]';
+  opts.deTypeSelector = 'input[name="corr_kit_type_de"]';
+  {% endif %}
   if (typeof window.kitCompositionInit === 'function') {
-    window.kitCompositionInit(state);
+    window.kitCompositionInit(state, opts);
   }
 })();
 </script>

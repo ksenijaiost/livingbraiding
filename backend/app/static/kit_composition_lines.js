@@ -1,6 +1,6 @@
 /**
  * Динамическая таблица состава комплекта: вид + Б/У + % + колонки мастеров.
- * Ожидает window.kitCompositionInit(state) и опционально window.kitCompositionOnChange().
+ * window.kitCompositionInit(state, options) — state.mountId задаёт экземпляр.
  */
 (function () {
   function esc(s) {
@@ -9,13 +9,15 @@
     return d.innerHTML;
   }
 
-  function money2(v) {
-    var n = parseFloat(v);
-    if (isNaN(n)) return '0.00';
-    return n.toFixed(2);
+  function getInstance(mountId) {
+    var id = mountId || 'kit';
+    return (window.kitCompositionInstances || {})[id] || null;
   }
 
   function getMasterIds(state) {
+    if (state.forceMasterIds && state.forceMasterIds.length) {
+      return state.forceMasterIds;
+    }
     if (typeof window.getKitColumnMasterIds === 'function') {
       return window.getKitColumnMasterIds();
     }
@@ -26,8 +28,10 @@
     var cat = state.blankCatalog || [];
     var showSe = true;
     var showDe = true;
-    var seEl = document.querySelector('input[name="kit_type_se"], input[name="blank_type_se"]');
-    var deEl = document.querySelector('input[name="kit_type_de"], input[name="blank_type_de"]');
+    var seSel = state.seTypeSelector || 'input[name="kit_type_se"], input[name="blank_type_se"]';
+    var deSel = state.deTypeSelector || 'input[name="kit_type_de"], input[name="blank_type_de"]';
+    var seEl = document.querySelector(seSel);
+    var deEl = document.querySelector(deSel);
     if (seEl) showSe = !!seEl.checked;
     if (deEl) showDe = !!deEl.checked;
     return cat.filter(function (it) {
@@ -48,14 +52,18 @@
     return !any;
   }
 
-  function readRowData(row) {
+  function readRowData(row, state) {
     var keyEl = row.querySelector('.kcl-key');
     var usedEl = row.querySelector('.kcl-used');
     var pctEl = row.querySelector('.kcl-pct');
+    var usedOnly = !!state.usedOnly;
+    var globalPct = state.globalUsedPct != null ? parseInt(state.globalUsedPct, 10) : 100;
+    if (isNaN(globalPct) || globalPct < 1) globalPct = 100;
+    if (globalPct > 100) globalPct = 100;
     var data = {
       key: keyEl ? String(keyEl.value || '').trim() : '',
-      is_used: !!(usedEl && usedEl.checked),
-      used_pct: pctEl ? (parseInt(pctEl.value, 10) || 100) : 100,
+      is_used: usedOnly || !!(usedEl && usedEl.checked),
+      used_pct: usedOnly ? globalPct : (pctEl ? (parseInt(pctEl.value, 10) || 100) : 100),
       by_staff: {},
     };
     row.querySelectorAll('.kcl-qty').forEach(function (inp) {
@@ -83,45 +91,55 @@
   }
 
   function createRow(state, idx, line, masterIds) {
+    var prefix = state.linePrefix || 'kit_line';
+    var usedOnly = !!state.usedOnly;
     var catalog = filteredCatalog(state);
     var tr = document.createElement('tr');
     tr.className = 'kcl-row';
     tr.setAttribute('data-line-idx', String(idx));
 
     var key = line && line.key ? line.key : '';
-    var isUsed = line && (line.condition === 'USED' || line.is_used);
+    var isUsed = usedOnly || (line && (line.condition === 'USED' || line.is_used));
     var pct = line && line.used_price_pct != null ? line.used_price_pct : 100;
     var byStaff = (line && line.by_staff) || {};
 
     var tdKey = document.createElement('td');
     tdKey.innerHTML =
-      '<select class="kcl-key" name="kit_line_' +
+      '<select class="kcl-key" name="' +
+      prefix +
+      '_' +
       idx +
       '_key" style="min-width:12rem;max-width:100%;">' +
       buildOptionsHtml(catalog, key) +
       '</select>';
     tr.appendChild(tdKey);
 
-    var tdBu = document.createElement('td');
-    tdBu.style.textAlign = 'center';
-    tdBu.innerHTML =
-      '<label style="white-space:nowrap;"><input type="checkbox" class="kcl-used" name="kit_line_' +
-      idx +
-      '_is_used" ' +
-      (isUsed ? 'checked ' : '') +
-      '/> Б/У</label>';
-    tr.appendChild(tdBu);
+    if (!usedOnly) {
+      var tdBu = document.createElement('td');
+      tdBu.style.textAlign = 'center';
+      tdBu.innerHTML =
+        '<label style="white-space:nowrap;"><input type="checkbox" class="kcl-used" name="' +
+        prefix +
+        '_' +
+        idx +
+        '_is_used" ' +
+        (isUsed ? 'checked ' : '') +
+        '/> Б/У</label>';
+      tr.appendChild(tdBu);
 
-    var tdPct = document.createElement('td');
-    tdPct.innerHTML =
-      '<input type="number" class="kcl-pct" name="kit_line_' +
-      idx +
-      '_used_pct" min="1" max="100" step="1" value="' +
-      esc(String(pct)) +
-      '" style="width:4rem;' +
-      (isUsed ? '' : 'visibility:hidden;') +
-      '" title="% цены новой заготовки" />';
-    tr.appendChild(tdPct);
+      var tdPct = document.createElement('td');
+      tdPct.innerHTML =
+        '<input type="number" class="kcl-pct" name="' +
+        prefix +
+        '_' +
+        idx +
+        '_used_pct" min="1" max="100" step="1" value="' +
+        esc(String(pct)) +
+        '" style="width:4rem;' +
+        (isUsed ? '' : 'visibility:hidden;') +
+        '" title="% цены новой заготовки" />';
+      tr.appendChild(tdPct);
+    }
 
     masterIds.forEach(function (mid) {
       var td = document.createElement('td');
@@ -129,7 +147,9 @@
       if (byStaff[mid] != null) q = parseInt(byStaff[mid], 10) || 0;
       else if (byStaff[String(mid)] != null) q = parseInt(byStaff[String(mid)], 10) || 0;
       td.innerHTML =
-        '<input type="number" class="kcl-qty" name="kit_line_' +
+        '<input type="number" class="kcl-qty" name="' +
+        prefix +
+        '_' +
         idx +
         '_qty_' +
         mid +
@@ -157,29 +177,34 @@
     }
   }
 
-  function reindexRows(tbody) {
+  function reindexRows(tbody, state) {
+    var prefix = state.linePrefix || 'kit_line';
     var rows = tbody.querySelectorAll('tr.kcl-row');
     rows.forEach(function (row, i) {
       row.setAttribute('data-line-idx', String(i));
-      row.querySelectorAll('[name^="kit_line_"]').forEach(function (el) {
+      row.querySelectorAll('[name^="' + prefix + '_"]').forEach(function (el) {
         var n = el.getAttribute('name') || '';
-        el.setAttribute('name', n.replace(/^kit_line_\d+_/, 'kit_line_' + i + '_'));
+        el.setAttribute('name', n.replace(new RegExp('^' + prefix + '_\\d+_'), prefix + '_' + i + '_'));
       });
     });
   }
 
-  window.rebuildKitCompositionTable = function () {
-    var tbody = document.getElementById('kit_composition_tbody');
-    var thead = document.getElementById('kit_composition_thead');
-    if (!tbody || !thead || !window._kitCompositionState) return;
-    var state = window._kitCompositionState;
+  function rebuildForMount(mountId) {
+    var state = getInstance(mountId);
+    if (!state) return;
+    var tbody = document.getElementById(state.tbodyId || 'kit_composition_tbody');
+    var thead = document.getElementById(state.theadId || 'kit_composition_thead');
+    if (!tbody || !thead) return;
     var masterIds = getMasterIds(state);
     var idToName = {};
     (state.masters || []).forEach(function (m) {
       idToName[m.id] = m.name;
     });
 
-    var headHtml = '<tr><th>Вид</th><th>Б/У</th><th>% цены</th>';
+    var headHtml = '<tr><th>Вид</th>';
+    if (!state.usedOnly) {
+      headHtml += '<th>Б/У</th><th>% цены</th>';
+    }
     masterIds.forEach(function (id) {
       headHtml += '<th>' + esc(idToName[id] || 'ID ' + id) + '</th>';
     });
@@ -194,8 +219,9 @@
     });
     ensureTrailingEmptyRow(tbody, state, masterIds);
     bindRowEvents(tbody, state, masterIds);
-    if (typeof window.kitCompositionOnChange === 'function') window.kitCompositionOnChange();
-  };
+    if (typeof state.onChange === 'function') state.onChange();
+    else if (typeof window.kitCompositionOnChange === 'function') window.kitCompositionOnChange();
+  }
 
   function bindRowEvents(tbody, state, masterIds) {
     tbody.querySelectorAll('.kcl-key, .kcl-used, .kcl-pct, .kcl-qty').forEach(function (el) {
@@ -203,7 +229,7 @@
       el.removeEventListener('input', el._kclHandler);
       el._kclHandler = function () {
         var row = el.closest('tr.kcl-row');
-        if (row) {
+        if (row && !state.usedOnly) {
           var used = row.querySelector('.kcl-used');
           var pct = row.querySelector('.kcl-pct');
           if (used && pct) {
@@ -211,39 +237,86 @@
           }
         }
         ensureTrailingEmptyRow(tbody, state, masterIds);
-        if (typeof window.kitCompositionOnChange === 'function') window.kitCompositionOnChange();
+        if (typeof state.onChange === 'function') state.onChange();
+        else if (typeof window.kitCompositionOnChange === 'function') window.kitCompositionOnChange();
       };
       el.addEventListener('change', el._kclHandler);
       el.addEventListener('input', el._kclHandler);
     });
   }
 
-  window.kitCompositionInit = function (state) {
-    window._kitCompositionState = state || {};
-    document.addEventListener('DOMContentLoaded', function () {
-      window.rebuildKitCompositionTable();
-      document.querySelectorAll('input[name="kit_type_se"], input[name="kit_type_de"], input[name="blank_type_se"], input[name="blank_type_de"]').forEach(function (el) {
-        el.addEventListener('change', window.rebuildKitCompositionTable);
+  window.kitCompositionInstances = window.kitCompositionInstances || {};
+
+  window.kitCompositionInit = function (state, options) {
+    state = state || {};
+    if (options) {
+      for (var k in options) {
+        if (Object.prototype.hasOwnProperty.call(options, k)) state[k] = options[k];
+      }
+    }
+    if (!state.mountId) state.mountId = 'kit';
+    if (!state.linePrefix) state.linePrefix = state.mountId === 'corr_kit' ? 'corr_kit_line' : 'kit_line';
+    if (!state.tbodyId) {
+      state.tbodyId = state.mountId === 'corr_kit' ? 'corr_kit_composition_tbody' : 'kit_composition_tbody';
+    }
+    if (!state.theadId) {
+      state.theadId = state.mountId === 'corr_kit' ? 'corr_kit_composition_thead' : 'kit_composition_thead';
+    }
+    window.kitCompositionInstances[state.mountId] = state;
+    if (state.mountId === 'kit') {
+      window._kitCompositionState = state;
+    }
+
+    function wireTypeFilters() {
+      var sel = (state.seTypeSelector || 'input[name="kit_type_se"]') + ', ' + (state.deTypeSelector || 'input[name="kit_type_de"]');
+      document.querySelectorAll(sel).forEach(function (el) {
+        el.removeEventListener('change', el._kclTypeHandler);
+        el._kclTypeHandler = function () {
+          rebuildForMount(state.mountId);
+        };
+        el.addEventListener('change', el._kclTypeHandler);
       });
-    });
-    if (document.readyState !== 'loading') {
-      window.rebuildKitCompositionTable();
+    }
+
+    function boot() {
+      rebuildForMount(state.mountId);
+      wireTypeFilters();
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', boot);
+    } else {
+      boot();
     }
   };
 
-  window.kitCompositionCollectLines = function () {
-    var tbody = document.getElementById('kit_composition_tbody');
+  window.rebuildKitCompositionTable = function (mountId) {
+    rebuildForMount(mountId || 'kit');
+  };
+
+  window.kitCompositionCollectLines = function (mountId) {
+    var state = getInstance(mountId || 'kit');
+    if (!state) return [];
+    var tbody = document.getElementById(state.tbodyId || 'kit_composition_tbody');
     if (!tbody) return [];
+    var pctInp = document.querySelector('input[name="corr_kit_used_discount_pct"]');
+    if (state.usedOnly && pctInp) {
+      state.globalUsedPct = parseInt(pctInp.value, 10) || 100;
+    }
     var out = [];
     tbody.querySelectorAll('tr.kcl-row').forEach(function (row) {
       if (lineIsEmpty(row)) return;
-      out.push(readRowData(row));
+      out.push(readRowData(row, state));
     });
     return out;
   };
 
-  window.kitCompositionHasUsed = function () {
-    return window.kitCompositionCollectLines().some(function (ln) {
+  window.corrKitCompositionCollectLines = function () {
+    return window.kitCompositionCollectLines('corr_kit');
+  };
+
+  window.kitCompositionHasUsed = function (mountId) {
+    return window.kitCompositionCollectLines(mountId || 'kit').some(function (ln) {
       return ln.is_used;
     });
   };

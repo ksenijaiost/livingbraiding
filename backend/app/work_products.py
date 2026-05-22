@@ -25,6 +25,7 @@ from app.db.models import (
     Client,
     Kit,
     KitAuthorStaff,
+    KitBlanksCondition,
     CatalogProduct,
     KitReserve,
     PayrollFundSourceKind,
@@ -46,22 +47,31 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.user_roles import select_users_with_role, user_has_role
-from app.kit_blank_stock_core import infer_kit_blanks_condition_from_totals
+from app.kit_blank_stock_core import (
+    composition_keys_intersection_catalog,
+    infer_kit_blanks_condition_from_totals,
+    load_catalog_kit_maps,
+    replace_blank_stock_for_kit,
+)
 from app.kit_composition import (
     KIT_INVENTORY_PIECE_EXCLUDE_KEYS,
     composition_json_from_lines,
     composition_json_from_totals,
 )
 from app.kit_composition_lines import (
+    apply_global_used_discount,
     filter_nonempty,
     infer_blanks_condition,
     inventory_piece_count,
+    inventory_totals_by_key,
     kit_by_staff_from_lines,
     lines_dicts_for_details,
     lines_from_form,
     lines_have_used,
     lines_to_json,
     lines_to_legacy_totals,
+    stock_price_for_used_kit,
+    stock_price_snapshot_for_used_kit,
     used_client_total_for_lines,
     client_price_for_lines,
 )
@@ -94,6 +104,12 @@ _WORK_NEW_FP_KEYS = frozenset({
     "corr_wash",
     "corr_steam",
     "corr_circle",
+    "corr_add_kit_to_stock",
+    "corr_kit_type_se",
+    "corr_kit_type_de",
+    "corr_kit_sku",
+    "corr_kit_title",
+    "corr_kit_used_discount_pct",
 })
 from app.visit_edit_policy import (
     edit_window_days,
@@ -709,6 +725,35 @@ def _kit_cost_snapshot_text(
     return "\n".join(lines)
 
 
+def _corr_kit_from_work_cost_snapshot_text(
+    *,
+    mat_cost: float,
+    kanek: float,
+    kudri: float,
+    k_snap: float,
+    ku_snap: float,
+    correction_master_pay: float,
+) -> str:
+    """Себестоимость б/у комплекта с работы коррекции: материал + ЗП коррекции."""
+    lines = ["Расчёт себестоимости комплекта (из работы «коррекция»):"]
+    total = 0.0
+    if kanek > 0:
+        lines.append(
+            f"Материал: канекалон — {kanek:.0f} г × {_fmt_money(float(k_snap)).replace(' ₽', ' ₽/г')} = {_fmt_money(float(kanek) * float(k_snap))}"
+        )
+    if kudri > 0:
+        lines.append(
+            f"Материал: кудри — {kudri:.0f} г × {_fmt_money(float(ku_snap)).replace(' ₽', ' ₽/г')} = {_fmt_money(float(kudri) * float(ku_snap))}"
+        )
+    if mat_cost > 0:
+        total += float(mat_cost)
+    if correction_master_pay > 0:
+        total += float(correction_master_pay)
+        lines.append(f"ЗП за коррекцию — {_fmt_money(float(correction_master_pay))}")
+    lines.append(f"Итого — {_fmt_money(total)}")
+    return "\n".join(lines)
+
+
 @router.get("/new", response_class=HTMLResponse)
 def work_new_get(
     request: Request,
@@ -786,6 +831,9 @@ async def work_new_post(
             scope = WorkScope(scope_raw)
         except ValueError:
             raise ValueError("Выберите режим: в наличие или на заказ.")
+
+        if _g_bool(form, "corr_add_kit_to_stock") and scope != WorkScope.IN_STOCK:
+            raise ValueError("Комплект на склад можно добавить только в режиме «в наличие».")
 
         kind_raw = (_g_str(form, "kind", "") or "").strip()
         try:
@@ -871,6 +919,15 @@ async def work_new_post(
         kit_use_multi_masters = _g_bool(form, "kit_use_multi_masters")
         composition_lines: list[Any] = []
         kit_bu_correction = False
+        corr_add_kit = False
+        corr_kit_lines_saved: list[Any] = []
+        corr_kit_discount_pct = 0
+        corr_kit_sku = ""
+        corr_kit_title = ""
+        corr_kit_type_se = False
+        corr_kit_type_de = False
+        corr_kit_new_price = 0.0
+        corr_kit_stock_price = 0.0
         if kind == WorkKind.KIT:
             if not kit_blank_type_se and not kit_blank_type_de:
                 raise ValueError("Для комплекта выберите тип заготовок: SE и/или DE.")
@@ -1001,6 +1058,59 @@ async def work_new_post(
                 details["correction"]["kit_description"] = corr_kit_description
             if corr_kit_blanks_count is not None:
                 details["correction"]["kit_blanks_count"] = corr_kit_blanks_count
+
+            corr_add_kit = _g_bool(form, "corr_add_kit_to_stock")
+            if corr_add_kit:
+                corr_kit_type_se = _g_bool(form, "corr_kit_type_se")
+                corr_kit_type_de = _g_bool(form, "corr_kit_type_de")
+                if not corr_kit_type_se and not corr_kit_type_de:
+                    raise ValueError(
+                        "Для комплекта на склад выберите тип заготовок: SE и/или DE."
+                    )
+                raw_corr_lines = filter_nonempty(lines_from_form(form, prefix="corr_kit_line"))
+                if not raw_corr_lines:
+                    raise ValueError(
+                        "Для комплекта на склад укажите хотя бы одну строку состава (вид и количество)."
+                    )
+                pct_raw = (_g_str(form, "corr_kit_used_discount_pct", "") or "").strip()
+                if not pct_raw:
+                    raise ValueError("Укажите «Скидка за Б/У (%)» для комплекта на склад.")
+                try:
+                    corr_kit_discount_pct = int(parse_float(pct_raw, min=1.0, field_name="corr_kit_used_discount_pct"))
+                except ValueError as exc:
+                    raise ValueError("«Скидка за Б/У (%)» — целое число от 1 до 100.") from exc
+                if corr_kit_discount_pct < 1 or corr_kit_discount_pct > 100:
+                    raise ValueError("«Скидка за Б/У (%)» — от 1 до 100.")
+                corr_kit_lines_saved = apply_global_used_discount(
+                    raw_corr_lines, corr_kit_discount_pct
+                )
+                corr_kit_new_price, corr_kit_stock_price, missing_price = stock_price_for_used_kit(
+                    db, raw_corr_lines, corr_kit_discount_pct
+                )
+                if missing_price:
+                    miss = ", ".join(missing_price)
+                    raise ValueError(
+                        f"Не найдены цены в прайсе «Заказ → Заготовки поштучно» для: {miss}."
+                    )
+                corr_kit_sku = (_g_str(form, "corr_kit_sku", "") or "").strip()
+                corr_kit_title = (_g_str(form, "corr_kit_title", "") or "").strip()
+                if not corr_kit_sku:
+                    raise ValueError("Для комплекта на склад укажите артикул.")
+                if not corr_kit_title:
+                    raise ValueError("Для комплекта на склад укажите название.")
+                if db.scalar(select(Kit.id).where(Kit.sku == corr_kit_sku)):
+                    raise ValueError("Комплект с таким артикулом уже есть — укажите другой.")
+                details["corr_kit_to_stock"] = {
+                    "sku": corr_kit_sku,
+                    "title": corr_kit_title,
+                    "blank_type_se": corr_kit_type_se,
+                    "blank_type_de": corr_kit_type_de,
+                    "used_discount_pct": corr_kit_discount_pct,
+                    "new_price_total": float(corr_kit_new_price),
+                    "stock_price_total": float(corr_kit_stock_price),
+                    "lines": lines_dicts_for_details(corr_kit_lines_saved),
+                }
+
             alloc = [(current_user.id, 1.0)]
         else:
             alloc = [(current_user.id, 1.0)]
@@ -1220,6 +1330,68 @@ async def work_new_post(
                 # Как при ручном резерве в админке: свободный остаток уменьшается на объём резерва.
                 kit.pieces_available = max(
                     0, int(kit.pieces_available or 0) - pieces_reserved
+                )
+
+        if kind == WorkKind.KIT_CORRECTION and corr_add_kit:
+            full_cost = float(cost_total_amount) + float(master_total)
+            corr_kit_pieces = inventory_piece_count(corr_kit_lines_saved)
+            comp_json = lines_to_json(corr_kit_lines_saved)
+            stock_snap = stock_price_snapshot_for_used_kit(
+                db,
+                corr_kit_lines_saved,
+                discount_pct=corr_kit_discount_pct,
+            )
+            cost_snap = _corr_kit_from_work_cost_snapshot_text(
+                mat_cost=float(mat_cost),
+                kanek=float(kanek),
+                kudri=float(kudri),
+                k_snap=float(k_snap or 0.0),
+                ku_snap=float(ku_snap or 0.0),
+                correction_master_pay=float(master_total),
+            )
+            kit_corr = Kit(
+                sku=corr_kit_sku[:80],
+                title=corr_kit_title[:200],
+                blanks_condition=KitBlanksCondition.USED,
+                description=None,
+                is_active=True,
+                pieces_total=corr_kit_pieces,
+                pieces_available=corr_kit_pieces,
+                blank_type_se=corr_kit_type_se,
+                blank_type_de=corr_kit_type_de,
+                weight_grams=None,
+                length_cm=None,
+                materials_text=None,
+                color_text=None,
+                notes=None,
+                stock_price_total=float(corr_kit_stock_price),
+                composition_json=comp_json,
+                stock_price_snapshot_text=stock_snap,
+                discount_percent=int(corr_kit_discount_pct),
+                cost_total=full_cost,
+                cost_snapshot_text=cost_snap,
+                author_cost_total=None,
+                created_at=utcnow_naive(),
+                is_in_stock=True,
+                is_archived=False,
+            )
+            db.add(kit_corr)
+            db.flush()
+            work.created_kit_id = kit_corr.id
+            mu = db.get(User, current_user.id)
+            if mu and mu.is_active and user_has_role(db, current_user.id, UserRole.MASTER):
+                db.add(KitAuthorStaff(kit_id=kit_corr.id, user_id=current_user.id, sort_order=0))
+            blank_qty = inventory_totals_by_key(corr_kit_lines_saved)
+            comp_legacy = lines_to_legacy_totals(corr_kit_lines_saved)
+            _, meta_map, _ = load_catalog_kit_maps(db)
+            allowed = set(composition_keys_intersection_catalog(comp_legacy, meta_map)) if comp_legacy else set()
+            if not allowed and comp_legacy:
+                allowed = set(comp_legacy.keys())
+            if not allowed:
+                allowed = set(blank_qty.keys())
+            if blank_qty:
+                replace_blank_stock_for_kit(
+                    db, kit_corr, quantities=blank_qty, allowed_keys=allowed
                 )
 
         staff_saved = list(

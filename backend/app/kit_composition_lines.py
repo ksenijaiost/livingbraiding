@@ -17,8 +17,12 @@ from app.kit_crud import kit_key_excluded_from_client_price
 from app.kit_blank_stock_core import load_catalog_kit_maps
 from app.zakaz_blanks import zakaz_blank_def_by_key
 
-_LINE_KEY_RE = re.compile(r"^kit_line_(\d+)_")
-_LINE_QTY_RE = re.compile(r"^kit_line_(\d+)_qty_(\d+)$")
+def _line_key_re(prefix: str) -> re.Pattern[str]:
+    return re.compile(rf"^{re.escape(prefix)}_(\d+)_")
+
+
+def _line_qty_re(prefix: str) -> re.Pattern[str]:
+    return re.compile(rf"^{re.escape(prefix)}_(\d+)_qty_(\d+)$")
 
 
 class BlankCondition(str, Enum):
@@ -237,6 +241,111 @@ def _price_for_line_unit(
     return float(p)
 
 
+def lines_as_new_for_pricing(lines: list[CompositionLine]) -> list[CompositionLine]:
+    """Копии строк с NEW и 100% — расчёт «как новые»."""
+    out: list[CompositionLine] = []
+    for ln in filter_nonempty(lines):
+        out.append(
+            CompositionLine(
+                key=ln.key,
+                condition=BlankCondition.NEW,
+                used_price_pct=100,
+                by_staff=dict(ln.by_staff),
+            )
+        )
+    return out
+
+
+def apply_global_used_discount(
+    lines: list[CompositionLine], discount_pct: int
+) -> list[CompositionLine]:
+    pct = max(1, min(100, int(discount_pct)))
+    out: list[CompositionLine] = []
+    for ln in filter_nonempty(lines):
+        out.append(
+            CompositionLine(
+                key=ln.key,
+                condition=BlankCondition.USED,
+                used_price_pct=pct,
+                by_staff=dict(ln.by_staff),
+            )
+        )
+    return out
+
+
+def client_price_new_equivalent(
+    db: Session,
+    lines: list[CompositionLine],
+    *,
+    extra_costs_amount: float = 0.0,
+) -> tuple[float, list[str]]:
+    return client_price_for_lines(
+        db, lines_as_new_for_pricing(lines), extra_costs_amount=extra_costs_amount
+    )
+
+
+def stock_price_for_used_kit(
+    db: Session,
+    lines: list[CompositionLine],
+    discount_pct: int,
+    *,
+    extra_costs_amount: float = 0.0,
+) -> tuple[float, float, list[str]]:
+    """(цена_как_новые, итог_на_склад, missing_keys)."""
+    new_total, missing = client_price_new_equivalent(
+        db, lines, extra_costs_amount=extra_costs_amount
+    )
+    if missing:
+        return 0.0, 0.0, missing
+    pct = max(1, min(100, int(discount_pct)))
+    stock_total = float(new_total) * (float(pct) / 100.0)
+    return float(new_total), float(stock_total), []
+
+
+def stock_price_snapshot_for_used_kit(
+    db: Session,
+    lines: list[CompositionLine],
+    *,
+    discount_pct: int,
+    extra_costs_amount: float = 0.0,
+) -> str:
+    """Текстовый снимок: позиции как новые, скидка Б/У, итог на склад."""
+    price_map, meta_by_key, _labels = load_catalog_kit_maps(db)
+    from app.zakaz_blanks import zakaz_blank_def_by_key as _zbd
+
+    new_lines = lines_as_new_for_pricing(lines)
+    lines_out = ["Расчёт цены комплекта (б/у на склад):"]
+    subtotal = 0.0
+    for ln in new_lines:
+        q = ln.total_qty()
+        if q <= 0:
+            continue
+        if kit_key_excluded_from_client_price(meta_by_key.get(ln.key) or {}, ln.key):
+            continue
+        p = price_map.get(ln.key)
+        if p is None:
+            z = _zbd().get(ln.key)
+            if z and not z.ignore_in_client_calc:
+                p = float(z.price)
+        if p is None:
+            continue
+        line_total = float(p) * float(q)
+        subtotal += line_total
+        lbl = (meta_by_key.get(ln.key) or {}).get("name") or ln.key
+        lines_out.append(
+            f"{lbl} — {q} шт × {float(p):.2f} ₽ = {line_total:.2f} ₽"
+        )
+    if extra_costs_amount > 0:
+        subtotal += float(extra_costs_amount)
+        lines_out.append(f"Доп. расходы — {float(extra_costs_amount):.2f} ₽")
+    lines_out.append(f"Цена как новые — {subtotal:.2f} ₽")
+    pct = max(1, min(100, int(discount_pct)))
+    stock_total = subtotal * (float(pct) / 100.0)
+    lines_out.append(f"Скидка за Б/У — {pct}%")
+    lines_out.append(f"Итоговая цена на склад — {stock_total:.2f} ₽")
+    return "\n".join(lines_out)
+
+
 def client_price_for_lines(
     db: Session,
     lines: list[CompositionLine],
@@ -317,17 +426,19 @@ def work_pay_for_lines(db: Session, lines: list[CompositionLine]) -> dict[int, f
     return out
 
 
-def lines_from_form(form: Any) -> list[CompositionLine]:
+def lines_from_form(form: Any, *, prefix: str = "kit_line") -> list[CompositionLine]:
+    key_re = _line_key_re(prefix)
+    qty_re = _line_qty_re(prefix)
     indices: set[int] = set()
     for key in form.keys():
-        m = _LINE_KEY_RE.match(str(key))
+        m = key_re.match(str(key))
         if m:
             indices.add(int(m.group(1)))
     lines: list[CompositionLine] = []
     for i in sorted(indices):
 
         def g(name: str, default: str = "") -> str:
-            raw = form.get(f"kit_line_{i}_{name}")
+            raw = form.get(f"{prefix}_{i}_{name}")
             if raw is None:
                 return default
             if hasattr(raw, "strip"):
@@ -344,7 +455,7 @@ def lines_from_form(form: Any) -> list[CompositionLine]:
         pct = max(1, min(100, pct))
         by_staff: dict[int, int] = {}
         for fk in form.keys():
-            qm = _LINE_QTY_RE.match(str(fk))
+            qm = qty_re.match(str(fk))
             if not qm or int(qm.group(1)) != i:
                 continue
             mid = int(qm.group(2))
