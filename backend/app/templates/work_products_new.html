@@ -221,11 +221,41 @@
           {% endfor %}
         </div>
 
-        <div style="overflow-x:auto; margin-top: 12px;" id="kit_qty_table_outer">
-          <table id="kit_qty_table">
-            <thead id="kit_qty_thead"></thead>
-            <tbody id="kit_qty_tbody"></tbody>
-          </table>
+        {% include "partials/kit_composition_lines_table.html" %}
+
+        <div id="kit_bu_correction_wrap" style="margin-top: 14px; display: none;">
+          <label style="display:block; margin-bottom: 8px;">
+            <input type="checkbox" name="kit_bu_correction" id="kit_bu_correction_cb" />
+            Была коррекция Б/У
+          </label>
+          <div id="kit_bu_correction_fields" class="card" style="background:#fff; display:none; margin-top: 8px; padding: 12px;">
+            <p class="muted" style="margin-top:0; font-size:12px;">ЗП за коррекцию не может превышать сумму б/у заготовок для клиента минус доля студии.</p>
+            <div class="row">
+              <div>
+                <label>Стрижка (1шт) — количество</label>
+                <input name="kit_corr_trim_qty" type="number" step="1" min="0" value="{{ fp.get('kit_corr_trim_qty', 0) or 0 }}" />
+              </div>
+              <div>
+                <label>Почасовая коррекция заготовок, ч</label>
+                <input name="kit_corr_hourly_hours" type="number" step="0.25" min="0" value="{{ fp.get('kit_corr_hourly_hours', '') or '' }}" style="max-width:180px;" />
+              </div>
+            </div>
+            <div class="row" style="margin-top: 10px;">
+              <div style="flex:1; min-width:220px;">
+                <label>Описание комплекта</label>
+                <input name="kit_corr_kit_description" type="text" maxlength="500" value="{{ fp.get('kit_corr_kit_description', '') or '' }}" />
+              </div>
+              <div>
+                <label>Количество заготовок в комплекте</label>
+                <input name="kit_corr_kit_blanks_count" type="number" step="1" min="0" value="{{ fp.get('kit_corr_kit_blanks_count', '') or '' }}" />
+              </div>
+            </div>
+            <div style="margin-top: 10px;">
+              <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="kit_corr_wash" id="kit_corr_wash" /> Стирка</label>
+              <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="kit_corr_steam" /> Отпаривание</label>
+              <label style="display:block;"><input type="checkbox" name="kit_corr_circle" id="kit_corr_circle" /> Одевание на круг</label>
+            </div>
+          </div>
         </div>
 
         <div id="kit_stock_block" style="margin-top: 12px;">
@@ -279,9 +309,10 @@
       var kit = document.getElementById('kit_block');
       if (!kind || !kit) return;
       kit.style.display = (kind.value === 'KIT') ? 'block' : 'none';
-      if (kind.value === 'KIT' && typeof window.rebuildKitTable === 'function') {
-        window.rebuildKitTable();
+      if (kind.value === 'KIT' && typeof window.rebuildKitCompositionTable === 'function') {
+        window.rebuildKitCompositionTable();
       }
+      syncKitBuCorrectionVisibility();
       if (typeof window.syncKitPreview === 'function') window.syncKitPreview();
     }
     function syncRubberBlock() {
@@ -372,22 +403,30 @@
       if (k === 'KIT') {
         var exMap = {};
         (st.excludeFromInventoryPieceCount || []).forEach(function (x) { exMap[x] = true; });
-        var rates = st.kitWorkPayByKey || {};
-        function kitRateForItem(itemKey, qtyTotal) {
-          return parseFloat(rates[itemKey]) || 0;
-        }
-
-        var totals = {};
-        document.querySelectorAll('#kit_qty_tbody input[name^="kit_qty_"]').forEach(function (inp) {
-          var m = /^kit_qty_(\d+)_(.+)$/.exec(inp.name);
-          if (!m) return;
-          var q = parseInt(inp.value, 10) || 0;
-          var key = m[2];
-          totals[key] = (totals[key] || 0) + q;
-        });
+        var payRates = st.kitWorkPayByKey || {};
+        var priceMap = st.kitPriceByKey || {};
+        var compLines = (typeof window.kitCompositionCollectLines === 'function')
+          ? window.kitCompositionCollectLines() : [];
 
         var inv = 0;
-        for (var key in totals) if (!exMap[key]) inv += totals[key] || 0;
+        var clientTotal = 0;
+        var usedClientTotal = 0;
+        compLines.forEach(function (ln) {
+          var key = ln.key || '';
+          var qty = 0;
+          for (var mid in (ln.by_staff || {})) qty += parseInt(ln.by_staff[mid], 10) || 0;
+          if (!exMap[key]) inv += qty;
+          var baseP = parseFloat(priceMap[key]) || 0;
+          if (baseP > 0 && qty > 0) {
+            if (ln.is_used) {
+              var pct = parseInt(ln.used_pct, 10) || 100;
+              clientTotal += baseP * (pct / 100.0) * qty;
+              usedClientTotal += baseP * (pct / 100.0) * qty;
+            } else {
+              clientTotal += baseP * qty;
+            }
+          }
+        });
         setPieces('Количество заготовок: ' + String(inv), true);
 
         var gramsTotal = kan + kud;
@@ -399,28 +438,27 @@
         var mixMasterId = st.currentUserId || 0;
 
         var ids = (typeof window.getKitColumnMasterIds === 'function') ? window.getKitColumnMasterIds() : [st.currentUserId || 0];
-        var lines = [];
+        var payLines = [];
         for (var ii = 0; ii < ids.length; ii++) {
           var uid = ids[ii];
           var sum = 0;
-          for (var itemKey in totals) {
-            var tq = totals[itemKey] || 0;
-            var r = kitRateForItem(itemKey, tq);
-            if (r <= 0) continue;
-            var inp2 = document.querySelector('input[name="kit_qty_' + uid + '_' + itemKey + '"]');
-            var q2 = inp2 ? (parseInt(inp2.value, 10) || 0) : 0;
-            if (q2 > 0) sum += r * q2;
-          }
-          if (mixBonusTotal > 0 && mixMasterId && uid === mixMasterId) {
-            sum += mixBonusTotal;
-          }
-          lines.push('ЗП «' + nameByUserId(st, uid) + '»: ' + money2(sum) + ' ₽');
+          compLines.forEach(function (ln) {
+            if (ln.is_used) return;
+            var q2 = parseInt((ln.by_staff || {})[uid] || (ln.by_staff || {})[String(uid)] || 0, 10) || 0;
+            if (q2 > 0) sum += (parseFloat(payRates[ln.key]) || 0) * q2;
+          });
+          if (mixBonusTotal > 0 && mixMasterId && uid === mixMasterId) sum += mixBonusTotal;
+          payLines.push('ЗП «' + nameByUserId(st, uid) + '»: ' + money2(sum) + ' ₽');
         }
-        setPayLines(lines);
+        setPayLines(payLines);
 
         var extra = parseFloat((document.querySelector('input[name="extra_costs_amount"]') || {}).value) || 0;
+        clientTotal += extra;
         var costKit = mat + extra;
-        setCost('Себестоимость (итого): ' + money2(costKit) + ' ₽ (материал + доп. расходы)');
+        setCost(
+          'С клиента (итого): ' + money2(clientTotal) + ' ₽ · Себестоимость: ' + money2(costKit) + ' ₽'
+          + (usedClientTotal > 0 ? ' · Б/У для клиента: ' + money2(usedClientTotal) + ' ₽' : '')
+        );
         return;
       }
 
@@ -766,120 +804,62 @@
           if (cur) cur.checked = true;
         }
       }
-      if (typeof window.rebuildKitTable === 'function') window.rebuildKitTable();
+      if (typeof window.rebuildKitCompositionTable === 'function') window.rebuildKitCompositionTable();
+      syncKitBuCorrectionVisibility();
     });
     document.querySelectorAll('.kit-master-cb').forEach(function (el) {
       el.addEventListener('change', function () {
-        if (typeof window.rebuildKitTable === 'function') window.rebuildKitTable();
+        if (typeof window.rebuildKitCompositionTable === 'function') window.rebuildKitCompositionTable();
       });
     });
 
+    function syncKitBuCorrectionVisibility() {
+      var wrap = document.getElementById('kit_bu_correction_wrap');
+      var fields = document.getElementById('kit_bu_correction_fields');
+      var cb = document.getElementById('kit_bu_correction_cb');
+      if (!wrap) return;
+      var hasUsed = typeof window.kitCompositionHasUsed === 'function' && window.kitCompositionHasUsed();
+      wrap.style.display = hasUsed ? 'block' : 'none';
+      if (!hasUsed && cb) cb.checked = false;
+      if (fields && cb) fields.style.display = (hasUsed && cb.checked) ? 'block' : 'none';
+    }
+
+    window.kitCompositionOnChange = function () {
+      syncKitBuCorrectionVisibility();
+      if (typeof syncWorkPreview === 'function') syncWorkPreview();
+    };
+
     (function () {
       var stateEl = document.getElementById('kit_table_state');
-      var state = { currentUserId: 0, masters: [], seItems: [], deItems: [], prefill: {} };
       try {
-        if (stateEl && stateEl.textContent) state = JSON.parse(stateEl.textContent);
+        if (stateEl && stateEl.textContent && typeof window.kitCompositionInit === 'function') {
+          window.kitCompositionInit(JSON.parse(stateEl.textContent));
+        }
       } catch (e) {}
 
-      function esc(s) {
-        var d = document.createElement('div');
-        d.textContent = s;
-        return d.innerHTML;
-      }
-
       function getKitColumnMasterIds() {
+        var st = window._kitCompositionState || {};
         var multi = document.getElementById('kit_use_multi_masters');
-        if (!multi || !multi.checked) return [state.currentUserId];
+        if (!multi || !multi.checked) return [st.currentUserId || 0];
         var ids = [];
         document.querySelectorAll('input[name="kit_master_on"]:checked').forEach(function (cb) {
           var v = parseInt(cb.value, 10);
           if (!isNaN(v) && v > 0) ids.push(v);
         });
-        return ids;
+        return ids.length ? ids : [st.currentUserId || 0];
       }
       window.getKitColumnMasterIds = getKitColumnMasterIds;
 
-      function rebuildKitTable() {
-        var kind = document.querySelector('select[name="kind"]');
-        if (!kind || kind.value !== 'KIT') return;
-        var thead = document.getElementById('kit_qty_thead');
-        var tbody = document.getElementById('kit_qty_tbody');
-        if (!thead || !tbody) return;
-        var ids = getKitColumnMasterIds();
-        var idToName = {};
-        (state.masters || []).forEach(function (m) { idToName[m.id] = m.name; });
-
-        var headHtml = '<tr><th>Вид</th>';
-        ids.forEach(function (id) {
-          headHtml += '<th>' + esc(idToName[id] || ('ID ' + id)) + '</th>';
+      var buCb = document.getElementById('kit_bu_correction_cb');
+      if (buCb) {
+        buCb.addEventListener('change', syncKitBuCorrectionVisibility);
+      }
+      ['kit_corr_wash', 'kit_corr_circle'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', function () {
+          if (typeof syncWorkPreview === 'function') syncWorkPreview();
         });
-        headHtml += '</tr>';
-        thead.innerHTML = headHtml;
-
-        var bodyHtml = '';
-        var pre = state.prefill || {};
-
-        function rowForItem(key, label) {
-          var tr = '<tr class="kit-data-row"><td>' + esc(label) + '</td>';
-          ids.forEach(function (uid) {
-            var name = 'kit_qty_' + uid + '_' + key;
-            var val = pre[name];
-            if (val === undefined || val === null) val = '0';
-            tr += '<td><input type="number" step="1" min="0" name="' + esc(name) + '" value="' + esc(String(val)) + '" /></td>';
-          });
-          tr += '</tr>';
-          return tr;
-        }
-
-        var kitSe = document.querySelector('input[name="kit_type_se"]');
-        var kitDe = document.querySelector('input[name="kit_type_de"]');
-        var showSe = kitSe && kitSe.checked;
-        var showDe = kitDe && kitDe.checked;
-
-        if (!showSe && !showDe) {
-          bodyHtml += '<tr><td colspan=\"' + (1 + ids.length) + '\"><span class=\"muted\">Выберите тип заготовок: SE и/или DE.</span></td></tr>';
-        }
-        if (showSe && (state.seItems || []).length) {
-          bodyHtml += '<tr><td colspan="' + (1 + ids.length) + '"><strong>SE</strong></td></tr>';
-          (state.seItems || []).forEach(function (it) {
-            bodyHtml += rowForItem(it.key, it.label);
-          });
-        }
-        if (showDe && (state.deItems || []).length) {
-          bodyHtml += '<tr><td colspan="' + (1 + ids.length) + '"><strong>DE</strong></td></tr>';
-          (state.deItems || []).forEach(function (it) {
-            bodyHtml += rowForItem(it.key, it.label);
-          });
-        }
-        tbody.innerHTML = bodyHtml;
-        syncKitPreview();
-      }
-
-      function syncKitPreview() {
-        // Legacy hook point: use unified preview.
-        if (typeof syncWorkPreview === 'function') syncWorkPreview();
-      }
-
-      window.syncKitPreview = syncKitPreview;
-
-      window.rebuildKitTable = rebuildKitTable;
-
-      document.querySelectorAll('input[name="kit_type_se"], input[name="kit_type_de"]').forEach(function (el) {
-        el.addEventListener('change', rebuildKitTable);
       });
-
-      // Live preview: update on any typing inside the dynamic table.
-      var kitTbody = document.getElementById('kit_qty_tbody');
-      if (kitTbody) {
-        kitTbody.addEventListener('input', function (e) {
-          var t = e && e.target;
-          if (t && t.name && String(t.name).indexOf('kit_qty_') === 0) syncKitPreview();
-        });
-        kitTbody.addEventListener('change', function (e) {
-          var t = e && e.target;
-          if (t && t.name && String(t.name).indexOf('kit_qty_') === 0) syncKitPreview();
-        });
-      }
 
       syncKitMasterPicker();
       syncClientBlock();
@@ -890,7 +870,6 @@
       syncMixUI();
       syncPriceHint();
       syncWorkPreview();
-      rebuildKitTable();
     })();
 
     // Prevent accidental submit on Enter in inputs.

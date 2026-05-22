@@ -104,6 +104,25 @@ def parse_bulk_kits_json(raw: str) -> list[dict[str, Any]]:
     return out
 
 
+def _composition_from_bulk(val: Any) -> tuple[str | None, dict[str, int] | None]:
+    """Возвращает (composition_json, totals_by_key)."""
+    from app.kit_composition_lines import lines_from_json, lines_to_json, lines_to_legacy_totals
+
+    if val is None:
+        return None, None
+    if isinstance(val, list) and val:
+        if isinstance(val[0], dict) and ("by_staff" in val[0] or "condition" in val[0]):
+            raw = json.dumps(val, ensure_ascii=False)
+            lines = lines_from_json(raw)
+            return lines_to_json(lines), lines_to_legacy_totals(lines) or None
+    totals = _composition_dict_from_json(val)
+    if totals:
+        from app.kit_composition import composition_json_from_totals
+
+        return composition_json_from_totals(totals), totals
+    return None, None
+
+
 def _composition_dict_from_json(val: Any) -> dict[str, int] | None:
     if val is None:
         return None
@@ -308,7 +327,7 @@ def import_single_kit_row(
         }
     try:
         saved_sku = allocate_unique_kit_sku(db, input_sku, reserved_skus)
-        comp = _composition_dict_from_json(row.get("composition"))
+        comp_json, comp = _composition_from_bulk(row.get("composition"))
         blank_qty = _blank_stock_dict(row.get("blank_stock"))
         if comp and not blank_qty:
             blank_qty = dict(comp)
@@ -342,7 +361,10 @@ def import_single_kit_row(
         kit = Kit()
         apply_kit_admin_form(kit, d)
         if comp:
-            kit.composition_json = json.dumps(comp, ensure_ascii=False, sort_keys=True)
+            if comp_json:
+                kit.composition_json = comp_json
+            elif comp:
+                kit.composition_json = json.dumps(comp, ensure_ascii=False, sort_keys=True)
         kit.updated_by_user_id = changed_by_user_id
         db.add(kit)
         db.flush()

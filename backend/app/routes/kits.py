@@ -49,7 +49,13 @@ from app.kit_crud import (
     validate_kit_admin_form,
 )
 from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
-from app.kit_composition import KIT_INVENTORY_PIECE_EXCLUDE_KEYS, composition_json_from_totals
+from app.kit_composition import (
+    KIT_INVENTORY_PIECE_EXCLUDE_KEYS,
+    composition_json_from_lines,
+    composition_json_from_totals,
+)
+from app.kit_composition_lines import lines_to_json
+from app.zakaz_blanks import kit_composition_catalog_items
 from app.kit_blank_stock_core import (
     blank_stock_edit_rows_for_kit,
     blank_stock_qty_map,
@@ -105,7 +111,11 @@ def _kit_qty_prefill_from_admin_fp(fp: dict[str, Any]) -> dict[str, str]:
     return out
 
 
-def kit_admin_new_table_state_json(*, kit_qty_prefill: dict[str, str]) -> str:
+def kit_admin_new_table_state_json(
+    *,
+    kit_qty_prefill: dict[str, str],
+    initial_lines: list[dict[str, Any]] | None = None,
+) -> str:
     return json.dumps(
         {
             "mode": "admin_kit_new",
@@ -113,6 +123,8 @@ def kit_admin_new_table_state_json(*, kit_qty_prefill: dict[str, str]) -> str:
             "masters": [{"id": 0, "name": "Количество в комплекте"}],
             "seItems": [{"key": k, "label": lbl} for k, lbl in _kit_se_items()],
             "deItems": [{"key": k, "label": lbl} for k, lbl in _kit_de_items()],
+            "blankCatalog": kit_composition_catalog_items(),
+            "initialLines": initial_lines or [],
             "prefill": kit_qty_prefill,
             "excludeFromInventoryPieceCount": sorted(KIT_INVENTORY_PIECE_EXCLUDE_KEYS),
         },
@@ -305,7 +317,10 @@ async def admin_kit_new_post(
             raise ValueError("Комплект с таким артикулом уже есть")
         kit = Kit()
         apply_kit_admin_form(kit, d)
-        kit.composition_json = composition_json_from_totals(d.composition_totals)
+        if d.composition_lines:
+            kit.composition_json = lines_to_json(d.composition_lines)
+        else:
+            kit.composition_json = composition_json_from_totals(d.composition_totals)
         try:
             p1 = get_nonempty_upload(form, "photo_1")
             if p1 is not None:

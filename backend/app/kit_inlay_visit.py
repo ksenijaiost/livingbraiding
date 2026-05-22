@@ -302,7 +302,18 @@ def _apply_stock_kit_usage(
         if mutate_stock:
             decrement_blank_stock_keys(db, int(kit.id), bd)
             sync_kit_pieces_available_from_blank_lines(db, kit)
-        selected_price = keyed_client_price_selected(bd, price_map=price_map, meta_by_key=meta_by_key)
+        from app.kit_composition_lines import composition_has_v2_lines, keyed_client_price_selected_v2
+
+        if composition_has_v2_lines(kit.composition_json):
+            selected_price = keyed_client_price_selected_v2(
+                db,
+                kit.composition_json,
+                bd,
+                price_map=price_map,
+                meta_by_key=meta_by_key,
+            )
+        else:
+            selected_price = keyed_client_price_selected(bd, price_map=price_map, meta_by_key=meta_by_key)
         selected_cost = keyed_cost_selected(bd, comp=comp, kit_cost_total=max(0.0, float(kit.cost_total or 0.0)))
         _disc, net = apply_discount_capped(
             selected_price, discount_percent=int(kit.discount_percent or 0), cost_floor=selected_cost

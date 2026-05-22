@@ -127,6 +127,7 @@ class KitAdminFormData:
     discount_percent: int
     blanks_condition: KitBlanksCondition = KitBlanksCondition.NEW
     composition_totals: dict[str, int] = field(default_factory=dict)
+    composition_lines: list[Any] = field(default_factory=list)
 
 
 def parse_kit_qty_totals_from_form(form: Any) -> dict[str, int]:
@@ -157,10 +158,27 @@ def parse_kit_qty_totals_from_form(form: Any) -> dict[str, int]:
 
 
 def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
+    from app.kit_composition_lines import (
+        infer_blanks_condition,
+        inventory_piece_count,
+        lines_from_form,
+        lines_to_legacy_totals,
+    )
+
+    composition_lines = lines_from_form(form)
+    if not composition_lines:
+        composition_lines = []
     composition_totals: dict[str, int] = {}
     if for_create:
-        composition_totals = parse_kit_qty_totals_from_form(form)
-        inv = kit_inventory_piece_count(composition_totals)
+        if composition_lines:
+            composition_totals = lines_to_legacy_totals(composition_lines)
+        else:
+            composition_totals = parse_kit_qty_totals_from_form(form)
+        inv = (
+            inventory_piece_count(composition_lines)
+            if composition_lines
+            else kit_inventory_piece_count(composition_totals)
+        )
         if composition_totals and any(q > 0 for q in composition_totals.values()):
             pieces_total = pieces_available = inv
         else:
@@ -187,8 +205,13 @@ def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
         stock_price_total=_g_float_opt(form, "stock_price_total"),
         cost_total=_g_float_opt(form, "cost_total"),
         discount_percent=_g_discount_percent_from_form_field(form, "discount_percent", 0),
-        blanks_condition=_parse_kit_blanks_condition_from_form(form),
+        blanks_condition=(
+            infer_blanks_condition(composition_lines)
+            if composition_lines
+            else _parse_kit_blanks_condition_from_form(form)
+        ),
         composition_totals=dict(composition_totals),
+        composition_lines=list(composition_lines),
     )
 
 
@@ -246,75 +269,23 @@ def calc_kit_stock_price_total_from_composition(
 
     Возвращает: (price_total_or_none, missing_keys).
     """
-    if not getattr(kit, "composition_json", None):
+    from app.kit_composition_lines import client_price_for_lines, lines_from_json
+
+    raw = getattr(kit, "composition_json", None)
+    if not raw:
         return None, []
+    lines = lines_from_json(str(raw))
+    if lines:
+        total, missing = client_price_for_lines(db, lines, extra_costs_amount=0.0)
+        if missing:
+            return None, missing
+        return float(total), []
+
     try:
-        payload = json.loads(str(kit.composition_json))
+        payload = json.loads(str(raw))
     except Exception:
         return None, ["<composition_json invalid>"]
-
-    totals: dict[str, int] = {}
-    if isinstance(payload, dict):
-        for k, v in payload.items():
-            try:
-                totals[str(k)] = int(v)
-            except Exception:
-                continue
-    elif isinstance(payload, list):
-        for it in payload:
-            if not isinstance(it, dict):
-                continue
-            k = str(it.get("key") or "").strip()
-            if not k:
-                continue
-            try:
-                q = int(it.get("qty") or 0)
-            except Exception:
-                q = 0
-            if q > 0:
-                totals[k] = totals.get(k, 0) + q
-    else:
-        return None, ["<composition_json invalid>"]
-
-    rows = list(
-        db.scalars(
-            select(CatalogProduct).where(
-                CatalogProduct.category_name == "Заказ",
-                CatalogProduct.subcategory_name == "Заготовки поштучно",
-                CatalogProduct.is_active.is_(True),
-            )
-        ).all()
-    )
-    price_map: dict[str, float] = {}
-    meta_by_key: dict[str, dict[str, Any]] = {}
-    for r in rows:
-        try:
-            meta = json.loads(r.meta_json or "{}")
-        except Exception:
-            meta = {}
-        if not isinstance(meta, dict):
-            meta = {}
-        k = (meta.get("kit_key") or "").strip()
-        if not k or r.price is None:
-            continue
-        price_map[k] = float(r.price)
-        meta_by_key[k] = meta
-
-    missing: list[str] = []
-    total = 0.0
-    for k, q in totals.items():
-        q = int(q)
-        if q <= 0 or kit_key_excluded_from_client_price(meta_by_key.get(k) or {}, k):
-            continue
-        p = price_map.get(k)
-        if p is None:
-            missing.append(k)
-            continue
-        total += float(p) * float(q)
-    if missing:
-        return None, sorted(set(missing))
-    # В Kit сейчас нет отдельного поля extra_costs_amount; показываем сумму только по заготовкам.
-    return float(total), []
+    return None, ["<composition_json invalid>"]
 
 
 def try_fill_kit_admin_stock_price_total_from_composition(
@@ -367,7 +338,7 @@ def validate_kit_admin_form(d: KitAdminFormData, *, for_create: bool) -> None:
     if not d.blank_type_de and not d.blank_type_se:
         raise ValueError("Выберите тип заготовок: D.E и/или S.E.")
     if for_create:
-        if not d.composition_totals and d.pieces_total <= 0:
+        if not d.composition_lines and not d.composition_totals and d.pieces_total <= 0:
             raise ValueError(
                 "Для нового комплекта укажите в таблице видов заготовок хотя бы одно ненулевое количество."
             )

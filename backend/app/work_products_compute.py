@@ -71,6 +71,7 @@ def compute_work_financials(
     corr_wash: bool,
     corr_circle: bool,
     corr_steam: bool,
+    composition_lines: list[Any] | None = None,
 ) -> WorkFinancials:
     # Local imports to avoid circular deps with work_products.py
     from app.work_products import (  # noqa: WPS433
@@ -87,14 +88,21 @@ def compute_work_financials(
     staff_master_profit: dict[int, float] = {uid: 0.0 for uid, _ in alloc}
 
     if kind == WorkKind.KIT:
-        for item_key, total_qty in kit_totals.items():
-            rate = _kit_work_pay_for_item(db, item_key)
-            if rate <= 0:
-                continue
+        if composition_lines:
+            from app.kit_composition_lines import work_pay_for_lines
+
+            pay_map = work_pay_for_lines(db, composition_lines)
             for uid in kit_staff_ids:
-                q = int(kit_by_staff.get(uid, {}).get(item_key, 0))
-                if q > 0:
-                    staff_master_profit[uid] += rate * q
+                staff_master_profit[uid] = float(pay_map.get(uid, 0.0))
+        else:
+            for item_key, total_qty in kit_totals.items():
+                rate = _kit_work_pay_for_item(db, item_key)
+                if rate <= 0:
+                    continue
+                for uid in kit_staff_ids:
+                    q = int(kit_by_staff.get(uid, {}).get(item_key, 0))
+                    if q > 0:
+                        staff_master_profit[uid] += rate * q
         if mix_source == MixSource.SELF_MIXED and grams_total > 0 and mix_complexity is not None:
             mrate = float(mix_complexity_rate_map(db).get(mix_complexity, 0.0))
             mix_pay = max(0.0, float(grams_total) * mrate)

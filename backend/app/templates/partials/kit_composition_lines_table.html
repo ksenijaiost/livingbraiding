@@ -1,0 +1,35 @@
+{# Динамические строки состава комплекта. Перед include: script kit_table_state или kit_composition_state #}
+<div style="margin-top:12px;padding:12px;border-radius:8px;border:1px solid #e2e8f0;background:#f8fafc;">
+  <div style="font-weight:600;margin-bottom:8px;">Состав по видам заготовок</div>
+  <p class="muted" style="font-size:13px;margin:0 0 10px;">
+    Выберите вид, отметьте Б/У при необходимости, укажите % цены для б/у и количество по мастерам.
+    Пустая последняя строка не сохраняется. Один вид можно добавить дважды (новая и б/у).
+  </p>
+  <div style="overflow-x:auto;">
+    <table id="kit_composition_table" style="border-collapse:collapse;font-size:14px;width:100%;">
+      <thead id="kit_composition_thead"></thead>
+      <tbody id="kit_composition_tbody"></tbody>
+    </table>
+  </div>
+</div>
+<script src="/static/kit_composition_lines.js"></script>
+<script>
+(function () {
+  var stateEl = document.getElementById('kit_table_state');
+  var state = {};
+  try {
+    if (stateEl && stateEl.textContent) state = JSON.parse(stateEl.textContent);
+  } catch (e) {}
+  if (!state.blankCatalog || !state.blankCatalog.length) {
+    var se = state.seItems || [];
+    var de = state.deItems || [];
+    state.blankCatalog = se.concat(de);
+  }
+  if (!state.initialLines && state.prefill) {
+    state.initialLines = [];
+  }
+  if (typeof window.kitCompositionInit === 'function') {
+    window.kitCompositionInit(state);
+  }
+})();
+</script>

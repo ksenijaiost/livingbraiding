@@ -20,35 +20,13 @@ from app.kit_crud import kit_key_excluded_from_client_price
 
 
 def parse_composition_totals(kit: Kit) -> dict[str, int]:
-    """Количества по ключу из composition_json (тот же формат, что в calc_kit_stock_price_total_from_composition)."""
+    """Количества по ключу из composition_json (v2 строки или legacy)."""
+    from app.kit_composition_lines import lines_from_json, lines_to_legacy_totals
+
     raw = getattr(kit, "composition_json", None)
     if not raw:
         return {}
-    try:
-        payload = json.loads(str(raw))
-    except Exception:
-        return {}
-    totals: dict[str, int] = {}
-    if isinstance(payload, dict):
-        for k, v in payload.items():
-            try:
-                totals[str(k)] = int(v)
-            except Exception:
-                continue
-    elif isinstance(payload, list):
-        for it in payload:
-            if not isinstance(it, dict):
-                continue
-            k = str(it.get("key") or "").strip()
-            if not k:
-                continue
-            try:
-                q = int(it.get("qty") or 0)
-            except Exception:
-                q = 0
-            if q > 0:
-                totals[k] = totals.get(k, 0) + q
-    return {k: int(v) for k, v in totals.items() if int(v) > 0}
+    return lines_to_legacy_totals(lines_from_json(str(raw)))
 
 
 def load_catalog_kit_maps(
