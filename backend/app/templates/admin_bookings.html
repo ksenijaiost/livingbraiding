@@ -64,7 +64,8 @@
               <td><a href="/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
               <td>{{ "Визит" if b.kind.value == "VISIT" else "Продажа" }}</td>
               <td>
-                {% if b.status.value == "ACTIVE" %}<strong>⌛ активна</strong>{% endif %}
+                {% if b.status.value == "PENDING_CONFIRMATION" %}<strong>😴 ждёт подтверждения</strong>{% endif %}
+                {% if b.status.value == "ACTIVE" %}<strong>подтверждена</strong>{% endif %}
                 {% if b.status.value == "DONE" %}✅ выполнена{% endif %}
                 {% if b.status.value == "CANCELLED" %}❌ отменена{% endif %}
               </td>
@@ -72,7 +73,7 @@
                 <a href="/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
                 {% if can_manage %}
                   <a href="/bookings/{{ b.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
-                  {% if b.status.value == "ACTIVE" %}
+                  {% if b.status.value in ["ACTIVE", "PENDING_CONFIRMATION"] %}
                     <form method="post" action="/bookings/{{ b.id }}/cancel" style="display:inline; margin:0;" data-lb-confirm="Отменить бронь?" data-lb-prompt-input="reason" data-lb-prompt-text="Причина отмены">
                       <input type="hidden" name="reason" value="" />
                       <button type="submit" class="secondary">Отменить</button>

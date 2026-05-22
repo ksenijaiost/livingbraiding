@@ -138,6 +138,15 @@ def ensure_prod_seed_data(db: Session) -> None:
     if not kit_mx:
         db.add(Setting(key=KIT_MAX_RESERVES_PER_KIT, value="3"))
 
+    from app.setting_keys import CALENDAR_DISPLAY_HOUR_FROM, CALENDAR_DISPLAY_HOUR_TO
+
+    cal_from = db.get(Setting, CALENDAR_DISPLAY_HOUR_FROM)
+    if not cal_from:
+        db.add(Setting(key=CALENDAR_DISPLAY_HOUR_FROM, value="9"))
+    cal_to = db.get(Setting, CALENDAR_DISPLAY_HOUR_TO)
+    if not cal_to:
+        db.add(Setting(key=CALENDAR_DISPLAY_HOUR_TO, value="21"))
+
     # Default material prices: ₽ за 100 г → ₽/г (админ может поменять в настройках)
     defaults = {
         MaterialType.KANEKALON: 4.0,  # 400 ₽ / 100 г
@@ -618,6 +627,28 @@ def _upsert_catalog_product(
     row.sort_order = sort_order
 
 
+def _deactivate_obsolete_zakaz_blank_catalog_rows(db: Session, *, obsolete_kit_keys: frozenset[str]) -> None:
+    """Снять с прайса строки с устаревшими kit_key (переименования / разбиение позиций)."""
+    rows = list(
+        db.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.category_name == "Заказ",
+                CatalogProduct.subcategory_name == "Заготовки поштучно",
+            )
+        ).all()
+    )
+    for r in rows:
+        try:
+            meta = json.loads(r.meta_json or "{}")
+        except Exception:
+            continue
+        if not isinstance(meta, dict):
+            continue
+        k = str(meta.get("kit_key") or "").strip()
+        if k in obsolete_kit_keys:
+            r.is_active = False
+
+
 def _ensure_zakaz_products_catalog(db: Session) -> None:
     """
     Прайс «Заказ» в catalog_products.
@@ -650,6 +681,11 @@ def _ensure_zakaz_products_catalog(db: Session) -> None:
             sort_order=so,
         )
         so += 1
+
+    _deactivate_obsolete_zakaz_blank_catalog_rows(
+        db,
+        obsolete_kit_keys=frozenset({"SE_BRAID_FREE_TIP", "DE_BRAID_NEW_FMT", "DE_DREAD_FREE_TIP"}),
+    )
 
     # ---- Correction ----
     corr_prices_overrides = {

@@ -23,3 +23,8 @@ MIX_LENGTH = "mix_length"
 MIX_SIMPLE_LEGACY = "mix_simple"
 MIX_MEDIUM_LEGACY = "mix_medium"
 MIX_HARD_LEGACY = "mix_hard"
+
+# ЗП мастера-консультанта при успешной брони после консультации
+CONSULTATION_PAY_BELOW_THRESHOLD = "consultation_pay_below_threshold"
+CONSULTATION_PAY_AT_OR_ABOVE_THRESHOLD = "consultation_pay_at_or_above_threshold"
+CONSULTATION_PAY_AMOUNT_THRESHOLD = "consultation_pay_amount_threshold"

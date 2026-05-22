@@ -46,6 +46,21 @@ def _ctx(request: Request, current_user: AuthUser, **kwargs):
     return {"request": request, "current_user": current_user, **kwargs}
 
 
+def _parse_estimated_duration(raw: object) -> int:
+    if raw is None:
+        raise ValueError("missing duration")
+    s = str(raw).strip()
+    if not s:
+        raise ValueError("empty duration")
+    try:
+        v = int(s)
+    except ValueError:
+        raise ValueError("bad duration")
+    if v < 1 or v > 1440:
+        raise ValueError("bad duration range")
+    return v
+
+
 def _parse_optional_price(raw: object) -> float | None:
     if raw is None:
         return None
@@ -512,6 +527,7 @@ def service_new_form(
             form_retail_kanekalon=False,
             form_retail_kudri=False,
             form_retail_mix=False,
+            form_duration="120",
         ),
     )
 
@@ -533,6 +549,7 @@ def service_new_save(
     retail_material_kanekalon: str | None = Form(None),
     retail_material_kudri: str | None = Form(None),
     retail_material_mix: str | None = Form(None),
+    estimated_duration_minutes: str = Form(...),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -546,6 +563,11 @@ def service_new_save(
     if not nm:
         q = quote(str(subcategory_id))
         return RedirectResponse(url=f"/admin/catalog/services/new?subcategory_id={q}&err=empty", status_code=303)
+    try:
+        duration = _parse_estimated_duration(estimated_duration_minutes)
+    except ValueError:
+        q = quote(str(subcategory_id))
+        return RedirectResponse(url=f"/admin/catalog/services/new?subcategory_id={q}&err=bad_duration", status_code=303)
     try:
         jf = _parse_optional_price(price_junior_from)
         jt = _parse_optional_price(price_junior_to)
@@ -561,6 +583,7 @@ def service_new_save(
         subcategory_id=subcategory_id,
         name=nm,
         is_active=_is_checked(is_active),
+        estimated_duration_minutes=duration,
         price_junior_from=jf,
         price_junior_to=jt,
         price_middle_from=mf,
@@ -638,6 +661,7 @@ def service_edit_form(
             form_retail_kanekalon=svc.retail_material_kanekalon,
             form_retail_kudri=svc.retail_material_kudri,
             form_retail_mix=svc.retail_material_mix,
+            form_duration=str(svc.estimated_duration_minutes),
         ),
     )
 
@@ -659,6 +683,7 @@ def service_edit_save(
     retail_material_kanekalon: str | None = Form(None),
     retail_material_kudri: str | None = Form(None),
     retail_material_mix: str | None = Form(None),
+    estimated_duration_minutes: str = Form(...),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -672,6 +697,7 @@ def service_edit_save(
     before = SimpleNamespace(
         name=svc.name,
         is_active=svc.is_active,
+        estimated_duration_minutes=svc.estimated_duration_minutes,
         price_junior_from=svc.price_junior_from,
         price_junior_to=svc.price_junior_to,
         price_middle_from=svc.price_middle_from,
@@ -692,6 +718,13 @@ def service_edit_save(
             status_code=303,
         )
     try:
+        duration = _parse_estimated_duration(estimated_duration_minutes)
+    except ValueError:
+        return RedirectResponse(
+            url=f"/admin/catalog/services/{service_id}/edit?err=bad_duration",
+            status_code=303,
+        )
+    try:
         jf = _parse_optional_price(price_junior_from)
         jt = _parse_optional_price(price_junior_to)
         mf = _parse_optional_price(price_middle_from)
@@ -706,6 +739,7 @@ def service_edit_save(
 
     svc.name = nm
     svc.is_active = _is_checked(is_active)
+    svc.estimated_duration_minutes = duration
     svc.price_junior_from = jf
     svc.price_junior_to = jt
     svc.price_middle_from = mf
@@ -732,6 +766,7 @@ def service_edit_save(
             (
                 "name",
                 "is_active",
+                "estimated_duration_minutes",
                 "price_junior_from",
                 "price_junior_to",
                 "price_middle_from",

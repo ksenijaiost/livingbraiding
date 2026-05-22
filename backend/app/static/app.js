@@ -31,6 +31,7 @@ document.addEventListener("DOMContentLoaded", function () {
   initKitReserveUI();
   initKitClearReservesUI();
   initLbFormGuards();
+  initLbDoubleSubmitGuard();
   initImageLightbox();
 });
 
@@ -1040,6 +1041,49 @@ function initAdminBookingForm() {
   if (initialCatId || initialSubId || initialSvcId) {
     setServiceSelections(initialCatId, initialSubId, initialSvcId);
   }
+}
+
+/** Блокирует повторный POST при двойном клике «Сохранить» (форма остаётся на экране до ответа сервера). */
+function initLbDoubleSubmitGuard() {
+  document.addEventListener(
+    "submit",
+    function (e) {
+      var form = e.target;
+      if (!form || form.tagName !== "FORM") return;
+      var method = (form.getAttribute("method") || "get").toLowerCase();
+      if (method === "get") return;
+      if (form.getAttribute("data-lb-allow-resubmit") === "1") return;
+
+      if (form.dataset.lbSubmitting === "1") {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      form.dataset.lbSubmitting = "1";
+
+      var buttons = form.querySelectorAll('button[type="submit"], input[type="submit"]');
+      for (var i = 0; i < buttons.length; i++) {
+        var btn = buttons[i];
+        btn.disabled = true;
+        if (btn.tagName === "BUTTON") {
+          if (!btn.dataset.lbSubmitOrigText) {
+            btn.dataset.lbSubmitOrigText = btn.textContent || "";
+          }
+          if (i === 0) {
+            btn.textContent = "Сохраняем…";
+          }
+        } else if (btn.tagName === "INPUT" && btn.type === "submit") {
+          if (!btn.dataset.lbSubmitOrigValue) {
+            btn.dataset.lbSubmitOrigValue = btn.value || "";
+          }
+          if (i === 0) {
+            btn.value = "Сохраняем…";
+          }
+        }
+      }
+    },
+    false
+  );
 }
 
 function initLbFormGuards() {

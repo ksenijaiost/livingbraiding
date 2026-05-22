@@ -87,6 +87,9 @@
                         style="vertical-align: top; padding: 8px 10px; cursor:pointer; {% if not d.in_month %}opacity:0.45;{% endif %} {% if d.is_today %}border-bottom:2px solid #111827;{% endif %}">
                       <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 8px;">
                         <div style="font-weight:700;" title="{{ d.iso }}">{{ d.date.day }}</div>
+                        {% if d.draft_count and d.draft_count > 0 %}
+                          <span title="Есть черновик визита" style="font-size:14px;line-height:1;">❗️</span>
+                        {% endif %}
                       </div>
                       <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px; font-size:12px;">
                         {% if d.visits %}
@@ -144,6 +147,7 @@
               {% if sections_ctx.is_master %}
                 <a href="/master/bookings"><button type="button" class="secondary">Мои записи</button></a>
                 <a href="/master/visit/new"><button type="button" class="secondary">Новый визит</button></a>
+                <a href="/master/visit/draft/new"><button type="button" class="secondary">Черновик визита</button></a>
               {% endif %}
               <a href="/clients"><button type="button" class="secondary">Клиенты</button></a>
               <a href="/visits"><button type="button" class="secondary">Визиты</button></a>
@@ -227,6 +231,53 @@
           if (!res.ok) throw new Error('HTTP ' + res.status);
           var data = await res.json();
 
+          function renderOccupancy(occ) {
+            occ = occ || {};
+            var masters = occ.masters || [];
+            if (!masters.length) return '';
+            var hourFrom = Number(occ.hour_from);
+            var hourTo = Number(occ.hour_to);
+            if (isNaN(hourFrom)) hourFrom = 9;
+            if (isNaN(hourTo)) hourTo = 21;
+            var spanMin = (hourTo - hourFrom) * 60;
+            if (spanMin <= 0) return '';
+            var pxHour = 48;
+            var gridH = (hourTo - hourFrom) * pxHour;
+            var segs = occ.segments || [];
+            var h = '';
+            h += '<div class=\"card lb-day-occ\" style=\"background:#f8fafc; margin: 10px 0;\">';
+            h += '<div style=\"font-weight:700; margin-bottom:8px;\">Занятость</div>';
+            h += '<div style=\"display:flex; gap:8px; overflow-x:auto;\">';
+            h += '<div style=\"flex:0 0 44px; font-size:11px; color:#64748b;\">';
+            for (var hh = hourFrom; hh < hourTo; hh++) {
+              h += '<div style=\"height:' + pxHour + 'px; line-height:' + pxHour + 'px; border-top:1px solid #e2e8f0;\">' + esc(String(hh) + ':00') + '</div>';
+            }
+            h += '</div>';
+            for (var mi = 0; mi < masters.length; mi++) {
+              var m = masters[mi] || {};
+              h += '<div style=\"flex:1 1 80px; min-width:72px;\">';
+              h += '<div style=\"font-size:12px; font-weight:600; text-align:center; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;\">' + esc(m.name || '') + '</div>';
+              h += '<div style=\"position:relative; height:' + gridH + 'px; border-left:1px solid #e2e8f0; background:#fff;\">';
+              for (var si = 0; si < segs.length; si++) {
+                var seg = segs[si] || {};
+                if (Number(seg.master_id) !== Number(m.id)) continue;
+                var topPct = ((Number(seg.start_minutes) - hourFrom * 60) / spanMin) * 100;
+                var hPct = ((Number(seg.end_minutes) - Number(seg.start_minutes)) / spanMin) * 100;
+                if (hPct <= 0) continue;
+                var bg = seg.color || '#9E88C0';
+                var op = (seg.status === 'DONE') ? '0.55' : '1';
+                h += '<a href=\"' + esc(seg.url || '#') + '\" title=\"Бронь #' + esc(seg.booking_id) + '\" style=\"position:absolute; left:2px; right:2px; top:' + topPct + '%; height:' + hPct + '%; background:' + bg + '; opacity:' + op + '; color:#fff; font-size:11px; text-decoration:none; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:1;\">' + esc(seg.booking_id) + '</a>';
+              }
+              h += '</div></div>';
+            }
+            h += '</div>';
+            h += '<div style=\"margin-top:10px; font-size:12px; display:flex; gap:16px; flex-wrap:wrap; color:#475569;\">';
+            h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#9E88C0; vertical-align:middle; margin-right:4px;\"></span> Подтверждена</span>';
+            h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#7F7679; vertical-align:middle; margin-right:4px;\"></span> Ждёт подтверждения</span>';
+            h += '</div></div>';
+            return h;
+          }
+
           function block(title, payload, key) {
             payload = payload || {};
             var items = payload.items || [];
@@ -235,6 +286,7 @@
             var studio = money2(payload.studio_sum || 0);
             var showStudio = !!data.is_super && key !== 'bookings';
             var isBookings = key === 'bookings';
+            var useServiceLabel = key === 'bookings' || key === 'visits';
             var h = '';
             h += '<div class=\"card\" style=\"background:#f8fafc; margin: 10px 0;\">';
             h += '<div style=\"display:flex; justify-content:space-between; gap:12px; align-items:baseline; flex-wrap:wrap;\">';
@@ -251,7 +303,7 @@
             } else {
               h += '<div style=\"margin-top:8px; overflow-x:auto;\">';
               h += '<table style=\"font-size:13px;\">';
-              h += '<thead><tr><th>ID</th><th>Клиент</th><th>Детали</th>';
+              h += '<thead><tr><th>ID</th><th style=\"max-width:12rem;\">Клиент</th><th>Детали</th>';
               if (isBookings) {
                 h += '<th>Статус</th>';
               } else {
@@ -262,10 +314,11 @@
               h += '<tbody>';
               for (var i = 0; i < items.length; i++) {
                 var it = items[i] || {};
+                var details = useServiceLabel ? (it.service_label || it.label || '—') : (it.label || it.kind || '—');
                 h += '<tr>';
                 h += '<td><code>' + esc(it.id) + '</code></td>';
-                h += '<td>' + esc(it.client || '—') + '</td>';
-                h += '<td>' + esc(it.label || it.kind || '—') + '</td>';
+                h += '<td style=\"max-width:12rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;\">' + esc(it.client || '—') + '</td>';
+                h += '<td>' + esc(details) + '</td>';
                 if (isBookings) {
                   h += '<td>' + esc(it.status || '—') + '</td>';
                 } else {
@@ -282,9 +335,13 @@
           }
 
           var html = '';
+          html += renderOccupancy(data.occupancy);
           html += block('Брони', data.bookings, 'bookings');
           html += block('Визиты', data.visits, 'visits');
           html += block('Работа', data.works, 'works');
+          if (data.drafts && data.drafts.count) {
+            html += block('Черновики визита', data.drafts, 'drafts');
+          }
           body.innerHTML = html;
           tt.textContent = data.date || isoDay || '—';
         } catch (e) {

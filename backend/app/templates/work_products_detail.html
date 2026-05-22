@@ -8,7 +8,9 @@
     </p>
 
     {% if msg %}
-      {% if msg == 'voided' %}
+      {% if msg == 'created' %}
+        <div class="ok" style="margin-bottom: 12px;">Работа сохранена.</div>
+      {% elif msg == 'voided' %}
         <div class="ok" style="margin-bottom: 12px;">Аннулировано.</div>
       {% elif msg == 'already_voided' %}
         <div class="error" style="margin-bottom: 12px;">Уже аннулировано.</div>
@@ -76,6 +78,9 @@
               <div>
                 <strong>Бронь</strong>
                 <div class="muted"><a href="/bookings/{{ row.booking_id }}">#{{ row.booking_id }}</a></div>
+                {% if consultation %}
+                  <div class="muted" style="margin-top:4px;">Консультация: <a href="/consultations/{{ consultation.id }}">#{{ consultation.id }}</a></div>
+                {% endif %}
               </div>
             {% endif %}
             {% if linked_sale_ids %}

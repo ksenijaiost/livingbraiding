@@ -39,6 +39,8 @@ app.include_router(work_products_routes.router)
 app.include_router(work_products_routes.legacy_admin_router)
 from app.routes.visits import router as visits_router  # noqa: E402
 app.include_router(visits_router)
+from app.routes.consultations import router as consultations_router  # noqa: E402
+app.include_router(consultations_router)
 from app.routes.settings import router as settings_router  # noqa: E402
 app.include_router(settings_router)
 from app.routes.clients import (  # noqa: E402

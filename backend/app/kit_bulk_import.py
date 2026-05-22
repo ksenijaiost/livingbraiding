@@ -18,6 +18,7 @@ from app.kit_blank_stock_core import (
 from app.kit_crud import (
     KitAdminFormData,
     apply_kit_admin_form,
+    infer_blank_types_from_composition_totals,
     sync_kit_authors_from_user_ids,
     try_fill_kit_admin_stock_price_total_from_composition,
     validate_kit_admin_form,
@@ -101,6 +102,25 @@ def parse_bulk_kits_json(raw: str) -> list[dict[str, Any]]:
             raise ValueError(f"Строка {i + 1}: ожидался объект, не {type(row).__name__}.")
         out.append(row)
     return out
+
+
+def _composition_from_bulk(val: Any) -> tuple[str | None, dict[str, int] | None]:
+    """Возвращает (composition_json, totals_by_key)."""
+    from app.kit_composition_lines import lines_from_json, lines_to_json, lines_to_legacy_totals
+
+    if val is None:
+        return None, None
+    if isinstance(val, list) and val:
+        if isinstance(val[0], dict) and ("by_staff" in val[0] or "condition" in val[0]):
+            raw = json.dumps(val, ensure_ascii=False)
+            lines = lines_from_json(raw)
+            return lines_to_json(lines), lines_to_legacy_totals(lines) or None
+    totals = _composition_dict_from_json(val)
+    if totals:
+        from app.kit_composition import composition_json_from_totals
+
+        return composition_json_from_totals(totals), totals
+    return None, None
 
 
 def _composition_dict_from_json(val: Any) -> dict[str, int] | None:
@@ -231,6 +251,7 @@ def row_to_kit_admin_data(
     saved_sku: str,
     pieces_initial: int,
     stock_price_total: float | None,
+    composition_totals: dict[str, int] | None = None,
 ) -> KitAdminFormData:
     sku = saved_sku.strip()
     title = _str_opt(row, "title")
@@ -245,11 +266,16 @@ def row_to_kit_admin_data(
         disc = int(disc_raw) if disc_raw != "" and disc_raw is not None else 0
     except (TypeError, ValueError):
         raise ValueError("Скидка (discount_percent) — целое число от 0 до 100.") from None
+    comp = dict(composition_totals or {})
+    bde = _bool_at(row, "blank_type_de")
+    bse = _bool_at(row, "blank_type_se")
+    if not bde and not bse and comp:
+        bde, bse = infer_blank_types_from_composition_totals(comp)
     return KitAdminFormData(
         sku=sku,
         title=title,
-        blank_type_de=_bool_at(row, "blank_type_de"),
-        blank_type_se=_bool_at(row, "blank_type_se"),
+        blank_type_de=bde,
+        blank_type_se=bse,
         pieces_total=max(0, pieces_initial),
         pieces_available=max(0, pieces_initial),
         weight_grams=_float_at(row, "weight_grams"),
@@ -262,7 +288,7 @@ def row_to_kit_admin_data(
         cost_total=ct,
         discount_percent=disc,
         blanks_condition=_blanks_condition_from_bulk_row(row),
-        composition_totals={},
+        composition_totals=comp,
     )
 
 
@@ -301,7 +327,7 @@ def import_single_kit_row(
         }
     try:
         saved_sku = allocate_unique_kit_sku(db, input_sku, reserved_skus)
-        comp = _composition_dict_from_json(row.get("composition"))
+        comp_json, comp = _composition_from_bulk(row.get("composition"))
         blank_qty = _blank_stock_dict(row.get("blank_stock"))
         if comp and not blank_qty:
             blank_qty = dict(comp)
@@ -325,6 +351,7 @@ def import_single_kit_row(
             saved_sku=saved_sku,
             pieces_initial=pieces_initial,
             stock_price_total=sp,
+            composition_totals=comp if comp else None,
         )
         if d.stock_price_total is None and comp:
             try_fill_kit_admin_stock_price_total_from_composition(db, d, composition_totals=comp)
@@ -334,7 +361,10 @@ def import_single_kit_row(
         kit = Kit()
         apply_kit_admin_form(kit, d)
         if comp:
-            kit.composition_json = json.dumps(comp, ensure_ascii=False, sort_keys=True)
+            if comp_json:
+                kit.composition_json = comp_json
+            elif comp:
+                kit.composition_json = json.dumps(comp, ensure_ascii=False, sort_keys=True)
         kit.updated_by_user_id = changed_by_user_id
         db.add(kit)
         db.flush()

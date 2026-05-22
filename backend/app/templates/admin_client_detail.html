@@ -14,6 +14,11 @@
   <div class="card">
     <p class="muted" style="margin-top:0;"><a href="/clients">← К списку клиентов</a></p>
 
+    {% if created_banner %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">
+        Клиент создан.
+      </p>
+    {% endif %}
     {% if confirmed_banner %}
       <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">
         Клиент подтверждён.

@@ -231,6 +231,27 @@ def _validate_stock_selection(
     return kit
 
 
+def estimate_stock_kit_usage(
+    db: Session,
+    *,
+    kit_id: int,
+    use_entire: bool,
+    blanks_used: int,
+    client_id: int | None = None,
+    usage_by_key: dict[str, int] | None = None,
+) -> tuple[int, float, float, dict[str, int]]:
+    """Расчёт стоимости комплекта без списания со склада."""
+    return _apply_stock_kit_usage(
+        db,
+        kit_id=kit_id,
+        use_entire=use_entire,
+        blanks_used=blanks_used,
+        client_id=client_id,
+        usage_by_key=usage_by_key,
+        mutate_stock=False,
+    )
+
+
 def _apply_stock_kit_usage(
     db: Session,
     *,
@@ -239,6 +260,7 @@ def _apply_stock_kit_usage(
     blanks_used: int,
     client_id: int | None = None,
     usage_by_key: dict[str, int] | None = None,
+    mutate_stock: bool = True,
 ) -> tuple[int, float, float, dict[str, int]]:
     """Списание: (pieces_used, cost_amount_for_visit, studio_fund_amount, usage_by_key_out).
 
@@ -263,8 +285,9 @@ def _apply_stock_kit_usage(
     if kit_inventory_is_keyed(db, int(kit.id)):
         price_map, meta_by_key, _labels = load_catalog_kit_maps(db)
         comp = parse_composition_totals(kit)
-        release_client_kit_reserves_into_free_pool(db, kit=kit, client_id=client_id)
-        db.flush()
+        if mutate_stock:
+            release_client_kit_reserves_into_free_pool(db, kit=kit, client_id=client_id)
+            db.flush()
         stock_map = blank_stock_qty_map(db, int(kit.id))
         max_by_key = max_take_by_key_for_client(db, kit=kit, client_id=client_id, stock_map=stock_map)
         bd = build_usage_breakdown_keyed(
@@ -276,15 +299,27 @@ def _apply_stock_kit_usage(
         ntot = sum(int(v) for v in bd.values())
         if ntot <= 0:
             raise ValueError("Укажите количество заготовок или «весь комплект»")
-        decrement_blank_stock_keys(db, int(kit.id), bd)
-        sync_kit_pieces_available_from_blank_lines(db, kit)
-        selected_price = keyed_client_price_selected(bd, price_map=price_map, meta_by_key=meta_by_key)
+        if mutate_stock:
+            decrement_blank_stock_keys(db, int(kit.id), bd)
+            sync_kit_pieces_available_from_blank_lines(db, kit)
+        from app.kit_composition_lines import composition_has_v2_lines, keyed_client_price_selected_v2
+
+        if composition_has_v2_lines(kit.composition_json):
+            selected_price = keyed_client_price_selected_v2(
+                db,
+                kit.composition_json,
+                bd,
+                price_map=price_map,
+                meta_by_key=meta_by_key,
+            )
+        else:
+            selected_price = keyed_client_price_selected(bd, price_map=price_map, meta_by_key=meta_by_key)
         selected_cost = keyed_cost_selected(bd, comp=comp, kit_cost_total=max(0.0, float(kit.cost_total or 0.0)))
         _disc, net = apply_discount_capped(
             selected_price, discount_percent=int(kit.discount_percent or 0), cost_floor=selected_cost
         )
         studio_fund = max(0.0, net - selected_cost)
-        if kit.pieces_available <= 0:
+        if mutate_stock and kit.pieces_available <= 0:
             kit.is_in_stock = False
         return int(ntot), float(net), float(studio_fund), bd
 
@@ -293,6 +328,7 @@ def _apply_stock_kit_usage(
         total_pieces = 1
     avail = int(kit.pieces_available or 0)
     cid = int(client_id or 0)
+    reserved_for_client = 0
     if cid > 0:
         total = db.scalar(
             select(func.coalesce(func.sum(KitReserve.pieces_reserved), 0)).where(
@@ -300,8 +336,8 @@ def _apply_stock_kit_usage(
                 KitReserve.reserved_for_client_id == cid,
             )
         )
-        total = int(total or 0)
-        if total > 0:
+        reserved_for_client = int(total or 0)
+        if mutate_stock and reserved_for_client > 0:
             rows = list(
                 db.scalars(
                     select(KitReserve)
@@ -314,10 +350,12 @@ def _apply_stock_kit_usage(
             )
             for r in rows:
                 db.delete(r)
-            kit.pieces_available = int(kit.pieces_available or 0) + int(total)
+            kit.pieces_available = int(kit.pieces_available or 0) + int(reserved_for_client)
             avail = int(kit.pieces_available or 0)
+            reserved_for_client = 0
 
-    n = avail if use_entire else int(blanks_used or 0)
+    max_for_client = int(avail or 0) + int(reserved_for_client or 0)
+    n = max_for_client if use_entire else int(blanks_used or 0)
     kit_cost_full = max(0.0, float(kit.cost_total or 0.0))
     max_disc_margin = max(0.0, price - kit_cost_full)
     pct = max(0, min(100, int(kit.discount_percent or 0)))
@@ -328,9 +366,10 @@ def _apply_stock_kit_usage(
     cost = net_full * k
     cost_portion = kit_cost_full * k
     studio_fund = max(0.0, cost - cost_portion)
-    kit.pieces_available = avail - n
-    if kit.pieces_available <= 0:
-        kit.is_in_stock = False
+    if mutate_stock:
+        kit.pieces_available = avail - n
+        if kit.pieces_available <= 0:
+            kit.is_in_stock = False
     return n, cost, studio_fund, {}
 
 
@@ -1052,210 +1091,14 @@ def save_kit_inlay_visit(
     created_by_label: str | None = None,
 ) -> Visit:
     """Визит с выбранным клиентом или новым черновиком; услуга, склад STOCK, расчёт."""
-    if inp.service_id <= 0:
-        raise ValueError("Выберите услугу")
+    from app.visit_multi_service import kit_inlay_to_multi, save_visit_with_services
 
-    master_rows = _resolve_visit_master_allocations(db, inp.visit_master_allocations)
-
-    service = db.scalar(
-        select(Service)
-        .options(selectinload(Service.subcategory).selectinload(ServiceSubcategory.category))
-        .where(Service.id == inp.service_id, Service.is_active.is_(True))
-    )
-    if not service or not service.subcategory or not service.subcategory.category:
-        raise ValueError("Услуга не найдена")
-    if (service.subcategory.category.name or "").strip() in ("Заказ", "Продажа материала"):
-        raise ValueError("Эта позиция недоступна для выбора в визите")
-
-    payload = build_payload_from_input(inp, db)
-
-    mat_cost, k_snap, ku_snap = _materials_cost_and_snapshot(
+    return save_visit_with_services(
         db,
-        kanekalon_grams=inp.kanekalon_grams,
-        kudri_grams=inp.kudri_grams,
+        master_id,
+        kit_inlay_to_multi(inp),
+        created_by_label=created_by_label,
     )
-    salon_pct = get_salon_cut_pct(db)
-
-    kit_cost_total = 0.0
-    usages: list[tuple[int, int, float, dict[str, int]]] = []
-    kit_studio_fund = 0.0
-
-    if service_requires_kit_block(service):
-        kind = inp.kit_kind.upper()
-        exclude_main_stock_cost = kind == "STOCK" and bool(inp.kit_paid_separately) and bool(
-            inp.stock_kit_lines
-        )
-        if kind == "STOCK" and inp.stock_kit_lines:
-            for line in inp.stock_kit_lines:
-                n, cost, sf, bd = _apply_stock_kit_usage(
-                    db,
-                    kit_id=line.kit_id,
-                    use_entire=line.use_entire,
-                    blanks_used=line.blanks_used,
-                    client_id=inp.existing_client_id,
-                    usage_by_key=line.usage_by_key,
-                )
-                usage_cost = 0.0 if exclude_main_stock_cost else cost
-                usage_sf = 0.0 if exclude_main_stock_cost else sf
-                usages.append((line.kit_id, n, usage_cost, bd))
-            kit_cost_total += usage_cost
-            kit_studio_fund += usage_sf
-        if kind == "OWN" and inp.own_extra_blanks and inp.own_extra_stock_kit_id:
-            n, cost, sf, bd = _apply_stock_kit_usage(
-                db,
-                kit_id=inp.own_extra_stock_kit_id,
-                use_entire=inp.own_extra_stock_use_entire,
-                blanks_used=inp.own_extra_stock_blanks_used,
-                client_id=inp.existing_client_id,
-                usage_by_key=inp.own_extra_stock_usage_by_key,
-            )
-            usages.append((inp.own_extra_stock_kit_id, n, cost, bd))
-            kit_cost_total += cost
-            kit_studio_fund += sf
-
-    addons = max(0.0, float(inp.addon_sales_amount or 0.0))
-    addons_detail: dict[str, Any] = {}
-    ad = (inp.addon_sales_description or "").strip()
-    if ad:
-        addons_detail["description"] = ad
-    addons_details_json = (
-        json.dumps(addons_detail, ensure_ascii=False) if addons_detail else None
-    )
-
-    grams_total = max(0.0, inp.kanekalon_grams) + max(0.0, inp.kudri_grams)
-    mix_cost = 0.0
-    mix_bonus_amount = 0.0
-    mix_bonus_master_id = None
-    if inp.mix_source and inp.mix_source != MixSource.NO_MIX:
-        if inp.mix_complexity is None:
-            raise ValueError("Укажите сложность смешки")
-        coef = mix_complexity_rate_for(db, inp.mix_complexity)
-        mix_cost = grams_total * coef
-        if inp.mix_source == MixSource.SELF_MIXED:
-            mix_bonus_amount = mix_cost
-            mix_bonus_master_id = master_id
-
-    amort_amount = 0.0
-    if inp.amortization_level is not None:
-        amort_amount = float(AMORTIZATION_LEVEL_RUBLES.get(inp.amortization_level.value, 0.0))
-
-    # Расходы до распределения
-    cost_total = mat_cost + kit_cost_total + addons + mix_cost + amort_amount
-    profit_before = inp.amount_from_client - cost_total
-    salon_profit = profit_before * salon_pct
-    masters_pool = profit_before - salon_profit
-
-    if inp.client_mode == "draft":
-        if not inp.draft_name.strip():
-            raise ValueError("Укажите имя клиента для черновика.")
-        if not client_has_any_contact(
-            inp.draft_phone,
-            inp.draft_telegram,
-            inp.draft_vk,
-            inp.draft_instagram,
-            inp.draft_other_contact,
-        ):
-            raise ValueError("Для черновика нужен хотя бы один контакт (телефон или соцсеть).")
-        client = Client(
-            name=inp.draft_name.strip()[:200],
-            phone=strip_or_none(inp.draft_phone, 30),
-            telegram=strip_or_none(inp.draft_telegram, 100),
-            vk=strip_or_none(inp.draft_vk, 120),
-            instagram=strip_or_none(inp.draft_instagram, 120),
-            other_contact=strip_or_none(inp.draft_other_contact, 200),
-            comment=None,
-            is_confirmed=False,
-            created_by_label=created_by_label,
-        )
-        db.add(client)
-        db.flush()
-    else:
-        if not inp.existing_client_id:
-            raise ValueError("Найдите и выберите клиента из списка или переключитесь на «Новый черновик».")
-        client = db.get(Client, inp.existing_client_id)
-        if client is None:
-            raise ValueError("Клиент не найден.")
-
-    performed_dt = datetime.combine(inp.performed_date, datetime.min.time())
-    ensure_event_date_in_open_payroll_period(db, performed_dt)
-
-    visit = Visit(
-        created_by_user_id=master_id,
-        performed_date=performed_dt,
-        duration_minutes=max(0, inp.duration_minutes),
-        client_id=client.id,
-        client_type=inp.client_type,
-        price_type=VisitPriceType.CLIENT,
-        client_discount_percent=int(inp.client_discount_percent or 0),
-        client_age_group=client.age_group,
-        kanekalon_grams=inp.kanekalon_grams,
-        kudri_grams=inp.kudri_grams,
-        mix_source=inp.mix_source,
-        mix_complexity=inp.mix_complexity,
-        mix_cost_amount=mix_cost,
-        mix_bonus_master_id=mix_bonus_master_id,
-        mix_bonus_amount=mix_bonus_amount,
-        kanekalon_price_per_gram_at_time=k_snap,
-        kudri_price_per_gram_at_time=ku_snap,
-        materials_cost_total=mat_cost,
-        amount_from_client=inp.amount_from_client,
-        addons_total=addons,
-        addons_details_json=addons_details_json,
-        amortization_level=inp.amortization_level,
-        amortization_amount=amort_amount,
-        studio_fund_amount=amort_amount + kit_studio_fund,
-        cost_total=cost_total,
-        profit_before_split=profit_before,
-        salon_cut_pct_at_time=salon_pct,
-        salon_profit=salon_profit,
-        masters_pool=masters_pool,
-        comment=None,
-        kit_paid_separately=bool(inp.kit_paid_separately),
-    )
-    db.add(visit)
-    db.flush()
-
-    for mid, pct in master_rows:
-        db.add(VisitMaster(visit_id=visit.id, master_id=mid, percent=pct))
-    db.flush()
-
-    details = payload.model_dump(mode="json")
-    db.add(
-        VisitService(
-            visit_id=visit.id,
-            service_id=service.id,
-            details_json=json.dumps(details, ensure_ascii=False),
-            category_name=service.subcategory.category.name,
-            subcategory_name=service.subcategory.name,
-            service_name=service.name,
-        )
-    )
-
-    for kid, pieces, camount, bd in usages:
-        uj = json.dumps(bd, ensure_ascii=False) if bd else None
-        db.add(
-            VisitKitUsage(
-                visit_id=visit.id,
-                kit_id=kid,
-                pieces_used=pieces,
-                cost_amount=camount,
-                note=None,
-                usage_breakdown_json=uj,
-            )
-        )
-
-    if payload.thermo is not None:
-        persist_new_thermo_template_if_needed(
-            db,
-            client_id=client.id,
-            details=payload.thermo,
-            label_suffix=f"Термо {performed_dt.date().isoformat()}",
-        )
-
-    post_visit_accruals(db, visit, visit.created_by_user_id)
-    db.commit()
-    db.refresh(visit)
-    return visit
 
 
 def list_master_visit_services(db: Session) -> list[Service]:

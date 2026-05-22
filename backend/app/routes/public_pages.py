@@ -110,6 +110,7 @@ def home(
         visits_by_day: dict[date, int] = defaultdict(int)
         bookings_by_day: dict[date, int] = defaultdict(int)
         works_by_day: dict[date, int] = defaultdict(int)
+        drafts_by_day: dict[date, int] = defaultdict(int)
         payroll_sum_by_day: dict[date, float] = defaultdict(float)
 
         v_stmt = (
@@ -163,7 +164,9 @@ def home(
         b_stmt = (
             select(Booking.planned_date)
             .where(
-                Booking.status == BookingStatus.ACTIVE,
+                Booking.status.in_(
+                    (BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)
+                ),
                 Booking.planned_date >= month_start_utc,
                 Booking.planned_date < month_end_utc,
             )
@@ -178,6 +181,18 @@ def home(
         for (dt0,) in db.execute(b_stmt).all():
             if isinstance(dt0, datetime):
                 bookings_by_day[_utc_naive_to_local_date(dt0)] += 1
+
+        from app.visit_draft import draft_counts_by_day
+
+        month_end_date = next_month_local_start.date()
+        draft_day_counts = draft_counts_by_day(
+            db,
+            user=current_user,
+            day_from=month_local_start.date(),
+            day_to_excl=month_end_date,
+        )
+        for d0, cnt in draft_day_counts.items():
+            drafts_by_day[d0] = int(cnt)
 
         if visit_ids:
             v_pay = list(
@@ -301,6 +316,7 @@ def home(
                         "visits": int(visits_by_day.get(d0, 0)),
                         "bookings": int(bookings_by_day.get(d0, 0)),
                         "works": int(works_by_day.get(d0, 0)),
+                        "draft_count": int(drafts_by_day.get(d0, 0)),
                         "payroll_sum": float(payroll_sum_by_day.get(d0, 0.0)),
                         "is_today": (d0 == now_local.date()),
                     }

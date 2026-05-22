@@ -360,6 +360,7 @@ class Service(Base):
     subcategory_id: Mapped[int] = mapped_column(ForeignKey("service_subcategories.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    estimated_duration_minutes: Mapped[int] = mapped_column(Integer, default=120, nullable=False)
 
     # Прайс по уровням мастера (в UI: младший / мастер / старший); любой диапазон может быть NULL.
     price_junior_from: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -624,12 +625,18 @@ class CatalogProduct(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
+class VisitMastersScope(str, enum.Enum):
+    VISIT = "VISIT"
+    PER_SERVICE = "PER_SERVICE"
+
+
 class BookingKind(str, enum.Enum):
     VISIT = "VISIT"
     PRODUCT_SALE = "PRODUCT_SALE"
 
 
 class BookingStatus(str, enum.Enum):
+    PENDING_CONFIRMATION = "PENDING_CONFIRMATION"
     ACTIVE = "ACTIVE"
     DONE = "DONE"
     CANCELLED = "CANCELLED"
@@ -654,9 +661,9 @@ class Booking(Base):
         nullable=False,
     )
     status: Mapped[BookingStatus] = mapped_column(
-        Enum(BookingStatus, native_enum=False, length=16),
+        Enum(BookingStatus, native_enum=False, length=24),
         nullable=False,
-        default=BookingStatus.ACTIVE,
+        default=BookingStatus.PENDING_CONFIRMATION,
     )
 
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -678,6 +685,19 @@ class Booking(Base):
 
     details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    consultation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("consultations.id"),
+        nullable=True,
+        unique=True,
+    )
+
+    masters_scope: Mapped[VisitMastersScope] = mapped_column(
+        Enum(VisitMastersScope, native_enum=False, length=16),
+        nullable=False,
+        default=VisitMastersScope.VISIT,
+    )
+    same_master_shares_all_services: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     cancelled_by_user: Mapped["User | None"] = relationship(foreign_keys=[cancelled_by_user_id])
@@ -688,6 +708,50 @@ class Booking(Base):
         cascade="all, delete-orphan",
     )
     kit_reserves: Mapped[list["KitReserve"]] = relationship(back_populates="booking")
+    consultation: Mapped["Consultation | None"] = relationship(
+        back_populates="booking",
+        foreign_keys=[consultation_id],
+    )
+    planned_services: Mapped[list["BookingPlannedService"]] = relationship(
+        back_populates="booking",
+        cascade="all, delete-orphan",
+        order_by="BookingPlannedService.sort_order",
+    )
+
+
+class BookingPlannedService(Base):
+    __tablename__ = "booking_planned_services"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False)
+    service_id: Mapped[int] = mapped_column(ForeignKey("services.id"), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    planned_start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    booking: Mapped["Booking"] = relationship(back_populates="planned_services")
+    service: Mapped["Service"] = relationship()
+    masters: Mapped[list["BookingPlannedServiceMaster"]] = relationship(
+        back_populates="planned_service",
+        cascade="all, delete-orphan",
+    )
+
+
+class BookingPlannedServiceMaster(Base):
+    __tablename__ = "booking_planned_service_masters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    booking_planned_service_id: Mapped[int] = mapped_column(
+        ForeignKey("booking_planned_services.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    planned_service: Mapped["BookingPlannedService"] = relationship(back_populates="masters")
+    master: Mapped["User"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("booking_planned_service_id", "master_id", name="uq_booking_planned_service_master"),
+    )
 
 
 class BookingMaster(Base):
@@ -748,6 +812,78 @@ class BookingAuditLog(Base):
     new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     booking: Mapped["Booking"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class Consultation(Base):
+    """Консультация мастера (бесплатно для клиента), может перейти в бронь."""
+
+    __tablename__ = "consultations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    consultation_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    types_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    service_id: Mapped[int | None] = mapped_column(ForeignKey("services.id"), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preliminary_cost_text: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    photo_1: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    photo_2: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    client: Mapped["Client"] = relationship()
+    service: Mapped["Service | None"] = relationship(foreign_keys=[service_id])
+    booking: Mapped["Booking | None"] = relationship(
+        back_populates="consultation",
+        foreign_keys="Booking.consultation_id",
+        uselist=False,
+    )
+    planned_services: Mapped[list["ConsultationService"]] = relationship(
+        back_populates="consultation",
+        cascade="all, delete-orphan",
+        order_by="ConsultationService.sort_order",
+    )
+
+
+class ConsultationService(Base):
+    __tablename__ = "consultation_services"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    consultation_id: Mapped[int] = mapped_column(
+        ForeignKey("consultations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    service_id: Mapped[int] = mapped_column(ForeignKey("services.id"), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    consultation: Mapped["Consultation"] = relationship(back_populates="planned_services")
+    service: Mapped["Service"] = relationship()
+
+    __table_args__ = (UniqueConstraint("consultation_id", "service_id", name="uq_consultation_service"),)
+
+
+class ConsultationAuditLog(Base):
+    __tablename__ = "consultation_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    consultation_id: Mapped[int] = mapped_column(
+        ForeignKey("consultations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    consultation: Mapped["Consultation"] = relationship()
     changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
 
 
@@ -968,8 +1104,10 @@ class PayrollFundSide(str, enum.Enum):
 
 class PayrollFundSourceKind(str, enum.Enum):
     VISIT = "VISIT"
+    VISIT_SERVICE = "VISIT_SERVICE"
     WORK = "WORK"
     PRODUCT_SALE = "PRODUCT_SALE"
+    CONSULTATION = "CONSULTATION"
     STUDIO_EXPENSE = "STUDIO_EXPENSE"
     MANUAL = "MANUAL"
 
@@ -1084,6 +1222,13 @@ class Visit(Base):
     salon_profit: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     masters_pool: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
+    masters_scope: Mapped[VisitMastersScope] = mapped_column(
+        Enum(VisitMastersScope, native_enum=False, length=16),
+        nullable=False,
+        default=VisitMastersScope.VISIT,
+    )
+    same_master_shares_all_services: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     client: Mapped[Client] = relationship()
     booking: Mapped["Booking | None"] = relationship(foreign_keys=[booking_id])
     created_by_user: Mapped["User | None"] = relationship(foreign_keys=[created_by_user_id])
@@ -1092,6 +1237,60 @@ class Visit(Base):
     masters: Mapped[list["VisitMaster"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
     services: Mapped[list["VisitService"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
     kit_usages: Mapped[list["VisitKitUsage"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
+    draft_source: Mapped["VisitDraft | None"] = relationship(
+        back_populates="finalized_visit",
+        foreign_keys="VisitDraft.finalized_visit_id",
+        uselist=False,
+    )
+
+
+class VisitDraft(Base):
+    __tablename__ = "visit_drafts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True)
+
+    form_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preview_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    locked_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finalized_visit_id: Mapped[int | None] = mapped_column(ForeignKey("visits.id"), nullable=True)
+
+    client: Mapped[Client] = relationship()
+    booking: Mapped["Booking | None"] = relationship()
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    locked_by_user: Mapped["User | None"] = relationship(foreign_keys=[locked_by_user_id])
+    finalized_visit: Mapped["Visit | None"] = relationship(
+        back_populates="draft_source",
+        foreign_keys=[finalized_visit_id],
+    )
+    participants: Mapped[list["VisitDraftParticipant"]] = relationship(
+        back_populates="visit_draft",
+        cascade="all, delete-orphan",
+    )
+
+
+class VisitDraftParticipant(Base):
+    __tablename__ = "visit_draft_participants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    visit_draft_id: Mapped[int] = mapped_column(
+        ForeignKey("visit_drafts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    visit_draft: Mapped["VisitDraft"] = relationship(back_populates="participants")
+    master: Mapped["User"] = relationship()
 
 
 class VisitAuditLog(Base):
@@ -1351,8 +1550,62 @@ class VisitService(Base):
     subcategory_name: Mapped[str] = mapped_column(String(160), nullable=False)
     service_name: Mapped[str] = mapped_column(String(200), nullable=False)
 
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_cancelled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    amount_from_client: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    client_discount_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    kanekalon_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    kudri_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    mix_source: Mapped[MixSource | None] = mapped_column(Enum(MixSource), nullable=True)
+    mix_complexity: Mapped[MixComplexity | None] = mapped_column(Enum(MixComplexity), nullable=True)
+    mix_cost_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    mix_bonus_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mix_bonus_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    kanekalon_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    kudri_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    materials_cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    addons_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    addons_details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    amortization_level: Mapped[AmortizationLevel | None] = mapped_column(Enum(AmortizationLevel), nullable=True)
+    amortization_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    studio_fund_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    profit_before_split: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    salon_cut_pct_at_time: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+    salon_profit: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    masters_pool: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    kit_paid_separately: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     visit: Mapped[Visit] = relationship(back_populates="services")
     service: Mapped[Service] = relationship()
+    cancelled_by_user: Mapped["User | None"] = relationship(foreign_keys=[cancelled_by_user_id])
+    masters: Mapped[list["VisitServiceMaster"]] = relationship(
+        back_populates="visit_service",
+        cascade="all, delete-orphan",
+    )
+    kit_usages: Mapped[list["VisitKitUsage"]] = relationship(back_populates="visit_service")
+
+
+class VisitServiceMaster(Base):
+    __tablename__ = "visit_service_masters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    visit_service_id: Mapped[int] = mapped_column(
+        ForeignKey("visit_services.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    percent: Mapped[float] = mapped_column(Float, nullable=False)
+
+    visit_service: Mapped["VisitService"] = relationship(back_populates="masters")
+    master: Mapped["User"] = relationship()
+
+    __table_args__ = (UniqueConstraint("visit_service_id", "master_id", name="uq_visit_service_master"),)
 
 
 class VisitKitUsage(Base):
@@ -1360,6 +1613,7 @@ class VisitKitUsage(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     visit_id: Mapped[int] = mapped_column(ForeignKey("visits.id"), nullable=False)
+    visit_service_id: Mapped[int | None] = mapped_column(ForeignKey("visit_services.id"), nullable=True)
     kit_id: Mapped[int] = mapped_column(ForeignKey("kits.id"), nullable=False)
     pieces_used: Mapped[int] = mapped_column(Integer, nullable=False)
 
@@ -1369,4 +1623,5 @@ class VisitKitUsage(Base):
     usage_breakdown_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     visit: Mapped[Visit] = relationship(back_populates="kit_usages")
+    visit_service: Mapped["VisitService | None"] = relationship(back_populates="kit_usages")
     kit: Mapped[Kit] = relationship()

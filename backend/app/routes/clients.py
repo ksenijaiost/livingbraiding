@@ -25,6 +25,7 @@ from app.client_validation import (
     strip_or_none,
 )
 from app.forms_parse import parse_bool
+from app.consultation_booking import OPEN_BOOKING_STATUSES
 from app.db.models import (
     Booking,
     BookingMaster,
@@ -158,7 +159,7 @@ def admin_clients(
     ).label("contact_preview")
 
     has_active_booking = func.coalesce(
-        func.max(case(((Booking.status == BookingStatus.ACTIVE), 1), else_=0)),
+        func.max(case((Booking.status.in_(OPEN_BOOKING_STATUSES), 1), else_=0)),
         0,
     ).label("has_active_booking")
 
@@ -304,7 +305,7 @@ async def admin_client_new_post(
     db.add(client)
     db.commit()
     db.refresh(client)
-    return RedirectResponse(url=f"/clients/{client.id}?created=1", status_code=303)
+    return RedirectResponse(url=f"/clients/{client.id}?msg=created", status_code=303)
 
 
 @router.get("/{client_id}/edit", response_class=HTMLResponse)
@@ -573,6 +574,7 @@ def admin_client_detail(
     request: Request,
     client_id: int,
     confirmed: str | None = None,
+    msg: str | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
@@ -619,7 +621,7 @@ def admin_client_detail(
     active_bookings = list(
         db.scalars(
             select(Booking)
-            .where(Booking.client_id == client_id, Booking.status == BookingStatus.ACTIVE)
+            .where(Booking.client_id == client_id, Booking.status.in_(OPEN_BOOKING_STATUSES))
             .order_by(Booking.planned_date.asc(), Booking.id.asc())
             .options(selectinload(Booking.masters).selectinload(BookingMaster.master))
             .limit(10)
@@ -652,6 +654,7 @@ def admin_client_detail(
             age_group_label=client_age_group_label(client.age_group),
             show_admin_actions=show_admin_actions,
             confirmed_banner=confirmed == "1",
+            created_banner=msg == "created",
             display_tz=display_tz,
         ),
     )

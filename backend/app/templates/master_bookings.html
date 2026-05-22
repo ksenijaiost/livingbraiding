@@ -3,6 +3,38 @@
   <div class="card">
     <h2 style="margin-top:0;">Мои записи</h2>
 
+    <h3 style="margin:18px 0 8px;font-size:1.05rem;">Черновики</h3>
+    <p class="muted" style="margin-top:0;">Незавершённые визиты, где вы участвуете как мастер.</p>
+    {% if not draft_rows %}
+      <p class="muted">Черновиков нет.</p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Дата визита</th>
+            <th>Клиент</th>
+            <th>Услуги</th>
+            <th>С клиента</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in draft_rows %}
+            {% set d = row.draft %}
+            <tr>
+              <td>{{ format_naive_utc_datetime(d.performed_date, display_tz) }}</td>
+              <td>{% if d.client %}<a href="/clients/{{ d.client.id }}">{{ d.client.name }}</a>{% else %}—{% endif %}</td>
+              <td>{{ row.services_label }}</td>
+              <td>{% if row.amount_total is not none %}{{ "%.0f"|format(row.amount_total) }} ₽{% else %}—{% endif %}</td>
+              <td><a href="/master/visit/draft/{{ d.id }}"><button type="button" class="secondary">Открыть</button></a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    <hr style="border:0;border-top:1px solid #e5e7eb;margin:28px 0 16px;" />
+
     <h3 style="margin:18px 0 8px;font-size:1.05rem;">Активные записи</h3>
     <p class="muted" style="margin-top:0;">Будущие брони (визит или продажа/заказ), где вы указаны мастером или ответственным по продаже.</p>
 

@@ -5,6 +5,10 @@
       <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
     {% endif %}
 
+    {% if msg == 'created' %}
+      <div class="ok" style="margin-bottom: 12px;">Продажа сохранена.</div>
+    {% endif %}
+
     {% if sale %}
       <p><a href="/sales/products">← К списку</a></p>
       <div class="row" style="align-items:flex-start;justify-content:space-between;gap:12px;">
@@ -41,6 +45,9 @@
         <p style="margin:6px 0;"><strong>Кто внёс</strong>: {{ sale.created_by_user.display_name if sale.created_by_user else '—' }}</p>
         {% if sale.booking_id %}
           <p style="margin:6px 0;"><strong>Бронь</strong>: <a href="/bookings/{{ sale.booking_id }}">#{{ sale.booking_id }}</a></p>
+        {% endif %}
+        {% if consultation %}
+          <p style="margin:6px 0;"><strong>Консультация</strong>: <a href="/consultations/{{ consultation.id }}">#{{ consultation.id }}</a></p>
         {% endif %}
         {% if linked_work_ids %}
           <p style="margin:6px 0;">

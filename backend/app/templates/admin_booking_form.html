@@ -12,6 +12,11 @@
 
     <form method="post" action="{% if is_new %}/bookings/new{% else %}/bookings/{{ booking.id }}/edit{% endif %}" enctype="multipart/form-data">
       <input type="hidden" name="client_id" id="client_id" value="{{ selected_client.id if selected_client else fp.get('client_id','') }}" />
+      {% if consultation_id %}
+        <input type="hidden" name="consultation_id" value="{{ consultation_id }}" />
+        <input type="hidden" name="prefill_photo_1" value="{{ fp.get('prefill_photo_1','') }}" />
+        <input type="hidden" name="prefill_photo_2" value="{{ fp.get('prefill_photo_2','') }}" />
+      {% endif %}
       <input type="hidden" name="calc_product_min" value="{{ fp.get('calc_product_min','') }}" />
       <input type="hidden" name="calc_product_max" value="{{ fp.get('calc_product_max','') }}" />
       <input type="hidden" name="calc_service_min" value="{{ fp.get('calc_service_min','') }}" />
@@ -456,6 +461,12 @@
           </div>
           <p class="muted" style="margin:6px 0 0;font-size:12px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.</p>
         </div>
+        {% if consultation_comment %}
+          <div style="margin-top: 10px;padding:10px 12px;border-radius:8px;border:1px solid #bfdbfe;background:#eff6ff;">
+            <label style="font-weight:700;">Комментарий консультации (только просмотр)</label>
+            <p style="margin:6px 0 0;white-space:pre-wrap;">{{ consultation_comment }}</p>
+          </div>
+        {% endif %}
         <div style="margin-top: 10px;">
           <label>Комментарий к брони</label>
           <textarea name="comment" rows="3" maxlength="2000">{{ fp.get('comment','') }}</textarea>

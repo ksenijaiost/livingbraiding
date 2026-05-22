@@ -966,7 +966,17 @@ def product_sale_detail(
         ).all()
     )
     linked_work_ids: list[int] = []
+    consultation = None
     if sale.booking_id:
+        from app.db.models import Booking
+
+        booking_row = db.scalar(
+            select(Booking)
+            .where(Booking.id == int(sale.booking_id))
+            .options(selectinload(Booking.consultation))
+        )
+        if booking_row and booking_row.consultation:
+            consultation = booking_row.consultation
         linked_work_ids = list(
             db.scalars(
                 select(WorkForInventory.id)
@@ -983,6 +993,7 @@ def product_sale_detail(
             request,
             current_user=current_user,
             sale=sale,
+            msg=request.query_params.get("msg"),
             error=None,
             audit_rows=audit_rows,
             can_edit=can_edit,
@@ -993,6 +1004,7 @@ def product_sale_detail(
                 getattr(sale, "material_mix_complexity", None)
             ),
             linked_work_ids=linked_work_ids,
+            consultation=consultation,
             kit_sale_lines_detail=_product_sale_kit_lines_for_detail(db, sale)
             if sale.kind == ProductSaleKind.KIT
             else [],
@@ -1537,5 +1549,5 @@ async def product_sale_new_post(
 
         try_auto_complete_booking(db, int(bid_for_auto_complete))
         db.commit()
-    return RedirectResponse(url="/sales/products?msg=saved", status_code=303)
+    return RedirectResponse(url=f"/sales/products/{row.id}?msg=created", status_code=303)
 

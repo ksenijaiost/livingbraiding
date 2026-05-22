@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top: 0;">Консультации</h2>
+    <p>
+      <a href="/visits">Визиты</a>
+      <span class="muted lb-dot-sep">·</span>
+      <a href="/sales/work">Работа с товарами</a>
+    </p>
+    <p class="muted" style="margin-bottom:8px;">
+      Список последних консультаций (до 200). Консультация бесплатна для клиента; при успешной брони и визите/продаже мастеру-консультанту начисляется ЗП.
+    </p>
+    <p style="margin:0 0 8px;font-size:13px;">
+      {% if consultations_mine_only %}
+        <strong>Мои</strong>
+        <span class="muted">·</span>
+        <a href="{{ consultations_url_scope_all }}">Все</a>
+      {% else %}
+        <strong>Все</strong>
+        <span class="muted">·</span>
+        <a href="{{ consultations_url_scope_mine }}">Только мои</a>
+      {% endif %}
+    </p>
+    <p style="margin:0 0 12px;font-size:13px;">
+      Статус брони:
+      {% if not booking_status_filter %}
+        <strong>любой</strong>
+      {% else %}
+        <a href="{{ consultations_url_bs_all }}">любой</a>
+      {% endif %}
+      <span class="muted">·</span>
+      {% if booking_status_filter == 'done' %}
+        <strong>выполнена</strong>
+      {% else %}
+        <a href="{{ consultations_url_bs_done }}">выполнена</a>
+      {% endif %}
+      <span class="muted">·</span>
+      {% if booking_status_filter == 'active' %}
+        <strong>открытая бронь</strong>
+      {% else %}
+        <a href="{{ consultations_url_bs_active }}">открытая бронь</a>
+      {% endif %}
+      <span class="muted">·</span>
+      {% if booking_status_filter == 'none_or_cancelled' %}
+        <strong>нет / отменена</strong>
+      {% else %}
+        <a href="{{ consultations_url_bs_none }}">нет / отменена</a>
+      {% endif %}
+    </p>
+    <p style="margin:0 0 12px;">
+      <a href="/consultations/new"><button type="button">Новая консультация</button></a>
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Дата</th>
+          <th>Вид</th>
+          <th>Мастер</th>
+          <th>Статус брони</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rv in row_views %}
+          {% set c = rv.consultation %}
+          <tr>
+            <td><a href="/consultations/{{ c.id }}">{{ c.id }}</a></td>
+            <td>{{ format_naive_utc_datetime(c.consultation_date, display_tz) }}</td>
+            <td>{{ format_types_display(c.types_json) }}</td>
+            <td>
+              {% if c.created_by_user %}{{ c.created_by_user.display_name }}{% else %}—{% endif %}
+            </td>
+            <td>{{ rv.booking_status_label }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="muted">Нет записей</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

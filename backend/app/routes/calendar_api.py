@@ -9,18 +9,27 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_role
+from app.consultation_booking import booking_status_label
+from app.calendar_display import get_calendar_display_hours
+from app.calendar_occupancy import build_occupancy_for_day
 from app.db.models import (
     Booking,
     BookingKind,
     BookingMaster,
+    BookingPlannedService,
     BookingStaff,
     BookingStatus,
+    Service,
+    ServiceSubcategory,
     PayrollFundLedger,
     PayrollFundSide,
     PayrollFundSourceKind,
     UserRole,
     Visit,
     VisitMaster,
+    VisitMastersScope,
+    VisitService,
+    VisitServiceMaster,
     WorkForInventory,
     WorkForInventoryStaff,
     WorkKind,
@@ -30,6 +39,10 @@ from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_date_iso
+from app.ui_service_display import (
+    booking_service_labels_from_booking,
+    format_visit_service_catalog_path,
+)
 
 
 router = APIRouter()
@@ -54,16 +67,6 @@ def _booking_kind_label(k: str) -> str:
     if k == BookingKind.PRODUCT_SALE.value:
         return "Продажа (без услуги)"
     return k
-
-
-def _booking_status_label(s: str) -> str:
-    if s == BookingStatus.ACTIVE.value:
-        return "⌛ активна"
-    if s == BookingStatus.DONE.value:
-        return "✅ выполнена"
-    if s == BookingStatus.CANCELLED.value:
-        return "❌ отменена"
-    return s
 
 
 def _work_activity_label(w: WorkForInventory) -> str:
@@ -128,7 +131,18 @@ def api_calendar_day(
     # ---- Bookings ----
     b_stmt = (
         select(Booking)
-        .options(selectinload(Booking.client))
+        .options(
+            selectinload(Booking.client),
+            selectinload(Booking.masters),
+            selectinload(Booking.planned_service)
+            .selectinload(Service.subcategory)
+            .selectinload(ServiceSubcategory.category),
+            selectinload(Booking.planned_services)
+            .selectinload(BookingPlannedService.service)
+            .selectinload(Service.subcategory)
+            .selectinload(ServiceSubcategory.category),
+            selectinload(Booking.planned_services).selectinload(BookingPlannedService.masters),
+        )
         .where(Booking.planned_date >= day_start, Booking.planned_date < day_end)
         .order_by(Booking.planned_date.asc(), Booking.id.asc())
     )
@@ -146,13 +160,17 @@ def api_calendar_day(
     for b in bookings:
         kind_l = _booking_kind_label(b.kind.value)
         time_l = format_naive_utc_datetime(b.planned_date, tz)
+        svc_label = ""
+        if b.kind == BookingKind.VISIT:
+            svc_label = booking_service_labels_from_booking(b)
         booking_items.append(
             {
                 "id": int(b.id),
                 "client": (b.client.name if b.client else "—"),
                 "kind": kind_l,
                 "label": f"{kind_l} · {time_l}",
-                "status": _booking_status_label(b.status.value),
+                "service_label": svc_label,
+                "status": booking_status_label(b.status),
                 "time": time_l,
                 "url": f"/bookings/{int(b.id)}",
                 "payout_sum": 0.0,
@@ -171,19 +189,56 @@ def api_calendar_day(
         v_stmt = v_stmt.where(
             or_(
                 Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == current_user.id)),
+                Visit.id.in_(
+                    select(VisitService.visit_id).where(
+                        VisitService.is_cancelled.is_(False),
+                        VisitService.mix_bonus_master_id == current_user.id,
+                    )
+                ),
+                Visit.id.in_(
+                    select(VisitService.visit_id)
+                    .join(VisitServiceMaster, VisitServiceMaster.visit_service_id == VisitService.id)
+                    .where(
+                        VisitService.is_cancelled.is_(False),
+                        VisitServiceMaster.master_id == current_user.id,
+                    )
+                ),
                 Visit.mix_bonus_master_id == current_user.id,
             )
         )
     visits = list(db.scalars(v_stmt).all())
+    vs_ids: list[int] = []
+    for v in visits:
+        for s in v.services or []:
+            if not s.is_cancelled and s.id:
+                vs_ids.append(int(s.id))
     visit_ids = [int(v.id) for v in visits if v.id is not None]
-    visit_payout = _sum_ledger(
+    visit_payout_vs = _sum_ledger(
+        db,
+        side=PayrollFundSide.MASTER,
+        source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+        source_ids=vs_ids,
+        user_id=current_user.id if is_master else None,
+    )
+    visit_payout_legacy = _sum_ledger(
         db,
         side=PayrollFundSide.MASTER,
         source_kind=PayrollFundSourceKind.VISIT,
         source_ids=visit_ids,
         user_id=current_user.id if is_master else None,
     )
-    visit_studio = (
+    visit_studio_vs = (
+        _sum_ledger(
+            db,
+            side=PayrollFundSide.STUDIO,
+            source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+            source_ids=vs_ids,
+            user_id=None,
+        )
+        if is_super
+        else {}
+    )
+    visit_studio_legacy = (
         _sum_ledger(
             db,
             side=PayrollFundSide.STUDIO,
@@ -197,23 +252,56 @@ def api_calendar_day(
 
     visit_items: list[dict[str, Any]] = []
     for v in visits:
-        svc = None
-        try:
-            svc = (sorted(list(v.services or []), key=lambda x: int(x.id or 0))[:1] or [None])[0]
-        except Exception:
-            svc = None
-        svc_name = (svc.service_name if svc else "—") if svc is not None else "—"
         vid = int(v.id)
-        visit_items.append(
-            {
-                "id": vid,
-                "client": (v.client.name if v.client else "—"),
-                "label": svc_name,
-                "url": f"/visits/{vid}",
-                "payout_sum": float(visit_payout.get(vid, 0.0)),
-                "studio_sum": float(visit_studio.get(vid, 0.0)),
-            }
+        client_name = v.client.name if v.client else "—"
+        active_services = sorted(
+            [s for s in (v.services or []) if not s.is_cancelled],
+            key=lambda x: (int(x.sort_order or 0), int(x.id or 0)),
         )
+        if not active_services:
+            visit_items.append(
+                {
+                    "id": vid,
+                    "client": client_name,
+                    "label": "—",
+                    "service_label": "",
+                    "url": f"/visits/{vid}",
+                    "payout_sum": float(visit_payout_legacy.get(vid, 0.0)),
+                    "studio_sum": float(visit_studio_legacy.get(vid, 0.0)),
+                }
+            )
+            continue
+        for svc in active_services:
+            if is_master:
+                show = svc.mix_bonus_master_id == current_user.id
+                if not show and v.masters_scope == VisitMastersScope.VISIT:
+                    vm_ids = list(
+                        db.scalars(select(VisitMaster.master_id).where(VisitMaster.visit_id == vid)).all()
+                    )
+                    show = current_user.id in vm_ids
+                if not show:
+                    mids = list(
+                        db.scalars(
+                            select(VisitServiceMaster.master_id).where(
+                                VisitServiceMaster.visit_service_id == svc.id
+                            )
+                        ).all()
+                    )
+                    show = current_user.id in mids
+                if not show:
+                    continue
+            sid = int(svc.id)
+            visit_items.append(
+                {
+                    "id": vid,
+                    "client": client_name,
+                    "label": svc.service_name,
+                    "service_label": format_visit_service_catalog_path(svc),
+                    "url": f"/visits/{vid}",
+                    "payout_sum": float(visit_payout_vs.get(sid, 0.0)),
+                    "studio_sum": float(visit_studio_vs.get(sid, 0.0)),
+                }
+            )
 
     # ---- Works ----
     w_day = func.coalesce(WorkForInventory.performed_date, WorkForInventory.created_at)
@@ -253,6 +341,22 @@ def api_calendar_day(
         else {}
     )
 
+    from app.visit_draft import draft_summary_label, drafts_for_calendar_day, preview_dict_from_json
+
+    draft_items: list[dict[str, Any]] = []
+    for dr in drafts_for_calendar_day(db, user=current_user, day=day):
+        preview = preview_dict_from_json(dr.preview_json)
+        draft_items.append(
+            {
+                "id": int(dr.id),
+                "client": dr.client.name if dr.client else "—",
+                "label": draft_summary_label(preview),
+                "url": f"/master/visit/draft/{int(dr.id)}",
+                "payout_sum": 0.0,
+                "studio_sum": 0.0,
+            }
+        )
+
     work_items: list[dict[str, Any]] = []
     for w in works:
         wid = int(w.id)
@@ -267,8 +371,14 @@ def api_calendar_day(
             }
         )
 
+    hour_from, hour_to = get_calendar_display_hours(db)
+    occupancy = build_occupancy_for_day(
+        db, day=day, hour_from=hour_from, hour_to=hour_to, bookings=bookings
+    )
+
     resp = {
         "date": day.isoformat(),
+        "occupancy": occupancy,
         "bookings": {"count": len(booking_items), "payout_sum": 0.0, "studio_sum": 0.0, "items": booking_items},
         "visits": {
             "count": len(visit_items),
@@ -281,6 +391,12 @@ def api_calendar_day(
             "payout_sum": _money0(sum(i["payout_sum"] for i in work_items)),
             "studio_sum": _money0(sum(i["studio_sum"] for i in work_items)) if is_super else 0.0,
             "items": work_items,
+        },
+        "drafts": {
+            "count": len(draft_items),
+            "payout_sum": 0.0,
+            "studio_sum": 0.0,
+            "items": draft_items,
         },
         "is_super": is_super,
     }

@@ -25,6 +25,7 @@ from app.db.models import (
     Client,
     Kit,
     KitAuthorStaff,
+    KitBlanksCondition,
     CatalogProduct,
     KitReserve,
     PayrollFundSourceKind,
@@ -46,11 +47,35 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.user_roles import select_users_with_role, user_has_role
-from app.kit_blank_stock_core import infer_kit_blanks_condition_from_totals
+from app.kit_blank_stock_core import (
+    composition_keys_intersection_catalog,
+    infer_kit_blanks_condition_from_totals,
+    load_catalog_kit_maps,
+    replace_blank_stock_for_kit,
+)
 from app.kit_composition import (
     KIT_INVENTORY_PIECE_EXCLUDE_KEYS,
+    composition_json_from_lines,
     composition_json_from_totals,
 )
+from app.kit_composition_lines import (
+    apply_global_used_discount,
+    filter_nonempty,
+    infer_blanks_condition,
+    inventory_piece_count,
+    inventory_totals_by_key,
+    kit_by_staff_from_lines,
+    lines_dicts_for_details,
+    lines_from_form,
+    lines_have_used,
+    lines_to_json,
+    lines_to_legacy_totals,
+    stock_price_for_used_kit,
+    stock_price_snapshot_for_used_kit,
+    used_client_total_for_lines,
+    client_price_for_lines,
+)
+from app.kit_inlay_visit import get_salon_cut_pct
 from app.kit_inlay_visit import _materials_cost_and_snapshot
 from app.work_products_compute import compute_work_financials
 from app.forms_parse import parse_bool, parse_date_iso, parse_float, parse_int
@@ -79,6 +104,12 @@ _WORK_NEW_FP_KEYS = frozenset({
     "corr_wash",
     "corr_steam",
     "corr_circle",
+    "corr_add_kit_to_stock",
+    "corr_kit_type_se",
+    "corr_kit_type_de",
+    "corr_kit_sku",
+    "corr_kit_title",
+    "corr_kit_used_discount_pct",
 })
 from app.visit_edit_policy import (
     edit_window_days,
@@ -91,7 +122,7 @@ from app.audit import diff_fields, write_audit_rows
 from app.kit_crud import kit_key_excluded_from_client_price
 from app.mix_rates import mix_complexity_rate_for, mix_rates_meta_json_dict
 from app.ui_visit_display import ru_mix_complexity as ru_mix_complexity_label
-from app.zakaz_blanks import kit_form_blank_defs
+from app.zakaz_blanks import kit_composition_catalog_items, kit_form_blank_defs
 
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_user_role"] = ru_user_role
@@ -259,8 +290,12 @@ def _kit_table_state_json(
             "masters": [{"id": u.id, "name": u.display_name} for u in masters],
             "seItems": [{"key": k, "label": lbl} for k, lbl in _kit_se_items()],
             "deItems": [{"key": k, "label": lbl} for k, lbl in _kit_de_items()],
+            "blankCatalog": kit_composition_catalog_items(),
+            "initialLines": [],
             "prefill": kit_qty_prefill,
             "kitWorkPayByKey": _kit_work_pay_map_from_catalog(db),
+            "kitPriceByKey": _kit_price_map_from_catalog(db),
+            "salonCutPct": float(get_salon_cut_pct(db)),
             "excludeFromInventoryPieceCount": sorted(KIT_INVENTORY_PIECE_EXCLUDE_KEYS),
             "materialPricePerGram": {"kanekalon": kpg, "kudri": kudpg},
         },
@@ -690,6 +725,35 @@ def _kit_cost_snapshot_text(
     return "\n".join(lines)
 
 
+def _corr_kit_from_work_cost_snapshot_text(
+    *,
+    mat_cost: float,
+    kanek: float,
+    kudri: float,
+    k_snap: float,
+    ku_snap: float,
+    correction_master_pay: float,
+) -> str:
+    """Себестоимость б/у комплекта с работы коррекции: материал + ЗП коррекции."""
+    lines = ["Расчёт себестоимости комплекта (из работы «коррекция»):"]
+    total = 0.0
+    if kanek > 0:
+        lines.append(
+            f"Материал: канекалон — {kanek:.0f} г × {_fmt_money(float(k_snap)).replace(' ₽', ' ₽/г')} = {_fmt_money(float(kanek) * float(k_snap))}"
+        )
+    if kudri > 0:
+        lines.append(
+            f"Материал: кудри — {kudri:.0f} г × {_fmt_money(float(ku_snap)).replace(' ₽', ' ₽/г')} = {_fmt_money(float(kudri) * float(ku_snap))}"
+        )
+    if mat_cost > 0:
+        total += float(mat_cost)
+    if correction_master_pay > 0:
+        total += float(correction_master_pay)
+        lines.append(f"ЗП за коррекцию — {_fmt_money(float(correction_master_pay))}")
+    lines.append(f"Итого — {_fmt_money(total)}")
+    return "\n".join(lines)
+
+
 @router.get("/new", response_class=HTMLResponse)
 def work_new_get(
     request: Request,
@@ -767,6 +831,9 @@ async def work_new_post(
             scope = WorkScope(scope_raw)
         except ValueError:
             raise ValueError("Выберите режим: в наличие или на заказ.")
+
+        if _g_bool(form, "corr_add_kit_to_stock") and scope != WorkScope.IN_STOCK:
+            raise ValueError("Комплект на склад можно добавить только в режиме «в наличие».")
 
         kind_raw = (_g_str(form, "kind", "") or "").strip()
         try:
@@ -850,6 +917,17 @@ async def work_new_post(
         kit_blank_type_se = _g_bool(form, "kit_type_se")
         kit_blank_type_de = _g_bool(form, "kit_type_de")
         kit_use_multi_masters = _g_bool(form, "kit_use_multi_masters")
+        composition_lines: list[Any] = []
+        kit_bu_correction = False
+        corr_add_kit = False
+        corr_kit_lines_saved: list[Any] = []
+        corr_kit_discount_pct = 0
+        corr_kit_sku = ""
+        corr_kit_title = ""
+        corr_kit_type_se = False
+        corr_kit_type_de = False
+        corr_kit_new_price = 0.0
+        corr_kit_stock_price = 0.0
         if kind == WorkKind.KIT:
             if not kit_blank_type_se and not kit_blank_type_de:
                 raise ValueError("Для комплекта выберите тип заготовок: SE и/или DE.")
@@ -867,38 +945,52 @@ async def work_new_post(
                         "Режим одной колонки доступен только при входе под мастером; "
                         "иначе отметьте «Несколько мастеров (комплект)» и выберите мастеров."
                     )
-            all_items = []
-            if kit_blank_type_se:
-                all_items.extend(_kit_se_items())
-            if kit_blank_type_de:
-                all_items.extend(_kit_de_items())
-            any_qty = False
-            for uid in kit_staff_ids:
-                per: dict[str, int] = {}
-                for item_key, _ in all_items:
-                    raw = _g_str(form, f"kit_qty_{uid}_{item_key}", "0")
-                    try:
-                        q = int(raw or "0")
-                    except ValueError:
-                        q = 0
-                    q = max(0, q)
-                    if q > 0:
-                        any_qty = True
-                    per[item_key] = q
-                    kit_totals[item_key] = kit_totals.get(item_key, 0) + q
-                kit_by_staff[uid] = per
-            if not any_qty:
-                raise ValueError("Для комплекта укажите хотя бы одно количество заготовок.")
+            composition_lines = filter_nonempty(lines_from_form(form))
+            if not composition_lines:
+                raise ValueError("Для комплекта укажите хотя бы одну строку состава (вид и количество).")
+            kit_totals, kit_by_staff = kit_by_staff_from_lines(composition_lines)
             kit_pieces_total = sum(kit_totals.values())
-            kit_pieces_inventory = sum(
-                q for k, q in kit_totals.items() if k not in KIT_INVENTORY_PIECE_EXCLUDE_KEYS
-            )
+            kit_pieces_inventory = inventory_piece_count(composition_lines)
+            kit_bu_correction = _g_bool(form, "kit_bu_correction")
+            if kit_bu_correction and not lines_have_used(composition_lines):
+                raise ValueError("Коррекция Б/У доступна только при наличии б/у заготовок в составе.")
             details["kit"] = {
                 "blank_type_se": kit_blank_type_se,
                 "blank_type_de": kit_blank_type_de,
                 "totals": kit_totals,
-                "by_staff": kit_by_staff,
+                "by_staff": {str(k): v for k, v in kit_by_staff.items()},
+                "lines": lines_dicts_for_details(composition_lines),
+                "bu_correction": kit_bu_correction,
             }
+            if kit_bu_correction:
+                corr_trim_qty = int(_g_float(form, "kit_corr_trim_qty", 0))
+                corr_hourly_hours = max(0.0, _g_float(form, "kit_corr_hourly_hours", 0.0))
+                corr_wash = _g_bool(form, "kit_corr_wash")
+                corr_circle = _g_bool(form, "kit_corr_circle")
+                corr_steam = _g_bool(form, "kit_corr_steam")
+                corr_kit_description = (_g_str(form, "kit_corr_kit_description", "") or "").strip() or None
+                raw_blanks = (_g_str(form, "kit_corr_kit_blanks_count", "") or "").strip()
+                corr_kit_blanks_count: int | None = None
+                if raw_blanks:
+                    try:
+                        corr_kit_blanks_count = int(
+                            parse_float(raw_blanks, min=0.0, field_name="kit_corr_kit_blanks_count")
+                        )
+                    except ValueError:
+                        raise ValueError("«Количество заготовок в комплекте» — целое число.")
+                if corr_wash and corr_circle:
+                    raise ValueError(
+                        "Если выбрана «Стирка», то «Одевание на круг» выбирать нельзя (входит в стирку)."
+                    )
+                details["kit"]["bu_correction_details"] = {
+                    "trim_qty": corr_trim_qty,
+                    "hourly_hours": float(corr_hourly_hours),
+                    "wash": corr_wash,
+                    "circle": corr_circle,
+                    "steam": corr_steam,
+                    "kit_description": corr_kit_description,
+                    "kit_blanks_count": corr_kit_blanks_count,
+                }
             alloc = _alloc_equal_shares_for_masters(db, kit_staff_ids)
         elif kind == WorkKind.RUBBER:
             rubber_type = (_g_str(form, "rubber_type", "") or "").strip()
@@ -966,6 +1058,59 @@ async def work_new_post(
                 details["correction"]["kit_description"] = corr_kit_description
             if corr_kit_blanks_count is not None:
                 details["correction"]["kit_blanks_count"] = corr_kit_blanks_count
+
+            corr_add_kit = _g_bool(form, "corr_add_kit_to_stock")
+            if corr_add_kit:
+                corr_kit_type_se = _g_bool(form, "corr_kit_type_se")
+                corr_kit_type_de = _g_bool(form, "corr_kit_type_de")
+                if not corr_kit_type_se and not corr_kit_type_de:
+                    raise ValueError(
+                        "Для комплекта на склад выберите тип заготовок: SE и/или DE."
+                    )
+                raw_corr_lines = filter_nonempty(lines_from_form(form, prefix="corr_kit_line"))
+                if not raw_corr_lines:
+                    raise ValueError(
+                        "Для комплекта на склад укажите хотя бы одну строку состава (вид и количество)."
+                    )
+                pct_raw = (_g_str(form, "corr_kit_used_discount_pct", "") or "").strip()
+                if not pct_raw:
+                    raise ValueError("Укажите «Скидка за Б/У (%)» для комплекта на склад.")
+                try:
+                    corr_kit_discount_pct = int(parse_float(pct_raw, min=1.0, field_name="corr_kit_used_discount_pct"))
+                except ValueError as exc:
+                    raise ValueError("«Скидка за Б/У (%)» — целое число от 1 до 100.") from exc
+                if corr_kit_discount_pct < 1 or corr_kit_discount_pct > 100:
+                    raise ValueError("«Скидка за Б/У (%)» — от 1 до 100.")
+                corr_kit_lines_saved = apply_global_used_discount(
+                    raw_corr_lines, corr_kit_discount_pct
+                )
+                corr_kit_new_price, corr_kit_stock_price, missing_price = stock_price_for_used_kit(
+                    db, raw_corr_lines, corr_kit_discount_pct
+                )
+                if missing_price:
+                    miss = ", ".join(missing_price)
+                    raise ValueError(
+                        f"Не найдены цены в прайсе «Заказ → Заготовки поштучно» для: {miss}."
+                    )
+                corr_kit_sku = (_g_str(form, "corr_kit_sku", "") or "").strip()
+                corr_kit_title = (_g_str(form, "corr_kit_title", "") or "").strip()
+                if not corr_kit_sku:
+                    raise ValueError("Для комплекта на склад укажите артикул.")
+                if not corr_kit_title:
+                    raise ValueError("Для комплекта на склад укажите название.")
+                if db.scalar(select(Kit.id).where(Kit.sku == corr_kit_sku)):
+                    raise ValueError("Комплект с таким артикулом уже есть — укажите другой.")
+                details["corr_kit_to_stock"] = {
+                    "sku": corr_kit_sku,
+                    "title": corr_kit_title,
+                    "blank_type_se": corr_kit_type_se,
+                    "blank_type_de": corr_kit_type_de,
+                    "used_discount_pct": corr_kit_discount_pct,
+                    "new_price_total": float(corr_kit_new_price),
+                    "stock_price_total": float(corr_kit_stock_price),
+                    "lines": lines_dicts_for_details(corr_kit_lines_saved),
+                }
+
             alloc = [(current_user.id, 1.0)]
         else:
             alloc = [(current_user.id, 1.0)]
@@ -991,11 +1136,47 @@ async def work_new_post(
             corr_wash=corr_wash,
             corr_circle=corr_circle,
             corr_steam=corr_steam,
+            composition_lines=composition_lines if kind == WorkKind.KIT else None,
         )
-        staff_master_profit = fin.staff_master_profit
-        master_total = fin.master_total
+        staff_master_profit = dict(fin.staff_master_profit)
+        if kind == WorkKind.KIT and kit_bu_correction:
+            bd = details["kit"].get("bu_correction_details") or {}
+            corr_fin = compute_work_financials(
+                db,
+                kind=WorkKind.KIT_CORRECTION,
+                scope=scope,
+                alloc=[(current_user.id, 1.0)],
+                current_user_id=current_user.id,
+                mat_cost=0.0,
+                kit_totals={},
+                kit_staff_ids=[],
+                kit_by_staff={},
+                mix_source=None,
+                mix_complexity=None,
+                grams_total=0.0,
+                rubber_type="",
+                rubber_qty=0,
+                corr_trim_qty=int(bd.get("trim_qty") or 0),
+                corr_hourly_hours=float(bd.get("hourly_hours") or 0.0),
+                corr_hourly_avg=False,
+                corr_wash=bool(bd.get("wash")),
+                corr_circle=bool(bd.get("circle")),
+                corr_steam=bool(bd.get("steam")),
+            )
+            used_total = used_client_total_for_lines(db, composition_lines)
+            salon_pct = float(get_salon_cut_pct(db))
+            max_corr_pay = max(0.0, used_total * (1.0 - salon_pct))
+            corr_pay = float(corr_fin.master_total)
+            if corr_pay > max_corr_pay + 0.01:
+                raise ValueError(
+                    "Сумма за коррекцию превышает допустимую сумму за Б/У заготовки."
+                )
+            staff_master_profit[current_user.id] = (
+                float(staff_master_profit.get(current_user.id, 0.0)) + corr_pay
+            )
+        master_total = float(sum(staff_master_profit.values()))
         studio_total = fin.studio_total
-        profit_total = fin.profit_total
+        profit_total = master_total + studio_total
         extra_costs_amount = fin.extra_costs_amount
         cost_total_amount = fin.cost_total_amount
         studio_share = fin.studio_share_snapshot
@@ -1071,10 +1252,13 @@ async def work_new_post(
                     sku = f"{sku}-{int(utcnow_naive().timestamp())}"
 
             full_cost = float(cost_total_amount) + float(master_total)
-            comp_json = composition_json_from_totals(kit_totals)
-            stock_price_total = _kit_client_stock_price_total(
-                db, kit_totals=kit_totals, extra_costs_amount=float(extra_costs_amount)
+            comp_json = lines_to_json(composition_lines) or composition_json_from_totals(kit_totals)
+            stock_price_total, missing_price = client_price_for_lines(
+                db, composition_lines, extra_costs_amount=float(extra_costs_amount)
             )
+            if missing_price:
+                miss = ", ".join(missing_price)
+                raise ValueError(f"Не найдены цены в прайсе «Заказ → Заготовки поштучно» для: {miss}.")
             stock_price_snapshot_text = _kit_stock_price_snapshot_text(
                 db, kit_totals=kit_totals, extra_costs_amount=float(extra_costs_amount)
             )
@@ -1094,7 +1278,7 @@ async def work_new_post(
             kit = Kit(
                 sku=sku[:80],
                 title=title[:200],
-                blanks_condition=infer_kit_blanks_condition_from_totals(db, kit_totals),
+                blanks_condition=infer_blanks_condition(composition_lines),
                 description=None,
                 is_active=True,
                 pieces_total=kit_pieces_inventory,
@@ -1148,6 +1332,68 @@ async def work_new_post(
                     0, int(kit.pieces_available or 0) - pieces_reserved
                 )
 
+        if kind == WorkKind.KIT_CORRECTION and corr_add_kit:
+            full_cost = float(cost_total_amount) + float(master_total)
+            corr_kit_pieces = inventory_piece_count(corr_kit_lines_saved)
+            comp_json = lines_to_json(corr_kit_lines_saved)
+            stock_snap = stock_price_snapshot_for_used_kit(
+                db,
+                corr_kit_lines_saved,
+                discount_pct=corr_kit_discount_pct,
+            )
+            cost_snap = _corr_kit_from_work_cost_snapshot_text(
+                mat_cost=float(mat_cost),
+                kanek=float(kanek),
+                kudri=float(kudri),
+                k_snap=float(k_snap or 0.0),
+                ku_snap=float(ku_snap or 0.0),
+                correction_master_pay=float(master_total),
+            )
+            kit_corr = Kit(
+                sku=corr_kit_sku[:80],
+                title=corr_kit_title[:200],
+                blanks_condition=KitBlanksCondition.USED,
+                description=None,
+                is_active=True,
+                pieces_total=corr_kit_pieces,
+                pieces_available=corr_kit_pieces,
+                blank_type_se=corr_kit_type_se,
+                blank_type_de=corr_kit_type_de,
+                weight_grams=None,
+                length_cm=None,
+                materials_text=None,
+                color_text=None,
+                notes=None,
+                stock_price_total=float(corr_kit_stock_price),
+                composition_json=comp_json,
+                stock_price_snapshot_text=stock_snap,
+                discount_percent=int(corr_kit_discount_pct),
+                cost_total=full_cost,
+                cost_snapshot_text=cost_snap,
+                author_cost_total=None,
+                created_at=utcnow_naive(),
+                is_in_stock=True,
+                is_archived=False,
+            )
+            db.add(kit_corr)
+            db.flush()
+            work.created_kit_id = kit_corr.id
+            mu = db.get(User, current_user.id)
+            if mu and mu.is_active and user_has_role(db, current_user.id, UserRole.MASTER):
+                db.add(KitAuthorStaff(kit_id=kit_corr.id, user_id=current_user.id, sort_order=0))
+            blank_qty = inventory_totals_by_key(corr_kit_lines_saved)
+            comp_legacy = lines_to_legacy_totals(corr_kit_lines_saved)
+            _, meta_map, _ = load_catalog_kit_maps(db)
+            allowed = set(composition_keys_intersection_catalog(comp_legacy, meta_map)) if comp_legacy else set()
+            if not allowed and comp_legacy:
+                allowed = set(comp_legacy.keys())
+            if not allowed:
+                allowed = set(blank_qty.keys())
+            if blank_qty:
+                replace_blank_stock_for_kit(
+                    db, kit_corr, quantities=blank_qty, allowed_keys=allowed
+                )
+
         staff_saved = list(
             db.scalars(
                 select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == work.id)
@@ -1160,7 +1406,7 @@ async def work_new_post(
 
             try_auto_complete_booking(db, bid_for_auto_complete)
             db.commit()
-        return RedirectResponse(url="/sales/work?msg=saved", status_code=303)
+        return RedirectResponse(url=f"/sales/work/{work.id}?msg=created", status_code=303)
     except ValueError as exc:
         masters = _list_masters_for_work_form(db)
         work_price_meta = {
@@ -1303,7 +1549,17 @@ def work_detail(
         ).all()
     )
     linked_sale_ids: list[int] = []
+    consultation = None
     if w.booking_id:
+        from app.db.models import Booking
+
+        booking_row = db.scalar(
+            select(Booking)
+            .where(Booking.id == int(w.booking_id))
+            .options(selectinload(Booking.consultation))
+        )
+        if booking_row and booking_row.consultation:
+            consultation = booking_row.consultation
         linked_sale_ids = list(
             db.scalars(
                 select(ProductSale.id)
@@ -1330,6 +1586,7 @@ def work_detail(
             audit_rows=audit_rows,
             msg=void_msg,
             linked_sale_ids=linked_sale_ids,
+            consultation=consultation,
         ),
     )
 

@@ -174,6 +174,42 @@
         </div>
       </div>
 
+      <div id="corr_add_kit_btn_wrap" style="margin: 12px 0; display:none;">
+        <button type="button" class="secondary" id="corr_add_kit_btn">Добавить комплект на склад</button>
+        <input type="hidden" name="corr_add_kit_to_stock" id="corr_add_kit_to_stock" value="{{ '1' if fp.corr_add_kit_to_stock else '' }}" />
+      </div>
+
+      <div id="corr_kit_stock_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
+        <h3 style="margin-top:0;">Комплект на склад (б/у)</h3>
+        <p class="muted" style="margin-top:-6px; font-size:13px;">
+          Все заготовки комплекта — б/у. ЗП по этой работе начисляется только за коррекцию; цена комплекта нужна для карточки на складе.
+        </p>
+        <div class="row">
+          <div>
+            <label>Тип заготовок</label>
+            <label><input type="checkbox" name="corr_kit_type_se" {% if fp.get('corr_kit_type_se', '1') in ('1', 'on', 'true', 'yes') or not fp.get('corr_kit_type_se') and not fp.get('corr_kit_type_de') %}checked{% endif %} /> SE</label>
+            <label><input type="checkbox" name="corr_kit_type_de" {% if fp.corr_kit_type_de %}checked{% endif %} /> DE</label>
+          </div>
+        </div>
+        {% with line_name_prefix='corr_kit_line', table_id='corr_kit_composition_table', thead_id='corr_kit_composition_thead', tbody_id='corr_kit_composition_tbody', state_element_id='corr_kit_table_state', used_only=true, mount_id='corr_kit' %}
+          {% include "partials/kit_composition_lines_table.html" %}
+        {% endwith %}
+        <script src="/static/kit_composition_lines.js"></script>
+        <div style="margin-top: 12px;">
+          <h4 style="margin: 0 0 8px;">Склад</h4>
+          <div class="row">
+            <div>
+              <label>Артикул</label>
+              <input name="corr_kit_sku" value="{{ fp.corr_kit_sku or '' }}" placeholder="например, KIT-BU-001" />
+            </div>
+            <div>
+              <label>Название</label>
+              <input name="corr_kit_title" value="{{ fp.corr_kit_title or '' }}" placeholder="Комплект б/у после коррекции" />
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="kit_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
         <h3 style="margin-top:0;">Комплект/Заготовки (поштучно)</h3>
         <p class="muted" style="margin-top:-6px;">
@@ -221,11 +257,41 @@
           {% endfor %}
         </div>
 
-        <div style="overflow-x:auto; margin-top: 12px;" id="kit_qty_table_outer">
-          <table id="kit_qty_table">
-            <thead id="kit_qty_thead"></thead>
-            <tbody id="kit_qty_tbody"></tbody>
-          </table>
+        {% include "partials/kit_composition_lines_table.html" %}
+
+        <div id="kit_bu_correction_wrap" style="margin-top: 14px; display: none;">
+          <label style="display:block; margin-bottom: 8px;">
+            <input type="checkbox" name="kit_bu_correction" id="kit_bu_correction_cb" />
+            Была коррекция Б/У
+          </label>
+          <div id="kit_bu_correction_fields" class="card" style="background:#fff; display:none; margin-top: 8px; padding: 12px;">
+            <p class="muted" style="margin-top:0; font-size:12px;">ЗП за коррекцию не может превышать сумму б/у заготовок для клиента минус доля студии.</p>
+            <div class="row">
+              <div>
+                <label>Стрижка (1шт) — количество</label>
+                <input name="kit_corr_trim_qty" type="number" step="1" min="0" value="{{ fp.get('kit_corr_trim_qty', 0) or 0 }}" />
+              </div>
+              <div>
+                <label>Почасовая коррекция заготовок, ч</label>
+                <input name="kit_corr_hourly_hours" type="number" step="0.25" min="0" value="{{ fp.get('kit_corr_hourly_hours', '') or '' }}" style="max-width:180px;" />
+              </div>
+            </div>
+            <div class="row" style="margin-top: 10px;">
+              <div style="flex:1; min-width:220px;">
+                <label>Описание комплекта</label>
+                <input name="kit_corr_kit_description" type="text" maxlength="500" value="{{ fp.get('kit_corr_kit_description', '') or '' }}" />
+              </div>
+              <div>
+                <label>Количество заготовок в комплекте</label>
+                <input name="kit_corr_kit_blanks_count" type="number" step="1" min="0" value="{{ fp.get('kit_corr_kit_blanks_count', '') or '' }}" />
+              </div>
+            </div>
+            <div style="margin-top: 10px;">
+              <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="kit_corr_wash" id="kit_corr_wash" /> Стирка</label>
+              <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="kit_corr_steam" /> Отпаривание</label>
+              <label style="display:block;"><input type="checkbox" name="kit_corr_circle" id="kit_corr_circle" /> Одевание на круг</label>
+            </div>
+          </div>
         </div>
 
         <div id="kit_stock_block" style="margin-top: 12px;">
@@ -249,6 +315,23 @@
       <div id="work_preview_block" class="card" style="background:#fff; margin: 12px 0; border: 1px solid #e2e8f0;">
         <h3 style="margin-top:0;">Предварительный расчёт</h3>
         <div id="work_preview_pieces_line" class="muted" style="font-size: 13px; display:none;">—</div>
+        <div id="corr_kit_price_preview" style="display:none; margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid #e2e8f0; background: #f8fafc; font-size: 13px;">
+          <strong style="display:block; margin-bottom: 8px;">Цена комплекта на склад (б/у)</strong>
+          <div class="row" style="align-items: flex-end;">
+            <div>
+              <label>Цена как новые, ₽</label>
+              <div id="corr_kit_new_price_display" style="font-weight:600;">—</div>
+            </div>
+            <div>
+              <label>Скидка за Б/У (%) <span style="color:#b91c1c;">*</span></label>
+              <input name="corr_kit_used_discount_pct" type="number" min="1" max="100" step="1" value="{{ fp.corr_kit_used_discount_pct or '' }}" placeholder="например, 40" style="max-width:6rem;" />
+            </div>
+            <div>
+              <label>Итоговая цена на склад, ₽</label>
+              <div id="corr_kit_stock_price_display" style="font-weight:600;">—</div>
+            </div>
+          </div>
+        </div>
         <div id="work_preview_master_lines" style="font-size: 13px; margin-top: 8px;">—</div>
         <div id="work_preview_cost_line" class="muted" style="font-size: 13px; margin-top: 8px;">—</div>
       </div>
@@ -258,6 +341,7 @@
   </div>
 
   <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
+  <script type="application/json" id="corr_kit_table_state">{{ kit_table_state_json | safe }}</script>
   <script type="application/json" id="work_price_meta">{{ work_price_meta_json | safe }}</script>
   <script>
     function kitTableCurrentUserId() {
@@ -279,9 +363,10 @@
       var kit = document.getElementById('kit_block');
       if (!kind || !kit) return;
       kit.style.display = (kind.value === 'KIT') ? 'block' : 'none';
-      if (kind.value === 'KIT' && typeof window.rebuildKitTable === 'function') {
-        window.rebuildKitTable();
+      if (kind.value === 'KIT' && typeof window.rebuildKitCompositionTable === 'function') {
+        window.rebuildKitCompositionTable();
       }
+      syncKitBuCorrectionVisibility();
       if (typeof window.syncKitPreview === 'function') window.syncKitPreview();
     }
     function syncRubberBlock() {
@@ -305,6 +390,69 @@
       if (!kind || !el) return;
       el.style.display = (kind.value === 'KIT_CORRECTION') ? 'block' : 'none';
       syncCorrectionRules();
+      syncCorrAddKitButton();
+    }
+    function isCorrAddKitEnabled() {
+      var h = document.getElementById('corr_add_kit_to_stock');
+      return !!(h && String(h.value || '').trim() === '1');
+    }
+    function syncCorrAddKitButton() {
+      var wrap = document.getElementById('corr_add_kit_btn_wrap');
+      var block = document.getElementById('corr_kit_stock_block');
+      var preview = document.getElementById('corr_kit_price_preview');
+      var kind = document.querySelector('select[name="kind"]');
+      var showBtn = kind && kind.value === 'KIT_CORRECTION' && getScopeValue() === 'IN_STOCK';
+      if (wrap) wrap.style.display = showBtn ? 'block' : 'none';
+      if (!showBtn) {
+        var hid = document.getElementById('corr_add_kit_to_stock');
+        if (hid) hid.value = '';
+        if (block) block.style.display = 'none';
+        if (preview) preview.style.display = 'none';
+        return;
+      }
+      var on = isCorrAddKitEnabled();
+      if (block) block.style.display = on ? 'block' : 'none';
+      if (preview) preview.style.display = on ? 'block' : 'none';
+      if (on && typeof window.rebuildKitCompositionTable === 'function') {
+        window.rebuildKitCompositionTable('corr_kit');
+      }
+    }
+    function syncCorrKitPricePreview() {
+      var newEl = document.getElementById('corr_kit_new_price_display');
+      var stockEl = document.getElementById('corr_kit_stock_price_display');
+      if (!newEl || !stockEl || !isCorrAddKitEnabled()) return;
+      var st = kitState();
+      var priceMap = st.kitPriceByKey || {};
+      var exMap = {};
+      (st.excludeFromInventoryPieceCount || []).forEach(function (x) { exMap[x] = true; });
+      var lines = (typeof window.corrKitCompositionCollectLines === 'function')
+        ? window.corrKitCompositionCollectLines() : [];
+      var newTotal = 0;
+      var inv = 0;
+      lines.forEach(function (ln) {
+        var key = ln.key || '';
+        var qty = 0;
+        for (var mid in (ln.by_staff || {})) qty += parseInt(ln.by_staff[mid], 10) || 0;
+        if (!exMap[key]) inv += qty;
+        var p = parseFloat(priceMap[key]) || 0;
+        newTotal += p * qty;
+      });
+      var pctRaw = (document.querySelector('input[name="corr_kit_used_discount_pct"]') || {}).value;
+      var pct = parseInt(pctRaw, 10);
+      if (isNaN(pct) || pct < 1) pct = null;
+      if (pct > 100) pct = 100;
+      newEl.textContent = money2(newTotal) + ' ₽';
+      if (pct == null) {
+        stockEl.textContent = '—';
+      } else {
+        stockEl.textContent = money2(newTotal * pct / 100) + ' ₽';
+      }
+      var piecesEl = document.getElementById('work_preview_pieces_line');
+      if (piecesEl && inv > 0) {
+        piecesEl.style.display = 'block';
+        piecesEl.textContent = 'Заготовок в комплекте (на склад): ' + inv + ' шт.';
+      }
+      return { newTotal: newTotal, inv: inv };
     }
     function syncCorrectionRules() {
       var wash = document.getElementById('corr_wash');
@@ -372,22 +520,30 @@
       if (k === 'KIT') {
         var exMap = {};
         (st.excludeFromInventoryPieceCount || []).forEach(function (x) { exMap[x] = true; });
-        var rates = st.kitWorkPayByKey || {};
-        function kitRateForItem(itemKey, qtyTotal) {
-          return parseFloat(rates[itemKey]) || 0;
-        }
-
-        var totals = {};
-        document.querySelectorAll('#kit_qty_tbody input[name^="kit_qty_"]').forEach(function (inp) {
-          var m = /^kit_qty_(\d+)_(.+)$/.exec(inp.name);
-          if (!m) return;
-          var q = parseInt(inp.value, 10) || 0;
-          var key = m[2];
-          totals[key] = (totals[key] || 0) + q;
-        });
+        var payRates = st.kitWorkPayByKey || {};
+        var priceMap = st.kitPriceByKey || {};
+        var compLines = (typeof window.kitCompositionCollectLines === 'function')
+          ? window.kitCompositionCollectLines() : [];
 
         var inv = 0;
-        for (var key in totals) if (!exMap[key]) inv += totals[key] || 0;
+        var clientTotal = 0;
+        var usedClientTotal = 0;
+        compLines.forEach(function (ln) {
+          var key = ln.key || '';
+          var qty = 0;
+          for (var mid in (ln.by_staff || {})) qty += parseInt(ln.by_staff[mid], 10) || 0;
+          if (!exMap[key]) inv += qty;
+          var baseP = parseFloat(priceMap[key]) || 0;
+          if (baseP > 0 && qty > 0) {
+            if (ln.is_used) {
+              var pct = parseInt(ln.used_pct, 10) || 100;
+              clientTotal += baseP * (pct / 100.0) * qty;
+              usedClientTotal += baseP * (pct / 100.0) * qty;
+            } else {
+              clientTotal += baseP * qty;
+            }
+          }
+        });
         setPieces('Количество заготовок: ' + String(inv), true);
 
         var gramsTotal = kan + kud;
@@ -399,28 +555,27 @@
         var mixMasterId = st.currentUserId || 0;
 
         var ids = (typeof window.getKitColumnMasterIds === 'function') ? window.getKitColumnMasterIds() : [st.currentUserId || 0];
-        var lines = [];
+        var payLines = [];
         for (var ii = 0; ii < ids.length; ii++) {
           var uid = ids[ii];
           var sum = 0;
-          for (var itemKey in totals) {
-            var tq = totals[itemKey] || 0;
-            var r = kitRateForItem(itemKey, tq);
-            if (r <= 0) continue;
-            var inp2 = document.querySelector('input[name="kit_qty_' + uid + '_' + itemKey + '"]');
-            var q2 = inp2 ? (parseInt(inp2.value, 10) || 0) : 0;
-            if (q2 > 0) sum += r * q2;
-          }
-          if (mixBonusTotal > 0 && mixMasterId && uid === mixMasterId) {
-            sum += mixBonusTotal;
-          }
-          lines.push('ЗП «' + nameByUserId(st, uid) + '»: ' + money2(sum) + ' ₽');
+          compLines.forEach(function (ln) {
+            if (ln.is_used) return;
+            var q2 = parseInt((ln.by_staff || {})[uid] || (ln.by_staff || {})[String(uid)] || 0, 10) || 0;
+            if (q2 > 0) sum += (parseFloat(payRates[ln.key]) || 0) * q2;
+          });
+          if (mixBonusTotal > 0 && mixMasterId && uid === mixMasterId) sum += mixBonusTotal;
+          payLines.push('ЗП «' + nameByUserId(st, uid) + '»: ' + money2(sum) + ' ₽');
         }
-        setPayLines(lines);
+        setPayLines(payLines);
 
         var extra = parseFloat((document.querySelector('input[name="extra_costs_amount"]') || {}).value) || 0;
+        clientTotal += extra;
         var costKit = mat + extra;
-        setCost('Себестоимость (итого): ' + money2(costKit) + ' ₽ (материал + доп. расходы)');
+        setCost(
+          'С клиента (итого): ' + money2(clientTotal) + ' ₽ · Себестоимость: ' + money2(costKit) + ' ₽'
+          + (usedClientTotal > 0 ? ' · Б/У для клиента: ' + money2(usedClientTotal) + ' ₽' : '')
+        );
         return;
       }
 
@@ -493,6 +648,11 @@
         var uid1 = st.currentUserId || 0;
         setPayLines([('ЗП «' + nameByUserId(st, uid1) + '»: ' + money2(payT * bonus) + ' ₽')]);
         setCost('Себестоимость (итого): ' + money2(mat + fxT) + ' ₽ (материал + доп. расходы)');
+        if (isCorrAddKitEnabled()) {
+          syncCorrKitPricePreview();
+        } else {
+          setPieces('—', false);
+        }
         return;
       }
 
@@ -730,8 +890,29 @@
     document.querySelectorAll('input[name="scope"]').forEach(function (el) {
       el.addEventListener('change', syncClientBlock);
       el.addEventListener('change', syncKitStockBlock);
+      el.addEventListener('change', syncCorrAddKitButton);
       el.addEventListener('change', syncPriceHint);
       el.addEventListener('change', syncWorkPreview);
+    });
+    var corrAddKitBtn = document.getElementById('corr_add_kit_btn');
+    if (corrAddKitBtn) {
+      corrAddKitBtn.addEventListener('click', function () {
+        var hid = document.getElementById('corr_add_kit_to_stock');
+        if (hid) hid.value = '1';
+        syncCorrAddKitButton();
+        syncWorkPreview();
+      });
+    }
+    var corrPctInp = document.querySelector('input[name="corr_kit_used_discount_pct"]');
+    if (corrPctInp) {
+      corrPctInp.addEventListener('input', function () { syncCorrKitPricePreview(); });
+      corrPctInp.addEventListener('change', function () { syncCorrKitPricePreview(); });
+    }
+    document.querySelectorAll('input[name="corr_kit_type_se"], input[name="corr_kit_type_de"]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        if (typeof window.rebuildKitCompositionTable === 'function') window.rebuildKitCompositionTable('corr_kit');
+        syncWorkPreview();
+      });
     });
     var kindSel = document.querySelector('select[name="kind"]');
     if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); syncCorrectionBlock(); syncMixUI(); syncPriceHint(); syncWorkPreview(); });
@@ -766,131 +947,73 @@
           if (cur) cur.checked = true;
         }
       }
-      if (typeof window.rebuildKitTable === 'function') window.rebuildKitTable();
+      if (typeof window.rebuildKitCompositionTable === 'function') window.rebuildKitCompositionTable();
+      syncKitBuCorrectionVisibility();
     });
     document.querySelectorAll('.kit-master-cb').forEach(function (el) {
       el.addEventListener('change', function () {
-        if (typeof window.rebuildKitTable === 'function') window.rebuildKitTable();
+        if (typeof window.rebuildKitCompositionTable === 'function') window.rebuildKitCompositionTable();
       });
     });
 
+    function syncKitBuCorrectionVisibility() {
+      var wrap = document.getElementById('kit_bu_correction_wrap');
+      var fields = document.getElementById('kit_bu_correction_fields');
+      var cb = document.getElementById('kit_bu_correction_cb');
+      if (!wrap) return;
+      var hasUsed = typeof window.kitCompositionHasUsed === 'function' && window.kitCompositionHasUsed();
+      wrap.style.display = hasUsed ? 'block' : 'none';
+      if (!hasUsed && cb) cb.checked = false;
+      if (fields && cb) fields.style.display = (hasUsed && cb.checked) ? 'block' : 'none';
+    }
+
+    window.kitCompositionOnChange = function () {
+      syncKitBuCorrectionVisibility();
+      if (typeof syncWorkPreview === 'function') syncWorkPreview();
+    };
+
     (function () {
       var stateEl = document.getElementById('kit_table_state');
-      var state = { currentUserId: 0, masters: [], seItems: [], deItems: [], prefill: {} };
       try {
-        if (stateEl && stateEl.textContent) state = JSON.parse(stateEl.textContent);
+        if (stateEl && stateEl.textContent && typeof window.kitCompositionInit === 'function') {
+          window.kitCompositionInit(JSON.parse(stateEl.textContent));
+        }
       } catch (e) {}
 
-      function esc(s) {
-        var d = document.createElement('div');
-        d.textContent = s;
-        return d.innerHTML;
-      }
-
       function getKitColumnMasterIds() {
+        var st = window._kitCompositionState || {};
         var multi = document.getElementById('kit_use_multi_masters');
-        if (!multi || !multi.checked) return [state.currentUserId];
+        if (!multi || !multi.checked) return [st.currentUserId || 0];
         var ids = [];
         document.querySelectorAll('input[name="kit_master_on"]:checked').forEach(function (cb) {
           var v = parseInt(cb.value, 10);
           if (!isNaN(v) && v > 0) ids.push(v);
         });
-        return ids;
+        return ids.length ? ids : [st.currentUserId || 0];
       }
       window.getKitColumnMasterIds = getKitColumnMasterIds;
 
-      function rebuildKitTable() {
-        var kind = document.querySelector('select[name="kind"]');
-        if (!kind || kind.value !== 'KIT') return;
-        var thead = document.getElementById('kit_qty_thead');
-        var tbody = document.getElementById('kit_qty_tbody');
-        if (!thead || !tbody) return;
-        var ids = getKitColumnMasterIds();
-        var idToName = {};
-        (state.masters || []).forEach(function (m) { idToName[m.id] = m.name; });
-
-        var headHtml = '<tr><th>Вид</th>';
-        ids.forEach(function (id) {
-          headHtml += '<th>' + esc(idToName[id] || ('ID ' + id)) + '</th>';
+      var buCb = document.getElementById('kit_bu_correction_cb');
+      if (buCb) {
+        buCb.addEventListener('change', syncKitBuCorrectionVisibility);
+      }
+      ['kit_corr_wash', 'kit_corr_circle'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', function () {
+          if (typeof syncWorkPreview === 'function') syncWorkPreview();
         });
-        headHtml += '</tr>';
-        thead.innerHTML = headHtml;
-
-        var bodyHtml = '';
-        var pre = state.prefill || {};
-
-        function rowForItem(key, label) {
-          var tr = '<tr class="kit-data-row"><td>' + esc(label) + '</td>';
-          ids.forEach(function (uid) {
-            var name = 'kit_qty_' + uid + '_' + key;
-            var val = pre[name];
-            if (val === undefined || val === null) val = '0';
-            tr += '<td><input type="number" step="1" min="0" name="' + esc(name) + '" value="' + esc(String(val)) + '" /></td>';
-          });
-          tr += '</tr>';
-          return tr;
-        }
-
-        var kitSe = document.querySelector('input[name="kit_type_se"]');
-        var kitDe = document.querySelector('input[name="kit_type_de"]');
-        var showSe = kitSe && kitSe.checked;
-        var showDe = kitDe && kitDe.checked;
-
-        if (!showSe && !showDe) {
-          bodyHtml += '<tr><td colspan=\"' + (1 + ids.length) + '\"><span class=\"muted\">Выберите тип заготовок: SE и/или DE.</span></td></tr>';
-        }
-        if (showSe && (state.seItems || []).length) {
-          bodyHtml += '<tr><td colspan="' + (1 + ids.length) + '"><strong>SE</strong></td></tr>';
-          (state.seItems || []).forEach(function (it) {
-            bodyHtml += rowForItem(it.key, it.label);
-          });
-        }
-        if (showDe && (state.deItems || []).length) {
-          bodyHtml += '<tr><td colspan="' + (1 + ids.length) + '"><strong>DE</strong></td></tr>';
-          (state.deItems || []).forEach(function (it) {
-            bodyHtml += rowForItem(it.key, it.label);
-          });
-        }
-        tbody.innerHTML = bodyHtml;
-        syncKitPreview();
-      }
-
-      function syncKitPreview() {
-        // Legacy hook point: use unified preview.
-        if (typeof syncWorkPreview === 'function') syncWorkPreview();
-      }
-
-      window.syncKitPreview = syncKitPreview;
-
-      window.rebuildKitTable = rebuildKitTable;
-
-      document.querySelectorAll('input[name="kit_type_se"], input[name="kit_type_de"]').forEach(function (el) {
-        el.addEventListener('change', rebuildKitTable);
       });
-
-      // Live preview: update on any typing inside the dynamic table.
-      var kitTbody = document.getElementById('kit_qty_tbody');
-      if (kitTbody) {
-        kitTbody.addEventListener('input', function (e) {
-          var t = e && e.target;
-          if (t && t.name && String(t.name).indexOf('kit_qty_') === 0) syncKitPreview();
-        });
-        kitTbody.addEventListener('change', function (e) {
-          var t = e && e.target;
-          if (t && t.name && String(t.name).indexOf('kit_qty_') === 0) syncKitPreview();
-        });
-      }
 
       syncKitMasterPicker();
       syncClientBlock();
       syncKitBlock();
       syncRubberBlock();
       syncCorrectionBlock();
+      syncCorrAddKitButton();
       syncKitStockBlock();
       syncMixUI();
       syncPriceHint();
       syncWorkPreview();
-      rebuildKitTable();
     })();
 
     // Prevent accidental submit on Enter in inputs.

@@ -24,13 +24,20 @@
       </div>
     {% endif %}
     {% if msg %}
-      {% if msg == 'cancelled' %}
+      {% if msg == 'created' %}
+        <div class="ok" style="margin:12px 0;">Визит сохранён.</div>
+      {% elif msg == 'cancelled' %}
         <div class="ok" style="margin:12px 0;">Визит отменён. Складные списания возвращены.</div>
       {% elif msg == 'already_cancelled' %}
         <div class="error" style="margin:12px 0;">Визит уже отменён.</div>
       {% elif msg == 'cancel_conflict' %}
         <div class="error" style="margin:12px 0;">Нельзя отменить: конфликт при возврате заготовок на склад (проверьте движения по комплекту).</div>
       {% endif %}
+    {% endif %}
+    {% if request.query_params.get('draft_client') == '1' and visit.client and not visit.client.is_confirmed %}
+      <p style="margin:12px 0; padding:10px 12px; background:#fffbeb; border-radius:8px; border:1px solid #fbbf24;">
+        <strong>Черновик клиента.</strong> Администратор должен проверить данные и подтвердить клиента в разделе «Клиенты».
+      </p>
     {% endif %}
     {% if not visit_super_priv %}
       <p class="muted" style="font-size: 12px; margin-top: 8px;">История изменений и аннулирование визита доступны суперадмину или техспецу.</p>
@@ -101,16 +108,30 @@
       </div>
     {% endif %}
 
-    <h3>Услуга</h3>
-
-    <h4 style="margin: 14px 0 6px; font-size: 1rem;">Услуга</h4>
+    <h3>Услуги визита</h3>
     {% if visit.services %}
-      {% for disp in service_displays %}
-        {% if service_displays|length > 1 %}
-          <p class="muted" style="margin: 8px 0 2px; font-size: 12px;">Услуга {{ loop.index }}</p>
-        {% endif %}
-        <p style="margin: 4px 0;">{{ disp.catalog_line }}</p>
+      {% for vs in visit.services|sort(attribute='sort_order') %}
+        {% set disp = service_displays.get(vs.id) %}
+        <div class="card" style="margin-bottom:10px;{% if vs.is_cancelled %}opacity:0.65;{% endif %}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+            <div>
+              <strong>{{ vs.service_name }}</strong>
+              {% if vs.is_cancelled %}<span class="muted"> (отменена)</span>{% endif %}
+              <p class="muted" style="margin:4px 0 0;font-size:13px;">{{ vs.category_name }} → {{ vs.subcategory_name }}</p>
+              <p style="margin:6px 0 0;">С клиента: <strong>{{ vs.amount_from_client|round(0) }} ₽</strong></p>
+            </div>
+            {% if visit_super_priv and not visit.is_cancelled and not vs.is_cancelled and not visit_closed_period %}
+              <form method="post" action="/visits/{{ visit.id }}/services/{{ vs.id }}/cancel" style="margin:0;">
+                <button type="submit" class="secondary" onclick="return confirm('Отменить эту услугу в визите?');">Отменить услугу</button>
+              </form>
+            {% endif %}
+          </div>
+          {% if disp %}
+            <p style="margin:8px 0 0;">{{ disp.catalog_line }}</p>
+          {% endif %}
+        </div>
       {% endfor %}
+      <p style="margin-top:8px;">Итого с клиента: <strong>{{ visit.amount_from_client|round(0) }} ₽</strong></p>
     {% else %}
       <p class="muted">—</p>
     {% endif %}
@@ -126,11 +147,13 @@
     <p style="margin: 4px 0;">{{ duration_h }} ч {{ duration_m }} мин</p>
 
     <h4 style="margin: 16px 0 6px; font-size: 1rem;">Информация об услуге</h4>
-    {% if service_displays %}
-      {% for disp in service_displays %}
-        {% if service_displays|length > 1 %}
-          <p class="muted" style="margin: 8px 0 2px; font-size: 12px;">Услуга {{ loop.index }}</p>
+    {% if sorted_services %}
+      {% for vs in sorted_services %}
+        {% set disp = service_displays.get(vs.id) %}
+        {% if sorted_services|length > 1 %}
+          <p class="muted" style="margin: 8px 0 2px; font-size: 12px;">{{ vs.service_name }}</p>
         {% endif %}
+        {% if not disp %}{% continue %}{% endif %}
         {% if disp.detail_blocks %}
           <ul style="margin: 4px 0 10px; padding-left: 1.2rem; line-height: 1.35;">
             {% for label, val in disp.detail_blocks %}

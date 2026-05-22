@@ -30,6 +30,15 @@
         <label>Максимум резервов на один комплект (1–20)</label>
         <input name="kit_max_reserves_per_kit" type="number" step="1" min="1" max="20" value="{{ kit_max_reserves_per_kit }}" />
       </div>
+      <div class="lb-mb-12">
+        <label>Час начала календаря (0–23)</label>
+        <input name="calendar_display_hour_from" type="number" step="1" min="0" max="23" value="{{ calendar_display_hour_from }}" />
+      </div>
+      <div class="lb-mb-12">
+        <label>Час окончания календаря (1–24, исключая)</label>
+        <input name="calendar_display_hour_to" type="number" step="1" min="1" max="24" value="{{ calendar_display_hour_to }}" />
+      </div>
+      <p class="muted lb-mb-12">Сетка «Занятость» в модалке дня: от начала до конца (например 9–21 — часы 9:00…20:00).</p>
       <div class="lb-mt-16 lb-pt-12 lb-bt">
         <button type="submit">Сохранить</button>
       </div>
@@ -111,6 +120,24 @@
           <div class="lb-mb-12">
             <label>Бонус “на заказ” (множитель, напр. 1.10)</label>
             <input name="custom_order_bonus_multiplier" type="number" step="0.01" min="0" value="{{ work_rates.custom_order_bonus_multiplier }}" />
+          </div>
+
+          <div class="card lb-card-info lb-mb-12" style="max-width: 28rem;">
+            <div style="font-weight:600; margin-bottom:10px;">ЗП за консультацию (при успешной брони)</div>
+            <div class="lb-stack-10">
+              <div>
+                <label>До порога (₽)</label>
+                <input name="consultation_pay_below_threshold" type="number" step="1" min="0" value="{{ work_rates.consultation_pay_below_threshold }}" class="lb-input-narrow" />
+              </div>
+              <div>
+                <label>От порога и выше (₽)</label>
+                <input name="consultation_pay_at_or_above_threshold" type="number" step="1" min="0" value="{{ work_rates.consultation_pay_at_or_above_threshold }}" class="lb-input-narrow" />
+              </div>
+              <div>
+                <label>Порог суммы визита/продажи + работ (₽)</label>
+                <input name="consultation_pay_amount_threshold" type="number" step="1" min="0" value="{{ work_rates.consultation_pay_amount_threshold }}" class="lb-input-narrow" />
+              </div>
+            </div>
           </div>
 
           <button type="submit">Сохранить коэффициенты</button>

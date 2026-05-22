@@ -2,7 +2,11 @@
 {% block content %}
   <div class="card">
     <h2 style="margin-top: 0;">Визиты</h2>
-    <p><a href="/sales/work">Работа с товарами</a></p>
+    <p>
+      <a href="/sales/work">Работа с товарами</a>
+      <span class="muted lb-dot-sep">·</span>
+      <a href="/consultations">Консультации</a>
+    </p>
     <p class="muted" style="margin-bottom:8px;">
       Список последних визитов (до 200). По умолчанию скрыты аннулированные — их можно показать отдельной ссылкой ниже.
     </p>
@@ -57,7 +61,7 @@
             <td>{{ v.client.name }}</td>
             <td>
               {% if v.services %}
-                {{ (v.services|sort(attribute='id')|first).service_name }}
+                {{ v.services_line }}
               {% else %}—{% endif %}
             </td>
             <td>{{ "%.0f"|format(v.amount_from_client) }}</td>

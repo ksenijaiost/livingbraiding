@@ -38,8 +38,8 @@ Install deps:
 
 ```bash
 py -m venv ..\.venv
-..\.\.venv\Scripts\python -m ensurepip --upgrade
-..\.\.venv\Scripts\python -m pip install -r requirements.txt
+..\.venv\Scripts\python -m ensurepip --upgrade
+..\.venv\Scripts\python -m pip install -r requirements.txt
 ```
 
 Enable dev seed (optional):
@@ -51,13 +51,13 @@ $env:ENABLE_DEV_SEED="1"
 Run migrations:
 
 ```bash
-..\.\.venv\Scripts\python -m alembic upgrade head
+..\.venv\Scripts\python -m alembic upgrade head
 ```
 
 Run server:
 
 ```bash
-..\.\.venv\Scripts\python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8010
+..\.venv\Scripts\python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8010
 ```
 
 ### Production (Linux, без Docker)
@@ -103,13 +103,13 @@ Open:
 Run tests:
 
 ```bash
-..\.\.venv\Scripts\python -m pytest
+..\.venv\Scripts\python -m pytest
 ```
 
 Validate questionnaire JSON examples:
 
 ```bash
-..\.\.venv\Scripts\python -m app.questionnaire.self_check
+..\.venv\Scripts\python -m app.questionnaire.self_check
 ```
 
 ### First start (no seeds): TECHSPEC user

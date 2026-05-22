@@ -1,0 +1,934 @@
+"""Визит с несколькими услугами: расчёт строк, сохранение, агрегаты на Visit."""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from datetime import date, datetime, time
+from typing import Any, Callable
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
+from starlette.datastructures import UploadFile
+
+from app.client_validation import client_has_any_contact, strip_or_none
+from app.db.models import (
+    AmortizationLevel,
+    Client,
+    MixComplexity,
+    MixSource,
+    Service,
+    ServiceCategory,
+    ServiceSubcategory,
+    User,
+    UserRole,
+    Visit,
+    VisitClientType,
+    VisitKitUsage,
+    VisitMaster,
+    VisitMastersScope,
+    VisitPriceType,
+    VisitService,
+    VisitServiceMaster,
+)
+from app.forms_parse import parse_bool, parse_date_iso, parse_float
+from app.kit_inlay_visit import (
+    AMORTIZATION_LEVEL_RUBLES,
+    KitInlayFormInput,
+    StockKitLineInput,
+    _apply_stock_kit_usage,
+    estimate_stock_kit_usage,
+    _build_kit_block_from_input,
+    _materials_cost_and_snapshot,
+    _parse_optional_nonneg_int,
+    _parse_stock_breakdown_json,
+    _parse_stock_kit_lines_from_form,
+    _parse_visit_client_discount_percent,
+    _parse_visit_master_allocations_from_form,
+    _resolve_visit_master_allocations,
+    build_payload_from_input,
+    get_salon_cut_pct,
+    read_visit_master_form_state,
+    service_requires_kit_block,
+)
+from app.mix_rates import mix_complexity_rate_for
+from app.payroll_fund import post_visit_accruals
+from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
+from app.questionnaire.answer_validate import extract_questionnaire_raw_from_form
+from app.thermo_visit import parse_thermo_from_form, persist_new_thermo_template_if_needed
+from app.user_roles import user_has_role
+
+
+_LINE_KEY_RE = re.compile(r"^line_(\d+)_")
+
+
+@dataclass
+class VisitServiceLineInput:
+    service_id: int
+    amount_from_client: float
+    client_discount_percent: int
+    kanekalon_grams: float
+    kudri_grams: float
+    mix_source: MixSource | None
+    mix_complexity: MixComplexity | None
+    mix_bonus_master_id: int | None
+    amortization_level: AmortizationLevel | None
+    kit_kind: str
+    stock_kit_lines: list[StockKitLineInput] = field(default_factory=list)
+    kit_paid_separately: bool = False
+    own_origin: str | None = None
+    own_correction: bool = False
+    own_extra_blanks: bool = False
+    own_extra_stock_kit_id: int | None = None
+    own_extra_stock_use_entire: bool = False
+    own_extra_stock_blanks_used: int = 0
+    own_extra_stock_usage_by_key: dict[str, int] | None = None
+    own_corr_trim_qty: int = 0
+    own_corr_hourly_hours: float = 0.0
+    own_corr_kit_description: str = ""
+    own_corr_kit_blanks_count: int | None = None
+    own_corr_wash: bool = False
+    own_corr_circle: bool = False
+    own_corr_steam: bool = False
+    service_master_allocations: list[tuple[int, int]] = field(default_factory=list)
+    questionnaire_raw: dict[str, str] = field(default_factory=dict)
+    addon_sales_amount: float = 0.0
+    addon_sales_description: str = ""
+    thermo_parsed: Any = None
+    started_at: datetime | None = None
+    comment: str | None = None
+    sort_order: int = 0
+
+
+@dataclass
+class VisitHeaderInput:
+    client_mode: str
+    existing_client_id: int | None
+    draft_name: str
+    draft_phone: str
+    draft_telegram: str
+    draft_vk: str
+    draft_instagram: str
+    draft_other_contact: str
+    client_type: VisitClientType
+    performed_date: date
+    duration_minutes: int
+    masters_scope: VisitMastersScope
+    same_master_shares_all_services: bool
+    visit_master_allocations: list[tuple[int, int]]
+    booking_id: int | None = None
+
+
+@dataclass
+class MultiServiceVisitInput:
+    header: VisitHeaderInput
+    lines: list[VisitServiceLineInput]
+
+
+@dataclass
+class VisitServiceLineComputed:
+    amount_from_client: float
+    client_discount_percent: int
+    kanekalon_grams: float
+    kudri_grams: float
+    mix_source: MixSource | None
+    mix_complexity: MixComplexity | None
+    mix_cost_amount: float
+    mix_bonus_master_id: int | None
+    mix_bonus_amount: float
+    kanekalon_price_per_gram_at_time: float | None
+    kudri_price_per_gram_at_time: float | None
+    materials_cost_total: float
+    addons_total: float
+    addons_details_json: str | None
+    amortization_level: AmortizationLevel | None
+    amortization_amount: float
+    studio_fund_amount: float
+    cost_total: float
+    profit_before_split: float
+    salon_cut_pct_at_time: float
+    salon_profit: float
+    masters_pool: float
+    kit_paid_separately: bool
+    kit_usages: list[tuple[int, int, float, dict[str, int] | None]]
+
+
+def _validate_mix_bonus_master(db: Session, master_id: int | None) -> None:
+    if master_id is None:
+        return
+    u = db.get(User, master_id)
+    if not u or not u.is_active:
+        raise ValueError("Мастер для бонуса смешки не найден или отключён.")
+    if not user_has_role(db, master_id, UserRole.MASTER):
+        raise ValueError("Бонус смешки может получить только активный мастер.")
+
+
+def _line_kit_inlay_adapter(line: VisitServiceLineInput, header: VisitHeaderInput) -> KitInlayFormInput:
+    return KitInlayFormInput(
+        client_mode=header.client_mode,
+        existing_client_id=header.existing_client_id,
+        draft_name=header.draft_name,
+        draft_phone=header.draft_phone,
+        draft_telegram=header.draft_telegram,
+        draft_vk=header.draft_vk,
+        draft_instagram=header.draft_instagram,
+        draft_other_contact=header.draft_other_contact,
+        client_type=header.client_type,
+        client_discount_percent=line.client_discount_percent,
+        performed_date=header.performed_date,
+        duration_minutes=header.duration_minutes,
+        amount_from_client=line.amount_from_client,
+        kanekalon_grams=line.kanekalon_grams,
+        kudri_grams=line.kudri_grams,
+        mix_source=line.mix_source,
+        mix_complexity=line.mix_complexity,
+        amortization_level=line.amortization_level,
+        service_id=line.service_id,
+        kit_kind=line.kit_kind,
+        stock_kit_id=line.stock_kit_lines[0].kit_id if line.stock_kit_lines else None,
+        stock_use_entire=line.stock_kit_lines[0].use_entire if line.stock_kit_lines else False,
+        stock_blanks_used=line.stock_kit_lines[0].blanks_used if line.stock_kit_lines else 0,
+        stock_usage_by_key=line.stock_kit_lines[0].usage_by_key if line.stock_kit_lines else None,
+        stock_kit_lines=line.stock_kit_lines,
+        kit_paid_separately=line.kit_paid_separately,
+        new_title="",
+        new_description=None,
+        new_blanks_total=0,
+        new_sku=None,
+        new_made_by_self=False,
+        new_notes=None,
+        own_origin=line.own_origin,
+        own_correction=line.own_correction,
+        own_extra_blanks=line.own_extra_blanks,
+        own_extra_stock_kit_id=line.own_extra_stock_kit_id,
+        own_extra_stock_use_entire=line.own_extra_stock_use_entire,
+        own_extra_stock_blanks_used=line.own_extra_stock_blanks_used,
+        own_extra_stock_usage_by_key=line.own_extra_stock_usage_by_key,
+        own_corr_trim_qty=line.own_corr_trim_qty,
+        own_corr_hourly_hours=line.own_corr_hourly_hours,
+        own_corr_kit_description=line.own_corr_kit_description,
+        own_corr_kit_blanks_count=line.own_corr_kit_blanks_count,
+        own_corr_wash=line.own_corr_wash,
+        own_corr_circle=line.own_corr_circle,
+        own_corr_steam=line.own_corr_steam,
+        visit_master_allocations=line.service_master_allocations,
+        questionnaire_raw=line.questionnaire_raw,
+        addon_sales_amount=line.addon_sales_amount,
+        addon_sales_description=line.addon_sales_description,
+        thermo_parsed=line.thermo_parsed,
+    )
+
+
+def compute_visit_service_line(
+    db: Session,
+    line: VisitServiceLineInput,
+    header: VisitHeaderInput,
+    *,
+    default_mix_bonus_master_id: int | None = None,
+    apply_kit_stock: bool = True,
+) -> VisitServiceLineComputed:
+    if line.service_id <= 0:
+        raise ValueError("Выберите услугу")
+
+    service = db.scalar(
+        select(Service)
+        .options(selectinload(Service.subcategory).selectinload(ServiceSubcategory.category))
+        .where(Service.id == line.service_id, Service.is_active.is_(True))
+    )
+    if not service or not service.subcategory or not service.subcategory.category:
+        raise ValueError("Услуга не найдена")
+    if (service.subcategory.category.name or "").strip() in ("Заказ", "Продажа материала"):
+        raise ValueError("Эта позиция недоступна для выбора в визите")
+
+    mat_cost, k_snap, ku_snap = _materials_cost_and_snapshot(
+        db,
+        kanekalon_grams=line.kanekalon_grams,
+        kudri_grams=line.kudri_grams,
+    )
+    salon_pct = get_salon_cut_pct(db)
+
+    kit_cost_total = 0.0
+    usages: list[tuple[int, int, float, dict[str, int] | None]] = []
+    kit_studio_fund = 0.0
+
+    if service_requires_kit_block(service):
+        kinp = _line_kit_inlay_adapter(line, header)
+        kind = line.kit_kind.upper()
+        exclude_main_stock_cost = kind == "STOCK" and bool(line.kit_paid_separately) and bool(line.stock_kit_lines)
+        stock_fn = _apply_stock_kit_usage if apply_kit_stock else estimate_stock_kit_usage
+        if kind == "STOCK" and line.stock_kit_lines:
+            for sk in line.stock_kit_lines:
+                n, cost, sf, bd = stock_fn(
+                    db,
+                    kit_id=sk.kit_id,
+                    use_entire=sk.use_entire,
+                    blanks_used=sk.blanks_used,
+                    client_id=header.existing_client_id,
+                    usage_by_key=sk.usage_by_key,
+                )
+                usage_cost = 0.0 if exclude_main_stock_cost else cost
+                usage_sf = 0.0 if exclude_main_stock_cost else sf
+                usages.append((sk.kit_id, n, usage_cost, bd))
+                kit_cost_total += usage_cost
+                kit_studio_fund += usage_sf
+        if kind == "OWN" and line.own_extra_blanks and line.own_extra_stock_kit_id:
+            n, cost, sf, bd = stock_fn(
+                db,
+                kit_id=line.own_extra_stock_kit_id,
+                use_entire=line.own_extra_stock_use_entire,
+                blanks_used=line.own_extra_stock_blanks_used,
+                client_id=header.existing_client_id,
+                usage_by_key=line.own_extra_stock_usage_by_key,
+            )
+            usages.append((line.own_extra_stock_kit_id, n, cost, bd))
+            kit_cost_total += cost
+            kit_studio_fund += sf
+        _build_kit_block_from_input(kinp, db)
+
+    addons = max(0.0, float(line.addon_sales_amount or 0.0))
+    addons_detail: dict[str, Any] = {}
+    ad = (line.addon_sales_description or "").strip()
+    if ad:
+        addons_detail["description"] = ad
+    addons_details_json = json.dumps(addons_detail, ensure_ascii=False) if addons_detail else None
+
+    grams_total = max(0.0, line.kanekalon_grams) + max(0.0, line.kudri_grams)
+    mix_cost = 0.0
+    mix_bonus_amount = 0.0
+    mix_bonus_master_id = line.mix_bonus_master_id
+    if line.mix_source and line.mix_source != MixSource.NO_MIX:
+        if line.mix_complexity is None:
+            raise ValueError("Укажите сложность смешки")
+        coef = mix_complexity_rate_for(db, line.mix_complexity)
+        mix_cost = grams_total * coef
+        if line.mix_source == MixSource.SELF_MIXED:
+            mix_bonus_amount = mix_cost
+            if mix_bonus_master_id is None:
+                mix_bonus_master_id = default_mix_bonus_master_id
+    if mix_bonus_master_id:
+        _validate_mix_bonus_master(db, mix_bonus_master_id)
+
+    amort_amount = 0.0
+    if line.amortization_level is not None:
+        amort_amount = float(AMORTIZATION_LEVEL_RUBLES.get(line.amortization_level.value, 0.0))
+
+    cost_total = mat_cost + kit_cost_total + addons + mix_cost + amort_amount
+    profit_before = line.amount_from_client - cost_total
+    salon_profit = profit_before * salon_pct
+    masters_pool = profit_before - salon_profit
+
+    return VisitServiceLineComputed(
+        amount_from_client=line.amount_from_client,
+        client_discount_percent=line.client_discount_percent,
+        kanekalon_grams=line.kanekalon_grams,
+        kudri_grams=line.kudri_grams,
+        mix_source=line.mix_source,
+        mix_complexity=line.mix_complexity,
+        mix_cost_amount=mix_cost,
+        mix_bonus_master_id=mix_bonus_master_id,
+        mix_bonus_amount=mix_bonus_amount,
+        kanekalon_price_per_gram_at_time=k_snap,
+        kudri_price_per_gram_at_time=ku_snap,
+        materials_cost_total=mat_cost,
+        addons_total=addons,
+        addons_details_json=addons_details_json,
+        amortization_level=line.amortization_level,
+        amortization_amount=amort_amount,
+        studio_fund_amount=amort_amount + kit_studio_fund,
+        cost_total=cost_total,
+        profit_before_split=profit_before,
+        salon_cut_pct_at_time=salon_pct,
+        salon_profit=salon_profit,
+        masters_pool=masters_pool,
+        kit_paid_separately=bool(line.kit_paid_separately),
+        kit_usages=usages,
+    )
+
+
+def recalc_visit_totals(visit: Visit) -> None:
+    """Суммы активных строк → денормализованные поля Visit."""
+    active = [s for s in (visit.services or []) if not s.is_cancelled]
+    if not active:
+        for fld in (
+            "amount_from_client",
+            "kanekalon_grams",
+            "kudri_grams",
+            "mix_cost_amount",
+            "mix_bonus_amount",
+            "materials_cost_total",
+            "addons_total",
+            "amortization_amount",
+            "studio_fund_amount",
+            "cost_total",
+            "profit_before_split",
+            "salon_profit",
+            "masters_pool",
+        ):
+            setattr(visit, fld, 0.0)
+        visit.mix_source = None
+        visit.mix_complexity = None
+        visit.mix_bonus_master_id = None
+        visit.amortization_level = None
+        visit.kanekalon_price_per_gram_at_time = None
+        visit.kudri_price_per_gram_at_time = None
+        visit.addons_details_json = None
+        visit.kit_paid_separately = False
+        visit.client_discount_percent = 0
+        return
+
+    visit.amount_from_client = sum(float(s.amount_from_client or 0) for s in active)
+    visit.kanekalon_grams = sum(float(s.kanekalon_grams or 0) for s in active)
+    visit.kudri_grams = sum(float(s.kudri_grams or 0) for s in active)
+    visit.mix_cost_amount = sum(float(s.mix_cost_amount or 0) for s in active)
+    visit.mix_bonus_amount = sum(float(s.mix_bonus_amount or 0) for s in active)
+    visit.materials_cost_total = sum(float(s.materials_cost_total or 0) for s in active)
+    visit.addons_total = sum(float(s.addons_total or 0) for s in active)
+    visit.amortization_amount = sum(float(s.amortization_amount or 0) for s in active)
+    visit.studio_fund_amount = sum(float(s.studio_fund_amount or 0) for s in active)
+    visit.cost_total = sum(float(s.cost_total or 0) for s in active)
+    visit.profit_before_split = sum(float(s.profit_before_split or 0) for s in active)
+    visit.salon_profit = sum(float(s.salon_profit or 0) for s in active)
+    visit.masters_pool = sum(float(s.masters_pool or 0) for s in active)
+    visit.client_discount_percent = max(int(s.client_discount_percent or 0) for s in active)
+    visit.kit_paid_separately = any(bool(s.kit_paid_separately) for s in active)
+    first = active[0]
+    visit.salon_cut_pct_at_time = float(first.salon_cut_pct_at_time or 0.5)
+    visit.kanekalon_price_per_gram_at_time = first.kanekalon_price_per_gram_at_time
+    visit.kudri_price_per_gram_at_time = first.kudri_price_per_gram_at_time
+    visit.mix_source = first.mix_source
+    visit.mix_complexity = first.mix_complexity
+    visit.mix_bonus_master_id = first.mix_bonus_master_id
+    visit.amortization_level = first.amortization_level
+
+
+def _resolve_client(db: Session, header: VisitHeaderInput, *, created_by_label: str | None) -> Client:
+    if header.client_mode == "draft":
+        if not header.draft_name.strip():
+            raise ValueError("Укажите имя клиента для черновика.")
+        if not client_has_any_contact(
+            header.draft_phone,
+            header.draft_telegram,
+            header.draft_vk,
+            header.draft_instagram,
+            header.draft_other_contact,
+        ):
+            raise ValueError("Для черновика нужен хотя бы один контакт (телефон или соцсеть).")
+        client = Client(
+            name=header.draft_name.strip()[:200],
+            phone=strip_or_none(header.draft_phone, 30),
+            telegram=strip_or_none(header.draft_telegram, 100),
+            vk=strip_or_none(header.draft_vk, 120),
+            instagram=strip_or_none(header.draft_instagram, 120),
+            other_contact=strip_or_none(header.draft_other_contact, 200),
+            comment=None,
+            is_confirmed=False,
+            created_by_label=created_by_label,
+        )
+        db.add(client)
+        db.flush()
+        return client
+    if not header.existing_client_id:
+        raise ValueError("Найдите и выберите клиента из списка или переключитесь на «Новый черновик».")
+    client = db.get(Client, header.existing_client_id)
+    if client is None:
+        raise ValueError("Клиент не найден.")
+    return client
+
+
+def _validate_lines_masters(
+    db: Session,
+    inp: MultiServiceVisitInput,
+) -> tuple[list[tuple[int, float]] | None, dict[int, list[tuple[int, float]]]]:
+    visit_rows: list[tuple[int, float]] | None = None
+    per_line: dict[int, list[tuple[int, float]]] = {}
+    if inp.header.masters_scope == VisitMastersScope.VISIT:
+        visit_rows = _resolve_visit_master_allocations(db, inp.header.visit_master_allocations)
+        if inp.header.same_master_shares_all_services:
+            for i, line in enumerate(inp.lines):
+                per_line[i] = list(visit_rows)
+        return visit_rows, per_line
+    for i, line in enumerate(inp.lines):
+        allocs = line.service_master_allocations
+        if inp.header.same_master_shares_all_services and inp.header.visit_master_allocations:
+            allocs = inp.header.visit_master_allocations
+        per_line[i] = _resolve_visit_master_allocations(db, allocs)
+    return None, per_line
+
+
+def save_visit_with_services(
+    db: Session,
+    master_id: int,
+    inp: MultiServiceVisitInput,
+    *,
+    created_by_label: str | None = None,
+) -> Visit:
+    if not inp.lines:
+        raise ValueError("Добавьте хотя бы одну услугу.")
+
+    visit_master_rows, line_master_rows = _validate_lines_masters(db, inp)
+    client = _resolve_client(db, inp.header, created_by_label=created_by_label)
+    performed_dt = datetime.combine(inp.header.performed_date, datetime.min.time())
+    ensure_event_date_in_open_payroll_period(db, performed_dt)
+
+    visit = Visit(
+        created_by_user_id=master_id,
+        performed_date=performed_dt,
+        duration_minutes=max(0, inp.header.duration_minutes),
+        client_id=client.id,
+        client_type=inp.header.client_type,
+        price_type=VisitPriceType.CLIENT,
+        client_discount_percent=0,
+        client_age_group=client.age_group,
+        booking_id=inp.header.booking_id,
+        masters_scope=inp.header.masters_scope,
+        same_master_shares_all_services=inp.header.same_master_shares_all_services,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_cost_amount=0,
+        mix_bonus_amount=0,
+        materials_cost_total=0,
+        amount_from_client=0,
+        addons_total=0,
+        cost_total=0,
+        profit_before_split=0,
+        salon_cut_pct_at_time=get_salon_cut_pct(db),
+        salon_profit=0,
+        masters_pool=0,
+        studio_fund_amount=0,
+        amortization_amount=0,
+    )
+    db.add(visit)
+    db.flush()
+
+    if visit_master_rows:
+        for mid, pct in visit_master_rows:
+            db.add(VisitMaster(visit_id=visit.id, master_id=mid, percent=pct))
+        db.flush()
+
+    for idx, line in enumerate(inp.lines):
+        if inp.header.client_type != VisitClientType.SELF and line.amount_from_client <= 0:
+            raise ValueError("Укажите сумму, взятую с клиента.")
+        computed = compute_visit_service_line(
+            db,
+            line,
+            inp.header,
+            default_mix_bonus_master_id=master_id,
+        )
+        kinp = _line_kit_inlay_adapter(line, inp.header)
+        payload = build_payload_from_input(kinp, db)
+        service = db.scalar(
+            select(Service)
+            .options(selectinload(Service.subcategory).selectinload(ServiceSubcategory.category))
+            .where(Service.id == line.service_id, Service.is_active.is_(True))
+        )
+        assert service and service.subcategory and service.subcategory.category
+
+        vs = VisitService(
+            visit_id=visit.id,
+            service_id=service.id,
+            details_json=json.dumps(payload.model_dump(mode="json"), ensure_ascii=False),
+            category_name=service.subcategory.category.name,
+            subcategory_name=service.subcategory.name,
+            service_name=service.name,
+            sort_order=line.sort_order if line.sort_order else idx,
+            amount_from_client=computed.amount_from_client,
+            client_discount_percent=computed.client_discount_percent,
+            kanekalon_grams=computed.kanekalon_grams,
+            kudri_grams=computed.kudri_grams,
+            mix_source=computed.mix_source,
+            mix_complexity=computed.mix_complexity,
+            mix_cost_amount=computed.mix_cost_amount,
+            mix_bonus_master_id=computed.mix_bonus_master_id,
+            mix_bonus_amount=computed.mix_bonus_amount,
+            kanekalon_price_per_gram_at_time=computed.kanekalon_price_per_gram_at_time,
+            kudri_price_per_gram_at_time=computed.kudri_price_per_gram_at_time,
+            materials_cost_total=computed.materials_cost_total,
+            addons_total=computed.addons_total,
+            addons_details_json=computed.addons_details_json,
+            amortization_level=computed.amortization_level,
+            amortization_amount=computed.amortization_amount,
+            studio_fund_amount=computed.studio_fund_amount,
+            cost_total=computed.cost_total,
+            profit_before_split=computed.profit_before_split,
+            salon_cut_pct_at_time=computed.salon_cut_pct_at_time,
+            salon_profit=computed.salon_profit,
+            masters_pool=computed.masters_pool,
+            kit_paid_separately=computed.kit_paid_separately,
+            started_at=line.started_at,
+            comment=(line.comment or "").strip() or None,
+        )
+        db.add(vs)
+        db.flush()
+
+        if inp.header.masters_scope == VisitMastersScope.PER_SERVICE:
+            for mid, pct in line_master_rows.get(idx, []):
+                db.add(VisitServiceMaster(visit_service_id=vs.id, master_id=mid, percent=pct))
+
+        for kid, pieces, camount, bd in computed.kit_usages:
+            uj = json.dumps(bd, ensure_ascii=False) if bd else None
+            db.add(
+                VisitKitUsage(
+                    visit_id=visit.id,
+                    visit_service_id=vs.id,
+                    kit_id=kid,
+                    pieces_used=pieces,
+                    cost_amount=camount,
+                    note=None,
+                    usage_breakdown_json=uj,
+                )
+            )
+
+        if payload.thermo is not None:
+            persist_new_thermo_template_if_needed(
+                db,
+                client_id=client.id,
+                details=payload.thermo,
+                label_suffix=f"Термо {performed_dt.date().isoformat()}",
+            )
+
+    visit = db.scalar(
+        select(Visit).options(selectinload(Visit.services)).where(Visit.id == visit.id)
+    )
+    assert visit is not None
+    recalc_visit_totals(visit)
+    post_visit_accruals(db, visit, visit.created_by_user_id)
+    db.commit()
+    db.refresh(visit)
+    return visit
+
+
+def kit_inlay_to_multi(inp: KitInlayFormInput, *, booking_id: int | None = None) -> MultiServiceVisitInput:
+    line = VisitServiceLineInput(
+        service_id=inp.service_id,
+        amount_from_client=inp.amount_from_client,
+        client_discount_percent=inp.client_discount_percent,
+        kanekalon_grams=inp.kanekalon_grams,
+        kudri_grams=inp.kudri_grams,
+        mix_source=inp.mix_source,
+        mix_complexity=inp.mix_complexity,
+        mix_bonus_master_id=inp.mix_source == MixSource.SELF_MIXED and None or None,
+        amortization_level=inp.amortization_level,
+        kit_kind=inp.kit_kind,
+        stock_kit_lines=list(inp.stock_kit_lines),
+        kit_paid_separately=inp.kit_paid_separately,
+        own_origin=inp.own_origin,
+        own_correction=inp.own_correction,
+        own_extra_blanks=inp.own_extra_blanks,
+        own_extra_stock_kit_id=inp.own_extra_stock_kit_id,
+        own_extra_stock_use_entire=inp.own_extra_stock_use_entire,
+        own_extra_stock_blanks_used=inp.own_extra_stock_blanks_used,
+        own_extra_stock_usage_by_key=inp.own_extra_stock_usage_by_key,
+        own_corr_trim_qty=inp.own_corr_trim_qty,
+        own_corr_hourly_hours=inp.own_corr_hourly_hours,
+        own_corr_kit_description=inp.own_corr_kit_description,
+        own_corr_kit_blanks_count=inp.own_corr_kit_blanks_count,
+        own_corr_wash=inp.own_corr_wash,
+        own_corr_circle=inp.own_corr_circle,
+        own_corr_steam=inp.own_corr_steam,
+        service_master_allocations=inp.visit_master_allocations,
+        questionnaire_raw=inp.questionnaire_raw,
+        addon_sales_amount=inp.addon_sales_amount,
+        addon_sales_description=inp.addon_sales_description,
+        thermo_parsed=inp.thermo_parsed,
+    )
+    header = VisitHeaderInput(
+        client_mode=inp.client_mode,
+        existing_client_id=inp.existing_client_id,
+        draft_name=inp.draft_name,
+        draft_phone=inp.draft_phone,
+        draft_telegram=inp.draft_telegram,
+        draft_vk=inp.draft_vk,
+        draft_instagram=inp.draft_instagram,
+        draft_other_contact=inp.draft_other_contact,
+        client_type=inp.client_type,
+        performed_date=inp.performed_date,
+        duration_minutes=inp.duration_minutes,
+        masters_scope=VisitMastersScope.VISIT,
+        same_master_shares_all_services=False,
+        visit_master_allocations=inp.visit_master_allocations,
+        booking_id=booking_id,
+    )
+    return MultiServiceVisitInput(header=header, lines=[line])
+
+
+def _discover_line_indices(form: Any) -> list[int]:
+    indices: set[int] = set()
+    for key in form.keys():
+        if not isinstance(key, str):
+            continue
+        m = _LINE_KEY_RE.match(key)
+        if m:
+            indices.add(int(m.group(1)))
+    if indices:
+        return sorted(indices)
+    if form.get("service_id") or form.get("line_count"):
+        return [0]
+    return []
+
+
+def _prefix_g(form: Any, prefix: str) -> Callable[[str, str], str]:
+    def g(name: str, default: str = "") -> str:
+        full = f"{prefix}{name}" if prefix else name
+        v = form.get(full)
+        if v is None and prefix:
+            v = form.get(name)
+        if v is None:
+            return default
+        if isinstance(v, UploadFile):
+            return default
+        if isinstance(v, (bytes, bytearray)):
+            return v.decode().strip()
+        return str(v).strip()
+
+    return g
+
+
+def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitServiceLineInput:
+    prefix = f"line_{idx}_"
+    g = _prefix_g(form, prefix)
+    g_int = lambda name, default=0: int(parse_float(g(name, "").strip() or "0", default=default, field_name=name)) if g(name, "").strip() else default
+    g_float = lambda name, default=0.0: parse_float(g(name, "").strip() or "0", default=default, field_name=name) if g(name, "").strip() else default
+    g_bool = lambda name: parse_bool(g(name, ""))
+
+    kanekalon_grams = g_float("kanekalon_grams", 0)
+    kudri_grams = g_float("kudri_grams", 0)
+    grams_total = max(0.0, kanekalon_grams) + max(0.0, kudri_grams)
+    mix_raw = g("mix_source", "")
+    if grams_total <= 0:
+        mix = MixSource.NO_MIX
+    else:
+        mix = MixSource.NO_MIX
+        if mix_raw:
+            try:
+                mix = MixSource(mix_raw)
+            except ValueError:
+                mix = MixSource.NO_MIX
+    comp: MixComplexity | None = None
+    if grams_total > 0 and mix != MixSource.NO_MIX:
+        comp_raw = (g("mix_complexity", "") or "").strip().upper()
+        comp_raw = {"SIMPLE": "STANDARD", "MEDIUM": "KANEK", "HARD": "THERMO"}.get(comp_raw, comp_raw)
+        if comp_raw:
+            try:
+                comp = MixComplexity(comp_raw)
+            except ValueError:
+                comp = None
+    amort_raw = g("amortization_level", "") or "MIN"
+    try:
+        amort = AmortizationLevel(amort_raw)
+    except ValueError:
+        amort = AmortizationLevel.MIN
+
+    stock_lines = _parse_stock_kit_lines_from_form(
+        _LineFormAdapter(form, prefix),
+        g,
+        lambda n, d=0: int(parse_float(g(n, "").strip() or "0", field_name=n)) if g(n, "").strip() else d,
+        g_bool,
+    )
+    mix_bonus_raw = g("mix_bonus_master_id", "").strip()
+    mix_bonus_id = int(mix_bonus_raw) if mix_bonus_raw.isdigit() and int(mix_bonus_raw) > 0 else None
+
+    q_raw: dict[str, str] = {}
+    qpre = f"{q_prefix}line_{idx}_" if q_prefix else f"line_{idx}_"
+    for k in form.keys():
+        if not isinstance(k, str):
+            continue
+        if k.startswith("q_") and (not prefix or k.startswith(qpre) or (idx == 0 and not k.startswith("line_"))):
+            key = k[len(qpre) :] if k.startswith(qpre) else k
+            if not key.startswith("q_"):
+                continue
+            vs = [v for v in form.getlist(k) if not isinstance(v, UploadFile)]
+            if vs:
+                v = vs[-1]
+                q_raw[key] = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+    if not q_raw and idx == 0:
+        q_raw = extract_questionnaire_raw_from_form(form)
+
+    started_at: datetime | None = None
+    st_raw = g("started_time", "").strip()
+    if st_raw:
+        try:
+            parts = st_raw.split(":")
+            h, m = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+            started_at = datetime.combine(date.today(), time(h, m))
+        except (ValueError, IndexError):
+            started_at = None
+
+    return VisitServiceLineInput(
+        service_id=int(parse_float(g("service_id", "0") or "0", field_name="service_id")),
+        amount_from_client=g_float("amount_from_client", 0),
+        client_discount_percent=_parse_visit_client_discount_percent(g),
+        kanekalon_grams=kanekalon_grams,
+        kudri_grams=kudri_grams,
+        mix_source=mix,
+        mix_complexity=comp,
+        mix_bonus_master_id=mix_bonus_id,
+        amortization_level=amort,
+        kit_kind=g("kit_kind", "STOCK").upper(),
+        stock_kit_lines=stock_lines,
+        kit_paid_separately=g_bool("kit_paid_separately"),
+        own_origin=g("own_origin") or None,
+        own_correction=g_bool("own_correction"),
+        own_extra_blanks=g_bool("own_extra_blanks"),
+        own_extra_stock_kit_id=int(g("own_extra_stock_kit_id", "0") or "0") or None,
+        own_extra_stock_use_entire=g_bool("own_extra_stock_use_entire"),
+        own_extra_stock_blanks_used=int(g("own_extra_stock_blanks_used", "0") or "0"),
+        own_extra_stock_usage_by_key=_parse_stock_breakdown_json(g, "own_extra_stock_breakdown_json"),
+        own_corr_trim_qty=int(g("own_corr_trim_qty", "0") or "0"),
+        own_corr_hourly_hours=max(0.0, g_float("own_corr_hourly_hours", 0)),
+        own_corr_kit_description=g("own_corr_kit_description", ""),
+        own_corr_kit_blanks_count=_parse_optional_nonneg_int(g, "own_corr_kit_blanks_count"),
+        own_corr_wash=g_bool("own_corr_wash"),
+        own_corr_circle=g_bool("own_corr_circle"),
+        own_corr_steam=g_bool("own_corr_steam"),
+        service_master_allocations=_parse_service_master_allocations_from_form(form, idx),
+        questionnaire_raw=q_raw,
+        addon_sales_amount=max(0.0, g_float("addon_sales_amount", 0)),
+        addon_sales_description=g("addon_sales_description", ""),
+        thermo_parsed=parse_thermo_from_form(_LineFormAdapter(form, prefix)),
+        started_at=started_at,
+        comment=g("comment", "") or None,
+        sort_order=idx,
+    )
+
+
+class _LineFormAdapter:
+    """Прокси FormData с префиксом line_N_ для парсеров kit_inlay."""
+
+    def __init__(self, form: Any, prefix: str) -> None:
+        self._form = form
+        self._prefix = prefix
+
+    def get(self, name: str, default: Any = None) -> Any:
+        v = self._form.get(self._prefix + name)
+        if v is None:
+            v = self._form.get(name)
+        return v if v is not None else default
+
+    def getlist(self, name: str) -> list[Any]:
+        vs = list(self._form.getlist(self._prefix + name))
+        if not vs:
+            vs = list(self._form.getlist(name))
+        return vs
+
+    def keys(self) -> Any:
+        return self._form.keys()
+
+
+def _parse_service_master_allocations_from_form(form: Any, line_idx: int) -> list[tuple[int, int]]:
+    prefix = f"line_{line_idx}_"
+    active: list[int] = []
+    for x in form.getlist(f"{prefix}service_master_on"):
+        if isinstance(x, UploadFile):
+            continue
+        try:
+            s = x.decode().strip() if isinstance(x, (bytes, bytearray)) else str(x).strip()
+            i = int(s)
+        except (ValueError, AttributeError):
+            continue
+        if i > 0 and i not in active:
+            active.append(i)
+    if not active:
+        return []
+    rows: list[tuple[int, int]] = []
+    if len(active) == 1:
+        mid = active[0]
+        raw = form.get(f"{prefix}service_master_pct_{mid}")
+        s = ""
+        if raw and not isinstance(raw, UploadFile):
+            s = raw.decode().strip() if isinstance(raw, (bytes, bytearray)) else str(raw).strip()
+        p = 100 if not s else int(s)
+        return [(mid, p)]
+    for mid in active:
+        raw = form.get(f"{prefix}service_master_pct_{mid}")
+        if not raw or isinstance(raw, UploadFile):
+            raise ValueError("Для каждого отмеченного мастера услуги укажите целый процент.")
+        s = raw.decode().strip() if isinstance(raw, (bytes, bytearray)) else str(raw).strip()
+        rows.append((mid, int(s)))
+    return rows
+
+
+def parse_multi_service_visit_form(
+    form: Any,
+    *,
+    single_master_default_id: int | None = None,
+    booking_id: int | None = None,
+) -> MultiServiceVisitInput:
+    g = _prefix_g(form, "")
+
+    def g_int(name: str, default: int = 0) -> int:
+        raw = g(name, "").strip()
+        if not raw:
+            return default
+        return int(parse_float(raw, field_name=name))
+
+    def g_bool(name: str) -> bool:
+        return parse_bool(g(name, ""))
+
+    indices = _discover_line_indices(form)
+    if not indices:
+        raise ValueError("Добавьте хотя бы одну услугу.")
+
+    scope_raw = (g("masters_scope", "VISIT") or "VISIT").strip().upper()
+    try:
+        masters_scope = VisitMastersScope(scope_raw)
+    except ValueError:
+        masters_scope = VisitMastersScope.VISIT
+
+    ct = VisitClientType.SELF if g_bool("client_is_self") else VisitClientType.RETURNING
+    pd_raw = g("performed_date", "")
+    try:
+        performed_date = parse_date_iso(pd_raw, field_name="performed_date") if pd_raw else date.today()
+    except ValueError:
+        performed_date = date.today()
+
+    mode_raw = (g("client_mode", "existing") or "existing").lower()
+    client_mode = "draft" if mode_raw == "draft" else "existing"
+    eid = g_int("existing_client_id", 0)
+    existing_client_id = eid if eid > 0 else None
+
+    if single_master_default_id is not None and not g_bool("visit_use_multi_masters"):
+        visit_master_allocations = [(single_master_default_id, 100)]
+    else:
+        visit_master_allocations = _parse_visit_master_allocations_from_form(form)
+
+    header = VisitHeaderInput(
+        client_mode=client_mode,
+        existing_client_id=existing_client_id,
+        draft_name=g("draft_client_name"),
+        draft_phone=g("draft_phone"),
+        draft_telegram=g("draft_telegram"),
+        draft_vk=g("draft_vk"),
+        draft_instagram=g("draft_instagram"),
+        draft_other_contact=g("draft_other_contact"),
+        client_type=ct,
+        performed_date=performed_date,
+        duration_minutes=g_int("duration_h", 0) * 60 + g_int("duration_m", 0),
+        masters_scope=masters_scope,
+        same_master_shares_all_services=g_bool("same_master_shares_all_services"),
+        visit_master_allocations=visit_master_allocations,
+        booking_id=booking_id,
+    )
+
+    lines = [_parse_line_from_form(form, i) for i in indices]
+    return MultiServiceVisitInput(header=header, lines=lines)
+
+
+def read_visit_master_form_state_multi(form: Any) -> tuple[dict[str, str], list[int], dict[int, str]]:
+    fp: dict[str, str] = {}
+    for key in form.keys():
+        if key == "visit_master_on" or str(key).startswith("visit_master_pct_"):
+            continue
+        if str(key).startswith("q_"):
+            continue
+        if _LINE_KEY_RE.match(str(key)):
+            continue
+        last: str | None = None
+        for v in form.getlist(key):
+            if isinstance(v, UploadFile):
+                continue
+            last = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+        if last is not None:
+            fp[key] = last
+    vm_on_ids, vm_pct_str = read_visit_master_form_state(form)
+    return fp, vm_on_ids, vm_pct_str

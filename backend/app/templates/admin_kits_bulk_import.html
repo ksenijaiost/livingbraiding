@@ -22,7 +22,7 @@
       <tbody>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">sku</td><td style="padding:8px;">Да</td><td style="padding:8px;"><strong>Артикул</strong> (непустая строка)</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">title</td><td style="padding:8px;">Да</td><td style="padding:8px;"><strong>Название</strong></td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_type_de<br/>blank_type_se</td><td style="padding:8px;">Да</td><td style="padding:8px;">Тип заготовок — <strong>D.E.</strong> и/или <strong>S.E.</strong> (хотя бы одно <code>true</code>)</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_type_de<br/>blank_type_se</td><td style="padding:8px;">Да / —</td><td style="padding:8px;">Тип заготовок — <strong>D.E.</strong> и/или <strong>S.E.</strong> (хотя бы одно <code>true</code>). Если оба не указаны или оба <code>false</code>, а задан непустой <code>composition</code> — <strong>авто</strong> по префиксам ключей: <code>DE_*</code> / <code>SE_*</code> (или устаревшие ключи <code>DE</code> / <code>SE</code>).</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">cost_total</td><td style="padding:8px;">Да</td><td style="padding:8px;"><strong>Себестоимость (всего), ₽</strong> — число &gt; 0</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">pieces_initial</td><td style="padding:8px;">Да / —</td><td style="padding:8px;"><strong>Количество заготовок</strong> при создании. Обязательно, если нет <code>composition</code>. Если <code>composition</code> задан и поле не указано — <strong>авто</strong>: сумма количеств по составу.</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">stock_price_total</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Цена на складе (всего), ₽</strong>. Если не указано и задан <code>composition</code> — <strong>авто</strong> по прайсу «Заказ» → «Заготовки поштучно» (нужны цены в каталоге по всем ключам состава); иначе укажите вручную число &gt; 0.</td></tr>
@@ -42,38 +42,27 @@
     </table>
 
     <h3>Ключи заготовок (<code>kit_key</code>)</h3>
-    <p class="muted" style="font-size:14px;">Ключи в <code>composition</code> и <code>blank_stock</code> — это <code>kit_key</code> из каталога «Заказ» → «Заготовки поштучно» (активная позиция с таким ключом в <code>meta_json</code>). Ниже эталонный список из кода приложения; в вашей базе набор может отличаться — ориентируйтесь на каталог.</p>
-    <p class="muted" style="font-size:14px;">Для б/у в каталоге могут быть отдельные ключи, например <code>SE_BRAID_USED</code> и <code>DE_DREAD_USED</code>.</p>
+    <p class="muted" style="font-size:14px;">В прайсе колонка «Наименование» — это поле <code>name</code> в базе (человекочитаемая подпись). В JSON для <code>composition</code> и <code>blank_stock</code> нужны ключи из <code>meta_json.kit_key</code> активных строк «Заказ» → «Заготовки поштучно» (задаются в каталоге рядом с позицией). Строка без <code>kit_key</code> или без цены не участвует в автосчёте цены склада и не попадает в эту таблицу.</p>
+    <p class="muted" style="font-size:14px;">Таблица ниже строится из текущей базы при открытии страницы (те же ключи, что использует импорт и форма комплекта).</p>
 
     <table style="width:100%;max-width:900px;border-collapse:collapse;font-size:13px;margin:12px 0 16px;">
       <thead>
         <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
           <th style="padding:6px 8px;">Ключ (<code>kit_key</code>)</th>
-          <th style="padding:6px 8px;">Подпись</th>
+          <th style="padding:6px 8px;">Наименование в прайсе</th>
         </tr>
       </thead>
       <tbody>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_BRAID_SHORT</td><td style="padding:6px 8px;">S.E. коса короткая</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_BRAID_LONG</td><td style="padding:6px 8px;">S.E. коса</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_BRAID_USED</td><td style="padding:6px 8px;">S.E. коса б/у</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_BRAID_FREE_TIP</td><td style="padding:6px 8px;">S.E. ажурная коса</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_DREAD</td><td style="padding:6px 8px;">S.E. дред</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_TIP_ADDON</td><td style="padding:6px 8px;">S.E. доплёт кончиков</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_TRIM_SHORT</td><td style="padding:6px 8px;">S.E. стрижка короткой косы</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">SE_TRIM_LONG</td><td style="padding:6px 8px;">S.E. стрижка длинной косы</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_BRAID_SHORT</td><td style="padding:6px 8px;">D.E. коса короткая</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_BRAID_LONG</td><td style="padding:6px 8px;">D.E. коса</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_BRAID_NEW_FMT</td><td style="padding:6px 8px;">D.E. ажурная коса</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_CURL</td><td style="padding:6px 8px;">D.E. термокудря</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_FREE_TIP</td><td style="padding:6px 8px;">D.E. дредокудря</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_SHORT</td><td style="padding:6px 8px;">D.E. дред короткий</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_LONG</td><td style="padding:6px 8px;">D.E. дред</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_USED</td><td style="padding:6px 8px;">D.E. дред б/у</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_TRIM</td><td style="padding:6px 8px;">D.E. стрижка</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_DREAD_MAX</td><td style="padding:6px 8px;">D.E. дред max</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_CURL_MAX</td><td style="padding:6px 8px;">D.E. кудря max</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_MICRO_BRAIDS_4X</td><td style="padding:6px 8px;">D.E. микрокосы 4х</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;font-family:monospace;">DE_MICRO_BRAID_6X</td><td style="padding:6px 8px;">D.E. микрокоса 6х</td></tr>
+        {% if catalog_kit_key_hints %}
+          {% for row in catalog_kit_key_hints %}
+            <tr style="border-bottom:1px solid #e5e7eb;">
+              <td style="padding:6px 8px;font-family:monospace;">{{ row.key }}</td>
+              <td style="padding:6px 8px;">{{ row.label }}</td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="2" class="muted" style="padding:8px;">Нет активных позиций с заполненным <code>kit_key</code> и ценой в «Заготовки поштучно».</td></tr>
+        {% endif %}
       </tbody>
     </table>
 

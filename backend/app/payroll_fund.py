@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Sequence
 
@@ -18,6 +19,10 @@ from app.kit_blank_stock_core import (
     parse_composition_totals,
 )
 from app.db.models import (
+    Booking,
+    BookingKind,
+    BookingStatus,
+    Consultation,
     Kit,
     MaterialPriceCurrent,
     MaterialType,
@@ -33,9 +38,18 @@ from app.db.models import (
     UserRole,
     Visit,
     VisitMaster,
+    VisitMastersScope,
+    VisitService,
+    VisitServiceMaster,
     WorkForInventory,
+    WorkRate,
     WorkScope,
     WorkForInventoryStaff,
+)
+from app.work_rate_keys import (
+    CONSULTATION_PAY_AMOUNT_THRESHOLD,
+    CONSULTATION_PAY_AT_OR_ABOVE_THRESHOLD,
+    CONSULTATION_PAY_BELOW_THRESHOLD,
 )
 
 _REVERSIBLE_ENTRY_KINDS = (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.EXPENSE)
@@ -141,9 +155,102 @@ def storno_source_accruals(
         )
 
 
+def post_visit_service_accruals(
+    db: Session,
+    visit_service: VisitService,
+    visit: Visit,
+    created_by_user_id: int | None,
+) -> None:
+    """Начисления ЗП по одной строке услуги (VISIT_SERVICE)."""
+    if visit.is_cancelled or visit_service.is_cancelled:
+        return
+    if _has_accruals_for_source(db, PayrollFundSourceKind.VISIT_SERVICE, visit_service.id):
+        return
+
+    studio_amt = money_q2(
+        float(visit_service.salon_profit or 0) + float(visit_service.studio_fund_amount or 0)
+    )
+    if studio_amt > 0:
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.STUDIO,
+            user_id=None,
+            amount=studio_amt,
+            source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+            source_id=visit_service.id,
+            created_by_user_id=created_by_user_id,
+        )
+
+    append_visit_service_master_pool_and_mix_bonus_ledgers(
+        db, visit_service, visit, created_by_user_id
+    )
+
+
+def append_visit_service_master_pool_and_mix_bonus_ledgers(
+    db: Session,
+    visit_service: VisitService,
+    visit: Visit,
+    created_by_user_id: int | None,
+) -> None:
+    mp = float(visit_service.masters_pool or 0)
+    if visit.masters_scope == VisitMastersScope.PER_SERVICE:
+        masters = list(
+            db.scalars(
+                select(VisitServiceMaster)
+                .where(VisitServiceMaster.visit_service_id == visit_service.id)
+                .order_by(VisitServiceMaster.id.asc())
+            ).all()
+        )
+    else:
+        masters = list(
+            db.scalars(select(VisitMaster).where(VisitMaster.visit_id == visit.id).order_by(VisitMaster.id.asc())).all()
+        )
+    for vm in masters:
+        pct = float(vm.percent or 0) / 100.0
+        amt = money_q2(mp * pct)
+        if amt > 0:
+            append_ledger(
+                db,
+                entry_kind=PayrollFundEntryKind.ACCRUAL,
+                side=PayrollFundSide.MASTER,
+                user_id=int(vm.master_id),
+                amount=amt,
+                source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+                source_id=visit_service.id,
+                created_by_user_id=created_by_user_id,
+            )
+
+    bonus_mid = visit_service.mix_bonus_master_id
+    bonus_amt = money_q2(float(visit_service.mix_bonus_amount or 0))
+    if bonus_mid and bonus_amt > 0:
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=int(bonus_mid),
+            amount=bonus_amt,
+            source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+            source_id=visit_service.id,
+            created_by_user_id=created_by_user_id,
+        )
+
+
 def post_visit_accruals(db: Session, visit: Visit, created_by_user_id: int | None) -> None:
     if visit.is_cancelled:
         return
+    services = list(
+        db.scalars(
+            select(VisitService)
+            .where(VisitService.visit_id == visit.id, VisitService.is_cancelled.is_(False))
+            .order_by(VisitService.sort_order.asc(), VisitService.id.asc())
+        ).all()
+    )
+    if services:
+        for vs in services:
+            post_visit_service_accruals(db, vs, visit, created_by_user_id)
+        return
+
     if _has_accruals_for_source(db, PayrollFundSourceKind.VISIT, visit.id):
         return
 
@@ -658,6 +765,111 @@ def sync_operational_payroll_postings(db: Session) -> None:
     for exp in db.scalars(select(StudioExpense).where(StudioExpense.is_voided.is_(False))).all():
         if not has_unreversed_studio_expense_posting(db, exp.id):
             replace_studio_expense_ledger(db, exp, exp.created_by_user_id)
+
+
+def _work_rate_int(db: Session, key: str, default: int) -> int:
+    r = db.scalar(select(WorkRate).where(WorkRate.key == key, WorkRate.is_active.is_(True)).limit(1))
+    if not r:
+        return default
+    try:
+        v = json.loads(r.value_json)
+        return int(v)
+    except Exception:
+        return default
+
+
+def consultation_pay_settings(db: Session) -> tuple[int, int, int]:
+    """(ниже порога, от порога, порог суммы) в рублях."""
+    below = _work_rate_int(db, CONSULTATION_PAY_BELOW_THRESHOLD, 200)
+    above = _work_rate_int(db, CONSULTATION_PAY_AT_OR_ABOVE_THRESHOLD, 300)
+    threshold = _work_rate_int(db, CONSULTATION_PAY_AMOUNT_THRESHOLD, 5000)
+    return below, above, threshold
+
+
+def _booking_has_fulfilled_visit_or_sale(db: Session, booking: Booking) -> bool:
+    if booking.kind == BookingKind.VISIT:
+        vid = db.scalar(
+            select(Visit.id).where(
+                Visit.booking_id == booking.id,
+                Visit.is_cancelled.is_(False),
+            ).limit(1)
+        )
+        return vid is not None
+    if booking.kind == BookingKind.PRODUCT_SALE:
+        sid = db.scalar(
+            select(ProductSale.id).where(
+                ProductSale.booking_id == booking.id,
+                ProductSale.is_voided.is_(False),
+            ).limit(1)
+        )
+        return sid is not None
+    return False
+
+
+def sum_booking_fulfillment_amount(db: Session, booking_id: int) -> int:
+    """Сумма amount_from_client: работы по брони + визит или продажа."""
+    b = db.get(Booking, booking_id)
+    if not b or b.status != BookingStatus.DONE:
+        return 0
+    total = 0
+    for w in db.scalars(
+        select(WorkForInventory).where(
+            WorkForInventory.booking_id == booking_id,
+            WorkForInventory.is_voided.is_(False),
+        )
+    ).all():
+        total += int(w.amount_from_client or 0)
+    if b.kind == BookingKind.VISIT:
+        v_amt = db.scalar(
+            select(Visit.amount_from_client).where(
+                Visit.booking_id == booking_id,
+                Visit.is_cancelled.is_(False),
+            ).limit(1)
+        )
+        if v_amt is not None:
+            total += int(v_amt)
+    elif b.kind == BookingKind.PRODUCT_SALE:
+        s_amt = db.scalar(
+            select(ProductSale.amount_from_client).where(
+                ProductSale.booking_id == booking_id,
+                ProductSale.is_voided.is_(False),
+            ).limit(1)
+        )
+        if s_amt is not None:
+            total += int(s_amt)
+    return total
+
+
+def post_consultation_accrual(
+    db: Session,
+    consultation_id: int,
+    created_by_user_id: int | None,
+) -> None:
+    """ЗП мастеру-консультанту после выполненной брони с визитом/продажей."""
+    if _has_accruals_for_source(db, PayrollFundSourceKind.CONSULTATION, consultation_id):
+        return
+    cons = db.get(Consultation, consultation_id)
+    if not cons:
+        return
+    b = db.scalar(select(Booking).where(Booking.consultation_id == consultation_id).limit(1))
+    if not b or b.status != BookingStatus.DONE:
+        return
+    if not _booking_has_fulfilled_visit_or_sale(db, b):
+        return
+    below, above, threshold = consultation_pay_settings(db)
+    base = sum_booking_fulfillment_amount(db, b.id)
+    pay = float(above if base >= threshold else below)
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.ACCRUAL,
+        side=PayrollFundSide.MASTER,
+        user_id=int(cons.created_by_user_id),
+        amount=pay,
+        source_kind=PayrollFundSourceKind.CONSULTATION,
+        source_id=consultation_id,
+        created_by_user_id=created_by_user_id,
+        comment=f"Консультация #{consultation_id}, бронь #{b.id}, база {base} ₽",
+    )
 
 
 def recent_ledger_rows(db: Session, limit: int = 150) -> list[PayrollFundLedger]:

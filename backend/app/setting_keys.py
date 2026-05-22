@@ -15,3 +15,7 @@ AUDIT_RETENTION_LAST_RUN_UTC = "audit_retention_last_run_utc"
 # Kits
 KIT_MAX_RESERVES_PER_KIT = "kit_max_reserves_per_kit"
 
+# Calendar day modal (occupancy grid)
+CALENDAR_DISPLAY_HOUR_FROM = "calendar_display_hour_from"
+CALENDAR_DISPLAY_HOUR_TO = "calendar_display_hour_to"
+

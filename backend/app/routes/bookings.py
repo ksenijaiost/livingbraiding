@@ -18,6 +18,11 @@ from sqlalchemy.orm import Session, selectinload
 from app.audit import FieldChange, diff_fields, write_audit_rows
 from app.auth import AuthUser, require_role
 from app.client_validation import format_created_by_label, strip_or_none
+from app.consultation_booking import (
+    booking_is_open,
+    booking_status_label,
+    can_create_booking_from_consultation,
+)
 from app.db.models import (
     Booking,
     BookingAuditLog,
@@ -27,6 +32,8 @@ from app.db.models import (
     BookingStaffKind,
     BookingStatus,
     Client,
+    Consultation,
+    PayrollFundSourceKind,
     Kit,
     KitAuditLog,
     KitReserve,
@@ -95,13 +102,10 @@ def _booking_kind_label(k: str) -> str:
 
 
 def _booking_status_label(s: str) -> str:
-    if s == BookingStatus.ACTIVE.value:
-        return "⌛ активна"
-    if s == BookingStatus.DONE.value:
-        return "✅ выполнена"
-    if s == BookingStatus.CANCELLED.value:
-        return "❌ отменена"
-    return s
+    try:
+        return booking_status_label(BookingStatus(s))
+    except ValueError:
+        return s
 
 
 def _product_kind_label(k: str | None) -> str:
@@ -343,9 +347,66 @@ def booking_linked_need_sale(b: Booking) -> bool:
     return b.kind == BookingKind.PRODUCT_SALE
 
 
+def _prefill_booking_fp_from_consultation(db: Session, cons: Consultation, fp: dict[str, str]) -> str | None:
+    """Заполнить fp из консультации. Возвращает текст ошибки или None."""
+    from app.planned_services_db import consultation_service_ids
+
+    fp["client_id"] = str(cons.client_id)
+    if cons.preliminary_cost_text:
+        fp["quoted_price_text"] = cons.preliminary_cost_text
+    svc_ids = consultation_service_ids(db, cons.id)
+    if svc_ids:
+        import json as _json
+
+        fp["planned_service_ids"] = _json.dumps(svc_ids)
+        fp["service_id"] = str(svc_ids[0])
+        fp["kind"] = BookingKind.VISIT.value
+        svc = db.get(Service, svc_ids[0])
+        if svc:
+            sub = db.get(ServiceSubcategory, svc.subcategory_id)
+            if sub:
+                fp["service_subcategory_id"] = str(sub.id)
+                fp["service_category_id"] = str(sub.category_id)
+    elif cons.service_id:
+        fp["service_id"] = str(cons.service_id)
+        fp["kind"] = BookingKind.VISIT.value
+        svc = db.get(Service, cons.service_id)
+        if svc:
+            sub = db.get(ServiceSubcategory, svc.subcategory_id)
+            if sub:
+                fp["service_subcategory_id"] = str(sub.id)
+                fp["service_category_id"] = str(sub.category_id)
+    if cons.photo_1:
+        fp["prefill_photo_1"] = cons.photo_1
+    if cons.photo_2:
+        fp["prefill_photo_2"] = cons.photo_2
+    return None
+
+
+def _parse_booking_visit_planned_services(
+    db: Session, form_raw: Any, fp: dict[str, str]
+) -> tuple[str | None, list[int], int | None]:
+    """Ошибка, список service_id, первый id для planned_service_id."""
+    from app.planned_services_db import parse_service_ids_from_form
+
+    ids = parse_service_ids_from_form(form_raw)
+    svc_raw = str(fp.get("service_id") or "").strip()
+    if not ids and svc_raw:
+        try:
+            ids = [parse_int(svc_raw, min=1, field_name="service_id")]
+        except ValueError:
+            ids = []
+    if not ids:
+        return "Выберите хотя бы одну услугу для брони визита.", [], None
+    for sid in ids:
+        if db.get(Service, sid) is None:
+            return "Услуга не найдена.", [], None
+    return None, ids, ids[0]
+
+
 def try_auto_complete_booking(db: Session, booking_id: int) -> None:
     b = db.get(Booking, booking_id)
-    if not b or b.status != BookingStatus.ACTIVE:
+    if not b or not booking_is_open(b.status):
         return
     details: dict[str, Any] = {}
     if b.details_json:
@@ -397,6 +458,11 @@ def try_auto_complete_booking(db: Session, booking_id: int) -> None:
         ],
     )
     release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=None)
+
+    if b.consultation_id:
+        from app.payroll_fund import post_consultation_accrual
+
+        post_consultation_accrual(db, int(b.consultation_id), created_by_user_id=None)
 
 
 def _amount_hint_from_booking(b: Booking) -> str:
@@ -880,9 +946,21 @@ def _masters_for_visit_form(db: Session) -> list[User]:
 def admin_booking_new_get(
     request: Request,
     client_id: int | None = None,
+    consultation_id: int | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
+    consultation: Consultation | None = None
+    consultation_comment: str | None = None
+    if consultation_id:
+        consultation = db.get(Consultation, consultation_id)
+        if consultation is None:
+            raise HTTPException(status_code=404, detail="Консультация не найдена")
+        if not can_create_booking_from_consultation(db, consultation):
+            raise HTTPException(status_code=400, detail="Для этой консультации уже есть активная или выполненная бронь")
+        client_id = consultation.client_id
+        consultation_comment = consultation.comment
+
     selected_client = db.get(Client, client_id) if client_id else None
     masters = _masters_for_visit_form(db)
     service_catalog = list_master_visit_services_catalog(db)
@@ -942,6 +1020,8 @@ def admin_booking_new_get(
     for k, v in request.query_params.items():
         if k in allow and v is not None:
             fp[k] = str(v)
+    if consultation:
+        _prefill_booking_fp_from_consultation(db, consultation, fp)
     return templates.TemplateResponse(
         "admin_booking_form.html",
         _ctx(
@@ -960,13 +1040,15 @@ def admin_booking_new_get(
             rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
             fp=fp,
             booking_master_on_ids=[],
+            consultation_id=consultation.id if consultation else None,
+            consultation_comment=consultation_comment,
         ),
     )
 
 
 @router.post("/new")
 @legacy_bookings_admin_router.post("/new")
-async def admin_booking_new_post(
+async def admin_booking_new_post(  # noqa: C901
     request: Request,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
@@ -989,6 +1071,7 @@ async def admin_booking_new_post(
     deposit_amount: int | None = None
     planned_service_id: int | None = None
     planned_product_kind: str | None = None
+    planned_service_ids: list[int] = []
 
     try:
         client_id = parse_int(client_id_raw, min=1, field_name="client_id")
@@ -1020,16 +1103,11 @@ async def admin_booking_new_post(
             err = "Предоплата должна быть числом."
 
     if not err and kind_raw == BookingKind.VISIT.value:
-        svc_raw = str(fp.get("service_id") or "").strip()
-        try:
-            planned_service_id = parse_int(svc_raw, min=1, field_name="service_id")
-        except ValueError:
-            planned_service_id = None
-        if planned_service_id is None:
-            err = "Выберите услугу для брони визита."
-        else:
-            if db.get(Service, planned_service_id) is None:
-                err = "Услуга не найдена."
+        svc_err, planned_service_ids, planned_service_id = _parse_booking_visit_planned_services(
+            db, form_raw, fp
+        )
+        if svc_err:
+            err = svc_err
 
     if not err and kind_raw == BookingKind.PRODUCT_SALE.value:
         pk = str(fp.get("product_kind") or "").strip()
@@ -1070,6 +1148,8 @@ async def admin_booking_new_post(
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
                 fp=fp,
                 booking_master_on_ids=[],
+                consultation_id=int(fp["consultation_id"]) if str(fp.get("consultation_id") or "").isdigit() else None,
+                consultation_comment=None,
             ),
             status_code=400,
         )
@@ -1112,12 +1192,57 @@ async def admin_booking_new_post(
             status_code=400,
         )
 
+    consultation_id_val: int | None = None
+    cons_raw = str(fp.get("consultation_id") or "").strip()
+    if cons_raw.isdigit():
+        consultation_id_val = int(cons_raw)
+        cons_chk = db.get(Consultation, consultation_id_val)
+        if cons_chk is None:
+            err = "Консультация не найдена."
+        elif not can_create_booking_from_consultation(db, cons_chk):
+            err = "Для этой консультации уже есть активная или выполненная бронь."
+        else:
+            if not photo_1_url and (fp.get("prefill_photo_1") or cons_chk.photo_1):
+                photo_1_url = str(fp.get("prefill_photo_1") or cons_chk.photo_1)
+            if not photo_2_url and (fp.get("prefill_photo_2") or cons_chk.photo_2):
+                photo_2_url = str(fp.get("prefill_photo_2") or cons_chk.photo_2)
+
+    if err:
+        cons_id_ctx = consultation_id_val
+        cons_comment_ctx = None
+        if cons_id_ctx:
+            c0 = db.get(Consultation, cons_id_ctx)
+            cons_comment_ctx = c0.comment if c0 else None
+        return templates.TemplateResponse(
+            "admin_booking_form.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                error=err,
+                is_new=True,
+                booking=None,
+                selected_client=client,
+                masters=masters,
+                staff_users=staff_users,
+                after_reserve=str(request.url),
+                service_catalog=service_catalog,
+                kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                product_kind_options=[k.value for k in ProductSaleKind],
+                rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+                fp=fp,
+                booking_master_on_ids=[],
+                consultation_id=cons_id_ctx,
+                consultation_comment=cons_comment_ctx,
+            ),
+            status_code=400,
+        )
+
     booking = Booking(
         created_by_user_id=current_user.id,
         client_id=client.id,
         planned_date=planned_date,
         kind=BookingKind(kind_raw),
-        status=BookingStatus.ACTIVE,
+        status=BookingStatus.PENDING_CONFIRMATION,
         quoted_price_text=quoted_price_text,
         deposit_amount=deposit_amount,
         photo_1=photo_1_url,
@@ -1126,10 +1251,16 @@ async def admin_booking_new_post(
         comment=comment,
         planned_service_id=planned_service_id,
         planned_product_kind=planned_product_kind,
+        consultation_id=consultation_id_val,
         details_json=json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False),
     )
     db.add(booking)
     db.flush()
+
+    if kind_raw == BookingKind.VISIT.value and planned_service_ids:
+        from app.planned_services_db import sync_booking_planned_services
+
+        sync_booking_planned_services(db, booking.id, planned_service_ids, planned_date=planned_date)
 
     if kind_raw == BookingKind.VISIT.value:
         on_ids: list[int] = []
@@ -1155,13 +1286,14 @@ async def admin_booking_new_post(
     _refresh_sale_order_master_ids_in_fp(db, booking_id=booking.id, fp=fp)
     booking.details_json = json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False)
     db.commit()
-    return RedirectResponse(url=f"/bookings/{booking.id}", status_code=303)
+    return RedirectResponse(url=f"/bookings/{booking.id}?msg=created", status_code=303)
 
 
 @router.get("/{booking_id}", response_class=HTMLResponse)
 def admin_booking_detail(
     request: Request,
     booking_id: int,
+    msg: str | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
@@ -1175,11 +1307,13 @@ def admin_booking_detail(
             selectinload(Booking.cancelled_by_user),
             selectinload(Booking.planned_service).selectinload(Service.subcategory),
             selectinload(Booking.masters).selectinload(BookingMaster.master),
+            selectinload(Booking.consultation),
         )
     )
     if b is None:
         raise HTTPException(status_code=404, detail="Бронь не найдена")
 
+    linked_consultation = b.consultation
     linked_visit_id = db.scalar(select(Visit.id).where(Visit.booking_id == booking_id).limit(1))
     linked_sale_id = db.scalar(select(ProductSale.id).where(ProductSale.booking_id == booking_id).limit(1))
     linked_work_id = db.scalar(select(WorkForInventory.id).where(WorkForInventory.booking_id == booking_id).limit(1))
@@ -1280,9 +1414,11 @@ def admin_booking_detail(
             product_kind_label=_product_kind_label(b.planned_product_kind),
             booking_can_create_master_records=booking_can_create_master_records,
             booking_link_master_only_title=booking_link_master_only_title,
+            flash_msg=msg,
             linked_visit_id=linked_visit_id,
             linked_sale_id=linked_sale_id,
             linked_work_id=linked_work_id,
+            linked_consultation=linked_consultation,
             audit_rows=audit_rows,
             display_tz=display_tz,
             sale_kit_order_users=sale_kit_order_users,
@@ -1665,7 +1801,9 @@ def admin_bookings(
 
     stmt = select(Booking).options(selectinload(Booking.client)).order_by(Booking.planned_date.asc(), Booking.id.asc()).limit(1000)
     if show_mode != "all":
-        stmt = stmt.where(Booking.status == BookingStatus.ACTIVE)
+        stmt = stmt.where(
+            Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE))
+        )
     if bookings_mine_only:
         stmt = stmt.where(
             or_(
@@ -1700,7 +1838,7 @@ def admin_booking_cancel(
     b = db.get(Booking, booking_id)
     if b is None:
         raise HTTPException(status_code=404, detail="Бронь не найдена")
-    if b.status != BookingStatus.ACTIVE:
+    if not booking_is_open(b.status):
         return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
     reason_norm = (reason or "").strip()
     if not reason_norm:
@@ -1712,6 +1850,16 @@ def admin_booking_cancel(
     b.cancelled_reason = reason_norm[:2000]
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
+    if b.consultation_id:
+        from app.payroll_fund import storno_source_accruals
+
+        storno_source_accruals(
+            db,
+            PayrollFundSourceKind.CONSULTATION,
+            int(b.consultation_id),
+            current_user.id,
+        )
+        b.consultation_id = None
     release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
     db.commit()
     write_audit_rows(
@@ -1736,7 +1884,7 @@ def admin_booking_mark_done(
     b = db.get(Booking, booking_id)
     if b is None:
         raise HTTPException(status_code=404, detail="Бронь не найдена")
-    if b.status != BookingStatus.ACTIVE:
+    if not booking_is_open(b.status):
         return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
     old_status = b.status
     b.status = BookingStatus.DONE
@@ -1753,6 +1901,40 @@ def admin_booking_mark_done(
     )
     db.commit()
     return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
+
+
+@router.post("/{booking_id}/confirm")
+@legacy_bookings_admin_router.post("/{booking_id}/confirm")
+def admin_booking_confirm(
+    booking_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    b = db.get(Booking, booking_id)
+    if b is None:
+        raise HTTPException(status_code=404, detail="Бронь не найдена")
+    if b.status != BookingStatus.PENDING_CONFIRMATION:
+        return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
+    old_status = b.status
+    b.status = BookingStatus.ACTIVE
+    b.updated_at = utcnow_naive()
+    b.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=BookingAuditLog,
+        entity_field="booking_id",
+        entity_id=b.id,
+        changed_by_user_id=current_user.id,
+        changes=[
+            FieldChange(
+                "status",
+                _booking_status_label(old_status.value),
+                _booking_status_label(BookingStatus.ACTIVE.value),
+            )
+        ],
+    )
+    db.commit()
+    return RedirectResponse(url=f"/bookings/{booking_id}?msg=confirmed", status_code=303)
 
 
 def _product_sale_activity_label(sale: ProductSale) -> str:
@@ -1895,18 +2077,36 @@ def master_bookings(
     current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
+    from app.visit_draft import draft_summary_label, list_open_drafts_for_master, preview_dict_from_json
+
+    draft_rows: list[dict[str, object]] = []
+    for d in list_open_drafts_for_master(db, current_user.id):
+        preview = preview_dict_from_json(d.preview_json)
+        draft_rows.append(
+            {
+                "draft": d,
+                "services_label": draft_summary_label(preview),
+                "amount_total": preview.get("amount_from_client_total"),
+            }
+        )
     visit_ids = list(
         db.scalars(
             select(Booking.id)
             .join(BookingMaster, BookingMaster.booking_id == Booking.id)
-            .where(Booking.status == BookingStatus.ACTIVE, BookingMaster.master_id == current_user.id)
+            .where(
+                Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)),
+                BookingMaster.master_id == current_user.id,
+            )
         ).all()
     )
     sale_ids = list(
         db.scalars(
             select(Booking.id)
             .join(BookingStaff, BookingStaff.booking_id == Booking.id)
-            .where(Booking.status == BookingStatus.ACTIVE, BookingStaff.user_id == current_user.id)
+            .where(
+                Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)),
+                BookingStaff.user_id == current_user.id,
+            )
         ).all()
     )
     ids = sorted(set([int(x) for x in (visit_ids + sale_ids) if x is not None]))
@@ -1961,6 +2161,7 @@ def master_bookings(
             request,
             current_user=current_user,
             rows=rows,
+            draft_rows=draft_rows,
             display_tz=display_tz,
             archive_rows=archive_rows,
             archive_days=archive_days,

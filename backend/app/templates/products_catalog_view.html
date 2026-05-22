@@ -172,7 +172,18 @@
               <tbody>
                 {% for r in g.rows %}
                   <tr>
-                    <td class="pcat-name"><strong>{{ r.name }}</strong></td>
+                    <td class="pcat-name">
+                      <strong>{{ r.name }}</strong>
+                      {% if g.subcategory_name == "Заготовки поштучно" %}
+                        {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
+                          <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
+                            <label style="display:block;">Ключ для JSON / комплекта (<code>kit_key</code>)
+                              <input form="row-edit-{{ r.id }}" name="kit_key" type="text" value="{{ r.kit_key or '' }}" placeholder="например DE_DREAD_LONG" maxlength="80" style="font-family:monospace;width:100%;max-width:100%;box-sizing:border-box;margin-top:4px;" />
+                            </label>
+                          </div>
+                        {% endif %}
+                      {% endif %}
+                    </td>
                     {% if show_labels_col %}
                       <td class="pcat-labels">
                         {% set is_bu = r.is_bu %}
@@ -247,7 +258,16 @@
                 {% endfor %}
                 {% if current_user.role.value == "ADMIN_SUPER" and is_catalog_products_category %}
                   <tr>
-                    <td class="pcat-name"><input form="new-row-{{ loop.index }}" name="name" type="text" placeholder="Новый элемент" style="width:100%;max-width:100%;box-sizing:border-box;" /></td>
+                    <td class="pcat-name">
+                      <input form="new-row-{{ loop.index }}" name="name" type="text" placeholder="Новый элемент" style="width:100%;max-width:100%;box-sizing:border-box;" />
+                      {% if g.subcategory_name == "Заготовки поштучно" %}
+                        <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
+                          <label style="display:block;">Ключ для JSON / комплекта (<code>kit_key</code>)
+                            <input form="new-row-{{ loop.index }}" name="kit_key" type="text" placeholder="латиница, цифры, _" maxlength="80" style="font-family:monospace;width:100%;max-width:100%;box-sizing:border-box;margin-top:4px;" />
+                          </label>
+                        </div>
+                      {% endif %}
+                    </td>
                     {% if show_labels_col %}
                       <td class="pcat-labels">
                         <div class="pcat-label-stack">
