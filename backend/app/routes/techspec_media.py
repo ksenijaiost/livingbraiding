@@ -30,6 +30,22 @@ _MAX_RESTORE_FILES = int(os.environ.get("LB_MEDIA_RESTORE_MAX_FILES", "20000"))
 # Имена как у save_upload_image: <32 hex>.<ext>
 _STORED_NAME_RE = re.compile(r"^[a-f0-9]{32}\.(?:jpg|jpeg|png|webp)$", re.IGNORECASE)
 
+# Служебные файлы в каталоге uploads (не попадают в бэкап; при restore пропускаются).
+_SKIP_RESTORE_BASENAMES = frozenset({".gitkeep", ".ds_store", "thumbs.db", "desktop.ini"})
+
+
+def _is_stored_media_filename(name: str) -> bool:
+    return bool(_STORED_NAME_RE.match(name)) and Path(name).suffix.lower() in ALLOWED_EXTS
+
+
+def _should_skip_restore_basename(base: str) -> bool:
+    low = base.lower()
+    if low in _SKIP_RESTORE_BASENAMES:
+        return True
+    if base.startswith("."):
+        return True
+    return False
+
 
 def _unlink_quiet(path: str) -> None:
     try:
@@ -64,7 +80,7 @@ def techspec_media_backup_zip(
     try:
         with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for p in sorted(root.iterdir()):
-                if p.is_file():
+                if p.is_file() and _is_stored_media_filename(p.name):
                     zf.write(p, arcname=p.name)
     except Exception:
         _unlink_quiet(tmp_path)
@@ -98,6 +114,7 @@ async def techspec_media_restore_zip(
     os.close(fd)
     total_written = 0
     restored = 0
+    skipped = 0
     try:
         chunk_size = 1024 * 1024
         with open(tmp_zip, "wb") as out:
@@ -125,14 +142,14 @@ async def techspec_media_restore_zip(
                         status_code=400,
                         detail=f"Недопустимый путь в архиве (нужен один файл в корне): {info.filename!r}",
                     )
-                if not _STORED_NAME_RE.match(base):
+                if _should_skip_restore_basename(base):
+                    skipped += 1
+                    continue
+                if not _is_stored_media_filename(base):
                     raise HTTPException(
                         status_code=400,
                         detail=f"Недопустимое имя файла (ожидается <uuid>.jpg|jpeg|png|webp): {base!r}",
                     )
-                ext = Path(base).suffix.lower()
-                if ext not in ALLOWED_EXTS:
-                    raise HTTPException(status_code=400, detail=f"Недопустимое расширение: {base!r}")
 
                 dest = (root / base).resolve()
                 try:
@@ -156,4 +173,4 @@ async def techspec_media_restore_zip(
     finally:
         _unlink_quiet(tmp_zip)
 
-    return JSONResponse({"restored": restored, "by_user": current_user.username})
+    return JSONResponse({"restored": restored, "skipped": skipped, "by_user": current_user.username})
