@@ -231,6 +231,27 @@ def _validate_stock_selection(
     return kit
 
 
+def estimate_stock_kit_usage(
+    db: Session,
+    *,
+    kit_id: int,
+    use_entire: bool,
+    blanks_used: int,
+    client_id: int | None = None,
+    usage_by_key: dict[str, int] | None = None,
+) -> tuple[int, float, float, dict[str, int]]:
+    """Расчёт стоимости комплекта без списания со склада."""
+    return _apply_stock_kit_usage(
+        db,
+        kit_id=kit_id,
+        use_entire=use_entire,
+        blanks_used=blanks_used,
+        client_id=client_id,
+        usage_by_key=usage_by_key,
+        mutate_stock=False,
+    )
+
+
 def _apply_stock_kit_usage(
     db: Session,
     *,
@@ -239,6 +260,7 @@ def _apply_stock_kit_usage(
     blanks_used: int,
     client_id: int | None = None,
     usage_by_key: dict[str, int] | None = None,
+    mutate_stock: bool = True,
 ) -> tuple[int, float, float, dict[str, int]]:
     """Списание: (pieces_used, cost_amount_for_visit, studio_fund_amount, usage_by_key_out).
 
@@ -263,8 +285,9 @@ def _apply_stock_kit_usage(
     if kit_inventory_is_keyed(db, int(kit.id)):
         price_map, meta_by_key, _labels = load_catalog_kit_maps(db)
         comp = parse_composition_totals(kit)
-        release_client_kit_reserves_into_free_pool(db, kit=kit, client_id=client_id)
-        db.flush()
+        if mutate_stock:
+            release_client_kit_reserves_into_free_pool(db, kit=kit, client_id=client_id)
+            db.flush()
         stock_map = blank_stock_qty_map(db, int(kit.id))
         max_by_key = max_take_by_key_for_client(db, kit=kit, client_id=client_id, stock_map=stock_map)
         bd = build_usage_breakdown_keyed(
@@ -276,15 +299,16 @@ def _apply_stock_kit_usage(
         ntot = sum(int(v) for v in bd.values())
         if ntot <= 0:
             raise ValueError("Укажите количество заготовок или «весь комплект»")
-        decrement_blank_stock_keys(db, int(kit.id), bd)
-        sync_kit_pieces_available_from_blank_lines(db, kit)
+        if mutate_stock:
+            decrement_blank_stock_keys(db, int(kit.id), bd)
+            sync_kit_pieces_available_from_blank_lines(db, kit)
         selected_price = keyed_client_price_selected(bd, price_map=price_map, meta_by_key=meta_by_key)
         selected_cost = keyed_cost_selected(bd, comp=comp, kit_cost_total=max(0.0, float(kit.cost_total or 0.0)))
         _disc, net = apply_discount_capped(
             selected_price, discount_percent=int(kit.discount_percent or 0), cost_floor=selected_cost
         )
         studio_fund = max(0.0, net - selected_cost)
-        if kit.pieces_available <= 0:
+        if mutate_stock and kit.pieces_available <= 0:
             kit.is_in_stock = False
         return int(ntot), float(net), float(studio_fund), bd
 
@@ -293,6 +317,7 @@ def _apply_stock_kit_usage(
         total_pieces = 1
     avail = int(kit.pieces_available or 0)
     cid = int(client_id or 0)
+    reserved_for_client = 0
     if cid > 0:
         total = db.scalar(
             select(func.coalesce(func.sum(KitReserve.pieces_reserved), 0)).where(
@@ -300,8 +325,8 @@ def _apply_stock_kit_usage(
                 KitReserve.reserved_for_client_id == cid,
             )
         )
-        total = int(total or 0)
-        if total > 0:
+        reserved_for_client = int(total or 0)
+        if mutate_stock and reserved_for_client > 0:
             rows = list(
                 db.scalars(
                     select(KitReserve)
@@ -314,10 +339,12 @@ def _apply_stock_kit_usage(
             )
             for r in rows:
                 db.delete(r)
-            kit.pieces_available = int(kit.pieces_available or 0) + int(total)
+            kit.pieces_available = int(kit.pieces_available or 0) + int(reserved_for_client)
             avail = int(kit.pieces_available or 0)
+            reserved_for_client = 0
 
-    n = avail if use_entire else int(blanks_used or 0)
+    max_for_client = int(avail or 0) + int(reserved_for_client or 0)
+    n = max_for_client if use_entire else int(blanks_used or 0)
     kit_cost_full = max(0.0, float(kit.cost_total or 0.0))
     max_disc_margin = max(0.0, price - kit_cost_full)
     pct = max(0, min(100, int(kit.discount_percent or 0)))
@@ -328,9 +355,10 @@ def _apply_stock_kit_usage(
     cost = net_full * k
     cost_portion = kit_cost_full * k
     studio_fund = max(0.0, cost - cost_portion)
-    kit.pieces_available = avail - n
-    if kit.pieces_available <= 0:
-        kit.is_in_stock = False
+    if mutate_stock:
+        kit.pieces_available = avail - n
+        if kit.pieces_available <= 0:
+            kit.is_in_stock = False
     return n, cost, studio_fund, {}
 
 

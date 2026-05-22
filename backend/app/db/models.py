@@ -1236,6 +1236,60 @@ class Visit(Base):
     masters: Mapped[list["VisitMaster"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
     services: Mapped[list["VisitService"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
     kit_usages: Mapped[list["VisitKitUsage"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
+    draft_source: Mapped["VisitDraft | None"] = relationship(
+        back_populates="finalized_visit",
+        foreign_keys="VisitDraft.finalized_visit_id",
+        uselist=False,
+    )
+
+
+class VisitDraft(Base):
+    __tablename__ = "visit_drafts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True)
+
+    form_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preview_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    locked_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finalized_visit_id: Mapped[int | None] = mapped_column(ForeignKey("visits.id"), nullable=True)
+
+    client: Mapped[Client] = relationship()
+    booking: Mapped["Booking | None"] = relationship()
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    locked_by_user: Mapped["User | None"] = relationship(foreign_keys=[locked_by_user_id])
+    finalized_visit: Mapped["Visit | None"] = relationship(
+        back_populates="draft_source",
+        foreign_keys=[finalized_visit_id],
+    )
+    participants: Mapped[list["VisitDraftParticipant"]] = relationship(
+        back_populates="visit_draft",
+        cascade="all, delete-orphan",
+    )
+
+
+class VisitDraftParticipant(Base):
+    __tablename__ = "visit_draft_participants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    visit_draft_id: Mapped[int] = mapped_column(
+        ForeignKey("visit_drafts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    visit_draft: Mapped["VisitDraft"] = relationship(back_populates="participants")
+    master: Mapped["User"] = relationship()
 
 
 class VisitAuditLog(Base):

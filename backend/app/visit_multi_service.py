@@ -38,6 +38,7 @@ from app.kit_inlay_visit import (
     KitInlayFormInput,
     StockKitLineInput,
     _apply_stock_kit_usage,
+    estimate_stock_kit_usage,
     _build_kit_block_from_input,
     _materials_cost_and_snapshot,
     _parse_optional_nonneg_int,
@@ -225,6 +226,7 @@ def compute_visit_service_line(
     header: VisitHeaderInput,
     *,
     default_mix_bonus_master_id: int | None = None,
+    apply_kit_stock: bool = True,
 ) -> VisitServiceLineComputed:
     if line.service_id <= 0:
         raise ValueError("Выберите услугу")
@@ -254,9 +256,10 @@ def compute_visit_service_line(
         kinp = _line_kit_inlay_adapter(line, header)
         kind = line.kit_kind.upper()
         exclude_main_stock_cost = kind == "STOCK" and bool(line.kit_paid_separately) and bool(line.stock_kit_lines)
+        stock_fn = _apply_stock_kit_usage if apply_kit_stock else estimate_stock_kit_usage
         if kind == "STOCK" and line.stock_kit_lines:
             for sk in line.stock_kit_lines:
-                n, cost, sf, bd = _apply_stock_kit_usage(
+                n, cost, sf, bd = stock_fn(
                     db,
                     kit_id=sk.kit_id,
                     use_entire=sk.use_entire,
@@ -270,7 +273,7 @@ def compute_visit_service_line(
                 kit_cost_total += usage_cost
                 kit_studio_fund += usage_sf
         if kind == "OWN" and line.own_extra_blanks and line.own_extra_stock_kit_id:
-            n, cost, sf, bd = _apply_stock_kit_usage(
+            n, cost, sf, bd = stock_fn(
                 db,
                 kit_id=line.own_extra_stock_kit_id,
                 use_entire=line.own_extra_stock_use_entire,

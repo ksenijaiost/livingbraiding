@@ -25,6 +25,7 @@ from app.db.models import (
     User,
     UserRole,
     Visit,
+    VisitDraft,
     WorkForInventory,
     WorkKind,
 )
@@ -44,9 +45,20 @@ from app.kit_inlay_visit import (
     save_kit_inlay_visit,
 )
 from app.visit_multi_service import parse_multi_service_visit_form, save_visit_with_services
+from app.visit_draft import (
+    acquire_draft_lock,
+    collect_form_dict,
+    finalize_visit_draft,
+    form_dict_from_json,
+    parse_draft_form,
+    release_draft_lock,
+    save_visit_draft,
+    user_can_edit_draft,
+    user_can_view_draft,
+)
 from app.planned_services_db import booking_planned_service_ids
 from app.mix_rates import mix_rates_meta_json_dict
-from app.ru_labels import ru_master_level
+from app.ru_labels import ru_master_level, ru_user_role
 from app.routes.bookings import try_auto_complete_booking
 from app.thermo_visit import collect_thermo_prefill_from_form
 from app.user_roles import select_users_with_role
@@ -211,6 +223,26 @@ def _stock_kit_lines_initial_for_template(fp: dict[str, str]) -> list[dict[str, 
     return [{"kit_id": None, "use_entire": False, "blanks_used": 0, "breakdown": None}]
 
 
+def _visit_master_state_from_prefill(fp: dict[str, str]) -> tuple[list[int], dict[int, str]]:
+    vm_on_ids: list[int] = []
+    raw = (fp.get("visit_master_on") or "").strip()
+    if raw:
+        for part in raw.split(","):
+            p = part.strip()
+            if p.isdigit():
+                vm_on_ids.append(int(p))
+    vm_pct_str: dict[int, str] = {}
+    for key, val in fp.items():
+        if not key.startswith("visit_master_pct_"):
+            continue
+        try:
+            mid = int(key.replace("visit_master_pct_", "", 1))
+        except ValueError:
+            continue
+        vm_pct_str[mid] = val
+    return vm_on_ids, vm_pct_str
+
+
 def _master_visit_step1_template_response(
     request: Request,
     *,
@@ -225,6 +257,11 @@ def _master_visit_step1_template_response(
     selected_client: Client | None = None,
     default_date: str | None = None,
     status_code: int = 200,
+    is_draft: bool = False,
+    draft_id: int | None = None,
+    draft_readonly: bool = False,
+    lock_banner: dict[str, str] | None = None,
+    draft_saved: bool = False,
 ):
     performed = (form_prefill.get("performed_date") or "").strip() or (default_date or date.today().isoformat())
     salon_cut_pct = get_salon_cut_pct(db)
@@ -286,9 +323,95 @@ def _master_visit_step1_template_response(
             error=error,
             saved=saved,
             saved_draft_client=saved_draft_client,
+            is_draft=is_draft,
+            draft_id=draft_id,
+            draft_readonly=draft_readonly,
+            lock_banner=lock_banner,
+            draft_saved=draft_saved,
         ),
         status_code=status_code,
     )
+
+
+def _draft_form_response_from_error(
+    request: Request,
+    *,
+    current_user: AuthUser,
+    db: Session,
+    form: Any,
+    draft_id: int | None,
+    draft_readonly: bool,
+    lock_banner: dict[str, str] | None,
+    error: str,
+):
+    fp = collect_form_dict(form)
+    fp.update(collect_questionnaire_prefill_from_form(form))
+    fp.update(collect_thermo_prefill_from_form(form))
+    vm_on_ids, vm_pct_str = _visit_master_state_from_prefill(fp)
+    selected_client = None
+    eid = (fp.get("existing_client_id") or "").strip()
+    try:
+        eid_int = parse_int(eid, min=1, field_name="existing_client_id")
+    except ValueError:
+        eid_int = 0
+    if eid_int > 0:
+        selected_client = db.get(Client, eid_int)
+    return _master_visit_step1_template_response(
+        request,
+        current_user=current_user,
+        db=db,
+        form_prefill=fp,
+        visit_master_on_ids=vm_on_ids,
+        visit_master_pct_str=vm_pct_str,
+        selected_client=selected_client,
+        error=error,
+        status_code=400,
+        is_draft=True,
+        draft_id=draft_id,
+        draft_readonly=draft_readonly,
+        lock_banner=lock_banner,
+    )
+
+
+def _load_draft_form_context(
+    db: Session,
+    draft: VisitDraft,
+    *,
+    current_user: AuthUser,
+    acquire_lock: bool,
+) -> tuple[dict[str, str], list[int], dict[int, str], Client | None, bool, dict[str, str] | None]:
+    lock_banner: dict[str, str] | None = None
+    readonly = current_user.role != UserRole.MASTER
+    if acquire_lock and current_user.role == UserRole.MASTER:
+        lock = acquire_draft_lock(db, draft, current_user.id)
+        readonly = lock.readonly
+        if lock.lock_holder:
+            lock_banner = {
+                "display_name": lock.lock_holder.display_name or lock.lock_holder.username,
+                "role": ru_user_role(lock.lock_holder.role),
+            }
+    elif current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER):
+        readonly = True
+        if draft.locked_by_user_id:
+            holder = db.get(User, int(draft.locked_by_user_id))
+            if holder:
+                lock_banner = {
+                    "display_name": holder.display_name or holder.username,
+                    "role": ru_user_role(holder.role),
+                }
+    fp = form_dict_from_json(draft.form_json)
+    if not fp.get("performed_date") and draft.performed_date:
+        tz = get_display_timezone(db)
+        local_dt = _utc_naive_to_local(draft.performed_date, tz)
+        if local_dt:
+            fp["performed_date"] = local_dt.date().isoformat()
+    fp.setdefault("existing_client_id", str(draft.client_id))
+    fp.setdefault("client_mode", "existing")
+    if draft.booking_id:
+        fp.setdefault("booking_id", str(draft.booking_id))
+    vm_on_ids, vm_pct_str = _visit_master_state_from_prefill(fp)
+    client = db.get(Client, int(draft.client_id))
+    return fp, vm_on_ids, vm_pct_str, client, readonly, lock_banner
 
 
 @router.get("/master/visit/new", response_class=HTMLResponse)
@@ -469,4 +592,281 @@ async def master_visit_new_post(
     if client_row and not client_row.is_confirmed:
         url += "&draft_client=1"
     return RedirectResponse(url=url, status_code=303)
+
+
+@router.get("/master/visit/draft/new", response_class=HTMLResponse)
+def master_visit_draft_new_get(
+    request: Request,
+    booking_id: int | None = None,
+    draft_saved: str | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form_prefill: dict[str, str] = {}
+    selected_client = None
+    default_date = date.today().isoformat()
+    if booking_id:
+        b = db.scalar(select(Booking).where(Booking.id == int(booking_id)).options(selectinload(Booking.client)))
+        if b and b.client:
+            form_prefill["client_mode"] = "existing"
+            form_prefill["existing_client_id"] = str(b.client_id)
+            selected_client = b.client
+            svc_ids = booking_planned_service_ids(db, b.id)
+            if svc_ids:
+                form_prefill["service_id"] = str(svc_ids[0])
+                form_prefill["planned_service_ids"] = json.dumps(svc_ids)
+                for i, sid in enumerate(svc_ids):
+                    form_prefill[f"line_{i}_service_id"] = str(sid)
+            elif b.planned_service_id:
+                form_prefill["service_id"] = str(b.planned_service_id)
+            form_prefill["booking_id"] = str(b.id)
+            tz = get_display_timezone(db)
+            local_dt = _utc_naive_to_local(b.planned_date, tz) if b.planned_date else None
+            if local_dt:
+                default_date = local_dt.date().isoformat()
+            amt = _amount_hint_from_booking(b)
+            if amt:
+                form_prefill["amount_from_client"] = amt
+            try:
+                d = json.loads(b.details_json or "{}")
+                if isinstance(d, dict):
+                    for k, v2 in d.items():
+                        if str(k).startswith("visit_") or str(k).startswith("corr_"):
+                            form_prefill[str(k)] = str(v2)
+            except Exception:
+                pass
+            _prefill_visit_stock_kit_from_booking(db, b, form_prefill)
+
+    return _master_visit_step1_template_response(
+        request,
+        current_user=current_user,
+        db=db,
+        form_prefill=form_prefill,
+        visit_master_on_ids=[current_user.id],
+        visit_master_pct_str={},
+        selected_client=selected_client,
+        default_date=default_date,
+        is_draft=True,
+        draft_id=None,
+        draft_readonly=False,
+        lock_banner=None,
+        draft_saved=draft_saved == "1",
+    )
+
+
+@router.get("/master/visit/draft/{draft_id}", response_class=HTMLResponse)
+def master_visit_draft_get(
+    request: Request,
+    draft_id: int,
+    draft_saved: str | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    draft = db.scalar(
+        select(VisitDraft)
+        .where(VisitDraft.id == int(draft_id), VisitDraft.finalized_visit_id.is_(None))
+        .options(selectinload(VisitDraft.participants))
+    )
+    if not draft or not user_can_view_draft(current_user, draft, db):
+        return RedirectResponse("/master/bookings", status_code=303)
+    fp, vm_on_ids, vm_pct_str, client, readonly, lock_banner = _load_draft_form_context(
+        db, draft, current_user=current_user, acquire_lock=True
+    )
+    if current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER):
+        readonly = True
+    elif not user_can_edit_draft(current_user, draft, db):
+        readonly = True
+    db.commit()
+    return _master_visit_step1_template_response(
+        request,
+        current_user=current_user,
+        db=db,
+        form_prefill=fp,
+        visit_master_on_ids=vm_on_ids,
+        visit_master_pct_str=vm_pct_str,
+        selected_client=client,
+        is_draft=True,
+        draft_id=int(draft.id),
+        draft_readonly=readonly,
+        lock_banner=lock_banner,
+        draft_saved=draft_saved == "1",
+    )
+
+
+@router.post("/master/visit/draft")
+async def master_visit_draft_create_post(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        booking_id_raw = str(form.get("booking_id") or "").strip()
+        booking_id_val = int(booking_id_raw) if booking_id_raw.isdigit() else None
+        inp = parse_draft_form(form, booking_id=booking_id_val)
+        form_dict = collect_form_dict(form)
+        draft = save_visit_draft(
+            db,
+            None,
+            inp,
+            current_user.id,
+            form_dict,
+            created_by_label=format_created_by_label(current_user),
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return _draft_form_response_from_error(
+            request,
+            current_user=current_user,
+            db=db,
+            form=form,
+            draft_id=None,
+            draft_readonly=False,
+            lock_banner=None,
+            error=str(exc),
+        )
+    return RedirectResponse(f"/master/visit/draft/{draft.id}?draft_saved=1", status_code=303)
+
+
+@router.post("/master/visit/draft/{draft_id}")
+async def master_visit_draft_update_post(
+    request: Request,
+    draft_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    draft = db.get(VisitDraft, int(draft_id))
+    readonly = False
+    lock_banner = None
+    if draft and draft.locked_by_user_id:
+        holder = db.get(User, int(draft.locked_by_user_id))
+        if holder:
+            lock_banner = {
+                "display_name": holder.display_name or holder.username,
+                "role": ru_user_role(holder.role),
+            }
+    if not draft or not user_can_edit_draft(current_user, draft, db):
+        return RedirectResponse("/master/bookings", status_code=303)
+    lock = acquire_draft_lock(db, draft, current_user.id)
+    readonly = lock.readonly
+    if lock.lock_holder:
+        lock_banner = {
+            "display_name": lock.lock_holder.display_name or lock.lock_holder.username,
+            "role": ru_user_role(lock.lock_holder.role),
+        }
+    if readonly:
+        db.rollback()
+        return _draft_form_response_from_error(
+            request,
+            current_user=current_user,
+            db=db,
+            form=form,
+            draft_id=int(draft_id),
+            draft_readonly=True,
+            lock_banner=lock_banner,
+            error="Черновик сейчас редактирует другой пользователь.",
+        )
+    try:
+        booking_id_raw = str(form.get("booking_id") or "").strip()
+        booking_id_val = int(booking_id_raw) if booking_id_raw.isdigit() else None
+        inp = parse_draft_form(form, booking_id=booking_id_val)
+        form_dict = collect_form_dict(form)
+        save_visit_draft(
+            db,
+            int(draft_id),
+            inp,
+            current_user.id,
+            form_dict,
+            created_by_label=format_created_by_label(current_user),
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return _draft_form_response_from_error(
+            request,
+            current_user=current_user,
+            db=db,
+            form=form,
+            draft_id=int(draft_id),
+            draft_readonly=False,
+            lock_banner=lock_banner,
+            error=str(exc),
+        )
+    return RedirectResponse(f"/master/visit/draft/{draft_id}?draft_saved=1", status_code=303)
+
+
+@router.post("/master/visit/draft/{draft_id}/finalize")
+async def master_visit_draft_finalize_post(
+    request: Request,
+    draft_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    draft = db.get(VisitDraft, int(draft_id))
+    lock_banner = None
+    if not draft or not user_can_edit_draft(current_user, draft, db):
+        return RedirectResponse("/master/bookings", status_code=303)
+    lock = acquire_draft_lock(db, draft, current_user.id)
+    if lock.readonly:
+        db.rollback()
+        if lock.lock_holder:
+            lock_banner = {
+                "display_name": lock.lock_holder.display_name or lock.lock_holder.username,
+                "role": ru_user_role(lock.lock_holder.role),
+            }
+        return _draft_form_response_from_error(
+            request,
+            current_user=current_user,
+            db=db,
+            form=form,
+            draft_id=int(draft_id),
+            draft_readonly=True,
+            lock_banner=lock_banner,
+            error="Черновик сейчас редактирует другой пользователь.",
+        )
+    try:
+        booking_id_raw = str(form.get("booking_id") or "").strip()
+        booking_id_val = int(booking_id_raw) if booking_id_raw.isdigit() else None
+        inp = parse_draft_form(form, booking_id=booking_id_val)
+        visit_id = finalize_visit_draft(
+            db,
+            int(draft_id),
+            inp,
+            current_user.id,
+            created_by_label=format_created_by_label(current_user),
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return _draft_form_response_from_error(
+            request,
+            current_user=current_user,
+            db=db,
+            form=form,
+            draft_id=int(draft_id),
+            draft_readonly=False,
+            lock_banner=lock_banner,
+            error=str(exc),
+        )
+    url = f"/visits/{visit_id}?msg=created"
+    client_row = db.get(Client, draft.client_id) if draft else None
+    if client_row and not client_row.is_confirmed:
+        url += "&draft_client=1"
+    return RedirectResponse(url=url, status_code=303)
+
+
+@router.post("/master/visit/draft/{draft_id}/unlock")
+def master_visit_draft_unlock_post(
+    draft_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    draft = db.get(VisitDraft, int(draft_id))
+    if draft:
+        release_draft_lock(db, draft, current_user.id)
+        db.commit()
+    return RedirectResponse(f"/master/visit/draft/{draft_id}", status_code=303)
 

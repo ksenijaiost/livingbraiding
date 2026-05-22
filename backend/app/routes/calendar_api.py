@@ -315,6 +315,22 @@ def api_calendar_day(
         else {}
     )
 
+    from app.visit_draft import draft_summary_label, drafts_for_calendar_day, preview_dict_from_json
+
+    draft_items: list[dict[str, Any]] = []
+    for dr in drafts_for_calendar_day(db, user=current_user, day=day):
+        preview = preview_dict_from_json(dr.preview_json)
+        draft_items.append(
+            {
+                "id": int(dr.id),
+                "client": dr.client.name if dr.client else "—",
+                "label": draft_summary_label(preview),
+                "url": f"/master/visit/draft/{int(dr.id)}",
+                "payout_sum": 0.0,
+                "studio_sum": 0.0,
+            }
+        )
+
     work_items: list[dict[str, Any]] = []
     for w in works:
         wid = int(w.id)
@@ -343,6 +359,12 @@ def api_calendar_day(
             "payout_sum": _money0(sum(i["payout_sum"] for i in work_items)),
             "studio_sum": _money0(sum(i["studio_sum"] for i in work_items)) if is_super else 0.0,
             "items": work_items,
+        },
+        "drafts": {
+            "count": len(draft_items),
+            "payout_sum": 0.0,
+            "studio_sum": 0.0,
+            "items": draft_items,
         },
         "is_super": is_super,
     }

@@ -1,9 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
   {% set fp = form_prefill %}
-  <div class="card">
-    <h2 style="margin-top: 0;">Новый визит</h2>
-    <p class="muted">Клиент, работа, услуга, материал и анкета по услуге на одной странице. Блок «Комплект» показывается, если это включено для услуги в каталоге.</p>
+  <div class="card" {% if draft_readonly %}style="pointer-events: none; opacity: 0.92;"{% endif %}>
+    <h2 style="margin-top: 0;">{% if is_draft %}{% if draft_id %}Черновик визита #{{ draft_id }}{% else %}Новый черновик визита{% endif %}{% else %}Новый визит{% endif %}</h2>
+    <p class="muted">Клиент, работа, услуга, материал и анкета по услуге на одной странице. Блок «Комплект» показывается, если это включено для услуги в каталоге.{% if is_draft %} Склад и финальный визит — только при «Сохранить визит».{% endif %}</p>
+    {% if lock_banner %}
+      <div style="margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid #fca5a5; background: #fef2f2; color: #b91c1c; pointer-events: auto;">
+        <strong>Только просмотр.</strong> Сейчас редактирует: {{ lock_banner.display_name }} ({{ lock_banner.role }}).
+      </div>
+    {% endif %}
+    {% if draft_saved %}
+      <div class="card" style="border-color:#86efac; background:#f0fdf4; margin-bottom: 12px; pointer-events: auto;">
+        <p style="margin:0;">Черновик сохранён. <a href="/master/bookings">Мои записи</a></p>
+      </div>
+    {% endif %}
     {% if saved %}
       <div class="card" style="border-color:#86efac; background:#f0fdf4; margin-bottom: 12px;">
         <p style="margin:0;">Визит <strong>#{{ saved }}</strong> сохранён. Зайди как админ и открой запись по ID вручную.</p>
@@ -22,7 +32,9 @@
         Нет услуг для визита (каталог пуст или все категории скрыты из визита). Проверьте сиды и настройки категорий.
       </div>
     {% endif %}
-    <form method="post" action="/master/visit/new" id="visit-form" enctype="multipart/form-data">
+    <form method="post"
+      action="{% if is_draft %}{% if draft_id %}/master/visit/draft/{{ draft_id }}{% else %}/master/visit/draft{% endif %}{% else %}/master/visit/new{% endif %}"
+      id="visit-form" enctype="multipart/form-data">
       <input type="hidden" name="booking_id" value="{{ fp.get('booking_id', '') }}" />
       <h3>Клиент</h3>
       <div style="margin-bottom: 10px;">
@@ -541,15 +553,34 @@
 
       <div id="visit_preview_block" class="card" style="background:#fff; margin: 12px 0; border: 1px solid #e2e8f0;">
         <h3 style="margin-top:0;">Предварительный расчёт</h3>
+        <div id="visit_preview_client_total" style="font-size: 14px; font-weight: 600; margin-top: 4px;">С клиента (итого): —</div>
         <div id="visit_preview_master_lines" style="font-size: 13px; margin-top: 8px;">—</div>
         <div id="visit_preview_cost_line" class="muted" style="font-size: 13px; margin-top: 8px;">—</div>
       </div>
 
-      <p style="margin-top: 16px;">
-        <button type="submit">Сохранить визит</button>
+      <p style="margin-top: 16px; pointer-events: auto;">
+        {% if is_draft %}
+          {% if not draft_readonly %}
+            <button type="submit">Сохранить черновик</button>
+            {% if draft_id %}
+              <button type="submit" formaction="/master/visit/draft/{{ draft_id }}/finalize" formmethod="post" onclick="return confirm('Сохранить визит? Склад будет списан, начисления ЗП созданы.');">Сохранить визит</button>
+            {% endif %}
+          {% endif %}
+          {% if draft_id %}
+            <a href="/master/bookings"><button type="button" class="secondary">Мои записи</button></a>
+            {% if not draft_readonly %}
+              <button type="submit" class="secondary" form="visit-draft-unlock-form">Снять блокировку</button>
+            {% endif %}
+          {% endif %}
+        {% else %}
+          <button type="submit">Сохранить визит</button>
+        {% endif %}
         <a href="/"><button type="button" class="secondary">Отмена</button></a>
       </p>
     </form>
+    {% if is_draft and draft_id and not draft_readonly %}
+      <form id="visit-draft-unlock-form" method="post" action="/master/visit/draft/{{ draft_id }}/unlock"></form>
+    {% endif %}
   </div>
   <script>
     function visitMastersModeSync() {
@@ -1286,6 +1317,7 @@
     function syncVisitPreview() {
       const payEl = document.getElementById('visit_preview_master_lines');
       const costEl = document.getElementById('visit_preview_cost_line');
+      const clientTotalEl = document.getElementById('visit_preview_client_total');
       if (!payEl || !costEl) return;
 
       const kan = Math.max(0, numVal('#kanekalon_grams'));
@@ -1337,6 +1369,14 @@
       }
 
       const costTotal = mat + kitCostTotal + addons + mixCost + amort;
+      let amountTotal = Math.max(0, numVal('#amount_from_client'));
+      document.querySelectorAll('[data-visit-line-card]').forEach(function (card) {
+        const amtIn = card.querySelector('input[name^="line_"][name$="_amount_from_client"]');
+        if (amtIn) amountTotal += Math.max(0, parseFloat(String(amtIn.value || '0')) || 0);
+      });
+      if (clientTotalEl) {
+        clientTotalEl.textContent = 'С клиента (итого): ' + money2(amountTotal) + ' ₽';
+      }
       const amount = Math.max(0, numVal('#amount_from_client'));
       const profitBefore = amount - costTotal;
       const salonProfit = profitBefore * (parseFloat(salonCutPct) || 0);

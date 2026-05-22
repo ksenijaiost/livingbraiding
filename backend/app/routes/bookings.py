@@ -2077,6 +2077,18 @@ def master_bookings(
     current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
+    from app.visit_draft import draft_summary_label, list_open_drafts_for_master, preview_dict_from_json
+
+    draft_rows: list[dict[str, object]] = []
+    for d in list_open_drafts_for_master(db, current_user.id):
+        preview = preview_dict_from_json(d.preview_json)
+        draft_rows.append(
+            {
+                "draft": d,
+                "services_label": draft_summary_label(preview),
+                "amount_total": preview.get("amount_from_client_total"),
+            }
+        )
     visit_ids = list(
         db.scalars(
             select(Booking.id)
@@ -2149,6 +2161,7 @@ def master_bookings(
             request,
             current_user=current_user,
             rows=rows,
+            draft_rows=draft_rows,
             display_tz=display_tz,
             archive_rows=archive_rows,
             archive_days=archive_days,
