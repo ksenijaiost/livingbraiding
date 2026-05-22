@@ -26,7 +26,7 @@
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">cost_total</td><td style="padding:8px;">Да</td><td style="padding:8px;"><strong>Себестоимость (всего), ₽</strong> — число &gt; 0</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">pieces_initial</td><td style="padding:8px;">Да / —</td><td style="padding:8px;"><strong>Количество заготовок</strong> при создании. Обязательно, если нет <code>composition</code>. Если <code>composition</code> задан и поле не указано — <strong>авто</strong>: сумма количеств по составу.</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">stock_price_total</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Цена на складе (всего), ₽</strong>. Если не указано и задан <code>composition</code> — <strong>авто</strong> по прайсу «Заказ» → «Заготовки поштучно» (нужны цены в каталоге по всем ключам состава); иначе укажите вручную число &gt; 0.</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">composition</td><td style="padding:8px;">—</td><td style="padding:8px;">Состав → <code>composition_json</code>. Объект <code>"КЛЮЧ": qty</code> или массив <code>[{"key","qty"},…]</code>. Без состава нельзя посчитать сумму заготовок и цену по ключам автоматически.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">composition</td><td style="padding:8px;">—</td><td style="padding:8px;">Состав v2 → <code>composition_json</code>: массив строк <code>{"key","condition":"NEW"|"USED","by_staff":{"0":qty}}</code> (для б/у — <code>used_price_pct</code> 1–100); можно <code>"qty": N</code> вместо <code>by_staff</code>. Устаревшие <code>{"КЛЮЧ": qty}</code> и <code>[{"key","qty"}]</code> читаются, в БД сохраняется v2.</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_stock</td><td style="padding:8px;">—</td><td style="padding:8px;">Остатки по <code>kit_key</code> (объект <code>"КЛЮЧ": остаток</code>). Если <code>composition</code> задан, а <code>blank_stock</code> нет или пустой — <strong>авто</strong>: те же количества, что в составе. Иначе укажите явно, чтобы задать другой фактический остаток по видам.</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">discount_percent</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Скидка (всего), %</strong> (по умолчанию 0; не выше допустимой маржи к цене и себестоимости)</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blanks_condition</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Состояние заготовок</strong> — <code>NEW</code> / <code>USED</code> / <code>MIXED</code> (по умолчанию <code>NEW</code>)</td></tr>
@@ -71,22 +71,21 @@
     {% endif %}
 
     <h3>Пример JSON</h3>
-    <p class="muted" style="font-size:13px;">Ключи в <code>composition</code> / <code>blank_stock</code> должны совпадать с вашим каталогом. Второй объект — без состава (только <code>pieces_initial</code>).</p>
-    <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;overflow:auto;font-size:13px;max-height:320px;">[
+    <p class="muted" style="font-size:13px;">Ключи в <code>composition</code> / <code>blank_stock</code> — из каталога (<code>kit_key</code>). В <code>by_staff</code> для импорта достаточно <code>"0": количество</code> (сумма по строке). Первый объект — состав v2; <code>pieces_initial</code> и цена склада посчитаются автоматически, если есть цены в прайсе. Второй — без состава.</p>
+    <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;overflow:auto;font-size:13px;max-height:360px;">[
   {
     "sku": "KIT-BULK-001",
-    "title": "Пример: несколько видов в составе и на складе",
+    "title": "Пример: состав v2 (NEW и б/у по строкам)",
     "blank_type_de": true,
     "blank_type_se": true,
-    "pieces_initial": 20,
-    "stock_price_total": 12000,
     "cost_total": 5500,
     "discount_percent": 0,
-    "composition": {
-      "SE_BRAID_LONG": 2,
-      "DE_BRAID_SHORT": 1,
-      "SE_TIP_ADDON": 1
-    },
+    "blanks_condition": "MIXED",
+    "composition": [
+      {"key": "SE_BRAID_LONG", "condition": "NEW", "by_staff": {"0": 2}},
+      {"key": "DE_BRAID_SHORT", "condition": "NEW", "by_staff": {"0": 1}},
+      {"key": "SE_TIP_ADDON", "condition": "USED", "used_price_pct": 50, "by_staff": {"0": 1}}
+    ],
     "blank_stock": {
       "SE_BRAID_LONG": 10,
       "DE_BRAID_SHORT": 5,
@@ -94,8 +93,8 @@
     },
     "weight_grams": 420,
     "length_cm": 65,
-    "materials_text": "Канекалон бренд X",
-    "color_text": "1B/30 омбре",
+    "materials_text": "Канекалон",
+    "color_text": "1B/30",
     "description": "Комплект для витрины",
     "notes": "Импортировано пакетом",
     "author_external": false,
@@ -103,7 +102,7 @@
   },
   {
     "sku": "KIT-BULK-002",
-    "title": "Только скалярный остаток, без состава по ключам",
+    "title": "Без состава по ключам — только pieces_initial",
     "blank_type_de": true,
     "blank_type_se": false,
     "pieces_initial": 8,
