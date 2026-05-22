@@ -1,7 +1,7 @@
 """Черновики визита.
 
 Revision ID: 0008_visit_drafts
-Revises: 0007_booking_pending_confirmation
+Revises: 0007_booking_pending
 Create Date: 2026-05-21
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0008_visit_drafts"
-down_revision = "0007_booking_pending_confirmation"
+down_revision = "0007_booking_pending"
 branch_labels = None
 depends_on = None
 

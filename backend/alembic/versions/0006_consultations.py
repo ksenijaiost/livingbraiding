@@ -16,7 +16,15 @@ branch_labels = None
 depends_on = None
 
 
+def _pg_widen_alembic_version() -> None:
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.execute(sa.text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"))
+
+
 def upgrade() -> None:
+    _pg_widen_alembic_version()
+
     # --- consultations (fix 27) ---
     op.create_table(
         "consultations",
@@ -157,8 +165,23 @@ def upgrade() -> None:
     ]
     for name, col_type, default in vs_cols:
         kw: dict = {"nullable": False} if default is not None and col_type != sa.DateTime else {"nullable": True}
-        if default is not None and name not in ("cancelled_at", "cancelled_by_user_id", "mix_source", "mix_complexity", "amortization_level", "started_at", "comment", "addons_details_json", "kanekalon_price_per_gram_at_time", "kudri_price_per_gram_at_time", "mix_bonus_master_id"):
-            kw["server_default"] = default
+        if default is not None and name not in (
+            "cancelled_at",
+            "cancelled_by_user_id",
+            "mix_source",
+            "mix_complexity",
+            "amortization_level",
+            "started_at",
+            "comment",
+            "addons_details_json",
+            "kanekalon_price_per_gram_at_time",
+            "kudri_price_per_gram_at_time",
+            "mix_bonus_master_id",
+        ):
+            if col_type is sa.Boolean:
+                kw["server_default"] = sa.text("false")
+            else:
+                kw["server_default"] = default
         op.add_column("visit_services", sa.Column(name, col_type, **kw))
     op.create_foreign_key(
         "fk_visit_services_cancelled_by",
@@ -191,6 +214,16 @@ def upgrade() -> None:
 
     # --- backfill visit_services from visits (single line per visit) ---
     conn = op.get_bind()
+    is_pg = conn.dialect.name == "postgresql"
+    mix_src = "(SELECT mix_source::text FROM visits WHERE id = :vid)" if is_pg else "(SELECT mix_source FROM visits WHERE id = :vid)"
+    mix_cpl = (
+        "(SELECT mix_complexity::text FROM visits WHERE id = :vid)" if is_pg else "(SELECT mix_complexity FROM visits WHERE id = :vid)"
+    )
+    amort = (
+        "(SELECT amortization_level::text FROM visits WHERE id = :vid)"
+        if is_pg
+        else "(SELECT amortization_level FROM visits WHERE id = :vid)"
+    )
     rows = conn.execute(
         sa.text(
             """
@@ -203,7 +236,7 @@ def upgrade() -> None:
     for visit_id, vs_id in rows:
         conn.execute(
             sa.text(
-                """
+                f"""
                 UPDATE visit_services SET
                   sort_order = 0,
                   is_cancelled = (SELECT is_cancelled FROM visits WHERE id = :vid),
@@ -226,7 +259,10 @@ def upgrade() -> None:
                   salon_cut_pct_at_time = (SELECT salon_cut_pct_at_time FROM visits WHERE id = :vid),
                   salon_profit = (SELECT salon_profit FROM visits WHERE id = :vid),
                   masters_pool = (SELECT masters_pool FROM visits WHERE id = :vid),
-                  kit_paid_separately = (SELECT kit_paid_separately FROM visits WHERE id = :vid)
+                  kit_paid_separately = (SELECT kit_paid_separately FROM visits WHERE id = :vid),
+                  mix_source = {mix_src},
+                  mix_complexity = {mix_cpl},
+                  amortization_level = {amort}
                 WHERE id = :vsid
                 """
             ),
