@@ -77,4 +77,7 @@ class AccessLogWithUserMiddleware(BaseHTTPMiddleware):
                 f'{client_host} | {request.method} "{path_qs} HTTP/1.1" '
                 f"| {status} | {elapsed_ms:.0f} ms | user={user_label}"
             )
+            validation_err = getattr(request.state, "validation_error", None)
+            if validation_err:
+                line = f"{line} | err={validation_err}"
             logging.getLogger(ACCESS_LOGGER_NAME).info(line)

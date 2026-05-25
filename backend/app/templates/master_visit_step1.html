@@ -295,10 +295,7 @@
             <input type="number" name="line_1_amount_from_client" min="0" step="1" value="{{ fp.get('line_1_amount_from_client','') }}" />
           </div>
         </div>
-        <input type="hidden" name="line_1_kit_kind" value="STOCK" />
-        <input type="hidden" name="line_1_kanekalon_grams" value="0" />
-        <input type="hidden" name="line_1_kudri_grams" value="0" />
-        <input type="hidden" name="line_1_mix_source" value="NO_MIX" />
+        <div id="lb-line-1-hidden-defaults"></div>
       </div>
       <p style="margin-top:10px;">
         <button type="button" class="secondary" id="lb-toggle-second-service">Добавить вторую услугу</button>
@@ -1753,15 +1750,36 @@
     updateServiceDerivedUI();
     const lbSecond = document.getElementById('lb-toggle-second-service');
     const lbExtra = document.getElementById('lb-extra-service-lines');
+    const lbLine1Defaults = document.getElementById('lb-line-1-hidden-defaults');
+    function lbSetLine1HiddenDefaults(on) {
+      if (!lbLine1Defaults) return;
+      lbLine1Defaults.innerHTML = '';
+      if (!on) return;
+      [
+        ['line_1_kit_kind', 'STOCK'],
+        ['line_1_kanekalon_grams', '0'],
+        ['line_1_kudri_grams', '0'],
+        ['line_1_mix_source', 'NO_MIX'],
+      ].forEach(function (pair) {
+        const el = document.createElement('input');
+        el.type = 'hidden';
+        el.name = pair[0];
+        el.value = pair[1];
+        lbLine1Defaults.appendChild(el);
+      });
+    }
     if (lbSecond && lbExtra) {
-      if (document.querySelector('input[name="line_1_service_id"]') && document.querySelector('input[name="line_1_service_id"]').value) {
+      const line1Svc = document.querySelector('input[name="line_1_service_id"]');
+      if (line1Svc && line1Svc.value) {
         lbExtra.style.display = 'block';
         lbSecond.textContent = 'Скрыть вторую услугу';
+        lbSetLine1HiddenDefaults(true);
       }
       lbSecond.addEventListener('click', function () {
         const show = lbExtra.style.display !== 'block';
         lbExtra.style.display = show ? 'block' : 'none';
         lbSecond.textContent = show ? 'Скрыть вторую услугу' : 'Добавить вторую услугу';
+        lbSetLine1HiddenDefaults(show);
       });
     }
   </script>

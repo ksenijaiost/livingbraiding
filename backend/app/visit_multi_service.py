@@ -63,6 +63,36 @@ from app.user_roles import user_has_role
 _LINE_KEY_RE = re.compile(r"^line_(\d+)_")
 
 
+def _line_service_id_from_form(form: Any, idx: int) -> int:
+    if idx == 0:
+        raw = form.get("service_id") or form.get("line_0_service_id")
+    else:
+        raw = form.get(f"line_{idx}_service_id")
+    if raw is None or isinstance(raw, UploadFile):
+        return 0
+    s = raw.decode().strip() if isinstance(raw, (bytes, bytearray)) else str(raw).strip()
+    if not s:
+        return 0
+    try:
+        return int(parse_float(s, field_name="service_id"))
+    except ValueError:
+        return 0
+
+
+def form_uses_multi_service_lines(form: Any) -> bool:
+    """Вторая и далее услуги: только если указан service_id строки (не скрытые line_1_* заглушки)."""
+    for key in form.keys():
+        if not isinstance(key, str):
+            continue
+        m = _LINE_KEY_RE.match(key)
+        if not m:
+            continue
+        idx = int(m.group(1))
+        if idx >= 1 and _line_service_id_from_form(form, idx) > 0:
+            return True
+    return False
+
+
 @dataclass
 class VisitServiceLineInput:
     service_id: int
@@ -660,9 +690,17 @@ def _discover_line_indices(form: Any) -> list[int]:
         m = _LINE_KEY_RE.match(key)
         if m:
             indices.add(int(m.group(1)))
-    if indices:
-        return sorted(indices)
-    if form.get("service_id") or form.get("line_count"):
+    result: list[int] = []
+    for idx in sorted(indices):
+        if idx == 0 and _line_service_id_from_form(form, 0) > 0:
+            result.append(0)
+        elif idx >= 1 and _line_service_id_from_form(form, idx) > 0:
+            result.append(idx)
+    if 0 not in result and _line_service_id_from_form(form, 0) > 0:
+        result.insert(0, 0)
+    if result:
+        return sorted(result)
+    if _line_service_id_from_form(form, 0) > 0 or form.get("line_count"):
         return [0]
     return []
 

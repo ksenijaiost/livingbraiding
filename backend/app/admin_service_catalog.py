@@ -137,14 +137,33 @@ def catalog_index(
         .group_by(ServiceCategory.id)
         .order_by(ServiceCategory.id)
     ).all()
+    svc_by_cat: dict[int, int] = {
+        int(cat_id): int(cnt)
+        for cat_id, cnt in db.execute(
+            select(ServiceSubcategory.category_id, func.count(Service.id))
+            .join(Service, Service.subcategory_id == ServiceSubcategory.id)
+            .group_by(ServiceSubcategory.category_id)
+        ).all()
+    }
     cat_rows = [
-        {"category": c, "sub_count": int(n)}
+        {
+            "category": c,
+            "sub_count": int(n),
+            "service_count": svc_by_cat.get(c.id, 0),
+        }
         for c, n in raw
         if (c.name or "").strip() not in _PRODUCT_CATALOG_ONLY_CATEGORIES
     ]
+    total_services = sum(r["service_count"] for r in cat_rows)
     return templates.TemplateResponse(
         "admin_catalog_index.html",
-        _ctx(request, current_user, cat_rows=cat_rows, err=err),
+        _ctx(
+            request,
+            current_user,
+            cat_rows=cat_rows,
+            total_services=total_services,
+            err=err,
+        ),
     )
 
 
