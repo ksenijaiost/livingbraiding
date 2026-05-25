@@ -55,6 +55,13 @@
       }
       table { width:100%; border-collapse: collapse; }
       th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 14px; }
+      /* Чередование строк в таблицах списков */
+      table tbody tr:nth-child(odd) { background-color: #ffffff; }
+      table tbody tr:nth-child(even) { background-color: #f8fafc; }
+      table > tr:nth-child(odd) { background-color: #ffffff; }
+      table > tr:nth-child(even) { background-color: #f8fafc; }
+      table thead tr { background-color: transparent; }
+      table tbody tr:hover { background-color: #f1f5f9; }
       .nav { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; }
       .nav a { text-decoration: none; opacity: 0.95; }
       .nav a:hover { text-decoration: underline; }
@@ -123,10 +130,14 @@
                 {% if current_user.role.value == "MASTER" %}
                   <a href="/master/bookings">Мои записи</a>
                   <a href="/master/visit/new">Новый визит</a>
+                  <a href="/consultations/new">Новая консультация</a>
                 {% endif %}
                 <a href="/visits">Визиты</a>
                 <a href="/consultations">Консультации</a>
                 <a href="/bookings">Брони</a>
+                {% if current_user.role.value in ("ADMIN", "ADMIN_SUPER") %}
+                  <a href="/bookings/new">Новая бронь</a>
+                {% endif %}
                 <a href="/service-catalog">Прайс — услуги</a>
               </div>
             </details>
@@ -136,6 +147,9 @@
               <div class="dd">
                 <a href="/sales/products">Продажа товаров</a>
                 <a href="/sales/work">Работа с товарами</a>
+                {% if current_user.role.value == "MASTER" %}
+                  <a href="/sales/work/new">Новая работа</a>
+                {% endif %}
                 <a href="/products-calc">Калькулятор</a>
                 <a href="/products-catalog">Прайс — товары</a>
               </div>
@@ -196,10 +210,14 @@
           {% if current_user.role.value == "MASTER" %}
             <a class="md-link" href="/master/bookings" onclick="window.lbToggleMobileNav(false)">Мои записи</a>
             <a class="md-link" href="/master/visit/new" onclick="window.lbToggleMobileNav(false)">Новый визит</a>
+            <a class="md-link" href="/consultations/new" onclick="window.lbToggleMobileNav(false)">Новая консультация</a>
           {% endif %}
           <a class="md-link" href="/visits" onclick="window.lbToggleMobileNav(false)">Визиты</a>
           <a class="md-link" href="/consultations" onclick="window.lbToggleMobileNav(false)">Консультации</a>
           <a class="md-link" href="/bookings" onclick="window.lbToggleMobileNav(false)">Брони</a>
+          {% if current_user.role.value in ("ADMIN", "ADMIN_SUPER") %}
+            <a class="md-link" href="/bookings/new" onclick="window.lbToggleMobileNav(false)">Новая бронь</a>
+          {% endif %}
           <a class="md-link" href="/service-catalog" onclick="window.lbToggleMobileNav(false)">Прайс — услуги</a>
         </details>
 
@@ -207,6 +225,9 @@
           <summary><strong>Товары</strong></summary>
           <a class="md-link" href="/sales/products" onclick="window.lbToggleMobileNav(false)">Продажа товаров</a>
           <a class="md-link" href="/sales/work" onclick="window.lbToggleMobileNav(false)">Работа с товарами</a>
+          {% if current_user.role.value == "MASTER" %}
+            <a class="md-link" href="/sales/work/new" onclick="window.lbToggleMobileNav(false)">Новая работа</a>
+          {% endif %}
           <a class="md-link" href="/products-calc" onclick="window.lbToggleMobileNav(false)">Калькулятор</a>
           <a class="md-link" href="/products-catalog" onclick="window.lbToggleMobileNav(false)">Прайс — товары</a>
         </details>

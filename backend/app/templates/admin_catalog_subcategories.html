@@ -6,6 +6,9 @@
       <a href="/admin/catalog/subcategories/new?category_id={{ category.id }}"><button type="button">Новая подкатегория</button></a>
     </div>
     <p><a href="/admin/catalog">← Прайс</a></p>
+    {% if sub_rows %}
+      <p class="muted" style="margin-top: -6px;"><strong>Всего услуг:</strong> {{ total_services }}</p>
+    {% endif %}
     {% if err == "empty" %}
       <div class="error">Укажите название.</div>
     {% elif err == "duplicate" %}
@@ -16,14 +19,17 @@
         <tr>
           <th>Название</th>
           <th>Активна</th>
+          <th>Услуг</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
-        {% for s in subs %}
+        {% for row in sub_rows %}
+          {% set s = row.sub %}
           <tr>
             <td><strong>{{ s.name }}</strong></td>
             <td>{% if s.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
+            <td>{{ row.service_count }}</td>
             <td style="white-space: nowrap;">
               <a href="/admin/catalog/subcategories/{{ s.id }}/services"><button type="button" class="secondary">Услуги</button></a>
               <a href="/admin/catalog/subcategories/{{ s.id }}/fields"><button type="button" class="secondary">Анкета</button></a>
@@ -33,7 +39,7 @@
         {% endfor %}
       </tbody>
     </table>
-    {% if not subs %}
+    {% if not sub_rows %}
       <p class="muted" style="margin-top: 12px;">Подкатегорий нет.</p>
     {% endif %}
   </div>

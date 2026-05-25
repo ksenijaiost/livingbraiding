@@ -16,7 +16,7 @@
     {% elif err == "bad_price" %}
       <div class="error">Некорректная цена (ожидается число, можно пусто).</div>
     {% endif %}
-    <p class="muted">Прайс по уровням мастера (от / до, ₽). Пустая ячейка — в базе NULL. Названия совпадают с уровнем мастера в карточке сотрудника.</p>
+    <p class="muted">Прайс по уровням мастера (от / до, ₽). Пустая ячейка — в базе NULL. Три колонки — те же подписи, что в карточке сотрудника в поле «Уровень мастера»: <strong>{{ ru_master_level('JUNIOR')|capitalize }}</strong>, <strong>{{ ru_master_level('MIDDLE')|capitalize }}</strong>, <strong>{{ ru_master_level('SENIOR')|capitalize }}</strong>.</p>
     <div style="overflow-x: auto;">
     <table>
       <thead>
