@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import date, datetime
 from typing import Any
@@ -44,7 +45,11 @@ from app.kit_inlay_visit import (
     parse_kit_inlay_form,
     save_kit_inlay_visit,
 )
-from app.visit_multi_service import parse_multi_service_visit_form, save_visit_with_services
+from app.visit_multi_service import (
+    form_uses_multi_service_lines,
+    parse_multi_service_visit_form,
+    save_visit_with_services,
+)
 from app.visit_draft import (
     acquire_draft_lock,
     collect_form_dict,
@@ -66,6 +71,22 @@ from app.webui import templates, ctx as _ctx
 
 
 router = APIRouter()
+_logger = logging.getLogger("livingbraiding.app")
+
+
+def _log_visit_new_validation_error(
+    request: Request,
+    exc: ValueError,
+    *,
+    current_user: AuthUser,
+) -> None:
+    msg = str(exc)
+    request.state.validation_error = msg
+    _logger.warning(
+        'POST /master/visit/new validation failed: %s | user=%s',
+        msg,
+        current_user.username,
+    )
 
 
 def _utc_naive_to_local(dt: datetime | None, tz_name: str) -> datetime | None:
@@ -492,9 +513,7 @@ async def master_visit_new_post(
     try:
         booking_id_raw = (form.get("booking_id") or "").strip() if hasattr(form.get("booking_id"), "strip") else str(form.get("booking_id") or "").strip()
         booking_id_val = int(booking_id_raw) if booking_id_raw.isdigit() else None
-        has_multi = any(
-            isinstance(k, str) and k.startswith("line_1_") for k in form.keys()
-        )
+        has_multi = form_uses_multi_service_lines(form)
         if has_multi:
             multi = parse_multi_service_visit_form(
                 form,
@@ -529,6 +548,7 @@ async def master_visit_new_post(
             db.commit()
         except ValueError as exc:
             db.rollback()
+            _log_visit_new_validation_error(request, exc, current_user=current_user)
             fp, vm_on_ids, vm_pct_str = master_visit_step1_prefill_from_form(form)
             fp.update(collect_questionnaire_prefill_from_form(form))
             fp.update(collect_thermo_prefill_from_form(form))
@@ -565,6 +585,7 @@ async def master_visit_new_post(
             except Exception:
                 db.rollback()
     except ValueError as exc:
+        _log_visit_new_validation_error(request, exc, current_user=current_user)
         fp, vm_on_ids, vm_pct_str = master_visit_step1_prefill_from_form(form)
         fp.update(collect_questionnaire_prefill_from_form(form))
         fp.update(collect_thermo_prefill_from_form(form))

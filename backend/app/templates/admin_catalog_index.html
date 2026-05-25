@@ -9,6 +9,9 @@
       <a href="/admin/catalog/categories/new"><button type="button">Новая категория</button></a>
     </div>
     <p class="muted">Категории → подкатегории → позиции прайса (только суперадмин). Здесь <strong>услуги</strong> (в т.ч. для формы визита) — у каждой услуги три шкалы цен. Вопросы анкеты — кнопка «Анкета» у категории, подкатегории или услуги.</p>
+    {% if cat_rows %}
+      <p class="muted" style="margin-top: -6px;"><strong>Всего услуг:</strong> {{ total_services }}</p>
+    {% endif %}
     {% if err == "empty" %}
       <div class="error">Укажите название.</div>
     {% elif err == "duplicate" %}
@@ -20,6 +23,7 @@
           <th>Категория</th>
           <th>Активна</th>
           <th>Подкатегорий</th>
+          <th>Услуг</th>
           <th></th>
         </tr>
       </thead>
@@ -30,6 +34,7 @@
             <td><strong>{{ c.name }}</strong></td>
             <td>{% if c.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
             <td>{{ row.sub_count }}</td>
+            <td>{{ row.service_count }}</td>
             <td style="white-space: nowrap;">
               <a href="/admin/catalog/categories/{{ c.id }}/subcategories"><button type="button" class="secondary">Подкатегории</button></a>
               <a href="/admin/catalog/categories/{{ c.id }}/fields"><button type="button" class="secondary">Анкета</button></a>
