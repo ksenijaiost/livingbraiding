@@ -148,6 +148,10 @@
                 <a href="/master/bookings"><button type="button" class="secondary">Мои записи</button></a>
                 <a href="/master/visit/new"><button type="button" class="secondary">Новый визит</button></a>
                 <a href="/master/visit/draft/new"><button type="button" class="secondary">Черновик визита</button></a>
+                <a href="/consultations/new"><button type="button" class="secondary">Новая консультация</button></a>
+              {% endif %}
+              {% if sections_ctx.is_admin %}
+                <a href="/bookings/new"><button type="button" class="secondary">Новая бронь</button></a>
               {% endif %}
               <a href="/clients"><button type="button" class="secondary">Клиенты</button></a>
               <a href="/visits"><button type="button" class="secondary">Визиты</button></a>
@@ -162,6 +166,9 @@
             <div style="display:flex; flex-wrap:wrap; gap:8px;">
               <a href="/sales/products"><button type="button" class="secondary">Продажа</button></a>
               <a href="/sales/work"><button type="button" class="secondary">Работа</button></a>
+              {% if sections_ctx.is_master %}
+                <a href="/sales/work/new"><button type="button" class="secondary">Новая работа</button></a>
+              {% endif %}
               <a href="/products-calc"><button type="button" class="secondary">Калькулятор</button></a>
               <a href="/products-catalog"><button type="button" class="secondary">Прайс — товары</button></a>
             </div>

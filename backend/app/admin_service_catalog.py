@@ -299,9 +299,29 @@ def subcategory_list(
         )
         .all()
     )
+    svc_by_sub: dict[int, int] = {
+        int(sub_id): int(cnt)
+        for sub_id, cnt in db.execute(
+            select(Service.subcategory_id, func.count(Service.id))
+            .join(ServiceSubcategory, Service.subcategory_id == ServiceSubcategory.id)
+            .where(ServiceSubcategory.category_id == category_id)
+            .group_by(Service.subcategory_id)
+        ).all()
+    }
+    sub_rows = [
+        {"sub": s, "service_count": svc_by_sub.get(s.id, 0)} for s in subs
+    ]
+    total_services = sum(r["service_count"] for r in sub_rows)
     return templates.TemplateResponse(
         "admin_catalog_subcategories.html",
-        _ctx(request, current_user, category=cat, subs=subs, err=err),
+        _ctx(
+            request,
+            current_user,
+            category=cat,
+            sub_rows=sub_rows,
+            total_services=total_services,
+            err=err,
+        ),
     )
 
 

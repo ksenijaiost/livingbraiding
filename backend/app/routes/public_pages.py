@@ -337,7 +337,11 @@ def home(
             "weeks": weeks,
         }
 
-        sections_ctx = {"is_master": current_user.role == UserRole.MASTER, "is_admin_super": current_user.role == UserRole.ADMIN_SUPER}
+        sections_ctx = {
+            "is_master": current_user.role == UserRole.MASTER,
+            "is_admin": current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER),
+            "is_admin_super": current_user.role == UserRole.ADMIN_SUPER,
+        }
 
     return templates.TemplateResponse(
         "home.html",
