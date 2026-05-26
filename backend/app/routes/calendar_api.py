@@ -39,6 +39,7 @@ from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_date_iso
+from app.payroll_fund import sum_ledger_amounts_by_source
 from app.ui_service_display import (
     booking_service_labels_from_booking,
     format_visit_service_catalog_path,
@@ -90,26 +91,10 @@ def _sum_ledger(
     source_ids: list[int],
     user_id: int | None = None,
 ) -> dict[int, float]:
-    if not source_ids:
-        return {}
-    stmt = (
-        select(PayrollFundLedger.source_id, func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
-        .where(
-            PayrollFundLedger.side == side,
-            PayrollFundLedger.source_kind == source_kind,
-            PayrollFundLedger.source_id.in_(source_ids),
-        )
-        .group_by(PayrollFundLedger.source_id)
+    raw = sum_ledger_amounts_by_source(
+        db, side=side, source_kind=source_kind, source_ids=source_ids, user_id=user_id
     )
-    if user_id is not None:
-        stmt = stmt.where(PayrollFundLedger.user_id == user_id)
-    rows = list(db.execute(stmt).all())
-    out: dict[int, float] = {}
-    for sid, amt in rows:
-        if sid is None:
-            continue
-        out[int(sid)] = _money0(float(amt or 0.0))
-    return out
+    return {k: _money0(v) for k, v in raw.items()}
 
 
 @router.get("/api/calendar/day")
@@ -271,6 +256,8 @@ def api_calendar_day(
                 }
             )
             continue
+        legacy_payout_allocated = False
+        legacy_studio_allocated = False
         for svc in active_services:
             if is_master:
                 show = svc.mix_bonus_master_id == current_user.id
@@ -291,6 +278,14 @@ def api_calendar_day(
                 if not show:
                     continue
             sid = int(svc.id)
+            payout = float(visit_payout_vs.get(sid, 0.0))
+            studio = float(visit_studio_vs.get(sid, 0.0))
+            if not legacy_payout_allocated:
+                payout += float(visit_payout_legacy.get(vid, 0.0))
+                legacy_payout_allocated = True
+            if is_super and not legacy_studio_allocated:
+                studio += float(visit_studio_legacy.get(vid, 0.0))
+                legacy_studio_allocated = True
             visit_items.append(
                 {
                     "id": vid,
@@ -298,8 +293,8 @@ def api_calendar_day(
                     "label": svc.service_name,
                     "service_label": format_visit_service_catalog_path(svc),
                     "url": f"/visits/{vid}",
-                    "payout_sum": float(visit_payout_vs.get(sid, 0.0)),
-                    "studio_sum": float(visit_studio_vs.get(sid, 0.0)),
+                    "payout_sum": payout,
+                    "studio_sum": studio,
                 }
             )
 

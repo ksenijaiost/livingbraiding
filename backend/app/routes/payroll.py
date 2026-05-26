@@ -13,6 +13,7 @@ from app.auth import AuthUser, require_role
 from app.db.models import PayrollPeriod, User, UserRole
 from app.db.session import get_db
 from app.forms_parse import parse_date_iso, parse_float, parse_int
+from app.db.models import PayrollFundSourceKind
 from app.payroll_fund import (
     PayrollFundPayoutPaymentKind,
     PayrollFundSide,
@@ -21,6 +22,7 @@ from app.payroll_fund import (
     post_manual_adjustment,
     post_payout,
     recent_ledger_rows,
+    visit_ids_for_visit_service_source_ids,
 )
 from app.payroll_utils import payroll_period_day_end, payroll_period_day_start
 from app.time_utils import utcnow_naive
@@ -149,6 +151,12 @@ def admin_payroll_fund_page(
     # Показываем всех сотрудников (даже с 0), а нулевые выносим в конец списка.
     bal_by_uid = {int(m["user_id"]): float(m["balance"]) for m in masters_bal}
     ledger_rows = recent_ledger_rows(db)
+    vs_source_ids = [
+        int(r.source_id)
+        for r in ledger_rows
+        if r.source_kind == PayrollFundSourceKind.VISIT_SERVICE and r.source_id is not None
+    ]
+    visit_id_by_service_id = visit_ids_for_visit_service_source_ids(db, vs_source_ids)
     payout_users = list(
         db.scalars(
             select_users_with_any_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER).order_by(User.display_name.asc())
@@ -180,6 +188,7 @@ def admin_payroll_fund_page(
             master_rows_zero=master_rows_zero,
             studio_balance=studio_bal,
             ledger_rows=ledger_rows,
+            visit_id_by_service_id=visit_id_by_service_id,
             payout_user_options=payout_user_options,
             payout_fund_balances_json=payout_fund_balances_json,
             msg=_payroll_fund_msg_ru(msg),

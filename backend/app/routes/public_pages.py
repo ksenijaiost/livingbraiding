@@ -40,6 +40,7 @@ from app.payroll_fund import (
     employee_fund_balance,
     employee_payout_total_net,
     studio_fund_balance,
+    sum_visit_ledger_by_visit_id,
 )
 from app.webui import templates, ctx as _ctx
 
@@ -195,22 +196,17 @@ def home(
             drafts_by_day[d0] = int(cnt)
 
         if visit_ids:
-            v_pay = list(
-                db.execute(
-                    select(Visit.id, Visit.performed_date, func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
-                    .join(PayrollFundLedger, PayrollFundLedger.source_id == Visit.id)
-                    .where(
-                        PayrollFundLedger.side == PayrollFundSide.MASTER,
-                        PayrollFundLedger.user_id == current_user.id,
-                        PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
-                        Visit.id.in_(visit_ids),
-                    )
-                    .group_by(Visit.id, Visit.performed_date)
-                ).all()
+            visit_pay_by_id = sum_visit_ledger_by_visit_id(
+                db,
+                side=PayrollFundSide.MASTER,
+                visit_ids=visit_ids,
+                user_id=current_user.id,
             )
-            for _, dt0, amt in v_pay:
+            for vid, dt0 in visit_rows:
                 if isinstance(dt0, datetime):
-                    payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(amt or 0.0)
+                    payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(
+                        visit_pay_by_id.get(int(vid), 0.0)
+                    )
 
         if work_ids:
             w_pay = list(
@@ -263,6 +259,7 @@ def home(
                 PayrollFundLedger.source_kind.notin_(
                     (
                         PayrollFundSourceKind.VISIT,
+                        PayrollFundSourceKind.VISIT_SERVICE,
                         PayrollFundSourceKind.WORK,
                         PayrollFundSourceKind.PRODUCT_SALE,
                     )

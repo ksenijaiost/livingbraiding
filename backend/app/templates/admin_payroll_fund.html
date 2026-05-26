@@ -301,10 +301,13 @@
                 <td>{{ "%.2f"|format(r.amount) }}</td>
                 <td>
                   {% if r.source_kind.value == 'VISIT' %}Визит {{ r.source_id or '' }}
+                  {% elif r.source_kind.value == 'VISIT_SERVICE' %}Визит {{ visit_id_by_service_id.get(r.source_id) or '?' }}
                   {% elif r.source_kind.value == 'WORK' %}Работа {{ r.source_id or '' }}
                   {% elif r.source_kind.value == 'PRODUCT_SALE' %}Продажа {{ r.source_id or '' }}
+                  {% elif r.source_kind.value == 'CONSULTATION' %}Консультация {{ r.source_id or '' }}
                   {% elif r.source_kind.value == 'STUDIO_EXPENSE' %}Расход {{ r.source_id or '' }}
-                  {% else %}Ручная{% endif %}
+                  {% elif r.source_kind.value == 'MANUAL' %}Ручная
+                  {% else %}{{ r.source_kind.value }}{% endif %}
                 </td>
                 <td>{{ r.created_by_user.display_name if r.created_by_user else '—' }}</td>
                 <td>{{ r.comment or '' }}</td>
