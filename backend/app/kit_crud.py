@@ -126,6 +126,7 @@ class KitAdminFormData:
     cost_total: float | None
     discount_percent: int
     blanks_condition: KitBlanksCondition = KitBlanksCondition.NEW
+    is_active: bool = True
     composition_totals: dict[str, int] = field(default_factory=dict)
     composition_lines: list[Any] = field(default_factory=list)
 
@@ -209,6 +210,11 @@ def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
             infer_blanks_condition(composition_lines)
             if composition_lines
             else _parse_kit_blanks_condition_from_form(form)
+        ),
+        is_active=(
+            True
+            if for_create and form.get("is_active") is None
+            else _g_bool(form, "is_active")
         ),
         composition_totals=dict(composition_totals),
         composition_lines=list(composition_lines),
@@ -527,6 +533,7 @@ def kit_to_form_prefill(kit: Kit) -> dict[str, Any]:
         "cost_total": ct,
         "discount_percent": disc,
         "blanks_condition": getattr(kit, "blanks_condition", KitBlanksCondition.NEW).value,
+        "is_active": "on" if kit.is_active else "",
         "author_external": "on" if kit.author_external else "",
         "kit_author_ids": [
             l.user_id
@@ -555,6 +562,7 @@ def apply_kit_admin_form(kit: Kit, d: KitAdminFormData) -> None:
     kit.stock_price_total = d.stock_price_total
     kit.cost_total = d.cost_total
     kit.discount_percent = int(d.discount_percent or 0)
+    kit.is_active = bool(d.is_active)
     kit.author_cost_total = None
     if kit.pieces_available <= 0:
         kit.is_in_stock = False

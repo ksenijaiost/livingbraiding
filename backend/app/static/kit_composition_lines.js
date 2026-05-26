@@ -118,13 +118,13 @@
       var tdBu = document.createElement('td');
       tdBu.style.textAlign = 'center';
       tdBu.innerHTML =
-        '<label style="white-space:nowrap;"><input type="checkbox" class="kcl-used" name="' +
+        '<label style="white-space:nowrap;" title="Использованные (б/у)"><input type="checkbox" class="kcl-used" name="' +
         prefix +
         '_' +
         idx +
         '_is_used" ' +
         (isUsed ? 'checked ' : '') +
-        '/> Б/У</label>';
+        ' aria-label="Использованные" /></label>';
       tr.appendChild(tdBu);
 
       var tdPct = document.createElement('td');
@@ -203,7 +203,7 @@
 
     var headHtml = '<tr><th>Вид</th>';
     if (!state.usedOnly) {
-      headHtml += '<th>Б/У</th><th>% цены</th>';
+      headHtml += '<th title="Использованные (б/у)">б/у</th><th>% цены</th>';
     }
     masterIds.forEach(function (id) {
       headHtml += '<th>' + esc(idToName[id] || 'ID ' + id) + '</th>';

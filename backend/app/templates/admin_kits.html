@@ -21,6 +21,8 @@
       <p class="lb-flash lb-flash-info">Резерв снят.</p>
     {% elif msg == "created" %}
       <p class="lb-flash lb-flash-ok">Комплект создан.</p>
+    {% elif msg == "deleted" %}
+      <p class="lb-flash lb-flash-ok">Комплект удалён из базы.</p>
     {% endif %}
     {% if err %}
       <div class="error lb-mb-12">{{ err }}</div>
@@ -138,6 +140,41 @@
         {% endfor %}
       </tbody>
     </table>
+
+    {% if inactive_kit_rows %}
+      <h3 style="margin:24px 0 10px;">Неактуальные комплекты</h3>
+      <p class="muted" style="font-size:13px;margin:0 0 12px;">Снята галочка «Актуален» в карточке — в выборе «из наличия» не показываются. Здесь можно удалить карточку из базы (если нет визитов и резервов).</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Артикул</th>
+            <th>Название</th>
+            <th>Остаток</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in inactive_kit_rows %}
+            {% set k = row.kit %}
+            <tr style="opacity:0.85;">
+              <td><a href="/kits/{{ k.id }}"><strong>{{ k.sku }}</strong></a></td>
+              <td>{{ k.title }}</td>
+              <td>{{ k.pieces_available }} / {{ k.pieces_total }}</td>
+              <td style="white-space:nowrap;">
+                {% if is_admin_kit and current_user.role.value == 'ADMIN_SUPER' %}
+                  <a href="/kits/{{ k.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+                  <form method="post" action="/kits/{{ k.id }}/delete" style="display:inline;margin:0;" onsubmit="return confirm('Удалить комплект «{{ k.sku }}» из базы безвозвратно?');">
+                    <button type="submit" class="secondary" style="color:#b91c1c;border-color:#fecaca;">Удалить</button>
+                  </form>
+                {% elif is_admin_kit %}
+                  <a href="/kits/{{ k.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
   </div>
 
 {% with after_reserve='list' %}

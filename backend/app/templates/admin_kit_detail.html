@@ -134,7 +134,7 @@
       <dt class="muted">Состояние заготовок</dt>
       <dd style="margin:0;">
         {% set _bc = kit.blanks_condition.value if kit.blanks_condition is not none else 'NEW' %}
-        {% if _bc == 'USED' %}Б/У{% elif _bc == 'MIXED' %}50 на 50{% else %}Новый{% endif %}
+        {% if _bc == 'USED' %}Использованные{% elif _bc == 'MIXED' %}50 на 50{% else %}Новый{% endif %}
       </dd>
 
       <dt class="muted">Описание</dt>

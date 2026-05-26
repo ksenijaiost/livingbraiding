@@ -100,6 +100,7 @@ def test_import_blank_types_inferred_from_composition(memory_db: Session) -> Non
     assert k.blank_type_se is False
 
 
+def test_import_success_minimal(memory_db: Session) -> None:
     db = memory_db
     reserved: set[str] = set()
     r = import_single_kit_row(
@@ -116,6 +117,42 @@ def test_import_blank_types_inferred_from_composition(memory_db: Session) -> Non
     assert k is not None
     assert int(k.pieces_available) == 5
     assert k.composition_json is None
+
+
+def test_import_blanks_condition_inferred_from_composition(memory_db: Session) -> None:
+    db = memory_db
+    row = _minimal_kit_row(
+        sku="S-MIX",
+        composition=[
+            {"key": "DE", "condition": "NEW", "qty": 1},
+            {"key": "SE", "condition": "USED", "qty": 1},
+        ],
+        used_discount_percent=40,
+    )
+    del row["pieces_initial"]
+    r = import_single_kit_row(db, row, reserved_skus=set(), changed_by_user_id=1)
+    assert r["ok"] is True, r.get("message")
+    k = db.get(Kit, int(r["kit_id"]))
+    assert k is not None
+    assert k.blanks_condition == KitBlanksCondition.MIXED
+    comp = __import__("json").loads(k.composition_json or "[]")
+    used_line = next(x for x in comp if x.get("condition") == "USED")
+    assert "used_price_pct" not in used_line
+
+
+def test_import_used_global_discount_applies(memory_db: Session) -> None:
+    db = memory_db
+    row = _minimal_kit_row(
+        sku="S-USED-ALL",
+        composition=[{"key": "DE", "condition": "USED", "qty": 2}],
+        used_discount_percent=55,
+    )
+    del row["pieces_initial"]
+    r = import_single_kit_row(db, row, reserved_skus=set(), changed_by_user_id=1)
+    assert r["ok"] is True
+    k = db.get(Kit, int(r["kit_id"]))
+    assert k is not None
+    assert k.blanks_condition == KitBlanksCondition.USED
 
 
 def test_import_composition_defaults_blank_stock_and_pieces(memory_db: Session) -> None:

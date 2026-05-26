@@ -28,6 +28,17 @@ MAX_BULK_JSON_BYTES = 512 * 1024
 MAX_BULK_KITS = 500
 
 
+def _bulk_default_used_price_pct(row: dict[str, Any]) -> int | None:
+    """% цены каталога для строк USED без своего used_price_pct (только used_discount_percent, не discount_percent)."""
+    raw = row.get("used_discount_percent")
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return max(1, min(100, int(raw)))
+    except (TypeError, ValueError):
+        return None
+
+
 def _blanks_condition_from_bulk_row(row: dict[str, Any]) -> KitBlanksCondition:
     raw = row.get("blanks_condition")
     if raw is None or str(raw).strip() == "":
@@ -104,23 +115,30 @@ def parse_bulk_kits_json(raw: str) -> list[dict[str, Any]]:
     return out
 
 
-def _composition_from_bulk(val: Any) -> tuple[str | None, dict[str, int] | None]:
-    """Возвращает (composition_json, totals_by_key)."""
+def _composition_from_bulk(
+    val: Any,
+    *,
+    row: dict[str, Any] | None = None,
+) -> tuple[str | None, dict[str, int] | None, list[Any]]:
+    """Возвращает (composition_json, totals_by_key, lines)."""
     from app.kit_composition_lines import lines_from_json, lines_to_json, lines_to_legacy_totals
 
     if val is None:
-        return None, None
+        return None, None, []
+    default_used_pct = _bulk_default_used_price_pct(row) if row else None
     if isinstance(val, list) and val:
-        if isinstance(val[0], dict) and ("by_staff" in val[0] or "condition" in val[0]):
+        if isinstance(val[0], dict) and (
+            "by_staff" in val[0] or "condition" in val[0] or "qty" in val[0]
+        ):
             raw = json.dumps(val, ensure_ascii=False)
-            lines = lines_from_json(raw)
-            return lines_to_json(lines), lines_to_legacy_totals(lines) or None
+            lines = lines_from_json(raw, default_used_price_pct=default_used_pct)
+            return lines_to_json(lines), lines_to_legacy_totals(lines) or None, lines
     totals = _composition_dict_from_json(val)
     if totals:
         from app.kit_composition import composition_json_from_totals
 
-        return composition_json_from_totals(totals), totals
-    return None, None
+        return composition_json_from_totals(totals), totals, []
+    return None, None, []
 
 
 def _composition_dict_from_json(val: Any) -> dict[str, int] | None:
@@ -252,7 +270,9 @@ def row_to_kit_admin_data(
     pieces_initial: int,
     stock_price_total: float | None,
     composition_totals: dict[str, int] | None = None,
+    composition_lines: list[Any] | None = None,
 ) -> KitAdminFormData:
+    from app.kit_composition_lines import infer_blanks_condition
     sku = saved_sku.strip()
     title = _str_opt(row, "title")
     if not title:
@@ -287,8 +307,14 @@ def row_to_kit_admin_data(
         stock_price_total=sp,
         cost_total=ct,
         discount_percent=disc,
-        blanks_condition=_blanks_condition_from_bulk_row(row),
+        is_active=_bool_at(row, "is_active", True),
+        blanks_condition=(
+            infer_blanks_condition(composition_lines)
+            if composition_lines
+            else _blanks_condition_from_bulk_row(row)
+        ),
         composition_totals=comp,
+        composition_lines=list(composition_lines or []),
     )
 
 
@@ -327,7 +353,7 @@ def import_single_kit_row(
         }
     try:
         saved_sku = allocate_unique_kit_sku(db, input_sku, reserved_skus)
-        comp_json, comp = _composition_from_bulk(row.get("composition"))
+        comp_json, comp, comp_lines = _composition_from_bulk(row.get("composition"), row=row)
         blank_qty = _blank_stock_dict(row.get("blank_stock"))
         if comp and not blank_qty:
             blank_qty = dict(comp)
@@ -352,6 +378,7 @@ def import_single_kit_row(
             pieces_initial=pieces_initial,
             stock_price_total=sp,
             composition_totals=comp if comp else None,
+            composition_lines=comp_lines if comp_lines else None,
         )
         if d.stock_price_total is None and comp:
             try_fill_kit_admin_stock_price_total_from_composition(db, d, composition_totals=comp)

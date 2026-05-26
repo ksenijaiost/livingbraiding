@@ -9,7 +9,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import UploadFile
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.audit import diff_fields, write_audit_rows
@@ -23,6 +23,7 @@ from app.db.models import (
     KitReserve,
     User,
     UserRole,
+    VisitKitUsage,
 )
 from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime, get_display_timezone, timezone_label
@@ -231,6 +232,18 @@ def master_kits_suggest(
     return JSONResponse({"kits": suggest_kits_for_stock(db, q, for_client_id=client_id)})
 
 
+def _kit_rows_for_list(kits: list[Kit], db: Session, display_tz: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "kit": k,
+            "reserve_tooltip": _kit_reservation_tooltip(k, db),
+            "reserve_slots_used": len(k.reserves or []),
+            "clear_modal_items_json": json.dumps(_kit_clear_modal_items(k, display_tz), ensure_ascii=False),
+        }
+        for k in kits
+    ]
+
+
 @router.get("", response_class=HTMLResponse)
 def admin_kits_list(
     request: Request,
@@ -252,27 +265,53 @@ def admin_kits_list(
     )
     staff_users = _staff_users_for_reserve(db)
     display_tz = get_display_timezone(db)
-    kit_rows = [
-        {
-            "kit": k,
-            "reserve_tooltip": _kit_reservation_tooltip(k, db),
-            "reserve_slots_used": len(k.reserves or []),
-            "clear_modal_items_json": json.dumps(_kit_clear_modal_items(k, display_tz), ensure_ascii=False),
-        }
-        for k in kits
-    ]
+    active = [k for k in kits if k.is_active]
+    inactive = [k for k in kits if not k.is_active]
     return templates.TemplateResponse(
         "admin_kits.html",
         _ctx(
             request,
             current_user=current_user,
-            kit_rows=kit_rows,
+            kit_rows=_kit_rows_for_list(active, db, display_tz),
+            inactive_kit_rows=_kit_rows_for_list(inactive, db, display_tz),
             staff_users=staff_users,
             kit_max_reserves=get_kit_max_reserves_per_kit(db),
             msg=msg,
             err=err,
         ),
     )
+
+
+@router.post("/{kit_id}/delete")
+def admin_kit_delete(
+    kit_id: int,
+    current_user: AuthUser = _KITS_SUPER,
+    db: Session = Depends(get_db),
+):
+    kit = db.get(Kit, kit_id)
+    if kit is None:
+        raise HTTPException(status_code=404, detail="Комплект не найден")
+    if kit.is_active:
+        return RedirectResponse(
+            url="/kits?err=" + quote("Удалять можно только неактуальные комплекты (снимите галочку «Актуален»)."),
+            status_code=303,
+        )
+    used = int(
+        db.scalar(select(func.count()).select_from(VisitKitUsage).where(VisitKitUsage.kit_id == kit_id)) or 0
+    )
+    if used > 0:
+        return RedirectResponse(
+            url="/kits?err=" + quote("Нельзя удалить: комплект уже использован в визитах."),
+            status_code=303,
+        )
+    if kit.reserves:
+        return RedirectResponse(
+            url="/kits?err=" + quote("Снимите все резервы перед удалением комплекта."),
+            status_code=303,
+        )
+    db.delete(kit)
+    db.commit()
+    return RedirectResponse(url="/kits?msg=deleted", status_code=303)
 
 
 @router.get("/new", response_class=HTMLResponse)
@@ -614,6 +653,7 @@ async def admin_kit_edit_post(
             discount_percent=kit.discount_percent,
             author_external=kit.author_external,
             author_staff_ids=sorted([l.user_id for l in (kit.author_staff_links or [])]),
+            is_active=kit.is_active,
         )
         d = parse_kit_admin_form(form, for_create=False)
         comp_tot = parse_composition_totals(kit)
@@ -666,6 +706,7 @@ async def admin_kit_edit_post(
             discount_percent=kit.discount_percent,
             author_external=kit.author_external,
             author_staff_ids=after_auth_ids,
+            is_active=kit.is_active,
         )
         ch = diff_fields(
             before,
@@ -684,6 +725,7 @@ async def admin_kit_edit_post(
                 "stock_price_total",
                 "cost_total",
                 "discount_percent",
+                "is_active",
                 "author_external",
                 "author_staff_ids",
             ),
