@@ -35,6 +35,7 @@ class CompositionLine:
     key: str
     condition: BlankCondition = BlankCondition.NEW
     used_price_pct: int = 100
+    used_price_pct_explicit: bool = False
     by_staff: dict[int, int] = field(default_factory=dict)
 
     def total_qty(self) -> int:
@@ -71,7 +72,11 @@ def _legacy_key_to_base(key: str) -> tuple[str, BlankCondition | None]:
     return k, None
 
 
-def lines_from_json(raw: str | None) -> list[CompositionLine]:
+def lines_from_json(
+    raw: str | None,
+    *,
+    default_used_price_pct: int | None = None,
+) -> list[CompositionLine]:
     if not raw:
         return []
     try:
@@ -89,12 +94,18 @@ def lines_from_json(raw: str | None) -> list[CompositionLine]:
                 if not k:
                     continue
                 cond = _normalize_condition(str(it.get("condition") or "NEW"))
+                pct_explicit = "used_price_pct" in it and str(it.get("used_price_pct") or "").strip() != ""
                 pct = 100
-                try:
-                    pct = int(it.get("used_price_pct") or 100)
-                except (TypeError, ValueError):
+                if pct_explicit:
+                    try:
+                        pct = int(it.get("used_price_pct") or 100)
+                    except (TypeError, ValueError):
+                        pct = 100
+                    pct = max(1, min(100, pct))
+                elif cond == BlankCondition.USED and default_used_price_pct is not None:
+                    pct = max(1, min(100, int(default_used_price_pct)))
+                elif cond == BlankCondition.USED:
                     pct = 100
-                pct = max(1, min(100, pct))
                 by_staff: dict[int, int] = {}
                 bs = it.get("by_staff")
                 if isinstance(bs, dict):
@@ -118,6 +129,7 @@ def lines_from_json(raw: str | None) -> list[CompositionLine]:
                             key=k,
                             condition=cond,
                             used_price_pct=pct,
+                            used_price_pct_explicit=pct_explicit,
                             by_staff=by_staff,
                         )
                     )
@@ -169,15 +181,18 @@ def lines_from_json(raw: str | None) -> list[CompositionLine]:
 def lines_to_json(lines: list[CompositionLine]) -> str | None:
     items: list[dict[str, Any]] = []
     for ln in filter_nonempty(lines):
-        by_staff = {str(int(uid)): int(q) for uid, q in ln.by_staff.items() if int(q) > 0}
+        by_staff = {int(uid): int(q) for uid, q in ln.by_staff.items() if int(q) > 0}
         if not by_staff:
             continue
         row: dict[str, Any] = {
             "key": ln.key,
             "condition": ln.condition.value,
-            "by_staff": by_staff,
         }
-        if ln.condition == BlankCondition.USED:
+        if len(by_staff) == 1 and 0 in by_staff:
+            row["qty"] = int(by_staff[0])
+        else:
+            row["by_staff"] = {str(uid): int(q) for uid, q in by_staff.items()}
+        if ln.condition == BlankCondition.USED and ln.used_price_pct_explicit:
             row["used_price_pct"] = int(ln.used_price_pct)
         items.append(row)
     return json.dumps(items, ensure_ascii=False) if items else None

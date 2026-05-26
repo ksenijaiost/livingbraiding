@@ -63,7 +63,6 @@ def products_catalog_view(
     product_cats = list(
         db.scalars(
             select(CatalogProduct.category_name)
-            .where(CatalogProduct.is_active.is_(True))
             .distinct()
             .order_by(CatalogProduct.category_name.asc())
         ).all()
@@ -76,37 +75,49 @@ def products_catalog_view(
         product_rows = list(
             db.scalars(
                 select(CatalogProduct)
-                .where(CatalogProduct.category_name == selected, CatalogProduct.is_active.is_(True))
+                .where(CatalogProduct.category_name == selected)
                 .order_by(CatalogProduct.subcategory_name.asc(), CatalogProduct.sort_order.asc(), CatalogProduct.name.asc())
             ).all()
         )
         if product_rows:
             is_catalog_products_category = True
-            groups: dict[str, list[SimpleNamespace]] = defaultdict(list)
-            for row in product_rows:
+            groups_active: dict[str, list[SimpleNamespace]] = defaultdict(list)
+            groups_inactive: dict[str, list[SimpleNamespace]] = defaultdict(list)
+
+            def _catalog_row_ns(row: CatalogProduct) -> SimpleNamespace:
                 try:
                     meta = json.loads(row.meta_json or "{}")
                 except Exception:
                     meta = {}
                 if not isinstance(meta, dict):
                     meta = {}
-                groups[row.subcategory_name].append(
-                    SimpleNamespace(
-                        id=row.id,
-                        category_name=row.category_name,
-                        subcategory_name=row.subcategory_name,
-                        name=row.name,
-                        price=row.price,
-                        master_pay=float(meta.get("master_pay")) if meta.get("master_pay") is not None else None,
-                        fixed_expense=float(meta.get("fixed_expense")) if meta.get("fixed_expense") is not None else None,
-                        kit_key=(str(meta.get("kit_key") or "").strip() or None),
-                        ignore_in_calc=bool(meta.get("ignore_in_calc") or False),
-                        is_used_in_kit_form=bool(meta.get("is_used_in_kit_form") or False),
-                        is_bu=bool(meta.get("is_bu") or ("Б/У" in row.name)),
-                        is_active=row.is_active,
-                    )
+                return SimpleNamespace(
+                    id=row.id,
+                    category_name=row.category_name,
+                    subcategory_name=row.subcategory_name,
+                    name=row.name,
+                    price=row.price,
+                    master_pay=float(meta.get("master_pay")) if meta.get("master_pay") is not None else None,
+                    fixed_expense=float(meta.get("fixed_expense")) if meta.get("fixed_expense") is not None else None,
+                    kit_key=(str(meta.get("kit_key") or "").strip() or None),
+                    ignore_in_calc=bool(meta.get("ignore_in_calc") or False),
+                    is_used_in_kit_form=bool(meta.get("is_used_in_kit_form") or False),
+                    is_bu=bool(meta.get("is_bu") or ("Б/У" in row.name)),
+                    is_active=row.is_active,
                 )
-            grouped_rows = [SimpleNamespace(subcategory_name=sub_name, rows=groups[sub_name]) for sub_name in sorted(groups.keys())]
+
+            for row in product_rows:
+                bucket = groups_active if row.is_active else groups_inactive
+                bucket[row.subcategory_name].append(_catalog_row_ns(row))
+            sub_names = sorted(set(groups_active.keys()) | set(groups_inactive.keys()))
+            grouped_rows = [
+                SimpleNamespace(
+                    subcategory_name=sub_name,
+                    rows=groups_active.get(sub_name, []),
+                    inactive_rows=groups_inactive.get(sub_name, []),
+                )
+                for sub_name in sub_names
+            ]
         else:
             services = list(
                 db.scalars(
@@ -143,7 +154,10 @@ def products_catalog_view(
                         is_active=s.is_active,
                     )
                 )
-            grouped_rows = [SimpleNamespace(subcategory_name=sub_name, rows=groups2[sub_name]) for sub_name in sorted(groups2.keys())]
+            grouped_rows = [
+                SimpleNamespace(subcategory_name=sub_name, rows=groups2[sub_name], inactive_rows=[])
+                for sub_name in sorted(groups2.keys())
+            ]
     return templates.TemplateResponse(
         "products_catalog_view.html",
         _ctx(
@@ -270,6 +284,30 @@ async def products_catalog_row_new(
     )
     db.commit()
     return _redirect("msg", "saved")
+
+
+@router.post("/products-catalog/{row_id}/delete")
+def products_catalog_row_delete(
+    row_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    row = db.get(CatalogProduct, row_id)
+    category = row.category_name if row else ""
+    if row is None:
+        raise HTTPException(status_code=404, detail="Позиция прайса не найдена")
+
+    def _redirect(message_key: str, value: str) -> RedirectResponse:
+        return RedirectResponse(
+            url=f"/products-catalog?{urlencode({'category': category, message_key: value})}",
+            status_code=303,
+        )
+
+    if row.is_active:
+        return _redirect("err", "delete_active")
+    db.delete(row)
+    db.commit()
+    return _redirect("msg", "deleted")
 
 
 @router.get("/price/products")

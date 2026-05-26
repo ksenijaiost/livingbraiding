@@ -26,10 +26,12 @@
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">cost_total</td><td style="padding:8px;">Да</td><td style="padding:8px;"><strong>Себестоимость (всего), ₽</strong> — число &gt; 0</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">pieces_initial</td><td style="padding:8px;">Да / —</td><td style="padding:8px;"><strong>Количество заготовок</strong> при создании. Обязательно, если нет <code>composition</code>. Если <code>composition</code> задан и поле не указано — <strong>авто</strong>: сумма количеств по составу.</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">stock_price_total</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Цена на складе (всего), ₽</strong>. Если не указано и задан <code>composition</code> — <strong>авто</strong> по прайсу «Заказ» → «Заготовки поштучно» (нужны цены в каталоге по всем ключам состава); иначе укажите вручную число &gt; 0.</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">composition</td><td style="padding:8px;">—</td><td style="padding:8px;">Состав v2 → <code>composition_json</code>: массив строк <code>{"key","condition":"NEW"|"USED","by_staff":{"0":qty}}</code> (для б/у — <code>used_price_pct</code> 1–100); можно <code>"qty": N</code> вместо <code>by_staff</code>. Устаревшие <code>{"КЛЮЧ": qty}</code> и <code>[{"key","qty"}]</code> читаются, в БД сохраняется v2.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">composition</td><td style="padding:8px;">—</td><td style="padding:8px;">Состав v2 → <code>composition_json</code>. Количество: <code>"qty": N</code> или <code>"by_staff": {"id": qty}</code>. Для всех строк <code>USED</code> без своего <code>used_price_pct</code> — общий % из <code>used_discount_percent</code> (не путать с <code>discount_percent</code>!). <code>blanks_condition</code> считается из <code>condition</code> строк.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">used_discount_percent</td><td style="padding:8px;">—</td><td style="padding:8px;">Скидка % от прайса «Заготовки поштучно» <strong>только для строк USED</strong> в составе, если у строки нет <code>used_price_pct</code>. Пример: 2 NEW + 4 USED и скидка 50% на б/у → <code>"used_discount_percent": 50</code>, в USED-строках <code>used_price_pct</code> не нужен.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">is_active</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Актуален</strong> (по умолчанию <code>true</code>; <code>false</code> — в конце списка комплектов, не в выборе «из наличия»)</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blank_stock</td><td style="padding:8px;">—</td><td style="padding:8px;">Остатки по <code>kit_key</code> (объект <code>"КЛЮЧ": остаток</code>). Если <code>composition</code> задан, а <code>blank_stock</code> нет или пустой — <strong>авто</strong>: те же количества, что в составе. Иначе укажите явно, чтобы задать другой фактический остаток по видам.</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">discount_percent</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Скидка (всего), %</strong> (по умолчанию 0; не выше допустимой маржи к цене и себестоимости)</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blanks_condition</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Состояние заготовок</strong> — <code>NEW</code> / <code>USED</code> / <code>MIXED</code> (по умолчанию <code>NEW</code>)</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">discount_percent</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Скидка на весь комплект при продаже со склада</strong>, % (по умолчанию 0; не на отдельные виды в составе — для USED в составе см. <code>used_discount_percent</code>)</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">blanks_condition</td><td style="padding:8px;">—</td><td style="padding:8px;">Устарело при v2-составе: вычисляется из <code>condition</code> строк. Без состава — <code>NEW</code> / <code>USED</code> / <code>MIXED</code> (по умолчанию <code>NEW</code>).</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">weight_grams</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Вес, г</strong></td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">length_cm</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Длина, см</strong></td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">materials_text</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Материалы</strong></td></tr>
@@ -71,7 +73,7 @@
     {% endif %}
 
     <h3>Пример JSON</h3>
-    <p class="muted" style="font-size:13px;">Ключи в <code>composition</code> / <code>blank_stock</code> — из каталога (<code>kit_key</code>). В <code>by_staff</code> для импорта достаточно <code>"0": количество</code> (сумма по строке). Первый объект — состав v2; <code>pieces_initial</code> и цена склада посчитаются автоматически, если есть цены в прайсе. Второй — без состава.</p>
+    <p class="muted" style="font-size:13px;">Ключи в <code>composition</code> / <code>blank_stock</code> — из каталога (<code>kit_key</code>). Количество удобнее задавать как <code>"qty": 2</code>; <code>by_staff</code> нужен только если важно разнести по мастерам (id из «Сотрудники»). Первый объект — состав v2; <code>blanks_condition</code> и <code>pieces_initial</code> посчитаются автоматически. Второй — без состава.</p>
     <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;overflow:auto;font-size:13px;max-height:360px;">[
   {
     "sku": "KIT-BULK-001",
@@ -80,11 +82,12 @@
     "blank_type_se": true,
     "cost_total": 5500,
     "discount_percent": 0,
-    "blanks_condition": "MIXED",
+    "used_discount_percent": 50,
     "composition": [
-      {"key": "SE_BRAID_LONG", "condition": "NEW", "by_staff": {"0": 2}},
-      {"key": "DE_BRAID_SHORT", "condition": "NEW", "by_staff": {"0": 1}},
-      {"key": "SE_TIP_ADDON", "condition": "USED", "used_price_pct": 50, "by_staff": {"0": 1}}
+      {"key": "SE_BRAID_LONG", "condition": "NEW", "qty": 2},
+      {"key": "DE_BRAID_SHORT", "condition": "NEW", "qty": 1},
+      {"key": "SE_TIP_ADDON", "condition": "USED", "qty": 1},
+      {"key": "DE_TIP_ADDON", "condition": "USED", "qty": 2}
     ],
     "blank_stock": {
       "SE_BRAID_LONG": 10,

@@ -91,6 +91,10 @@
       <p class="error">Заполните название нового элемента.</p>
     {% elif err == "duplicate" %}
       <p class="error">Такой элемент уже есть в этой подкатегории.</p>
+    {% elif err == "delete_active" %}
+      <p class="error">Удалять можно только неактуальные строки (снимите «Актуально» и сохраните).</p>
+    {% elif msg == "deleted" %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Строка прайса удалена из базы.</p>
     {% endif %}
 
     <div class="lb-nav-strip">
@@ -256,6 +260,104 @@
                     {% endif %}
                   </tr>
                 {% endfor %}
+                {% if g.inactive_rows %}
+                  <tr>
+                    <td colspan="{% if show_labels_col %}6{% elif show_expense_col %}5{% elif show_work %}5{% else %}4{% endif %}" class="muted" style="padding:14px 8px 6px;font-size:13px;">
+                      <strong>Неактуальные</strong> — снята галочка «Актуально»; в расчётах и импорте не участвуют. Можно снова включить, отредактировать или <strong>удалить из базы</strong> (кнопка «Удалить»).
+                    </td>
+                  </tr>
+                  {% for r in g.inactive_rows %}
+                  <tr style="opacity:0.85;">
+                    <td class="pcat-name">
+                      <strong>{{ r.name }}</strong>
+                      {% if g.subcategory_name == "Заготовки поштучно" %}
+                        {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
+                          <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
+                            <label style="display:block;">Ключ для JSON / комплекта (<code>kit_key</code>)
+                              <input form="row-edit-{{ r.id }}" name="kit_key" type="text" value="{{ r.kit_key or '' }}" placeholder="например DE_DREAD_LONG" maxlength="80" style="font-family:monospace;width:100%;max-width:100%;box-sizing:border-box;margin-top:4px;" />
+                            </label>
+                          </div>
+                        {% endif %}
+                      {% endif %}
+                    </td>
+                    {% if show_labels_col %}
+                      <td class="pcat-labels">
+                        {% set is_bu = r.is_bu %}
+                        {% set is_kit = r.is_used_in_kit_form %}
+                        {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
+                          <div class="pcat-label-stack">
+                            <label><input form="row-edit-{{ r.id }}" type="checkbox" name="is_used_in_kit_form" {% if is_kit %}checked{% endif %} />кальк</label>
+                            <label><input form="row-edit-{{ r.id }}" type="checkbox" name="ignore_in_calc" {% if r.ignore_in_calc %}checked{% endif %} />техн</label>
+                            <label><input form="row-edit-{{ r.id }}" type="checkbox" name="is_bu" {% if is_bu %}checked{% endif %} />Б/У</label>
+                          </div>
+                        {% else %}
+                          <div class="pcat-label-stack">
+                            {% if is_kit %}<span class="muted">кальк</span>{% endif %}
+                            {% if r.ignore_in_calc %}<span class="muted">техн</span>{% endif %}
+                            {% if is_bu %}<span class="muted">Б/У</span>{% endif %}
+                            {% if not is_kit and not r.ignore_in_calc and not is_bu %}<span class="muted">—</span>{% endif %}
+                          </div>
+                        {% endif %}
+                      </td>
+                    {% endif %}
+                    {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
+                      <td class="pcat-num">
+                        <input form="row-edit-{{ r.id }}" name="price" type="text" inputmode="decimal" value="{{ '' if r.price is none else r.price }}" />
+                      </td>
+                      {% if show_work %}
+                        <td class="pcat-num">
+                          <input form="row-edit-{{ r.id }}" name="master_pay" type="text" inputmode="decimal" value="{{ '' if r.master_pay is none else r.master_pay }}" />
+                        </td>
+                      {% endif %}
+                      {% if show_expense_col %}
+                        <td class="pcat-num">
+                          <input form="row-edit-{{ r.id }}" name="fixed_expense" type="text" inputmode="decimal" value="{{ '' if r.fixed_expense is none else r.fixed_expense }}" />
+                        </td>
+                      {% endif %}
+                      <td class="pcat-active">
+                        <label>
+                          <input form="row-edit-{{ r.id }}" name="is_active" type="checkbox" {% if r.is_active %}checked{% endif %} />
+                          <span>{% if r.is_active %}да{% else %}нет{% endif %}</span>
+                        </label>
+                      </td>
+                      <td class="pcat-actions">
+                        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+                          <form id="row-edit-{{ r.id }}" method="post" action="/products-catalog/{{ r.id }}/edit" style="margin:0;">
+                            <input type="hidden" name="category" value="{{ selected_category }}" />
+                            {% if not show_work %}
+                              <input type="hidden" name="master_pay" value="" />
+                            {% endif %}
+                            {% if not show_expense_col %}
+                              <input type="hidden" name="fixed_expense" value="{{ '' if r.fixed_expense is none else r.fixed_expense }}" />
+                            {% endif %}
+                            {% if selected_category == "Заказ" and not show_labels_col %}
+                              <input type="hidden" name="is_used_in_kit_form" value="{% if r.is_used_in_kit_form %}on{% endif %}" />
+                              <input type="hidden" name="ignore_in_calc" value="{% if r.ignore_in_calc %}on{% endif %}" />
+                              <input type="hidden" name="is_bu" value="{% if r.is_bu %}on{% endif %}" />
+                            {% endif %}
+                            <button type="submit" class="secondary" style="padding:4px 10px;">Сохранить</button>
+                          </form>
+                          <form method="post" action="/products-catalog/{{ r.id }}/delete" style="margin:0;" onsubmit="return confirm('Удалить строку ' + {{ r.name|tojson }} + ' из прайса безвозвратно?');">
+                            <button type="submit" class="secondary" style="padding:4px 10px;color:#b91c1c;border-color:#fecaca;">Удалить</button>
+                          </form>
+                        </div>
+                      </td>
+                    {% else %}
+                      <td class="pcat-num">{% if r.price is not none %}{{ r.price }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                      {% if show_work %}
+                        <td class="pcat-num">{% if r.master_pay is not none %}{{ r.master_pay }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                      {% endif %}
+                      {% if show_expense_col %}
+                        <td class="pcat-num">{% if r.fixed_expense is not none %}{{ r.fixed_expense }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                      {% endif %}
+                      <td class="pcat-active">{% if r.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
+                      {% if current_user.role.value == "ADMIN_SUPER" %}
+                        <td class="pcat-actions"><span class="muted">—</span></td>
+                      {% endif %}
+                    {% endif %}
+                  </tr>
+                  {% endfor %}
+                {% endif %}
                 {% if current_user.role.value == "ADMIN_SUPER" and is_catalog_products_category %}
                   <tr>
                     <td class="pcat-name">
