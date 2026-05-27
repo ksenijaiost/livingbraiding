@@ -4,6 +4,35 @@
     <p class="muted" style="margin-top:0;"><a href="/clients">← К клиентам</a></p>
     <h2 style="margin-top:0;">{% if is_new %}Новая бронь{% else %}Редактирование брони{% endif %}</h2>
 
+    <div class="card" style="margin: 12px 0; background:#f8fafc;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div>
+          <div class="muted" style="font-size:12px;">График мастеров (месяц)</div>
+          <div id="lbBookSchedMonthLabel" style="font-weight:700;">—</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="secondary" onclick="window.lbBookSchedShift(-1)">←</button>
+          <button type="button" class="secondary" onclick="window.lbBookSchedShift(1)">→</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto; margin-top:10px;">
+        <table style="table-layout:fixed; width:100%;">
+          <thead>
+            <tr>
+              <th style="width:14.28%;">Пн</th><th style="width:14.28%;">Вт</th><th style="width:14.28%;">Ср</th>
+              <th style="width:14.28%;">Чт</th><th style="width:14.28%;">Пт</th><th style="width:14.28%;">Сб</th><th style="width:14.28%;">Вс</th>
+            </tr>
+          </thead>
+          <tbody id="lbBookSchedTbody">
+            <tr><td colspan="7" class="muted" style="padding:10px;">Загрузка…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="muted" style="margin-top:8px; font-size:12px;">
+        Мастеров: по графику (только WORKING). Брони: активные/ожидающие (VISIT). Клик по дню откроет «Занятость».
+      </div>
+    </div>
+
     {% if error %}
       <p style="background:#fee2e2;border:1px solid #fecaca;color:#991b1b;padding:10px 12px;border-radius:8px;">
         {{ error }}
@@ -102,6 +131,7 @@
                   </label>
                 {% endfor %}
               </div>
+              <div id="lbBookingScheduleAvailMsg" class="muted" style="margin-top:10px; font-size:12px;"></div>
             {% endif %}
           </div>
         </div>
@@ -482,6 +512,253 @@
   <script type="application/json" id="lb-booking-service-catalog-json">{{ service_catalog|tojson }}</script>
   <script type="application/json" id="lb-booking-initial-service-json">
     {{ {'category_id': (fp.get('service_category_id') or 0)|int, 'subcategory_id': (fp.get('service_subcategory_id') or 0)|int, 'service_id': (fp.get('service_id') or 0)|int } | tojson }}
+  </script>
+
+  <script>
+    (function () {
+      function getInputs() {
+        var plannedDate = document.querySelector('input[name="planned_date"]');
+        var plannedTime = document.querySelector('input[name="planned_time"]');
+        var serviceSel = document.getElementById('service_id');
+        var msg = document.getElementById('lbBookingScheduleAvailMsg');
+        var masterCbs = Array.from(document.querySelectorAll('input[name="booking_master_on"]'));
+        return { plannedDate, plannedTime, serviceSel, msg, masterCbs };
+      }
+
+      async function refreshAvailableMasters() {
+        var el = getInputs();
+        if (!el.plannedDate || !el.plannedTime || !el.serviceSel) return;
+        if (!el.plannedDate.value || !el.plannedTime.value || !el.serviceSel.value) return;
+        if (el.masterCbs.length === 0) return;
+
+        var url =
+          '/api/booking/available-masters?d=' + encodeURIComponent(el.plannedDate.value) +
+          '&t=' + encodeURIComponent(el.plannedTime.value) +
+          '&service_id=' + encodeURIComponent(el.serviceSel.value);
+
+        try {
+          var res = await fetch(url);
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          var data = await res.json();
+          var allow = new Set((data.available_master_ids || []).map(String));
+          for (var i = 0; i < el.masterCbs.length; i++) {
+            var cb = el.masterCbs[i];
+            var ok = allow.has(String(cb.value));
+            cb.disabled = !ok;
+            if (!ok) cb.checked = false;
+          }
+          if (el.msg) {
+            el.msg.textContent = allow.size ? '' : 'На выбранное время доступных мастеров нет.';
+          }
+        } catch (e) {
+          console.error(e);
+          if (el.msg) el.msg.textContent = 'Не удалось проверить график мастеров.';
+        }
+      }
+
+      var el0 = getInputs();
+      if (el0.plannedDate) el0.plannedDate.addEventListener('change', refreshAvailableMasters);
+      if (el0.plannedTime) el0.plannedTime.addEventListener('change', refreshAvailableMasters);
+      if (el0.serviceSel) el0.serviceSel.addEventListener('change', refreshAvailableMasters);
+
+      // initial run
+      refreshAvailableMasters();
+    })();
+  </script>
+
+  <!-- Occupancy modal (only bookings) -->
+  <div id="lbBookOccBackdrop" style="display:none; position:fixed; inset:0; background: rgba(0,0,0,0.35); z-index: 200;"></div>
+  <div id="lbBookOccModal" style="display:none; position:fixed; inset:0; z-index: 210; padding: 18px; overflow:auto; pointer-events:none;">
+    <div style="pointer-events:auto; max-width: 980px; margin: 30px auto; background:#fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+        <div>
+          <div class="muted" style="font-size:12px;">Занятость</div>
+          <h3 id="lbBookOccTitle" style="margin:0;">—</h3>
+        </div>
+        <button type="button" class="secondary" onclick="window.lbBookOccClose()">Закрыть</button>
+      </div>
+      <div id="lbBookOccBody" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      function esc(s) {
+        return String(s || '').replace(/[&<>\"']/g, function (c) {
+          return ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c] || c);
+        });
+      }
+      function ymFromDate(dt) {
+        var y = dt.getFullYear();
+        var m = String(dt.getMonth() + 1).padStart(2, '0');
+        return y + '-' + m;
+      }
+      function addMonths(ym, delta) {
+        var y = Number(ym.slice(0, 4));
+        var m = Number(ym.slice(5, 7)) - 1;
+        var dt = new Date(y, m, 1);
+        dt.setMonth(dt.getMonth() + delta);
+        return ymFromDate(dt);
+      }
+      function isoFromYMD(y, m0, d) {
+        var mm = String(m0 + 1).padStart(2, '0');
+        var dd = String(d).padStart(2, '0');
+        return y + '-' + mm + '-' + dd;
+      }
+      function show(el) { if (el) el.style.display = 'block'; }
+      function hide(el) { if (el) el.style.display = 'none'; }
+
+      window.lbBookOccClose = function () {
+        hide(document.getElementById('lbBookOccBackdrop'));
+        hide(document.getElementById('lbBookOccModal'));
+        document.body.style.overflow = '';
+      };
+
+      window.lbBookOccOpen = async function (isoDay) {
+        var bd = document.getElementById('lbBookOccBackdrop');
+        var md = document.getElementById('lbBookOccModal');
+        var tt = document.getElementById('lbBookOccTitle');
+        var body = document.getElementById('lbBookOccBody');
+        if (!bd || !md || !tt || !body) return;
+        tt.textContent = isoDay;
+        body.innerHTML = '<div class="muted">Загрузка…</div>';
+        show(bd); show(md);
+        document.body.style.overflow = 'hidden';
+        try {
+          var res = await fetch('/api/calendar/day?d=' + encodeURIComponent(isoDay) + '&view=occupancy');
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          var data = await res.json();
+          var occ = data.occupancy || {};
+          var masters = occ.masters || [];
+          var segs = occ.segments || [];
+          var schedule = occ.schedule || {};
+          if (!masters.length) {
+            body.innerHTML = '<div class="muted">Нет активных мастеров.</div>';
+            return;
+          }
+          var hourFrom = Number(occ.hour_from);
+          var hourTo = Number(occ.hour_to);
+          var spanMin = (hourTo - hourFrom) * 60;
+          var pxHour = 48;
+          var gridH = (hourTo - hourFrom) * pxHour;
+          var h = '';
+          h += '<div style="display:flex; gap:8px; overflow-x:auto;">';
+          h += '<div style="flex:0 0 44px; font-size:11px; color:#64748b;">';
+          for (var hh = hourFrom; hh < hourTo; hh++) {
+            h += '<div style="height:' + pxHour + 'px; line-height:' + pxHour + 'px; border-top:1px solid #e2e8f0;">' + esc(String(hh) + ':00') + '</div>';
+          }
+          h += '</div>';
+          for (var mi = 0; mi < masters.length; mi++) {
+            var m = masters[mi] || {};
+            h += '<div style="flex:1 1 80px; min-width:72px;">';
+            h += '<div style="font-size:12px; font-weight:600; text-align:center; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + esc(m.name || '') + '</div>';
+            var sc = schedule[String(m.id)] || {};
+            var colState = sc.column_state || 'working';
+            var colBg = (colState === 'day_off') ? '#f3f4f6' : (colState === 'no_data' ? '#e5e7eb' : '#fff');
+            h += '<div style="position:relative; height:' + gridH + 'px; border-left:1px solid #e2e8f0; background:' + colBg + ';">';
+            if (colState === 'working') {
+              var un = sc.unavailable || [];
+              for (var ui = 0; ui < un.length; ui++) {
+                var r = un[ui] || {};
+                var startMin = Number(r.start_minutes);
+                var endMin = Number(r.end_minutes);
+                var topPct = ((startMin - hourFrom * 60) / spanMin) * 100;
+                var hPct = ((endMin - startMin) / spanMin) * 100;
+                if (hPct <= 0) continue;
+                h += '<div style="position:absolute; left:2px; right:2px; top:' + topPct + '%; height:' + hPct + '%; background:#cbd5e1; opacity:0.55; z-index:0; pointer-events:none; border-radius:3px;"></div>';
+              }
+            }
+            for (var si = 0; si < segs.length; si++) {
+              var seg = segs[si] || {};
+              if (Number(seg.master_id) !== Number(m.id)) continue;
+              var topPct2 = ((Number(seg.start_minutes) - hourFrom * 60) / spanMin) * 100;
+              var hPct2 = ((Number(seg.end_minutes) - Number(seg.start_minutes)) / spanMin) * 100;
+              if (hPct2 <= 0) continue;
+              var bg = seg.color || '#9E88C0';
+              h += '<div title="Бронь #' + esc(seg.booking_id) + '" style="position:absolute; left:2px; right:2px; top:' + topPct2 + '%; height:' + hPct2 + '%; background:' + bg + '; color:#fff; font-size:11px; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:' + (si + 2) + '; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.92);">' + esc(seg.booking_id) + '</div>';
+            }
+            h += '</div></div>';
+          }
+          h += '</div>';
+          body.innerHTML = h;
+        } catch (e) {
+          console.error(e);
+          body.innerHTML = '<div class="muted">Не удалось загрузить занятость.</div>';
+        }
+      };
+
+      // Month stats calendar
+      var plannedDate = document.querySelector('input[name="planned_date"]');
+      var baseIso = (plannedDate && plannedDate.value) ? plannedDate.value : (new Date()).toISOString().slice(0, 10);
+      var curYm = ymFromDate(new Date(baseIso + 'T00:00:00'));
+      var label = document.getElementById('lbBookSchedMonthLabel');
+      var tbody = document.getElementById('lbBookSchedTbody');
+
+      function renderMonth(days) {
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        if (label) label.textContent = curYm;
+        var year = Number(curYm.slice(0, 4));
+        var monthIndex = Number(curYm.slice(5, 7)) - 1;
+        var first = new Date(year, monthIndex, 1);
+        var firstWeekday = (first.getDay() + 6) % 7; // Mon=0
+        var daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+        var totalCells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+        var dayMap = {};
+        for (var i = 0; i < (days || []).length; i++) dayMap[days[i].date] = days[i];
+
+        for (var cell = 0; cell < totalCells; cell++) {
+          if (cell % 7 === 0) tbody.appendChild(document.createElement('tr'));
+          var tr = tbody.lastChild;
+          var td = document.createElement('td');
+          td.style.verticalAlign = 'top';
+          td.style.padding = '8px 10px';
+          td.style.border = '1px solid #f1f5f9';
+          var dayNum = cell - firstWeekday + 1;
+          if (dayNum < 1 || dayNum > daysInMonth) {
+            td.style.opacity = '0.45';
+            td.innerHTML = '<div style="height:40px;"></div>';
+          } else {
+            var iso = isoFromYMD(year, monthIndex, dayNum);
+            var it = dayMap[iso] || {};
+            td.style.cursor = 'pointer';
+            td.innerHTML =
+              '<div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">' +
+                '<div style="font-weight:700;" title="' + esc(iso) + '">' + dayNum + '</div>' +
+              '</div>' +
+              '<div style="margin-top:6px; display:flex; flex-direction:column; gap:4px; font-size:12px;">' +
+                '<div>Мастеров: <strong>' + esc(it.working_masters || 0) + '</strong></div>' +
+                '<div>Брони: <strong>' + esc(it.bookings || 0) + '</strong></div>' +
+              '</div>';
+            td.addEventListener('click', (function (isoDay) {
+              return function () { window.lbBookOccOpen(isoDay); };
+            })(iso));
+          }
+          tr.appendChild(td);
+        }
+      }
+
+      async function loadMonth() {
+        if (!tbody) return;
+        tbody.innerHTML = '<tr><td colspan="7" class="muted" style="padding:10px;">Загрузка…</td></tr>';
+        try {
+          var res = await fetch('/api/schedule/month?m=' + encodeURIComponent(curYm));
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          var data = await res.json();
+          renderMonth(data.days || []);
+        } catch (e) {
+          console.error(e);
+          tbody.innerHTML = '<tr><td colspan="7" class="muted" style="padding:10px;">Не удалось загрузить календарь.</td></tr>';
+        }
+      }
+
+      window.lbBookSchedShift = async function (delta) {
+        curYm = addMonths(curYm, delta);
+        await loadMonth();
+      };
+
+      loadMonth();
+    })();
   </script>
 
   {# Резерв комплекта делается автоматически при сохранении брони #}

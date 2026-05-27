@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth import AuthUser, require_role
 from app.consultation_booking import booking_status_label
 from app.calendar_display import get_calendar_display_hours
-from app.calendar_occupancy import build_occupancy_for_day
+from app.calendar_occupancy import build_occupancy_for_day, list_calendar_masters
+from app.master_schedule import is_master_available_for_interval
 from app.db.models import (
     Booking,
     BookingKind,
@@ -100,6 +101,7 @@ def _sum_ledger(
 @router.get("/api/calendar/day")
 def api_calendar_day(
     d: str,
+    view: str | None = Query(None),
     current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -371,6 +373,16 @@ def api_calendar_day(
         db, day=day, hour_from=hour_from, hour_to=hour_to, bookings=bookings
     )
 
+    if (view or "").strip().lower() == "occupancy":
+        return JSONResponse(
+            {
+                "date": day.isoformat(),
+                "occupancy": occupancy,
+                "is_super": is_super,
+                "view": "occupancy",
+            }
+        )
+
     resp = {
         "date": day.isoformat(),
         "occupancy": occupancy,
@@ -396,4 +408,50 @@ def api_calendar_day(
         "is_super": is_super,
     }
     return JSONResponse(resp)
+
+
+@router.get("/api/booking/available-masters")
+def api_booking_available_masters(
+    d: str,
+    t: str,
+    service_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    """
+    Для админ-формы брони: какие мастера доступны по графику на выбранную дату/время
+    (интервал = duration из estimated_duration_minutes).
+    """
+    try:
+        day = date.fromisoformat((d or "").strip())
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad date")
+
+    time_raw = (t or "").strip()
+    try:
+        parts = time_raw.replace(".", ":").split(":")
+        hh = int(parts[0])
+        mm = int(parts[1]) if len(parts) > 1 else 0
+        tm = time(hour=hh % 24, minute=min(max(mm, 0), 59))
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad time")
+
+    svc = db.get(Service, int(service_id))
+    if svc is None:
+        raise HTTPException(status_code=400, detail="service not found")
+
+    dur_min = int(svc.estimated_duration_minutes or 0)
+    if dur_min <= 0:
+        return JSONResponse({"available_master_ids": []})
+
+    start_dt = datetime.combine(day, tm)
+    end_dt = start_dt + timedelta(minutes=dur_min)
+
+    available: list[int] = []
+    for m in list_calendar_masters(db):
+        mid = int(m["id"])
+        if is_master_available_for_interval(db, master_id=mid, start_dt=start_dt, end_dt=end_dt):
+            available.append(mid)
+
+    return JSONResponse({"available_master_ids": available})
 

@@ -42,6 +42,7 @@ from app.payroll_fund import (
     studio_fund_balance,
     sum_visit_ledger_by_visit_id,
 )
+from app.master_schedule import schedule_filled_until
 from app.webui import templates, ctx as _ctx
 
 
@@ -65,6 +66,7 @@ def home(
     payroll_home: dict[str, Any] | None = None
     calendar_ctx: dict[str, Any] | None = None
     sections_ctx: dict[str, Any] | None = None
+    master_schedule_banner: dict[str, Any] | None = None
 
     display_tz = get_display_timezone(db)
     tz = ZoneInfo(display_tz)
@@ -334,6 +336,15 @@ def home(
             "weeks": weeks,
         }
 
+        if current_user.role == UserRole.MASTER:
+            filled = schedule_filled_until(db, master_id=current_user.id)
+            if filled:
+                master_schedule_banner = {
+                    "filled_until": filled,
+                }
+            else:
+                master_schedule_banner = None
+
         sections_ctx = {
             "is_master": current_user.role == UserRole.MASTER,
             "is_admin": current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER),
@@ -342,7 +353,14 @@ def home(
 
     return templates.TemplateResponse(
         "home.html",
-        _ctx(request, current_user=current_user, payroll_home=payroll_home, calendar_ctx=calendar_ctx, sections_ctx=sections_ctx),
+        _ctx(
+            request,
+            current_user=current_user,
+            payroll_home=payroll_home,
+            calendar_ctx=calendar_ctx,
+            sections_ctx=sections_ctx,
+            master_schedule_banner=master_schedule_banner,
+        ),
     )
 
 

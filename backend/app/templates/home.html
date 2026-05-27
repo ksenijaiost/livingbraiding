@@ -3,6 +3,22 @@
   <div class="card">
     <h2 style="margin-top: 0;">Главная</h2>
 
+    {% if sections_ctx and sections_ctx.is_master %}
+      <div class="card" style="margin-bottom: 16px; background: #f8fafc;">
+        <h3 style="margin-top:0;">График работы</h3>
+        <div class="muted" style="font-size:12px; margin-top:4px;">
+          {% if master_schedule_banner and master_schedule_banner.filled_until %}
+            Заполнен до <strong>{{ master_schedule_banner.filled_until.strftime("%d.%m.%Y") }}</strong>
+          {% else %}
+            График не заполнен
+          {% endif %}
+        </div>
+        <div style="margin-top:10px;">
+          <a href="/master/schedule"><button type="button" class="secondary">Редактировать график</button></a>
+        </div>
+      </div>
+    {% endif %}
+
     {% if payroll_home %}
       {% set _pb = (payroll_home.personal_balance or 0)|float %}
       {% set _paid = (payroll_home.paid_net or 0)|float %}
@@ -254,6 +270,7 @@
             var pxHour = 48;
             var gridH = (hourTo - hourFrom) * pxHour;
             var segs = occ.segments || [];
+            var schedule = occ.schedule || {};
             var h = '';
             h += '<div class=\"card lb-day-occ\" style=\"background:#f8fafc; margin: 10px 0;\">';
             h += '<div style=\"font-weight:700; margin-bottom:8px;\">Занятость</div>';
@@ -267,7 +284,24 @@
               var m = masters[mi] || {};
               h += '<div style=\"flex:1 1 80px; min-width:72px;\">';
               h += '<div style=\"font-size:12px; font-weight:600; text-align:center; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;\">' + esc(m.name || '') + '</div>';
-              h += '<div style=\"position:relative; height:' + gridH + 'px; border-left:1px solid #e2e8f0; background:#fff;\">';
+              var sc = schedule[String(m.id)] || {};
+              var colState = sc.column_state || sc.state || 'working';
+              var colBg = '#fff';
+              if (colState === 'day_off') colBg = '#f3f4f6';
+              if (colState === 'no_data') colBg = '#e5e7eb';
+              h += '<div style=\"position:relative; height:' + gridH + 'px; border-left:1px solid #e2e8f0; background:' + colBg + ';\">';
+              if (colState === 'working') {
+                var un = sc.unavailable || [];
+                for (var ui = 0; ui < un.length; ui++) {
+                  var r = un[ui] || {};
+                  var startMin = Number(r.start_minutes);
+                  var endMin = Number(r.end_minutes);
+                  var topPct = ((startMin - hourFrom * 60) / spanMin) * 100;
+                  var hPct = ((endMin - startMin) / spanMin) * 100;
+                  if (hPct <= 0) continue;
+                  h += '<div style=\"position:absolute; left:2px; right:2px; top:' + topPct + '%; height:' + hPct + '%; background:#cbd5e1; opacity:0.55; z-index:0; pointer-events:none; border-radius:3px;\"></div>';
+                }
+              }
               for (var si = 0; si < segs.length; si++) {
                 var seg = segs[si] || {};
                 if (Number(seg.master_id) !== Number(m.id)) continue;
@@ -284,6 +318,9 @@
             h += '<div style=\"margin-top:10px; font-size:12px; display:flex; gap:16px; flex-wrap:wrap; color:#475569;\">';
             h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#9E88C0; vertical-align:middle; margin-right:4px;\"></span> Подтверждена</span>';
             h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#7F7679; vertical-align:middle; margin-right:4px;\"></span> Ждёт подтверждения</span>';
+            h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#cbd5e1; vertical-align:middle; margin-right:4px;\"></span> Нерабочее время</span>';
+            h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#f3f4f6; vertical-align:middle; margin-right:4px; border:1px solid #e5e7eb\"></span> Выходной</span>';
+            h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#e5e7eb; vertical-align:middle; margin-right:4px; border:1px solid #d1d5db\"></span> Нет данных</span>';
             h += '</div></div>';
             return h;
           }

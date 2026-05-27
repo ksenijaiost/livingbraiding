@@ -21,6 +21,7 @@ from app.db.models import (
     UserRole,
 )
 from app.display_time import get_display_timezone
+from app.master_schedule import master_unavailable_for_day
 from app.user_roles import select_users_with_role
 
 COLOR_OCCUPANCY_ACTIVE = "#9E88C0"
@@ -193,9 +194,29 @@ def build_occupancy_for_day(
                 )
             )
 
+    masters = list_calendar_masters(db)
+    schedule: dict[str, Any] = {}
+    for m in masters:
+        mid = int(m["id"])
+        st, unavailable = master_unavailable_for_day(
+            db,
+            master_id=mid,
+            d=day,
+            hour_from=hour_from,
+            hour_to=hour_to,
+        )
+        schedule[str(mid)] = {
+            "column_state": st,
+            "unavailable": [
+                {"start_minutes": u.start_minutes, "end_minutes": u.end_minutes}
+                for u in unavailable
+            ],
+        }
+
     return {
         "hour_from": hour_from,
         "hour_to": hour_to,
-        "masters": list_calendar_masters(db),
+        "masters": masters,
         "segments": [s.to_dict() for s in segments],
+        "schedule": schedule,
     }

@@ -72,6 +72,7 @@ from app.media_store import delete_media_by_url, get_nonempty_upload, save_uploa
 from app.time_utils import utcnow_naive
 from app.user_roles import select_users_with_any_role, select_users_with_role
 from app.work_products import _rubber_type_items
+from app.master_schedule import is_master_available_for_interval
 from app.webui import templates, ctx as _ctx
 
 
@@ -1084,10 +1085,11 @@ async def admin_booking_new_post(  # noqa: C901
         if client is None:
             err = "Клиент не найден."
 
+    tz_name: str | None = None
     if not err:
         try:
-            tz = get_display_timezone(db)
-            planned_date = _parse_planned_booking_datetime(fp, tz)
+            tz_name = get_display_timezone(db)
+            planned_date = _parse_planned_booking_datetime(fp, tz_name)
         except Exception:
             err = "Укажите дату и время брони."
 
@@ -1155,6 +1157,69 @@ async def admin_booking_new_post(  # noqa: C901
         )
 
     assert client is not None and planned_date is not None
+    if tz_name is None:
+        tz_name = get_display_timezone(db)
+
+    # --- График мастеров (жёсткая server-validation при создании брони) ---
+    on_ids: list[int] = []
+    if kind_raw == BookingKind.VISIT.value:
+        for v in form_raw.getlist("booking_master_on"):
+            try:
+                on_ids.append(parse_int(v, min=1, field_name="booking_master_on"))
+            except Exception:
+                pass
+        on_ids = sorted(set([i for i in on_ids if i > 0]))
+
+        # Интервал для проверки: от planned_time до end = start + sum(estimated_duration_minutes).
+        local_start = _utc_naive_to_local(planned_date, tz_name).replace(second=0, microsecond=0)
+        dur_total = 0
+        for sid in planned_service_ids:
+            svc = db.get(Service, sid)
+            if not svc:
+                continue
+            dur_total += int(svc.estimated_duration_minutes or 0)
+
+        if dur_total > 0 and on_ids:
+            local_end = local_start + timedelta(minutes=dur_total)
+            unavailable_names: list[str] = []
+            for mid in on_ids:
+                if not is_master_available_for_interval(
+                    db,
+                    master_id=mid,
+                    start_dt=local_start,
+                    end_dt=local_end,
+                ):
+                    u = db.get(User, mid)
+                    unavailable_names.append((u.display_name or u.username) if u else f"#{mid}")
+
+            if unavailable_names:
+                err = (
+                    "Следующие мастера недоступны по графику на выбранное время: "
+                    + ", ".join(unavailable_names)
+                )
+                return templates.TemplateResponse(
+                    "admin_booking_form.html",
+                    _ctx(
+                        request,
+                        current_user=current_user,
+                        error=err,
+                        is_new=True,
+                        booking=None,
+                        selected_client=client,
+                        masters=masters,
+                        staff_users=staff_users,
+                        after_reserve=str(request.url),
+                        service_catalog=service_catalog,
+                        kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                        product_kind_options=[k.value for k in ProductSaleKind],
+                        rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+                        fp=fp,
+                        booking_master_on_ids=on_ids,
+                        consultation_id=int(fp["consultation_id"]) if str(fp.get("consultation_id") or "").isdigit() else None,
+                        consultation_comment=None,
+                    ),
+                    status_code=400,
+                )
     try:
         up1 = get_nonempty_upload(form_raw, "photo_1")
         up2 = get_nonempty_upload(form_raw, "photo_2")
@@ -1263,13 +1328,6 @@ async def admin_booking_new_post(  # noqa: C901
         sync_booking_planned_services(db, booking.id, planned_service_ids, planned_date=planned_date)
 
     if kind_raw == BookingKind.VISIT.value:
-        on_ids: list[int] = []
-        for v in form_raw.getlist("booking_master_on"):
-            try:
-                on_ids.append(parse_int(v, min=1, field_name="booking_master_on"))
-            except Exception:
-                pass
-        on_ids = sorted(set([i for i in on_ids if i > 0]))
         for mid in on_ids:
             if db.get(User, mid) is None:
                 continue
@@ -1507,6 +1565,7 @@ async def admin_booking_edit_post(
     deposit_amount: int | None = None
     planned_service_id: int | None = None
     planned_product_kind: str | None = None
+    tz_name: str | None = None
 
     try:
         client_id = parse_int(client_id_raw, min=1, field_name="client_id")
@@ -1521,8 +1580,8 @@ async def admin_booking_edit_post(
 
     if not err:
         try:
-            tz = get_display_timezone(db)
-            planned_date = _parse_planned_booking_datetime(fp, tz)
+            tz_name = get_display_timezone(db)
+            planned_date = _parse_planned_booking_datetime(fp, tz_name)
         except Exception:
             err = "Укажите дату и время брони."
 
@@ -1577,6 +1636,37 @@ async def admin_booking_edit_post(
             except Exception:
                 pass
         on_ids = sorted(set([i for i in on_ids if i > 0]))
+
+    # --- График мастеров (жёсткая server-validation при редактировании) ---
+    if (
+        not err
+        and kind_raw == BookingKind.VISIT.value
+        and planned_service_id is not None
+        and planned_date is not None
+        and tz_name is not None
+        and on_ids
+    ):
+        local_start = _utc_naive_to_local(planned_date, tz_name).replace(second=0, microsecond=0)
+        svc = db.get(Service, planned_service_id)
+        dur_total = int(svc.estimated_duration_minutes or 0) if svc else 0
+        if dur_total > 0:
+            local_end = local_start + timedelta(minutes=dur_total)
+            unavailable_names: list[str] = []
+            for mid in on_ids:
+                if not is_master_available_for_interval(
+                    db,
+                    master_id=mid,
+                    start_dt=local_start,
+                    end_dt=local_end,
+                ):
+                    u = db.get(User, mid)
+                    unavailable_names.append((u.display_name or u.username) if u else f"#{mid}")
+
+            if unavailable_names:
+                err = (
+                    "Следующие мастера недоступны по графику на выбранное время: "
+                    + ", ".join(unavailable_names)
+                )
 
     if err:
         return templates.TemplateResponse(
