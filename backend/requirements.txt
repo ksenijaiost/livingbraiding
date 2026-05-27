@@ -10,3 +10,5 @@ itsdangerous==2.2.0
 python-dotenv==1.1.0
 tzdata>=2025.1
 pytest==8.4.2
+Pillow
+pillow-heif

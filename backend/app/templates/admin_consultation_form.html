@@ -130,14 +130,14 @@
               <a href="{{ consultation.photo_1 }}" class="lb-lightbox"><img src="{{ consultation.photo_1 }}" alt="" style="max-width:160px;max-height:160px;border-radius:8px;display:block;margin-bottom:6px;" /></a>
               <label><input type="checkbox" name="clear_photo_1" value="1" /> Удалить фото 1</label>
             {% endif %}
-            <input type="file" name="photo_1" accept="image/*" />
+            <input type="file" name="photo_1" accept="image/*,.heic,.heif" />
           </div>
           <div>
             {% if consultation and consultation.photo_2 %}
               <a href="{{ consultation.photo_2 }}" class="lb-lightbox"><img src="{{ consultation.photo_2 }}" alt="" style="max-width:160px;max-height:160px;border-radius:8px;display:block;margin-bottom:6px;" /></a>
               <label><input type="checkbox" name="clear_photo_2" value="1" /> Удалить фото 2</label>
             {% endif %}
-            <input type="file" name="photo_2" accept="image/*" />
+            <input type="file" name="photo_2" accept="image/*,.heic,.heif" />
           </div>
         </div>
       </div>
