@@ -415,6 +415,7 @@ def api_booking_available_masters(
     d: str,
     t: str,
     service_id: int,
+    duration_minutes: int | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -440,7 +441,7 @@ def api_booking_available_masters(
     if svc is None:
         raise HTTPException(status_code=400, detail="service not found")
 
-    dur_min = int(svc.estimated_duration_minutes or 0)
+    dur_min = int(duration_minutes or 0) or int(svc.estimated_duration_minutes or 0)
     if dur_min <= 0:
         return JSONResponse({"available_master_ids": []})
 

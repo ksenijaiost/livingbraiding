@@ -134,6 +134,31 @@
               <div id="lbBookingScheduleAvailMsg" class="muted" style="margin-top:10px; font-size:12px;"></div>
             {% endif %}
           </div>
+
+          <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+            <div style="font-weight: 700; margin-bottom: 8px;">Время выполнения услуги</div>
+            <label style="display:flex; gap:10px; align-items:center;">
+              <input type="checkbox" id="lbBookingCustomDurOn" name="visit_custom_duration_on" value="1"
+                {% if fp.get('visit_custom_duration_on') in ('1','on','true','yes') %}checked{% endif %} />
+              <span>Выбрать время</span>
+            </label>
+
+            <div class="muted" id="lbBookingDurDefaultText" style="margin-top:6px; font-size:12px;"></div>
+
+            <div class="row" id="lbBookingDurInputs" style="margin-top:10px; display:none; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+              <div>
+                <label>Часы</label>
+                <input type="number" id="lbBookingDurH" name="visit_custom_duration_h" min="0" step="1" value="{{ fp.get('visit_custom_duration_h','') }}" style="max-width:7rem;" />
+              </div>
+              <div>
+                <label>Минуты</label>
+                <input type="number" id="lbBookingDurM" name="visit_custom_duration_m" min="0" max="59" step="1" value="{{ fp.get('visit_custom_duration_m','') }}" style="max-width:7rem;" />
+              </div>
+              <div class="muted" style="font-size:12px; align-self:center;">
+                Для БД будет сохранено суммарно в минутах.
+              </div>
+            </div>
+          </div>
         </div>
 
         <div id="visit_kit_card" class="card" style="margin-top: 12px; background:#f8fafc; display:none;">
@@ -432,6 +457,13 @@
         <h3 style="margin-top:0;">Условия</h3>
         <div class="row">
           <div>
+            <div id="lbBookingPricePreview" style="margin-bottom:10px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff;">
+              <div style="font-weight:700;">Предварительный расчёт</div>
+              <div class="muted" style="font-size:12px; margin-top:4px;">
+                Расчёт предварительный и может отличаться от финальной суммы.
+              </div>
+              <div id="lbBookingPricePreviewLines" style="margin-top:8px; font-size:13px;"></div>
+            </div>
             <label>Сумма, озвученная клиенту</label>
             <input name="quoted_price_text" maxlength="120" value="{{ fp.get('quoted_price_text','') }}" placeholder="Напр.: 3500 или 3500–4000" />
           </div>
@@ -522,7 +554,28 @@
         var serviceSel = document.getElementById('service_id');
         var msg = document.getElementById('lbBookingScheduleAvailMsg');
         var masterCbs = Array.from(document.querySelectorAll('input[name="booking_master_on"]'));
-        return { plannedDate, plannedTime, serviceSel, msg, masterCbs };
+        var customOn = document.getElementById('lbBookingCustomDurOn');
+        var durH = document.getElementById('lbBookingDurH');
+        var durM = document.getElementById('lbBookingDurM');
+        return { plannedDate, plannedTime, serviceSel, msg, masterCbs, customOn, durH, durM };
+      }
+
+      function toInt(v) {
+        var n = Number(v);
+        if (isNaN(n)) return 0;
+        n = Math.floor(n);
+        return n < 0 ? 0 : n;
+      }
+
+      function getDurationOverrideMinutes() {
+        var el = getInputs();
+        if (!el.customOn || !el.customOn.checked) return null;
+        var h = toInt(el.durH ? el.durH.value : 0);
+        var m = toInt(el.durM ? el.durM.value : 0);
+        if (m > 59) m = 59;
+        var total = h * 60 + m;
+        if (total <= 0) return null;
+        return total;
       }
 
       async function refreshAvailableMasters() {
@@ -535,6 +588,8 @@
           '/api/booking/available-masters?d=' + encodeURIComponent(el.plannedDate.value) +
           '&t=' + encodeURIComponent(el.plannedTime.value) +
           '&service_id=' + encodeURIComponent(el.serviceSel.value);
+        var dur = getDurationOverrideMinutes();
+        if (dur != null) url += '&duration_minutes=' + encodeURIComponent(String(dur));
 
         try {
           var res = await fetch(url);
@@ -560,9 +615,143 @@
       if (el0.plannedDate) el0.plannedDate.addEventListener('change', refreshAvailableMasters);
       if (el0.plannedTime) el0.plannedTime.addEventListener('change', refreshAvailableMasters);
       if (el0.serviceSel) el0.serviceSel.addEventListener('change', refreshAvailableMasters);
+      if (el0.customOn) el0.customOn.addEventListener('change', refreshAvailableMasters);
+      if (el0.durH) el0.durH.addEventListener('input', refreshAvailableMasters);
+      if (el0.durM) el0.durM.addEventListener('input', refreshAvailableMasters);
 
       // initial run
       refreshAvailableMasters();
+    })();
+  </script>
+
+  <script>
+    (function () {
+      function toInt(v) {
+        var n = Number(v);
+        if (isNaN(n)) return 0;
+        n = Math.floor(n);
+        return n < 0 ? 0 : n;
+      }
+      function setText(id, txt) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = txt || '';
+      }
+      function show(id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = '';
+      }
+      function hide(id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      }
+      function readPriceRange(minV, maxV) {
+        var a = String(minV || '').trim();
+        var b = String(maxV || '').trim();
+        if (!a && !b) return null;
+        var aN = Number(a);
+        var bN = Number(b);
+        if (!isNaN(aN) && !isNaN(bN) && a && b) {
+          if (Math.abs(aN - bN) < 0.0005) return { min: aN, max: aN };
+          return { min: Math.min(aN, bN), max: Math.max(aN, bN) };
+        }
+        if (!isNaN(aN) && a) return { min: aN, max: aN };
+        if (!isNaN(bN) && b) return { min: bN, max: bN };
+        return null;
+      }
+      function fmtRub(n) {
+        try { return Math.round(Number(n || 0)) + ' ₽'; } catch (e) { return '0 ₽'; }
+      }
+      function fmtRange(r) {
+        if (!r) return '—';
+        if (r.min === r.max) return fmtRub(r.min);
+        return fmtRub(r.min) + ' – ' + fmtRub(r.max);
+      }
+
+      function updateDurationBlock() {
+        var on = document.getElementById('lbBookingCustomDurOn');
+        var h = document.getElementById('lbBookingDurH');
+        var m = document.getElementById('lbBookingDurM');
+        var svcSel = document.getElementById('service_id');
+        var defaultText = '';
+
+        // Пытаемся взять длительность из data-атрибутов options (если есть),
+        // иначе fallback: по умолчанию 120 мин (без точного вычисления).
+        var defMin = 120;
+        if (svcSel && svcSel.selectedOptions && svcSel.selectedOptions.length) {
+          var opt = svcSel.selectedOptions[0];
+          var dm = opt ? Number(opt.getAttribute('data-duration-minutes')) : NaN;
+          if (!isNaN(dm) && dm > 0) defMin = dm;
+        }
+        var dh = Math.floor(defMin / 60);
+        var dmm = defMin % 60;
+        defaultText = 'По умолчанию: ' + dh + ' ч ' + String(dmm).padStart(2,'0') + ' мин (из настроек услуги).';
+        setText('lbBookingDurDefaultText', defaultText);
+
+        if (on && on.checked) {
+          show('lbBookingDurInputs');
+          if (h && !String(h.value || '').trim()) h.value = String(dh);
+          if (m && !String(m.value || '').trim()) m.value = String(dmm);
+        } else {
+          hide('lbBookingDurInputs');
+        }
+      }
+
+      function updatePricePreview() {
+        var kindVisit = (document.querySelector('input[name="kind"][value="VISIT"]') || {}).checked;
+        var kindSale = (document.querySelector('input[name="kind"][value="PRODUCT_SALE"]') || {}).checked;
+        var svcMin = (document.querySelector('input[name="calc_service_min"]') || {}).value;
+        var svcMax = (document.querySelector('input[name="calc_service_max"]') || {}).value;
+        var prodMin = (document.querySelector('input[name="calc_product_min"]') || {}).value;
+        var prodMax = (document.querySelector('input[name="calc_product_max"]') || {}).value;
+
+        var svcR = readPriceRange(svcMin, svcMax);
+        var prodR = readPriceRange(prodMin, prodMax);
+
+        var lines = [];
+        if (kindVisit && svcR) lines.push({ label: 'Услуга по прайсу', r: svcR });
+        if (kindVisit && prodR) lines.push({ label: 'Работа/комплект/материалы', r: prodR });
+        if (kindSale && prodR) lines.push({ label: 'Товар', r: prodR });
+
+        var total = null;
+        for (var i = 0; i < lines.length; i++) {
+          var rr = lines[i].r;
+          if (!rr) continue;
+          if (!total) total = { min: rr.min, max: rr.max };
+          else total = { min: total.min + rr.min, max: total.max + rr.max };
+        }
+
+        var box = document.getElementById('lbBookingPricePreviewLines');
+        if (!box) return;
+        if (!lines.length) {
+          box.innerHTML = '<div class="muted">Выберите услугу/товар — появится предрасчёт.</div>';
+          return;
+        }
+        var h = '';
+        for (var j = 0; j < lines.length; j++) {
+          h += '<div style="display:flex; justify-content:space-between; gap:10px;">' +
+            '<div>' + lines[j].label + '</div>' +
+            '<div style="font-weight:700; white-space:nowrap;">' + fmtRange(lines[j].r) + '</div>' +
+          '</div>';
+        }
+        h += '<div style="margin-top:8px; padding-top:8px; border-top:1px solid #e5e7eb; display:flex; justify-content:space-between; gap:10px;">' +
+          '<div style="font-weight:700;">Итого</div>' +
+          '<div style="font-weight:800; white-space:nowrap;">' + fmtRange(total) + '</div>' +
+        '</div>';
+        box.innerHTML = h;
+      }
+
+      document.addEventListener('change', function (e) {
+        var id = (e && e.target && e.target.id) ? e.target.id : '';
+        if (id === 'service_id' || id === 'lbBookingCustomDurOn') updateDurationBlock();
+        updatePricePreview();
+      });
+      document.addEventListener('input', function (e) {
+        var id = (e && e.target && e.target.id) ? e.target.id : '';
+        if (id === 'lbBookingDurH' || id === 'lbBookingDurM') updateDurationBlock();
+      });
+
+      updateDurationBlock();
+      updatePricePreview();
     })();
   </script>
 

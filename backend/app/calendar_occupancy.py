@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import json
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -136,8 +137,24 @@ def build_occupancy_for_day(
         url = f"/bookings/{int(b.id)}"
         booking_master_ids = [int(m.master_id) for m in (b.masters or []) if m.master_id]
 
+        # Fix 43: длительность может быть переопределена прямо в брони
+        # (visit_custom_duration_minutes в details_json). Если задана — используем её.
+        dur_override: int = 0
+        raw_details = getattr(b, "details_json", None)
+        if raw_details:
+            try:
+                d0 = json.loads(raw_details)
+                if isinstance(d0, dict):
+                    dur_override = int(d0.get("visit_custom_duration_minutes") or 0)
+            except Exception:
+                dur_override = 0
+        if dur_override < 0:
+            dur_override = 0
+
         lines = list(b.planned_services or [])
         if lines:
+            # Для multi-service занятости по строкам planned_services оставляем
+            # длительности услуг (override относится к "времени визита" в простой форме).
             for ps in sorted(lines, key=lambda x: (int(x.sort_order or 0), int(x.id or 0))):
                 svc = ps.service
                 if svc is None:
@@ -173,7 +190,7 @@ def build_occupancy_for_day(
         svc = b.planned_service
         if svc is None:
             continue
-        dur = int(svc.estimated_duration_minutes or 0)
+        dur = dur_override if dur_override > 0 else int(svc.estimated_duration_minutes or 0)
         if dur <= 0:
             continue
         start_local = _utc_naive_to_local(b.planned_date, tz)

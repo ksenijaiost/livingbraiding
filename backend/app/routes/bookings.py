@@ -640,6 +640,9 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
     calc_keys = ("calc_product_min", "calc_product_max", "calc_service_min", "calc_service_max")
     if kind_raw == BookingKind.VISIT.value:
         keys = (
+            "visit_custom_duration_on",
+            "visit_custom_duration_h",
+            "visit_custom_duration_m",
             "visit_kit_mode",
             "visit_stock_kit_id",
             "visit_stock_kit_pieces",
@@ -709,6 +712,26 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
             d[key] = sv
 
     if kind_raw == BookingKind.VISIT.value:
+        # Нормализуем кастомную длительность → minutes в details_json (и сохраняем H/M для UI).
+        if parse_bool(fp.get("visit_custom_duration_on")):
+            raw_h = str(fp.get("visit_custom_duration_h") or "").strip()
+            raw_m = str(fp.get("visit_custom_duration_m") or "").strip()
+            try:
+                hh = int(parse_float(raw_h or "0", min=0.0, field_name="visit_custom_duration_h"))
+            except Exception:
+                hh = 0
+            try:
+                mm = int(parse_float(raw_m or "0", min=0.0, field_name="visit_custom_duration_m"))
+            except Exception:
+                mm = 0
+            if mm < 0:
+                mm = 0
+            if mm > 59:
+                mm = 59
+            total = int(hh) * 60 + int(mm)
+            if total > 0:
+                d["visit_custom_duration_minutes"] = int(total)
+
         strip_visit_kit_keys = True
         try:
             sid = parse_int(str(fp.get("service_id") or "").strip(), min=1, field_name="service_id")
@@ -1170,8 +1193,16 @@ async def admin_booking_new_post(  # noqa: C901
                 pass
         on_ids = sorted(set([i for i in on_ids if i > 0]))
 
-        # Интервал для проверки: от planned_time до end = start + sum(estimated_duration_minutes).
+        # Интервал для проверки: от planned_time до end = start + (override или sum(estimated_duration_minutes)).
         local_start = _utc_naive_to_local(planned_date, tz_name).replace(second=0, microsecond=0)
+        # Override длительности (Fix 43)
+        dur_override = 0
+        try:
+            dj = _booking_details_from_form(db, fp)
+            dur_override = int(dj.get("visit_custom_duration_minutes") or 0)
+        except Exception:
+            dur_override = 0
+
         dur_total = 0
         for sid in planned_service_ids:
             svc = db.get(Service, sid)
@@ -1179,8 +1210,9 @@ async def admin_booking_new_post(  # noqa: C901
                 continue
             dur_total += int(svc.estimated_duration_minutes or 0)
 
-        if dur_total > 0 and on_ids:
-            local_end = local_start + timedelta(minutes=dur_total)
+        dur_use = dur_override if dur_override > 0 else dur_total
+        if dur_use > 0 and on_ids:
+            local_end = local_start + timedelta(minutes=dur_use)
             unavailable_names: list[str] = []
             for mid in on_ids:
                 if not is_master_available_for_interval(
@@ -1649,8 +1681,15 @@ async def admin_booking_edit_post(
         local_start = _utc_naive_to_local(planned_date, tz_name).replace(second=0, microsecond=0)
         svc = db.get(Service, planned_service_id)
         dur_total = int(svc.estimated_duration_minutes or 0) if svc else 0
-        if dur_total > 0:
-            local_end = local_start + timedelta(minutes=dur_total)
+        dur_override = 0
+        try:
+            dj = _booking_details_from_form(db, fp)
+            dur_override = int(dj.get("visit_custom_duration_minutes") or 0)
+        except Exception:
+            dur_override = 0
+        dur_use = dur_override if dur_override > 0 else dur_total
+        if dur_use > 0:
+            local_end = local_start + timedelta(minutes=dur_use)
             unavailable_names: list[str] = []
             for mid in on_ids:
                 if not is_master_available_for_interval(
