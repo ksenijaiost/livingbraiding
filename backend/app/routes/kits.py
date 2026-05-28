@@ -9,7 +9,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.audit import diff_fields, write_audit_rows
@@ -244,33 +244,57 @@ def _kit_rows_for_list(kits: list[Kit], db: Session, display_tz: str) -> list[di
     ]
 
 
+def _kits_list_sort(sort: str | None, direction: str | None) -> tuple[str, str, object]:
+    sort_key = (sort or "sku").strip().lower()
+    if sort_key not in ("id", "sku", "title"):
+        sort_key = "sku"
+    sort_dir = (direction or "asc").strip().lower()
+    if sort_dir not in ("asc", "desc"):
+        sort_dir = "asc"
+    col = {"id": Kit.id, "sku": Kit.sku, "title": Kit.title}[sort_key]
+    order = col.asc() if sort_dir == "asc" else col.desc()
+    return sort_key, sort_dir, order
+
+
 @router.get("", response_class=HTMLResponse)
 def admin_kits_list(
     request: Request,
+    q: str | None = None,
     stock: str | None = Query(default="in_stock"),
+    sort: str | None = Query(default="sku"),
+    direction: str | None = Query(default="asc", alias="dir"),
     msg: str | None = None,
     err: str | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    kits = list(
-        db.scalars(
-            select(Kit)
-            .options(
-                selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
-                selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_user),
-                selectinload(Kit.reserves).selectinload(KitReserve.reserved_by_user),
-            )
-            .order_by(Kit.sku.asc())
-        ).all()
+    q_norm = (q or "").strip()
+    stock_mode = (stock or "in_stock").strip().lower()
+    if stock_mode not in ("in_stock", "all"):
+        stock_mode = "in_stock"
+    sort_key, sort_dir, order = _kits_list_sort(sort, direction)
+
+    stmt = (
+        select(Kit)
+        .options(
+            selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
+            selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_user),
+            selectinload(Kit.reserves).selectinload(KitReserve.reserved_by_user),
+        )
+        .order_by(order)
     )
+    if q_norm:
+        like = f"%{q_norm}%"
+        stmt = stmt.where(or_(Kit.sku.ilike(like), Kit.title.ilike(like)))
+
+    kits = list(db.scalars(stmt).all())
     staff_users = _staff_users_for_reserve(db)
     display_tz = get_display_timezone(db)
-    stock_mode = (stock or "in_stock").strip().lower()
     active = [k for k in kits if k.is_active]
     if stock_mode != "all":
         active = [k for k in active if int(k.pieces_available or 0) > 0]
     inactive = [k for k in kits if not k.is_active]
+    is_super = current_user.role == UserRole.ADMIN_SUPER
     return templates.TemplateResponse(
         "admin_kits.html",
         _ctx(
@@ -281,6 +305,10 @@ def admin_kits_list(
             staff_users=staff_users,
             kit_max_reserves=get_kit_max_reserves_per_kit(db),
             stock_mode=stock_mode,
+            q=q_norm,
+            sort=sort_key,
+            sort_dir=sort_dir,
+            is_super=is_super,
             msg=msg,
             err=err,
         ),

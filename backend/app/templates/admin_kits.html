@@ -28,24 +28,52 @@
       <div class="error lb-mb-12">{{ err }}</div>
     {% endif %}
 
-    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin: 10px 0 14px;">
-      <div class="muted" style="font-size:12px;">Показывать</div>
-      <a href="/kits"{% if stock_mode != 'all' %} style="text-decoration:underline;"{% endif %}>
-        <button type="button" class="secondary">В наличии</button>
-      </a>
-      <a href="/kits?stock=all"{% if stock_mode == 'all' %} style="text-decoration:underline;"{% endif %}>
-        <button type="button" class="secondary">Все</button>
-      </a>
+    <form method="get" action="/kits" class="row" style="margin-bottom: 12px;">
+      <div>
+        <label>Поиск</label>
+        <input name="q" value="{{ q or '' }}" placeholder="артикул или название" />
+      </div>
+      <input type="hidden" name="stock" value="{{ stock_mode }}" />
+      <input type="hidden" name="sort" value="{{ sort }}" />
+      <input type="hidden" name="dir" value="{{ sort_dir }}" />
+      <div style="align-self:end;">
+        <button type="submit">Найти</button>
+      </div>
+    </form>
+
+    <p style="margin:0 0 14px;font-size:13px;">
       {% if stock_mode != 'all' %}
-        <div class="muted" style="font-size:12px;">(скрыты комплекты с 0 заготовок)</div>
+        <strong>В наличии</strong>
+        <span class="muted">·</span>
+        <a href="/kits?stock=all&amp;q={{ (q or '')|urlencode }}&amp;sort={{ sort }}&amp;dir={{ sort_dir }}">Все</a>
+        <span class="muted" style="margin-left:8px;">(скрыты комплекты с 0 заготовок)</span>
+      {% else %}
+        <strong>Все</strong>
+        <span class="muted">·</span>
+        <a href="/kits?stock=in_stock&amp;q={{ (q or '')|urlencode }}&amp;sort={{ sort }}&amp;dir={{ sort_dir }}">В наличии</a>
       {% endif %}
-    </div>
+    </p>
 
     <table>
       <thead>
         <tr>
-          <th>Артикул</th>
-          <th>Название</th>
+          {% if is_super %}
+            <th>
+              <a href="/kits?q={{ (q or '')|urlencode }}&amp;stock={{ stock_mode }}&amp;sort=id&amp;dir={{ 'desc' if sort == 'id' and sort_dir == 'asc' else 'asc' }}">
+                ID{% if sort == 'id' %} {% if sort_dir == 'asc' %}↑{% else %}↓{% endif %}{% endif %}
+              </a>
+            </th>
+          {% endif %}
+          <th>
+            <a href="/kits?q={{ (q or '')|urlencode }}&amp;stock={{ stock_mode }}&amp;sort=sku&amp;dir={{ 'desc' if sort == 'sku' and sort_dir == 'asc' else 'asc' }}">
+              Артикул{% if sort == 'sku' %} {% if sort_dir == 'asc' %}↑{% else %}↓{% endif %}{% endif %}
+            </a>
+          </th>
+          <th>
+            <a href="/kits?q={{ (q or '')|urlencode }}&amp;stock={{ stock_mode }}&amp;sort=title&amp;dir={{ 'desc' if sort == 'title' and sort_dir == 'asc' else 'asc' }}">
+              Название{% if sort == 'title' %} {% if sort_dir == 'asc' %}↑{% else %}↓{% endif %}{% endif %}
+            </a>
+          </th>
           <th>Цена, ₽</th>
           <th>Скидка, %</th>
           <th>Остаток</th>
@@ -61,6 +89,9 @@
           {% set slots_full = slots_u >= kit_max_reserves %}
           {% set can_open_reserve = k.pieces_available > 0 and not slots_full %}
           <tr>
+            {% if is_super %}
+              <td class="muted lb-nowrap"><a href="/kits/{{ k.id }}">{{ k.id }}</a></td>
+            {% endif %}
             <td class="lb-nowrap">
               {% if missing_price %}
                 <span title="Не задана цена продажи — списание в визите/продаже недоступно" class="lb-icon-warn-mr4">⚠️</span>
@@ -149,6 +180,10 @@
               {% endif %}
               </div>
             </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="{{ 7 if is_super else 6 }}" class="muted" style="padding:12px;">Ничего не найдено.</td>
           </tr>
         {% endfor %}
       </tbody>
