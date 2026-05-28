@@ -586,10 +586,10 @@
 
         var url =
           '/api/booking/available-masters?d=' + encodeURIComponent(el.plannedDate.value) +
-          '&t=' + encodeURIComponent(el.plannedTime.value) +
-          '&service_id=' + encodeURIComponent(el.serviceSel.value);
+          '\x26t=' + encodeURIComponent(el.plannedTime.value) +
+          '\x26service_id=' + encodeURIComponent(el.serviceSel.value);
         var dur = getDurationOverrideMinutes();
-        if (dur != null) url += '&duration_minutes=' + encodeURIComponent(String(dur));
+        if (dur != null) url += '\x26duration_minutes=' + encodeURIComponent(String(dur));
 
         try {
           var res = await fetch(url);
@@ -774,11 +774,11 @@
     (function () {
       function esc(s) {
         return String(s || '')
-          .replace(/&/g, '&' + 'amp;')
-          .replace(/</g, '<' + 'lt;')
-          .replace(/>/g, '>' + 'gt;')
-          .replace(/"/g, '&' + 'quot;')
-          .replace(/'/g, '&' + '#39;');
+          .replace(/\x26/g, '\x26amp;')
+          .replace(/\x3c/g, '\x3clt;')
+          .replace(/\x3e/g, '\x3egt;')
+          .replace(/\x22/g, '\x26quot;')
+          .replace(/\x27/g, '\x26#39;');
       }
       function ymFromDate(dt) {
         var y = dt.getFullYear();
@@ -817,7 +817,7 @@
         show(bd); show(md);
         document.body.style.overflow = 'hidden';
         try {
-          var res = await fetch('/api/calendar/day?d=' + encodeURIComponent(isoDay) + '&view=occupancy');
+          var res = await fetch('/api/calendar/day?d=' + encodeURIComponent(isoDay) + '\x26view=occupancy');
           if (!res.ok) throw new Error('HTTP ' + res.status);
           var data = await res.json();
           var occ = data.occupancy || {};
