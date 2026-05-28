@@ -7,8 +7,14 @@ from pathlib import Path
 from starlette.datastructures import UploadFile
 
 
-ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
-ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
+ALLOWED_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+}
 MAX_BYTES = 10 * 1024 * 1024  # 10MB
 
 
@@ -32,6 +38,8 @@ def _safe_ext(filename: str | None, content_type: str | None) -> str | None:
         return ".png"
     if ct == "image/webp":
         return ".webp"
+    if ct in ("image/heic", "image/heif"):
+        return ".heic"
     return None
 
 
@@ -72,18 +80,64 @@ async def save_upload_image(upload: object) -> str:
     """
     Save an uploaded image to local disk and return a DB-safe URL: `/media/<rel_path>`.
     """
-    ct = (upload.content_type or "").strip().lower()
-    if ct and ct not in ALLOWED_CONTENT_TYPES:
-        raise ValueError("Допускаются только JPG/PNG/WebP.")
     ext = _safe_ext(upload.filename, upload.content_type)
     if not ext:
-        raise ValueError("Некорректный файл: допускаются только JPG/PNG/WebP.")
+        raise ValueError("Некорректный файл: допускаются JPG/PNG/WebP/HEIC.")
 
     # yyyy-mm style folders are overkill; keep it simple for now.
-    rel_name = f"{uuid.uuid4().hex}{ext}"
+    heic_out_ext = ".jpg" if ext in (".heic", ".heif") else ext
+    rel_name = f"{uuid.uuid4().hex}{heic_out_ext}"
     root = media_root_dir()
     dest = (root / rel_name)
 
+    # HEIC/HEIF: конвертируем в JPG перед сохранением.
+    if ext in (".heic", ".heif"):
+        # Read upload into memory (лимит 10MB уже стоит).
+        data_parts: list[bytes] = []
+        total = 0
+        while True:
+            chunk = await upload.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_BYTES:
+                raise ValueError("Файл слишком большой (лимит 10MB).")
+            data_parts.append(chunk)
+        data = b"".join(data_parts)
+
+        try:
+            from io import BytesIO
+
+            from PIL import Image  # type: ignore
+            from pillow_heif import register_heif_opener  # type: ignore
+
+            register_heif_opener()
+            img = Image.open(BytesIO(data))
+            img.load()
+
+            # HEIC может содержать прозрачность; JPEG её не поддерживает.
+            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                bg = Image.new("RGB", img.size, (255, 255, 255))
+                bg.paste(img.convert("RGBA"), mask=img.convert("RGBA").split()[-1])
+                img = bg
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
+
+            img.save(dest, format="JPEG", quality=90, optimize=True)
+        except ImportError as e:
+            raise ValueError("Для HEIC нужна библиотека pillow-heif.") from e
+        except Exception as e:
+            # Do not leak internals to UI; keep message actionable.
+            raise ValueError("Не удалось обработать HEIC-фото.") from e
+
+        # reset for potential reuse
+        try:
+            await upload.seek(0)
+        except Exception:
+            pass
+        return f"/media/{rel_name}"
+
+    # JPG/PNG/WebP: сохраняем как есть (стримом).
     total = 0
     with dest.open("wb") as f:
         while True:

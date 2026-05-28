@@ -10,10 +10,11 @@ inside the visit-related tables, so changing settings only affects *future* visi
 """
 
 import enum
-from datetime import datetime
+from datetime import datetime, date, time
 
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -22,6 +23,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    Time,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -813,6 +815,60 @@ class BookingAuditLog(Base):
 
     booking: Mapped["Booking"] = relationship()
     changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class MasterScheduleStatus(str, enum.Enum):
+    WORKING = "WORKING"
+    DAY_OFF = "DAY_OFF"
+
+
+class MasterScheduleDay(Base):
+    """График работы мастера по дням (рабочий/выходной + интервал и перерыв)."""
+
+    __tablename__ = "master_schedule_days"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    work_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    status: Mapped[MasterScheduleStatus] = mapped_column(
+        Enum(MasterScheduleStatus, native_enum=False, length=16), nullable=False
+    )
+    # Если status=WORKING, то интервалы могут быть NULL → подставляются часы по умолчанию в доменной логике.
+    time_from: Mapped[time | None] = mapped_column(Time, nullable=True)
+    time_to: Mapped[time | None] = mapped_column(Time, nullable=True)
+    break_from: Mapped[time | None] = mapped_column(Time, nullable=True)
+    break_to: Mapped[time | None] = mapped_column(Time, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    master: Mapped["User"] = relationship(foreign_keys=[master_id])
+
+    __table_args__ = (
+        UniqueConstraint("master_id", "work_date", name="uq_master_schedule_day"),
+    )
+
+
+class MasterScheduleAuditLog(Base):
+    """Audit changes for master schedule days (поля old/new)."""
+
+    __tablename__ = "master_schedule_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    work_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+    master: Mapped["User"] = relationship(foreign_keys=[master_id])
 
 
 class Consultation(Base):

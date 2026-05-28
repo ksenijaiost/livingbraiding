@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth import AuthUser, require_role
 from app.consultation_booking import booking_status_label
 from app.calendar_display import get_calendar_display_hours
-from app.calendar_occupancy import build_occupancy_for_day
+from app.calendar_occupancy import build_occupancy_for_day, list_calendar_masters
+from app.master_schedule import is_master_available_for_interval
 from app.db.models import (
     Booking,
     BookingKind,
@@ -39,6 +40,7 @@ from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_date_iso
+from app.payroll_fund import sum_ledger_amounts_by_source
 from app.ui_service_display import (
     booking_service_labels_from_booking,
     format_visit_service_catalog_path,
@@ -90,31 +92,16 @@ def _sum_ledger(
     source_ids: list[int],
     user_id: int | None = None,
 ) -> dict[int, float]:
-    if not source_ids:
-        return {}
-    stmt = (
-        select(PayrollFundLedger.source_id, func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
-        .where(
-            PayrollFundLedger.side == side,
-            PayrollFundLedger.source_kind == source_kind,
-            PayrollFundLedger.source_id.in_(source_ids),
-        )
-        .group_by(PayrollFundLedger.source_id)
+    raw = sum_ledger_amounts_by_source(
+        db, side=side, source_kind=source_kind, source_ids=source_ids, user_id=user_id
     )
-    if user_id is not None:
-        stmt = stmt.where(PayrollFundLedger.user_id == user_id)
-    rows = list(db.execute(stmt).all())
-    out: dict[int, float] = {}
-    for sid, amt in rows:
-        if sid is None:
-            continue
-        out[int(sid)] = _money0(float(amt or 0.0))
-    return out
+    return {k: _money0(v) for k, v in raw.items()}
 
 
 @router.get("/api/calendar/day")
 def api_calendar_day(
     d: str,
+    view: str | None = Query(None),
     current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -271,6 +258,8 @@ def api_calendar_day(
                 }
             )
             continue
+        legacy_payout_allocated = False
+        legacy_studio_allocated = False
         for svc in active_services:
             if is_master:
                 show = svc.mix_bonus_master_id == current_user.id
@@ -291,6 +280,14 @@ def api_calendar_day(
                 if not show:
                     continue
             sid = int(svc.id)
+            payout = float(visit_payout_vs.get(sid, 0.0))
+            studio = float(visit_studio_vs.get(sid, 0.0))
+            if not legacy_payout_allocated:
+                payout += float(visit_payout_legacy.get(vid, 0.0))
+                legacy_payout_allocated = True
+            if is_super and not legacy_studio_allocated:
+                studio += float(visit_studio_legacy.get(vid, 0.0))
+                legacy_studio_allocated = True
             visit_items.append(
                 {
                     "id": vid,
@@ -298,8 +295,8 @@ def api_calendar_day(
                     "label": svc.service_name,
                     "service_label": format_visit_service_catalog_path(svc),
                     "url": f"/visits/{vid}",
-                    "payout_sum": float(visit_payout_vs.get(sid, 0.0)),
-                    "studio_sum": float(visit_studio_vs.get(sid, 0.0)),
+                    "payout_sum": payout,
+                    "studio_sum": studio,
                 }
             )
 
@@ -376,6 +373,16 @@ def api_calendar_day(
         db, day=day, hour_from=hour_from, hour_to=hour_to, bookings=bookings
     )
 
+    if (view or "").strip().lower() == "occupancy":
+        return JSONResponse(
+            {
+                "date": day.isoformat(),
+                "occupancy": occupancy,
+                "is_super": is_super,
+                "view": "occupancy",
+            }
+        )
+
     resp = {
         "date": day.isoformat(),
         "occupancy": occupancy,
@@ -401,4 +408,51 @@ def api_calendar_day(
         "is_super": is_super,
     }
     return JSONResponse(resp)
+
+
+@router.get("/api/booking/available-masters")
+def api_booking_available_masters(
+    d: str,
+    t: str,
+    service_id: int,
+    duration_minutes: int | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    """
+    Для админ-формы брони: какие мастера доступны по графику на выбранную дату/время
+    (интервал = duration из estimated_duration_minutes).
+    """
+    try:
+        day = date.fromisoformat((d or "").strip())
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad date")
+
+    time_raw = (t or "").strip()
+    try:
+        parts = time_raw.replace(".", ":").split(":")
+        hh = int(parts[0])
+        mm = int(parts[1]) if len(parts) > 1 else 0
+        tm = time(hour=hh % 24, minute=min(max(mm, 0), 59))
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad time")
+
+    svc = db.get(Service, int(service_id))
+    if svc is None:
+        raise HTTPException(status_code=400, detail="service not found")
+
+    dur_min = int(duration_minutes or 0) or int(svc.estimated_duration_minutes or 0)
+    if dur_min <= 0:
+        return JSONResponse({"available_master_ids": []})
+
+    start_dt = datetime.combine(day, tm)
+    end_dt = start_dt + timedelta(minutes=dur_min)
+
+    available: list[int] = []
+    for m in list_calendar_masters(db):
+        mid = int(m["id"])
+        if is_master_available_for_interval(db, master_id=mid, start_dt=start_dt, end_dt=end_dt):
+            available.append(mid)
+
+    return JSONResponse({"available_master_ids": available})
 

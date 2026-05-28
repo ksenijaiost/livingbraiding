@@ -40,7 +40,9 @@ from app.payroll_fund import (
     employee_fund_balance,
     employee_payout_total_net,
     studio_fund_balance,
+    sum_visit_ledger_by_visit_id,
 )
+from app.master_schedule import schedule_filled_until
 from app.webui import templates, ctx as _ctx
 
 
@@ -64,6 +66,7 @@ def home(
     payroll_home: dict[str, Any] | None = None
     calendar_ctx: dict[str, Any] | None = None
     sections_ctx: dict[str, Any] | None = None
+    master_schedule_banner: dict[str, Any] | None = None
 
     display_tz = get_display_timezone(db)
     tz = ZoneInfo(display_tz)
@@ -195,22 +198,17 @@ def home(
             drafts_by_day[d0] = int(cnt)
 
         if visit_ids:
-            v_pay = list(
-                db.execute(
-                    select(Visit.id, Visit.performed_date, func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
-                    .join(PayrollFundLedger, PayrollFundLedger.source_id == Visit.id)
-                    .where(
-                        PayrollFundLedger.side == PayrollFundSide.MASTER,
-                        PayrollFundLedger.user_id == current_user.id,
-                        PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
-                        Visit.id.in_(visit_ids),
-                    )
-                    .group_by(Visit.id, Visit.performed_date)
-                ).all()
+            visit_pay_by_id = sum_visit_ledger_by_visit_id(
+                db,
+                side=PayrollFundSide.MASTER,
+                visit_ids=visit_ids,
+                user_id=current_user.id,
             )
-            for _, dt0, amt in v_pay:
+            for vid, dt0 in visit_rows:
                 if isinstance(dt0, datetime):
-                    payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(amt or 0.0)
+                    payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(
+                        visit_pay_by_id.get(int(vid), 0.0)
+                    )
 
         if work_ids:
             w_pay = list(
@@ -263,6 +261,7 @@ def home(
                 PayrollFundLedger.source_kind.notin_(
                     (
                         PayrollFundSourceKind.VISIT,
+                        PayrollFundSourceKind.VISIT_SERVICE,
                         PayrollFundSourceKind.WORK,
                         PayrollFundSourceKind.PRODUCT_SALE,
                     )
@@ -337,6 +336,15 @@ def home(
             "weeks": weeks,
         }
 
+        if current_user.role == UserRole.MASTER:
+            filled = schedule_filled_until(db, master_id=current_user.id)
+            if filled:
+                master_schedule_banner = {
+                    "filled_until": filled,
+                }
+            else:
+                master_schedule_banner = None
+
         sections_ctx = {
             "is_master": current_user.role == UserRole.MASTER,
             "is_admin": current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER),
@@ -345,7 +353,14 @@ def home(
 
     return templates.TemplateResponse(
         "home.html",
-        _ctx(request, current_user=current_user, payroll_home=payroll_home, calendar_ctx=calendar_ctx, sections_ctx=sections_ctx),
+        _ctx(
+            request,
+            current_user=current_user,
+            payroll_home=payroll_home,
+            calendar_ctx=calendar_ctx,
+            sections_ctx=sections_ctx,
+            master_schedule_banner=master_schedule_banner,
+        ),
     )
 
 

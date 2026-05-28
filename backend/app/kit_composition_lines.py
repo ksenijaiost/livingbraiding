@@ -282,6 +282,7 @@ def apply_global_used_discount(
                 key=ln.key,
                 condition=BlankCondition.USED,
                 used_price_pct=pct,
+                used_price_pct_explicit=True,
                 by_staff=dict(ln.by_staff),
             )
         )

@@ -59,6 +59,83 @@ def money_q2(x: float) -> float:
     return round(float(x), 2)
 
 
+def sum_ledger_amounts_by_source(
+    db: Session,
+    *,
+    side: PayrollFundSide,
+    source_kind: PayrollFundSourceKind,
+    source_ids: list[int],
+    user_id: int | None = None,
+) -> dict[int, float]:
+    """Сумма проводок по source_id для одного source_kind."""
+    if not source_ids:
+        return {}
+    stmt = (
+        select(PayrollFundLedger.source_id, func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
+        .where(
+            PayrollFundLedger.side == side,
+            PayrollFundLedger.source_kind == source_kind,
+            PayrollFundLedger.source_id.in_(source_ids),
+        )
+        .group_by(PayrollFundLedger.source_id)
+    )
+    if user_id is not None:
+        stmt = stmt.where(PayrollFundLedger.user_id == user_id)
+    out: dict[int, float] = {}
+    for sid, amt in db.execute(stmt).all():
+        if sid is None:
+            continue
+        out[int(sid)] = money_q2(float(amt or 0.0))
+    return out
+
+
+def sum_visit_ledger_by_visit_id(
+    db: Session,
+    *,
+    side: PayrollFundSide,
+    visit_ids: list[int],
+    user_id: int | None = None,
+) -> dict[int, float]:
+    """Сумма проводок по визиту: legacy VISIT + построчные VISIT_SERVICE."""
+    if not visit_ids:
+        return {}
+    out = sum_ledger_amounts_by_source(
+        db,
+        side=side,
+        source_kind=PayrollFundSourceKind.VISIT,
+        source_ids=visit_ids,
+        user_id=user_id,
+    )
+    stmt = (
+        select(VisitService.visit_id, func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
+        .join(VisitService, VisitService.id == PayrollFundLedger.source_id)
+        .where(
+            PayrollFundLedger.side == side,
+            PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT_SERVICE,
+            VisitService.visit_id.in_(visit_ids),
+        )
+        .group_by(VisitService.visit_id)
+    )
+    if user_id is not None:
+        stmt = stmt.where(PayrollFundLedger.user_id == user_id)
+    for vid, amt in db.execute(stmt).all():
+        if vid is None:
+            continue
+        k = int(vid)
+        out[k] = money_q2(out.get(k, 0.0) + float(amt or 0.0))
+    return out
+
+
+def visit_ids_for_visit_service_source_ids(db: Session, visit_service_ids: list[int]) -> dict[int, int]:
+    """visit_service.id → visit.id (для подписи источника в журнале)."""
+    if not visit_service_ids:
+        return {}
+    rows = db.execute(
+        select(VisitService.id, VisitService.visit_id).where(VisitService.id.in_(visit_service_ids))
+    ).all()
+    return {int(vsid): int(vid) for vsid, vid in rows if vsid is not None and vid is not None}
+
+
 def append_ledger(
     db: Session,
     *,
