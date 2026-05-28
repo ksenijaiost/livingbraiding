@@ -147,7 +147,7 @@ def run_purge(
     db: Session,
     *,
     entity: str,
-    entity_id: int,
+    entity_id: int | list[int],
     confirm1: str,
     confirm2: str,
     actor_user_id: int | None,
@@ -158,23 +158,45 @@ def run_purge(
         )
     kind = (entity or "").strip().lower()
     if kind == "visit":
-        purge_visit_hard(db, entity_id, actor_user_id=actor_user_id)
+        purge_visit_hard(db, int(entity_id), actor_user_id=actor_user_id)
     elif kind == "booking":
-        purge_booking_hard(db, entity_id, actor_user_id=actor_user_id)
+        purge_booking_hard(db, int(entity_id), actor_user_id=actor_user_id)
     elif kind == "product_sale":
-        purge_product_sale_hard(db, entity_id, actor_user_id=actor_user_id)
+        purge_product_sale_hard(db, int(entity_id), actor_user_id=actor_user_id)
     elif kind == "work":
-        purge_work_hard(db, entity_id, actor_user_id=actor_user_id)
+        purge_work_hard(db, int(entity_id), actor_user_id=actor_user_id)
     elif kind == "client":
-        purge_client_hard(db, entity_id, actor_user_id=actor_user_id)
+        purge_client_hard(db, int(entity_id), actor_user_id=actor_user_id)
+    elif kind == "kit":
+        ids = entity_id if isinstance(entity_id, list) else [int(entity_id)]
+        purge_kits_hard(db, ids, actor_user_id=actor_user_id)
     else:
         raise ValueError("Неизвестный тип объекта.")
 
 
-def parse_purge_entity(entity: str, entity_id_raw: str) -> tuple[str, int]:
+def parse_purge_entity(entity: str, entity_id_raw: str) -> tuple[str, int | list[int]]:
     e = (entity or "").strip().lower()
+    raw = (entity_id_raw or "").strip()
+    if e == "kit":
+        parts = [p.strip() for p in raw.replace("\n", ",").replace(" ", ",").split(",") if p.strip()]
+        if not parts:
+            raise ValueError("id: укажите ID (одно число) или список ID через запятую/пробел/перенос строки.")
+        ids: list[int] = []
+        for p in parts:
+            try:
+                ids.append(int(parse_int(p, min=1, field_name="id")))
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
+        seen: set[int] = set()
+        out: list[int] = []
+        for x in ids:
+            if x in seen:
+                continue
+            seen.add(x)
+            out.append(x)
+        return e, out if len(out) > 1 else int(out[0])
     try:
-        eid = parse_int((entity_id_raw or "").strip(), min=1, field_name="id")
+        eid = parse_int(raw, min=1, field_name="id")
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
     return e, int(eid)
@@ -189,10 +211,11 @@ def _fmt_dt(dt) -> str:
         return str(dt)
 
 
-def build_purge_preview(db: Session, entity: str, entity_id: int) -> dict:
+def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) -> dict:
     """Краткое описание объекта для экрана подтверждения удаления (суперадмин)."""
     kind = (entity or "").strip().lower()
-    eid = int(entity_id)
+    ids = entity_id if isinstance(entity_id, list) else [int(entity_id)]
+    eid = int(ids[0]) if ids else 0
 
     if kind == "visit":
         visit = db.scalar(
@@ -309,4 +332,58 @@ def build_purge_preview(db: Session, entity: str, entity_id: int) -> dict:
         )
         return {"ok": True, "heading": f"Клиент #{eid}", "lines": lines}
 
+    if kind == "kit":
+        if not ids:
+            return {"ok": False, "error": "ID не указан."}
+        kits = list(db.scalars(select(Kit).where(Kit.id.in_(ids)).order_by(Kit.id.asc())).all())
+        found_ids = {int(k.id) for k in kits}
+        missing = [str(i) for i in ids if int(i) not in found_ids]
+
+        blockers: list[str] = []
+        for kid in ids[:80]:
+            used_v = int(db.scalar(select(func.count()).select_from(VisitKitUsage).where(VisitKitUsage.kit_id == int(kid))) or 0)
+            used_s = int(db.scalar(select(func.count()).select_from(ProductSale).where(ProductSale.kit_id == int(kid))) or 0)
+            used_w = int(db.scalar(select(func.count()).select_from(WorkForInventory).where(WorkForInventory.created_kit_id == int(kid))) or 0)
+            if used_v or used_s or used_w:
+                blockers.append(f"{kid} (визиты:{used_v}, продажи:{used_s}, работы:{used_w})")
+
+        lines: list[str] = []
+        lines.append(f"ID к удалению: {', '.join(str(x) for x in ids[:40])}" + ("…" if len(ids) > 40 else ""))
+        if missing:
+            lines.append("Не найдены: " + ", ".join(missing[:40]) + ("…" if len(missing) > 40 else ""))
+        if kits:
+            sample = kits[:5]
+            lines.append("Примеры карточек: " + "; ".join(f"#{int(k.id)} {k.sku} — {k.title}" for k in sample))
+        if blockers:
+            lines.append("Нельзя удалить (есть использование): " + "; ".join(blockers[:10]) + ("…" if len(blockers) > 10 else ""))
+        heading = f"Комплект #{ids[0]}" if len(ids) == 1 else f"Комплекты (x{len(ids)})"
+        return {"ok": True, "heading": heading, "lines": lines}
+
     return {"ok": False, "error": "Неизвестный тип объекта."}
+
+
+def purge_kits_hard(db: Session, kit_ids: list[int], *, actor_user_id: int | None) -> None:
+    ids = [int(x) for x in kit_ids if int(x) > 0]
+    if not ids:
+        raise ValueError("ID комплекта не указан.")
+
+    bad: list[str] = []
+    for kid in ids:
+        used_v = int(db.scalar(select(func.count()).select_from(VisitKitUsage).where(VisitKitUsage.kit_id == kid)) or 0)
+        used_s = int(db.scalar(select(func.count()).select_from(ProductSale).where(ProductSale.kit_id == kid)) or 0)
+        used_w = int(db.scalar(select(func.count()).select_from(WorkForInventory).where(WorkForInventory.created_kit_id == kid)) or 0)
+        if used_v or used_s or used_w:
+            bad.append(f"{kid} (визиты:{used_v}, продажи:{used_s}, работы:{used_w})")
+    if bad:
+        raise ValueError("Нельзя удалить: комплект(ы) использованы в данных. " + "; ".join(bad[:12]) + ("…" if len(bad) > 12 else ""))
+
+    kits = list(db.scalars(select(Kit).where(Kit.id.in_(ids)).order_by(Kit.id.asc())).all())
+    found_ids = {int(k.id) for k in kits}
+    missing = [str(i) for i in ids if int(i) not in found_ids]
+    if missing:
+        raise ValueError("Не найдены комплекты: " + ", ".join(missing[:40]) + ("…" if len(missing) > 40 else ""))
+
+    for k in kits:
+        db.execute(delete(KitReserve).where(KitReserve.kit_id == int(k.id)))
+        db.execute(delete(KitAuditLog).where(KitAuditLog.kit_id == int(k.id)))
+        db.delete(k)
