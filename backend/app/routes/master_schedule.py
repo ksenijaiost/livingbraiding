@@ -4,7 +4,7 @@ from datetime import date, datetime, time
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -367,9 +367,11 @@ async def api_save_master_schedule_bulk(
 @router.get("/master/schedule", response_class=HTMLResponse)
 def master_schedule_page(
     request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
+    if current_user.role == UserRole.ADMIN_SUPER:
+        return RedirectResponse(url="/admin/master-schedule", status_code=303)
     # Template itself does all loading via API, we only provide initial master list.
     # Provide hour defaults for quick placeholders.
     hour_from, hour_to = get_default_work_hours(db)
