@@ -286,9 +286,9 @@
           var tag = (t.tagName || '').toUpperCase();
           if (tag === 'TEXTAREA') return;
           if (tag === 'BUTTON') return;
-          if (t && t.getAttribute && t.getAttribute('data-allow-enter-submit') === '1') return;
-          var form = (t && t.form) ? t.form : null;
-          if (form && form.getAttribute && form.getAttribute('data-allow-enter-submit') === '1') return;
+          if (t &amp;&amp; t.getAttribute &amp;&amp; t.getAttribute('data-allow-enter-submit') === '1') return;
+          var form = (t &amp;&amp; t.form) ? t.form : null;
+          if (form &amp;&amp; form.getAttribute &amp;&amp; form.getAttribute('data-allow-enter-submit') === '1') return;
           if (!form) return;
           e.preventDefault();
         });
@@ -301,13 +301,13 @@
             var all = document.querySelectorAll('details.nav-dd');
             for (var i = 0; i < all.length; i++) {
               var d = all[i];
-              if (opened && d === opened) continue;
+              if (opened &amp;&amp; d === opened) continue;
               d.removeAttribute('open');
             }
           } catch (e) {}
         }
         document.addEventListener('toggle', function (e) {
-          var t = e && e.target;
+          var t = e &amp;&amp; e.target;
           if (!t) return;
           if (t.tagName !== 'DETAILS') return;
           if (!t.classList || !t.classList.contains('nav-dd')) return;
@@ -375,13 +375,13 @@
             var all = drawer.querySelectorAll('details');
             for (var i = 0; i < all.length; i++) {
               var d = all[i];
-              if (opened && d === opened) continue;
+              if (opened &amp;&amp; d === opened) continue;
               d.removeAttribute('open');
             }
           } catch (e) {}
         }
         document.addEventListener('toggle', function (e) {
-          var t = e && e.target;
+          var t = e &amp;&amp; e.target;
           if (!t) return;
           if (t.tagName !== 'DETAILS') return;
           var drawer = document.getElementById('lbMobileDrawer');

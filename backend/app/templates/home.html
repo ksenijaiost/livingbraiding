@@ -229,9 +229,12 @@
       }
 
       function esc(s) {
-        return String(s || '').replace(/[&<>\"']/g, function (c) {
-          return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c] || c);
-        });
+        return String(s || '')
+          .replace(/\x26/g, '\x26amp;')
+          .replace(/\x3c/g, '\x3clt;')
+          .replace(/\x3e/g, '\x3egt;')
+          .replace(/\x22/g, '\x26quot;')
+          .replace(/\x27/g, '\x26#39;');
       }
 
       window.lbCloseDayModal = function () {
@@ -332,7 +335,7 @@
             var cnt = Number(payload.count || 0);
             var payout = money2(payload.payout_sum || 0);
             var studio = money2(payload.studio_sum || 0);
-            var showStudio = !!data.is_super && key !== 'bookings';
+            var showStudio = !!data.is_super &amp;&amp; key !== 'bookings';
             var isBookings = key === 'bookings';
             var useServiceLabel = key === 'bookings' || key === 'visits';
             var h = '';
@@ -387,7 +390,7 @@
           html += block('Брони', data.bookings, 'bookings');
           html += block('Визиты', data.visits, 'visits');
           html += block('Работа', data.works, 'works');
-          if (data.drafts && data.drafts.count) {
+          if (data.drafts &amp;&amp; data.drafts.count) {
             html += block('Черновики визита', data.drafts, 'drafts');
           }
           body.innerHTML = html;
@@ -417,7 +420,7 @@
       document.addEventListener('keydown', function (e) {
         if (!e || e.key !== 'Escape') return;
         var md = document.getElementById('lbDayModal');
-        if (md && md.style.display === 'block') window.lbCloseDayModal();
+        if (md &amp;&amp; md.style.display === 'block') window.lbCloseDayModal();
       });
     })();
   </script>
