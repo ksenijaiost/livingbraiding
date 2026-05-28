@@ -647,15 +647,15 @@
       function readPriceRange(minV, maxV) {
         var a = String(minV || '').trim();
         var b = String(maxV || '').trim();
-        if (!a &amp;&amp; !b) return null;
+        if (!a && !b) return null;
         var aN = Number(a);
         var bN = Number(b);
-        if (!isNaN(aN) &amp;&amp; !isNaN(bN) &amp;&amp; a &amp;&amp; b) {
+        if (!isNaN(aN) && !isNaN(bN) && a && b) {
           if (Math.abs(aN - bN) < 0.0005) return { min: aN, max: aN };
           return { min: Math.min(aN, bN), max: Math.max(aN, bN) };
         }
-        if (!isNaN(aN) &amp;&amp; a) return { min: aN, max: aN };
-        if (!isNaN(bN) &amp;&amp; b) return { min: bN, max: bN };
+        if (!isNaN(aN) && a) return { min: aN, max: aN };
+        if (!isNaN(bN) && b) return { min: bN, max: bN };
         return null;
       }
       function fmtRub(n) {
@@ -677,20 +677,20 @@
         // Пытаемся взять длительность из data-атрибутов options (если есть),
         // иначе fallback: по умолчанию 120 мин (без точного вычисления).
         var defMin = 120;
-        if (svcSel &amp;&amp; svcSel.selectedOptions &amp;&amp; svcSel.selectedOptions.length) {
+        if (svcSel && svcSel.selectedOptions && svcSel.selectedOptions.length) {
           var opt = svcSel.selectedOptions[0];
           var dm = opt ? Number(opt.getAttribute('data-duration-minutes')) : NaN;
-          if (!isNaN(dm) &amp;&amp; dm > 0) defMin = dm;
+          if (!isNaN(dm) && dm > 0) defMin = dm;
         }
         var dh = Math.floor(defMin / 60);
         var dmm = defMin % 60;
         defaultText = 'По умолчанию: ' + dh + ' ч ' + String(dmm).padStart(2,'0') + ' мин (из настроек услуги).';
         setText('lbBookingDurDefaultText', defaultText);
 
-        if (on &amp;&amp; on.checked) {
+        if (on && on.checked) {
           show('lbBookingDurInputs');
-          if (h &amp;&amp; !String(h.value || '').trim()) h.value = String(dh);
-          if (m &amp;&amp; !String(m.value || '').trim()) m.value = String(dmm);
+          if (h && !String(h.value || '').trim()) h.value = String(dh);
+          if (m && !String(m.value || '').trim()) m.value = String(dmm);
         } else {
           hide('lbBookingDurInputs');
         }
@@ -708,9 +708,9 @@
         var prodR = readPriceRange(prodMin, prodMax);
 
         var lines = [];
-        if (kindVisit &amp;&amp; svcR) lines.push({ label: 'Услуга по прайсу', r: svcR });
-        if (kindVisit &amp;&amp; prodR) lines.push({ label: 'Работа/комплект/материалы', r: prodR });
-        if (kindSale &amp;&amp; prodR) lines.push({ label: 'Товар', r: prodR });
+        if (kindVisit && svcR) lines.push({ label: 'Услуга по прайсу', r: svcR });
+        if (kindVisit && prodR) lines.push({ label: 'Работа/комплект/материалы', r: prodR });
+        if (kindSale && prodR) lines.push({ label: 'Товар', r: prodR });
 
         var total = null;
         for (var i = 0; i < lines.length; i++) {
@@ -741,12 +741,12 @@
       }
 
       document.addEventListener('change', function (e) {
-        var id = (e &amp;&amp; e.target &amp;&amp; e.target.id) ? e.target.id : '';
+        var id = (e && e.target && e.target.id) ? e.target.id : '';
         if (id === 'service_id' || id === 'lbBookingCustomDurOn') updateDurationBlock();
         updatePricePreview();
       });
       document.addEventListener('input', function (e) {
-        var id = (e &amp;&amp; e.target &amp;&amp; e.target.id) ? e.target.id : '';
+        var id = (e && e.target && e.target.id) ? e.target.id : '';
         if (id === 'lbBookingDurH' || id === 'lbBookingDurM') updateDurationBlock();
       });
 
@@ -881,7 +881,7 @@
 
       // Month stats calendar
       var plannedDate = document.querySelector('input[name="planned_date"]');
-      var baseIso = (plannedDate &amp;&amp; plannedDate.value) ? plannedDate.value : (new Date()).toISOString().slice(0, 10);
+      var baseIso = (plannedDate && plannedDate.value) ? plannedDate.value : (new Date()).toISOString().slice(0, 10);
       var curYm = ymFromDate(new Date(baseIso + 'T00:00:00'));
       var label = document.getElementById('lbBookSchedMonthLabel');
       var tbody = document.getElementById('lbBookSchedTbody');
