@@ -281,6 +281,7 @@ async def api_save_master_schedule_bulk(
     weekday_work_6: str | None = Form(None),
     # CUSTOM CYCLIC
     scheme: str = Form("CUSTOM"),
+    odd_even_mode: str = Form("ODD"),
     custom_work_days: int | None = Form(None),
     custom_day_off_days: int | None = Form(None),
     # time interval
@@ -340,12 +341,16 @@ async def api_save_master_schedule_bulk(
             "CUSTOM": "CUSTOM",
         }
         sch = scheme_map.get((scheme or "").strip().upper(), "CUSTOM")
+        oem = (odd_even_mode or "ODD").strip().upper()
+        if oem not in ("ODD", "EVEN"):
+            oem = "ODD"
         apply_cyclic_bulk(
             db,
             master_id=real_master_id,
             date_from=d_from,
             date_to=d_to,
             scheme=sch,  # type: ignore[arg-type]
+            odd_even_mode=oem,  # type: ignore[arg-type]
             custom_work_days=int(custom_work_days or 1),
             custom_day_off_days=int(custom_day_off_days or 1),
             time_from=tf,

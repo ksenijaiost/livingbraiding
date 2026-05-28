@@ -51,6 +51,10 @@
         <tbody id="lbMsTbody"></tbody>
       </table>
     </div>
+    <div class="muted" style="font-size:12px; margin-top:10px;">
+      Если вы заполнили график на отдельные даты, то все дни между заполненными датами автоматически считаются выходными.
+      Бронь визитов на незаполненные и выходные дни недоступна.
+    </div>
   </div>
 
   <!-- Day modal -->
@@ -167,6 +171,20 @@
             <option value="CUSTOM">Своя схема</option>
           </select>
 
+          <div id="lbMsBulkOddEvenBlock" style="margin-top:10px; display:none;">
+            <div class="muted" style="font-size:12px; margin-bottom:6px;">Чередование</div>
+            <div class="row" style="gap:12px; flex-wrap:wrap;">
+              <label style="display:flex; gap:10px; align-items:center; margin:0;">
+                <input type="radio" name="lbMsOddEvenMode" id="lbMsOddMode" value="ODD" checked />
+                <span>Нечётные (1, 3, 5…)</span>
+              </label>
+              <label style="display:flex; gap:10px; align-items:center; margin:0;">
+                <input type="radio" name="lbMsOddEvenMode" id="lbMsEvenMode" value="EVEN" />
+                <span>Чётные (2, 4, 6…)</span>
+              </label>
+            </div>
+          </div>
+
           <div id="lbMsBulkCustomBlock" style="margin-top:10px; display:none;">
             <div class="row" style="gap:12px; flex-wrap:wrap;">
               <div>
@@ -227,7 +245,7 @@
     </div>
   </div>
 
-  <script type="application/json" id="lb-ms-config">{{ {"isAdmin": is_admin_super, "masterId": master_id, "todayIso": today_iso} | tojson }}</script>
+  <script type="application/json" id="lb-ms-config">{{ {"isAdmin": is_admin_super, "masterId": master_id, "todayIso": today_iso, "defaultTimeFrom": ("%02d:00" % hour_from), "defaultTimeTo": ("%02d:00" % hour_to)} | tojson }}</script>
   <script src="/static/master_schedule.js"></script>
 {% endblock %}
 
