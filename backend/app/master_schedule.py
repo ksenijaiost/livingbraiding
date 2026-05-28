@@ -365,6 +365,7 @@ def apply_cyclic_bulk(
     date_from: date,
     date_to: date,
     scheme: Literal["ALL_DAYS", "WEEKDAYS", "ODD_EVEN", "CUSTOM"],
+    odd_even_mode: Literal["ODD", "EVEN"] = "ODD",
     custom_work_days: int,
     custom_day_off_days: int,
     time_from: time | None,
@@ -399,7 +400,10 @@ def apply_cyclic_bulk(
         elif scheme == "WEEKDAYS":
             is_work = wd <= 4
         elif scheme == "ODD_EVEN":
-            is_work = (day_index % 2) == 0
+            # day_index: 0 => day #1 in selected period
+            # ODD: 1,3,5,... are working; EVEN: 2,4,6,... are working
+            is_odd = (day_index % 2) == 0
+            is_work = is_odd if (odd_even_mode or "ODD") == "ODD" else (not is_odd)
         elif scheme == "CUSTOM":
             work_n = max(1, int(custom_work_days or 1))
             off_n = max(1, int(custom_day_off_days or 1))

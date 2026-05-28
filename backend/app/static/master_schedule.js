@@ -5,6 +5,8 @@
   var isAdmin = !!cfg.isAdmin;
   var masterId = Number(cfg.masterId || 0);
   var todayIso = String(cfg.todayIso || '');
+  var defaultTimeFrom = String(cfg.defaultTimeFrom || '');
+  var defaultTimeTo = String(cfg.defaultTimeTo || '');
 
   function addDaysIso(dateIso, deltaDays) {
     var dt = new Date(dateIso + 'T00:00:00');
@@ -45,6 +47,30 @@
     bd.style.display = 'block';
     md.style.display = 'block';
     document.body.style.overflow = 'hidden';
+
+    // Defaults: treat as a working day with default hours.
+    try {
+      var dayOffChk = document.getElementById('lbMsDayOffChk');
+      var workingBlock = document.getElementById('lbMsWorkingBlock');
+      var allDayChk = document.getElementById('lbMsAllDayChk');
+      var timeFrom = document.getElementById('lbMsTimeFrom');
+      var timeTo = document.getElementById('lbMsTimeTo');
+      var breakChk = document.getElementById('lbMsBreakChk');
+      var breakBlock = document.getElementById('lbMsBreakBlock');
+      var breakFrom = document.getElementById('lbMsBreakFrom');
+      var breakTo = document.getElementById('lbMsBreakTo');
+
+      if (dayOffChk) dayOffChk.checked = false;
+      show(workingBlock);
+      if (allDayChk) allDayChk.checked = true;
+      if (timeFrom) { timeFrom.value = defaultTimeFrom || ''; timeFrom.disabled = true; }
+      if (timeTo) { timeTo.value = defaultTimeTo || ''; timeTo.disabled = true; }
+      if (breakChk) breakChk.checked = false;
+      if (breakBlock) breakBlock.style.display = 'none';
+      if (breakFrom) { breakFrom.value = ''; breakFrom.disabled = true; }
+      if (breakTo) { breakTo.value = ''; breakTo.disabled = true; }
+    } catch (e) {}
+
     window.lbMsLoadDay(isoDay);
   };
 
@@ -206,24 +232,33 @@
       var breakTo = document.getElementById('lbMsBreakTo');
 
       var state = data.state || 'no_data';
-      if (state === 'day_off' || state === 'no_data') {
-        dayOffChk.checked = true;
+      if (state === 'day_off') {
+        if (dayOffChk) dayOffChk.checked = true;
         hide(workingBlock);
-      } else {
-        dayOffChk.checked = false;
-        show(workingBlock);
-        allDayChk.checked = !data.time_from && !data.time_to;
-        timeFrom.disabled = allDayChk.checked;
-        timeTo.disabled = allDayChk.checked;
-        if (data.time_from) timeFrom.value = data.time_from;
-        if (data.time_to) timeTo.value = data.time_to;
-        breakChk.checked = !!(data.break_from && data.break_to);
-        show(breakBlock);
-        breakBlock.style.display = breakChk.checked ? '' : 'none';
-        breakFrom.disabled = !breakChk.checked;
-        breakTo.disabled = !breakChk.checked;
-        if (data.break_from) breakFrom.value = data.break_from;
-        if (data.break_to) breakTo.value = data.break_to;
+        return;
+      }
+
+      // WORKING or NO_DATA -> defaults to working
+      if (dayOffChk) dayOffChk.checked = false;
+      show(workingBlock);
+      if (allDayChk) allDayChk.checked = !data.time_from && !data.time_to;
+      if (timeFrom) {
+        timeFrom.value = data.time_from || defaultTimeFrom || '';
+        timeFrom.disabled = !!(allDayChk && allDayChk.checked);
+      }
+      if (timeTo) {
+        timeTo.value = data.time_to || defaultTimeTo || '';
+        timeTo.disabled = !!(allDayChk && allDayChk.checked);
+      }
+      if (breakChk) breakChk.checked = !!(data.break_from && data.break_to);
+      if (breakBlock) breakBlock.style.display = (breakChk && breakChk.checked) ? '' : 'none';
+      if (breakFrom) {
+        breakFrom.value = data.break_from || '';
+        breakFrom.disabled = !(breakChk && breakChk.checked);
+      }
+      if (breakTo) {
+        breakTo.value = data.break_to || '';
+        breakTo.disabled = !(breakChk && breakChk.checked);
       }
     } catch (e) {
       console.error(e);
@@ -313,6 +348,13 @@
     }
   }
 
+  function syncOddEvenBlock() {
+    var sb = document.getElementById('lbMsBulkScheme');
+    var blk = document.getElementById('lbMsBulkOddEvenBlock');
+    if (!sb || !blk) return;
+    blk.style.display = (sb.value === 'ODD_EVEN') ? '' : 'none';
+  }
+
   function syncBulkAllDay() {
     var allDayEl = document.getElementById('lbMsBulkAllDayChk');
     if (!allDayEl) return;
@@ -340,6 +382,7 @@
     if (id === 'lbMsBulkScheme') {
       var custom = document.getElementById('lbMsBulkCustomBlock');
       if (custom) custom.style.display = (document.getElementById('lbMsBulkScheme').value === 'CUSTOM') ? '' : 'none';
+      syncOddEvenBlock();
     }
     if (id === 'lbMsBulkAllDayChk') {
       syncBulkAllDay();
@@ -391,6 +434,9 @@
       if (scheme === 'CUSTOM') {
         fd.append('custom_work_days', document.getElementById('lbMsBulkCustomWork').value || '2');
         fd.append('custom_day_off_days', document.getElementById('lbMsBulkCustomOff').value || '2');
+      } else if (scheme === 'ODD_EVEN') {
+        var oe = document.querySelector('input[name=\"lbMsOddEvenMode\"]:checked');
+        fd.append('odd_even_mode', oe ? String(oe.value || 'ODD') : 'ODD');
       }
     }
 
@@ -409,6 +455,7 @@
     if (from && !from.value) from.value = todayIso;
     if (to && !to.value) to.value = addDaysIso(todayIso, 14);
     setBulkBlocks();
+    syncOddEvenBlock();
     var sb = document.getElementById('lbMsBulkScheme');
     if (sb) {
       var custom = document.getElementById('lbMsBulkCustomBlock');
@@ -436,6 +483,7 @@
       });
     }
     setBulkBlocks();
+    syncOddEvenBlock();
     syncBulkAllDay();
     syncBulkBreak();
   })();
