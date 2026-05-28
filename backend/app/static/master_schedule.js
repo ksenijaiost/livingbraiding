@@ -313,6 +313,27 @@
     }
   }
 
+  function syncBulkAllDay() {
+    var allDayEl = document.getElementById('lbMsBulkAllDayChk');
+    if (!allDayEl) return;
+    var allDay = !!allDayEl.checked;
+    var tf = document.getElementById('lbMsBulkTimeFrom');
+    var tt = document.getElementById('lbMsBulkTimeTo');
+    if (tf) tf.disabled = allDay;
+    if (tt) tt.disabled = allDay;
+  }
+
+  function syncBulkBreak() {
+    var chk = document.getElementById('lbMsBulkBreakChk');
+    if (!chk) return;
+    var bb = document.getElementById('lbMsBulkBreakBlock');
+    if (bb) bb.style.display = chk.checked ? '' : 'none';
+    var bf = document.getElementById('lbMsBulkBreakFrom');
+    var bt = document.getElementById('lbMsBulkBreakTo');
+    if (bf) bf.disabled = !chk.checked;
+    if (bt) bt.disabled = !chk.checked;
+  }
+
   document.addEventListener('change', function (e) {
     var id = evTargetId(e);
     if (id === 'lbMsBulkMode') setBulkBlocks();
@@ -321,19 +342,10 @@
       if (custom) custom.style.display = (document.getElementById('lbMsBulkScheme').value === 'CUSTOM') ? '' : 'none';
     }
     if (id === 'lbMsBulkAllDayChk') {
-      var allDay = document.getElementById('lbMsBulkAllDayChk').checked;
-      var tf = document.getElementById('lbMsBulkTimeFrom');
-      var tt = document.getElementById('lbMsBulkTimeTo');
-      if (tf) tf.disabled = allDay;
-      if (tt) tt.disabled = allDay;
+      syncBulkAllDay();
     }
     if (id === 'lbMsBulkBreakChk') {
-      var bb = document.getElementById('lbMsBulkBreakBlock');
-      if (bb) bb.style.display = document.getElementById('lbMsBulkBreakChk').checked ? '' : 'none';
-      var bf = document.getElementById('lbMsBulkBreakFrom');
-      var bt = document.getElementById('lbMsBulkBreakTo');
-      if (bf) bf.disabled = !document.getElementById('lbMsBulkBreakChk').checked;
-      if (bt) bt.disabled = !document.getElementById('lbMsBulkBreakChk').checked;
+      syncBulkBreak();
     }
   });
 
@@ -424,5 +436,7 @@
       });
     }
     setBulkBlocks();
+    syncBulkAllDay();
+    syncBulkBreak();
   })();
 })();
