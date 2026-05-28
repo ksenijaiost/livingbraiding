@@ -773,9 +773,12 @@
   <script>
     (function () {
       function esc(s) {
-        return String(s || '').replace(/[&<>\"']/g, function (c) {
-          return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c] || c);
-        });
+        return String(s || '')
+          .replace(/&/g, '&' + 'amp;')
+          .replace(/</g, '<' + 'lt;')
+          .replace(/>/g, '>' + 'gt;')
+          .replace(/"/g, '&' + 'quot;')
+          .replace(/'/g, '&' + '#39;');
       }
       function ymFromDate(dt) {
         var y = dt.getFullYear();

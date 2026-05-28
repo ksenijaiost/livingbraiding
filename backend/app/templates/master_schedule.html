@@ -251,9 +251,12 @@
       }
 
       function esc(s) {
-        return String(s || '').replace(/[&<>\"']/g, function (c) {
-          return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c] || c);
-        });
+        return String(s || '')
+          .replace(/&/g, '&' + 'amp;')
+          .replace(/</g, '<' + 'lt;')
+          .replace(/>/g, '>' + 'gt;')
+          .replace(/"/g, '&' + 'quot;')
+          .replace(/'/g, '&' + '#39;');
       }
 
       function show(el) { if (el) el.style.display = ''; }
@@ -277,15 +280,6 @@
         if (bd) bd.style.display = 'none';
         if (md) md.style.display = 'none';
         document.body.style.overflow = '';
-      };
-
-      window.lbMsOpenBulk = function () {
-        var bd = document.getElementById('lbMsBulkBackdrop');
-        var md = document.getElementById('lbMsBulkModal');
-        if (!bd || !md) return;
-        bd.style.display = 'block';
-        md.style.display = 'block';
-        document.body.style.overflow = 'hidden';
       };
 
       window.lbMsCloseBulkModal = function () {
@@ -407,6 +401,22 @@
         }
         renderMonth(data.days || []);
       }
+
+      window.lbMsShiftMonth = async function (delta) {
+        if (!curYm) {
+          var dt0 = new Date(todayIso + 'T00:00:00');
+          curYm = ymFromDate(dt0);
+        }
+        var year = Number(curYm.slice(0, 4));
+        var month = Number(curYm.slice(5, 7));
+        var dt = new Date(year, month - 1 + delta, 1);
+        try {
+          await loadMonth(ymFromDate(dt));
+        } catch (e) {
+          console.error(e);
+          setBanner('Ошибка загрузки');
+        }
+      };
 
       // Day load
       window.lbMsLoadDay = async function (isoDay) {
@@ -622,7 +632,6 @@
       };
 
       window.lbMsOpenBulk = function () {
-        // Pre-fill defaults
         var from = document.getElementById('lbMsBulkDateFrom');
         var to = document.getElementById('lbMsBulkDateTo');
         if (from && !from.value) from.value = todayIso;
@@ -633,11 +642,6 @@
           var custom = document.getElementById('lbMsBulkCustomBlock');
           if (custom) custom.style.display = (sb.value === 'CUSTOM') ? '' : 'none';
         }
-        window.lbMsOpenBulkInner();
-      };
-
-      // Backwards-compat for earlier assignment
-      window.lbMsOpenBulkInner = function () {
         var bd = document.getElementById('lbMsBulkBackdrop');
         var md = document.getElementById('lbMsBulkModal');
         if (!bd || !md) return;
