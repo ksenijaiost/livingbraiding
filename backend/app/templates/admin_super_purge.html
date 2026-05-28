@@ -22,11 +22,15 @@
           <option value="booking">Бронь</option>
           <option value="product_sale">Продажа товара (розница)</option>
           <option value="work">Работа с товарами</option>
+          <option value="kit">Комплект(ы)</option>
         </select>
       </div>
       <div style="margin-bottom: 12px;">
         <label for="entity_id">ID (число из URL карточки)</label>
-        <input type="number" name="entity_id" id="entity_id" min="1" step="1" required style="width: 100%; max-width: 12rem;" />
+        <input type="text" name="entity_id" id="entity_id" required style="width: 100%; max-width: 24rem;" />
+        <div class="muted" style="font-size:12px; margin-top:6px;">
+          Для «Комплект(ы)» можно указать несколько ID через запятую, пробел или перенос строки (например: <code>12, 13, 14</code>).
+        </div>
       </div>
 
       <div id="purge-preview-wrap" style="display: none; margin-bottom: 16px; padding: 12px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px;">
@@ -101,7 +105,7 @@
         setPreviewVisible(true);
         titleEl.textContent = 'Загрузка…';
 
-        var url = '/admin/super/purge/preview?entity=' + encodeURIComponent(ent) + '&entity_id=' + encodeURIComponent(idRaw);
+        var url = '/admin/super/purge/preview?entity=' + encodeURIComponent(ent) + '\x26entity_id=' + encodeURIComponent(idRaw);
         fetch(url, { credentials: 'same-origin' })
           .then(function (r) { return r.json(); })
           .then(function (data) {

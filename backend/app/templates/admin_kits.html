@@ -28,6 +28,19 @@
       <div class="error lb-mb-12">{{ err }}</div>
     {% endif %}
 
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin: 10px 0 14px;">
+      <div class="muted" style="font-size:12px;">Показывать</div>
+      <a href="/kits"{% if stock_mode != 'all' %} style="text-decoration:underline;"{% endif %}>
+        <button type="button" class="secondary">В наличии</button>
+      </a>
+      <a href="/kits?stock=all"{% if stock_mode == 'all' %} style="text-decoration:underline;"{% endif %}>
+        <button type="button" class="secondary">Все</button>
+      </a>
+      {% if stock_mode != 'all' %}
+        <div class="muted" style="font-size:12px;">(скрыты комплекты с 0 заготовок)</div>
+      {% endif %}
+    </div>
+
     <table>
       <thead>
         <tr>

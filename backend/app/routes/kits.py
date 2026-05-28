@@ -247,6 +247,7 @@ def _kit_rows_for_list(kits: list[Kit], db: Session, display_tz: str) -> list[di
 @router.get("", response_class=HTMLResponse)
 def admin_kits_list(
     request: Request,
+    stock: str | None = Query(default="in_stock"),
     msg: str | None = None,
     err: str | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
@@ -265,7 +266,10 @@ def admin_kits_list(
     )
     staff_users = _staff_users_for_reserve(db)
     display_tz = get_display_timezone(db)
+    stock_mode = (stock or "in_stock").strip().lower()
     active = [k for k in kits if k.is_active]
+    if stock_mode != "all":
+        active = [k for k in active if int(k.pieces_available or 0) > 0]
     inactive = [k for k in kits if not k.is_active]
     return templates.TemplateResponse(
         "admin_kits.html",
@@ -276,6 +280,7 @@ def admin_kits_list(
             inactive_kit_rows=_kit_rows_for_list(inactive, db, display_tz),
             staff_users=staff_users,
             kit_max_reserves=get_kit_max_reserves_per_kit(db),
+            stock_mode=stock_mode,
             msg=msg,
             err=err,
         ),
