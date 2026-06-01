@@ -118,7 +118,7 @@
           </div>
 
           <div style="margin-top: 14px;">
-            <div style="font-weight: 600; margin-bottom: 8px;">Планируемый мастер (можно несколько)</div>
+            <div style="font-weight: 600; margin-bottom: 8px;">Планируемый мастер (можно несколько) *</div>
             {% if not masters %}
               <p class="muted" style="margin: 0;">Нет активных мастеров.</p>
             {% else %}
@@ -621,6 +621,22 @@
 
       // initial run
       refreshAvailableMasters();
+
+      var bookingForm = document.querySelector('form[method="post"]');
+      if (bookingForm) {
+        bookingForm.addEventListener('submit', function (e) {
+          var kindVisit = document.querySelector('input[name="kind"][value="VISIT"]');
+          if (!kindVisit || !kindVisit.checked) return;
+          var checked = document.querySelectorAll('input[name="booking_master_on"]:checked');
+          if (checked.length > 0) return;
+          e.preventDefault();
+          if (el0.msg) {
+            el0.msg.textContent = 'Выберите хотя бы одного мастера.';
+          } else {
+            alert('Выберите хотя бы одного мастера.');
+          }
+        });
+      }
     })();
   </script>
 
@@ -881,7 +897,7 @@
 
       // Month stats calendar
       var plannedDate = document.querySelector('input[name="planned_date"]');
-      var baseIso = (plannedDate && plannedDate.value) ? plannedDate.value : (new Date()).toISOString().slice(0, 10);
+      var baseIso = (plannedDate && plannedDate.value) ? plannedDate.value : isoFromYMD(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
       var curYm = ymFromDate(new Date(baseIso + 'T00:00:00'));
       var label = document.getElementById('lbBookSchedMonthLabel');
       var tbody = document.getElementById('lbBookSchedTbody');

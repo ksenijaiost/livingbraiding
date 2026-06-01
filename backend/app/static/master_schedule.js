@@ -116,6 +116,12 @@
     return y + '-' + m;
   }
 
+  function isoFromYMD(year, monthIndex, dayNum) {
+    var mm = String(monthIndex + 1).padStart(2, '0');
+    var dd = String(dayNum).padStart(2, '0');
+    return year + '-' + mm + '-' + dd;
+  }
+
   function renderMonth(days) {
     var tbody = document.getElementById('lbMsTbody');
     var label = document.getElementById('lbMsMonthLabel');
@@ -143,17 +149,16 @@
       var dayNum = cell - firstWeekday + 1;
       var d = null;
       var iso = '';
-      if (dayNum >= 1 && dayNum <= daysInMonth) {
-        var dtCell = new Date(year, monthIndex, dayNum);
-        iso = dtCell.toISOString().slice(0, 10);
+      var inMonth = dayNum >= 1 && dayNum <= daysInMonth;
+      if (inMonth) {
+        iso = isoFromYMD(year, monthIndex, dayNum);
         d = dayMap[iso];
       }
-      var state = d && d.state ? d.state : null;
+      var state = d && d.state ? d.state : (inMonth ? 'no_data' : null);
       var bg = '#e5e7eb';
       if (state === 'working') bg = '#ffffff';
       else if (state === 'day_off') bg = '#f3f4f6';
       else if (state === 'no_data') bg = '#e5e7eb';
-      var inMonth = !!d;
       var opacity = inMonth ? '1' : '0.45';
       tbodyHtml += '<td style="vertical-align:top; padding:8px 10px; cursor:' + (inMonth ? 'pointer' : 'default') + '; opacity:' + opacity + '; background:' + bg + '; border:1px solid #f1f5f9;">';
       if (inMonth) {
