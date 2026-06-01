@@ -1193,6 +1193,31 @@ async def admin_booking_new_post(  # noqa: C901
                 pass
         on_ids = sorted(set([i for i in on_ids if i > 0]))
 
+        if not on_ids:
+            return templates.TemplateResponse(
+                "admin_booking_form.html",
+                _ctx(
+                    request,
+                    current_user=current_user,
+                    error="Выберите хотя бы одного мастера.",
+                    is_new=True,
+                    booking=None,
+                    selected_client=client,
+                    masters=masters,
+                    staff_users=staff_users,
+                    after_reserve=str(request.url),
+                    service_catalog=service_catalog,
+                    kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                    product_kind_options=[k.value for k in ProductSaleKind],
+                    rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+                    fp=fp,
+                    booking_master_on_ids=[],
+                    consultation_id=int(fp["consultation_id"]) if str(fp.get("consultation_id") or "").isdigit() else None,
+                    consultation_comment=None,
+                ),
+                status_code=400,
+            )
+
         # Интервал для проверки: от planned_time до end = start + (override или sum(estimated_duration_minutes)).
         local_start = _utc_naive_to_local(planned_date, tz_name).replace(second=0, microsecond=0)
         # Override длительности (Fix 43)
@@ -1668,6 +1693,9 @@ async def admin_booking_edit_post(
             except Exception:
                 pass
         on_ids = sorted(set([i for i in on_ids if i > 0]))
+
+    if not err and kind_raw == BookingKind.VISIT.value and not on_ids:
+        err = "Выберите хотя бы одного мастера."
 
     # --- График мастеров (жёсткая server-validation при редактировании) ---
     if (
