@@ -935,8 +935,12 @@
                 '<div style="font-weight:700;" title="' + esc(iso) + '">' + dayNum + '</div>' +
               '</div>' +
               '<div style="margin-top:6px; display:flex; flex-direction:column; gap:4px; font-size:12px;">' +
-                '<div>Мастеров: <strong>' + esc(it.working_masters || 0) + '</strong></div>' +
-                '<div>Брони: <strong>' + esc(it.bookings || 0) + '</strong></div>' +
+                '<div class="lb-cal-stat" title="Мастеров">' +
+                  '<span class="lb-cal-lbl-full">Мастеров: </span><span class="lb-cal-lbl-icon" aria-hidden="true">👥 </span>' +
+                  '<strong>' + esc(it.working_masters || 0) + '</strong></div>' +
+                '<div class="lb-cal-stat" title="Брони">' +
+                  '<span class="lb-cal-lbl-full">Брони: </span><span class="lb-cal-lbl-icon" aria-hidden="true">📋 </span>' +
+                  '<strong>' + esc(it.bookings || 0) + '</strong></div>' +
               '</div>';
             td.addEventListener('click', (function (isoDay) {
               return function () { window.lbBookOccOpen(isoDay); };

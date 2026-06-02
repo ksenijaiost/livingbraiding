@@ -102,7 +102,7 @@ def products_catalog_view(
                     kit_key=(str(meta.get("kit_key") or "").strip() or None),
                     ignore_in_calc=bool(meta.get("ignore_in_calc") or False),
                     is_used_in_kit_form=bool(meta.get("is_used_in_kit_form") or False),
-                    is_bu=bool(meta.get("is_bu") or ("Б/У" in row.name)),
+                    is_bu=bool(meta.get("is_bu")),
                     is_active=row.is_active,
                 )
 
@@ -207,7 +207,6 @@ async def products_catalog_row_edit(
     meta["fixed_expense"] = fixed_expense
     meta["is_used_in_kit_form"] = parse_bool(form.get("is_used_in_kit_form"))
     meta["ignore_in_calc"] = parse_bool(form.get("ignore_in_calc"))
-    meta["is_bu"] = parse_bool(form.get("is_bu"))
     if row.category_name == "Заказ" and row.subcategory_name == "Заготовки поштучно":
         kk = str(form.get("kit_key") or "").strip()
         if kk:
@@ -265,7 +264,7 @@ async def products_catalog_row_new(
         "fixed_expense": fixed_expense,
         "is_used_in_kit_form": parse_bool(form.get("is_used_in_kit_form")),
         "ignore_in_calc": parse_bool(form.get("ignore_in_calc")),
-        "is_bu": parse_bool(form.get("is_bu")),
+        "is_bu": False,
     }
     if category == "Заказ" and subcategory_name == "Заготовки поштучно":
         kk = str(form.get("kit_key") or "").strip()

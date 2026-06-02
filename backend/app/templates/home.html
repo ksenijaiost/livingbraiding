@@ -109,20 +109,24 @@
                       </div>
                       <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px; font-size:12px;">
                         {% if d.visits %}
-                          <div>Визиты: <strong>{{ d.visits }}</strong></div>
+                          <div class="lb-cal-stat" title="Визиты">
+                            <span class="lb-cal-lbl-full">Визиты: </span><span class="lb-cal-lbl-icon" aria-hidden="true">✂️ </span><strong>{{ d.visits }}</strong>
+                          </div>
                         {% endif %}
                         {% if d.bookings %}
-                          <div>Брони: <strong>{{ d.bookings }}</strong></div>
+                          <div class="lb-cal-stat" title="Брони">
+                            <span class="lb-cal-lbl-full">Брони: </span><span class="lb-cal-lbl-icon" aria-hidden="true">📋 </span><strong>{{ d.bookings }}</strong>
+                          </div>
                         {% endif %}
                         {% if d.works %}
-                          <div>Работа: <strong>{{ d.works }}</strong></div>
+                          <div class="lb-cal-stat" title="Работа">
+                            <span class="lb-cal-lbl-full">Работа: </span><span class="lb-cal-lbl-icon" aria-hidden="true">🔧 </span><strong>{{ d.works }}</strong>
+                          </div>
                         {% endif %}
                         {% if d.payroll_sum and (d.payroll_sum|abs > 0.001) %}
-                          <div>
-                            ЗП:
-                            <strong>
-                              {% if d.payroll_sum > 0 %}+{% endif %}{{ "%.2f"|format(d.payroll_sum) }} ₽
-                            </strong>
+                          <div class="lb-cal-stat" title="ЗП">
+                            <span class="lb-cal-lbl-full">ЗП: </span><span class="lb-cal-lbl-icon" aria-hidden="true">💰 </span>
+                            <strong>{% if d.payroll_sum > 0 %}+{% endif %}{{ "%.2f"|format(d.payroll_sum) }} ₽</strong>
                           </div>
                         {% endif %}
                       </div>

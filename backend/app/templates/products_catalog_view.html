@@ -127,7 +127,7 @@
 
     {% if selected_category == "Заказ" %}
       <details class="muted" style="font-size: 13px; margin: 10px 0 14px; max-width: 52rem;">
-        <summary style="cursor: pointer; user-select: none;">Справка по меткам «кальк», «техн», «Б/У»</summary>
+        <summary style="cursor: pointer; user-select: none;">Справка по меткам «кальк» и «техн»</summary>
         <div style="margin-top: 10px; line-height: 1.45;">
           <p style="margin: 0 0 0.65em 0;">
             Метки задают, как строка прайса участвует в форме «Работа с товарами» и в автоматических суммах по комплекту.
@@ -138,9 +138,6 @@
             </li>
             <li style="margin-bottom: 0.5em;">
               <strong>техн</strong> — позиция не включается в автосумму <strong>цены для клиента</strong> по комплекту (по колонке «Цена»). Начисление <strong>ЗП</strong> и учёт в разборе себестоимости идут по колонке «Работа», если она заполнена.
-            </li>
-            <li style="margin-bottom: 0.5em;">
-              <strong>Б/У</strong> — служебная пометка каталога. Такие строки не участвуют в автосуммах цены для клиента и ЗП по комплекту.
             </li>
           </ul>
           <p style="margin: 0.65em 0 0 0;">
@@ -190,20 +187,17 @@
                     </td>
                     {% if show_labels_col %}
                       <td class="pcat-labels">
-                        {% set is_bu = r.is_bu %}
                         {% set is_kit = r.is_used_in_kit_form %}
                         {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
                           <div class="pcat-label-stack">
                             <label><input form="row-edit-{{ r.id }}" type="checkbox" name="is_used_in_kit_form" {% if is_kit %}checked{% endif %} />кальк</label>
                             <label><input form="row-edit-{{ r.id }}" type="checkbox" name="ignore_in_calc" {% if r.ignore_in_calc %}checked{% endif %} />техн</label>
-                            <label><input form="row-edit-{{ r.id }}" type="checkbox" name="is_bu" {% if is_bu %}checked{% endif %} />Б/У</label>
                           </div>
                         {% else %}
                           <div class="pcat-label-stack">
                             {% if is_kit %}<span class="muted">кальк</span>{% endif %}
                             {% if r.ignore_in_calc %}<span class="muted">техн</span>{% endif %}
-                            {% if is_bu %}<span class="muted">Б/У</span>{% endif %}
-                            {% if not is_kit and not r.ignore_in_calc and not is_bu %}<span class="muted">—</span>{% endif %}
+                            {% if not is_kit and not r.ignore_in_calc %}<span class="muted">—</span>{% endif %}
                           </div>
                         {% endif %}
                       </td>
@@ -240,7 +234,6 @@
                           {% if selected_category == "Заказ" and not show_labels_col %}
                             <input type="hidden" name="is_used_in_kit_form" value="{% if r.is_used_in_kit_form %}on{% endif %}" />
                             <input type="hidden" name="ignore_in_calc" value="{% if r.ignore_in_calc %}on{% endif %}" />
-                            <input type="hidden" name="is_bu" value="{% if r.is_bu %}on{% endif %}" />
                           {% endif %}
                           <button type="submit" class="secondary" style="padding:4px 10px;">Сохранить</button>
                         </form>
@@ -282,20 +275,17 @@
                     </td>
                     {% if show_labels_col %}
                       <td class="pcat-labels">
-                        {% set is_bu = r.is_bu %}
                         {% set is_kit = r.is_used_in_kit_form %}
                         {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
                           <div class="pcat-label-stack">
                             <label><input form="row-edit-{{ r.id }}" type="checkbox" name="is_used_in_kit_form" {% if is_kit %}checked{% endif %} />кальк</label>
                             <label><input form="row-edit-{{ r.id }}" type="checkbox" name="ignore_in_calc" {% if r.ignore_in_calc %}checked{% endif %} />техн</label>
-                            <label><input form="row-edit-{{ r.id }}" type="checkbox" name="is_bu" {% if is_bu %}checked{% endif %} />Б/У</label>
                           </div>
                         {% else %}
                           <div class="pcat-label-stack">
                             {% if is_kit %}<span class="muted">кальк</span>{% endif %}
                             {% if r.ignore_in_calc %}<span class="muted">техн</span>{% endif %}
-                            {% if is_bu %}<span class="muted">Б/У</span>{% endif %}
-                            {% if not is_kit and not r.ignore_in_calc and not is_bu %}<span class="muted">—</span>{% endif %}
+                            {% if not is_kit and not r.ignore_in_calc %}<span class="muted">—</span>{% endif %}
                           </div>
                         {% endif %}
                       </td>
@@ -333,7 +323,6 @@
                             {% if selected_category == "Заказ" and not show_labels_col %}
                               <input type="hidden" name="is_used_in_kit_form" value="{% if r.is_used_in_kit_form %}on{% endif %}" />
                               <input type="hidden" name="ignore_in_calc" value="{% if r.ignore_in_calc %}on{% endif %}" />
-                              <input type="hidden" name="is_bu" value="{% if r.is_bu %}on{% endif %}" />
                             {% endif %}
                             <button type="submit" class="secondary" style="padding:4px 10px;">Сохранить</button>
                           </form>
@@ -375,7 +364,6 @@
                         <div class="pcat-label-stack">
                           <label><input form="new-row-{{ loop.index }}" type="checkbox" name="is_used_in_kit_form" />кальк</label>
                           <label><input form="new-row-{{ loop.index }}" type="checkbox" name="ignore_in_calc" />техн</label>
-                          <label><input form="new-row-{{ loop.index }}" type="checkbox" name="is_bu" />Б/У</label>
                         </div>
                       </td>
                     {% endif %}
@@ -405,7 +393,6 @@
                         {% if selected_category == "Заказ" and not show_labels_col %}
                           <input type="hidden" name="is_used_in_kit_form" value="" />
                           <input type="hidden" name="ignore_in_calc" value="" />
-                          <input type="hidden" name="is_bu" value="" />
                         {% endif %}
                         <button type="submit" class="secondary" style="padding:4px 10px;">Добавить</button>
                       </form>

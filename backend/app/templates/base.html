@@ -94,7 +94,13 @@
       @media (max-width: 820px) {
         .nav-desktop { display:none; }
         .nav-mobile { display:flex; }
+        .lb-cal-stat .lb-cal-lbl-full { display: none; }
       }
+      @media (min-width: 821px) {
+        .lb-cal-stat .lb-cal-lbl-icon { display: none; }
+      }
+      .lb-cal-stat { white-space: nowrap; }
+      .lb-cal-stat .lb-cal-lbl-icon { margin-right: 1px; }
       .error { background: #fee2e2; border: 1px solid #fecaca; color: #991b1b; padding: 10px 12px; border-radius: 8px; }
       .ok { background: #f0fdf4; border: 1px solid #86efac; color: #166534; padding: 10px 12px; border-radius: 8px; }
     </style>
