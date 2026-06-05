@@ -43,6 +43,7 @@ from app.payroll_fund import (
     sum_visit_ledger_by_visit_id,
 )
 from app.master_schedule import schedule_filled_until
+from app.techspec_home import collect_techspec_home_stats
 from app.webui import templates, ctx as _ctx
 
 
@@ -67,6 +68,10 @@ def home(
     calendar_ctx: dict[str, Any] | None = None
     sections_ctx: dict[str, Any] | None = None
     master_schedule_banner: dict[str, Any] | None = None
+    techspec_home: dict[str, Any] | None = None
+
+    if UserRole.TECHSPEC in current_user.roles:
+        techspec_home = collect_techspec_home_stats(db)
 
     display_tz = get_display_timezone(db)
     tz = ZoneInfo(display_tz)
@@ -360,6 +365,7 @@ def home(
             calendar_ctx=calendar_ctx,
             sections_ctx=sections_ctx,
             master_schedule_banner=master_schedule_banner,
+            techspec_home=techspec_home,
         ),
     )
 

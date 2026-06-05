@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import os
-import re
 import tempfile
 import zipfile
 from datetime import date
@@ -19,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 
 from app.auth import AuthUser, require_techspec_user
-from app.media_store import ALLOWED_EXTS, media_root_dir
+from app.media_store import is_stored_media_backup_filename, iter_media_backup_paths, media_root_dir
 
 router = APIRouter(prefix="/techspec/media", tags=["techspec-media"])
 
@@ -27,15 +26,8 @@ _MAX_RESTORE_UNCOMPRESSED = int(os.environ.get("LB_MEDIA_RESTORE_MAX_BYTES", str
 _MAX_UPLOAD_ZIP = int(os.environ.get("LB_MEDIA_RESTORE_MAX_ZIP_BYTES", str(600 * 1024 * 1024)))
 _MAX_RESTORE_FILES = int(os.environ.get("LB_MEDIA_RESTORE_MAX_FILES", "20000"))
 
-# Имена как у save_upload_image: <32 hex>.<ext>
-_STORED_NAME_RE = re.compile(r"^[a-f0-9]{32}\.(?:jpg|jpeg|png|webp)$", re.IGNORECASE)
-
 # Служебные файлы в каталоге uploads (не попадают в бэкап; при restore пропускаются).
 _SKIP_RESTORE_BASENAMES = frozenset({".gitkeep", ".ds_store", "thumbs.db", "desktop.ini"})
-
-
-def _is_stored_media_filename(name: str) -> bool:
-    return bool(_STORED_NAME_RE.match(name)) and Path(name).suffix.lower() in ALLOWED_EXTS
 
 
 def _should_skip_restore_basename(base: str) -> bool:
@@ -79,9 +71,8 @@ def techspec_media_backup_zip(
     os.close(fd)
     try:
         with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for p in sorted(root.iterdir()):
-                if p.is_file() and _is_stored_media_filename(p.name):
-                    zf.write(p, arcname=p.name)
+            for p in iter_media_backup_paths(root):
+                zf.write(p, arcname=p.name)
     except Exception:
         _unlink_quiet(tmp_path)
         raise HTTPException(status_code=500, detail="Не удалось собрать архив.")
@@ -145,7 +136,7 @@ async def techspec_media_restore_zip(
                 if _should_skip_restore_basename(base):
                     skipped += 1
                     continue
-                if not _is_stored_media_filename(base):
+                if not is_stored_media_backup_filename(base):
                     raise HTTPException(
                         status_code=400,
                         detail=f"Недопустимое имя файла (ожидается <uuid>.jpg|jpeg|png|webp): {base!r}",
