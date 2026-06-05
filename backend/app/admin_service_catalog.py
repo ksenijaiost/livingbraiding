@@ -20,7 +20,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, require_role
 from app.audit import diff_fields, write_audit_rows
+from app.consultation_types import CONSULTATION_TYPE_CHOICES
 from app.db.models import (
+    ConsultationKind,
     Service,
     ServiceAuditLog,
     ServiceCategory,
@@ -515,14 +517,25 @@ def category_new_form(
             form_name="",
             form_active=True,
             form_include_in_visit=True,
+            form_consultation_kind=ConsultationKind.BRAIDING.value,
+            consultation_kind_choices=CONSULTATION_TYPE_CHOICES,
         ),
     )
+
+
+def _parse_consultation_kind(raw: str | None) -> ConsultationKind:
+    v = (raw or "").strip().upper()
+    try:
+        return ConsultationKind(v)
+    except ValueError:
+        return ConsultationKind.BRAIDING
 
 
 @router.post("/categories/new")
 def category_new_save(
     name: str = Form(...),
     is_active: str | None = Form(None),
+    consultation_kind: str = Form(ConsultationKind.BRAIDING.value),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -532,6 +545,7 @@ def category_new_save(
     cat = ServiceCategory(
         name=nm,
         is_active=_is_checked(is_active),
+        consultation_kind=_parse_consultation_kind(consultation_kind),
     )
     db.add(cat)
     try:
@@ -564,6 +578,8 @@ def category_edit_form(
             form_name=cat.name,
             form_active=cat.is_active,
             form_include_in_visit=True,
+            form_consultation_kind=cat.consultation_kind.value,
+            consultation_kind_choices=CONSULTATION_TYPE_CHOICES,
         ),
     )
 
@@ -573,13 +589,18 @@ def category_edit_save(
     category_id: int,
     name: str = Form(...),
     is_active: str | None = Form(None),
+    consultation_kind: str = Form(ConsultationKind.BRAIDING.value),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
     cat = db.get(ServiceCategory, category_id)
     if cat is None:
         raise HTTPException(status_code=404, detail="Категория не найдена")
-    before = SimpleNamespace(name=cat.name, is_active=cat.is_active)
+    before = SimpleNamespace(
+        name=cat.name,
+        is_active=cat.is_active,
+        consultation_kind=cat.consultation_kind,
+    )
     nm = (name or "").strip()
     if not nm:
         return RedirectResponse(
@@ -588,6 +609,7 @@ def category_edit_save(
         )
     cat.name = nm
     cat.is_active = _is_checked(is_active)
+    cat.consultation_kind = _parse_consultation_kind(consultation_kind)
     cat.updated_at = utcnow_naive()
     cat.updated_by_user_id = current_user.id
     write_audit_rows(
@@ -596,7 +618,7 @@ def category_edit_save(
         entity_field="category_id",
         entity_id=cat.id,
         changed_by_user_id=current_user.id,
-        changes=diff_fields(before, cat, ("name", "is_active")),
+        changes=diff_fields(before, cat, ("name", "is_active", "consultation_kind")),
     )
     try:
         db.commit()

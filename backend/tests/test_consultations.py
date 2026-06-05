@@ -5,11 +5,14 @@ from datetime import datetime
 import pytest
 
 from app.consultation_types import (
+    consultation_kind_for_category_name,
+    filter_consultation_catalog_by_types,
     format_types_display,
     parse_types_from_form,
     types_json_dumps,
     validate_types_selected,
 )
+from app.db.models import ConsultationKind
 from app.db.models import (
     Booking,
     BookingKind,
@@ -42,6 +45,30 @@ def test_types_json_roundtrip() -> None:
 
 def test_validate_types_requires_selection() -> None:
     assert validate_types_selected({}) is not None
+
+
+def test_consultation_kind_for_category_name() -> None:
+    assert consultation_kind_for_category_name("Наращивание") == ConsultationKind.EXTENSION
+    assert consultation_kind_for_category_name("Снятие") == ConsultationKind.OTHER
+    assert consultation_kind_for_category_name("Уход") == ConsultationKind.OTHER
+    assert consultation_kind_for_category_name("Обучение") == ConsultationKind.OTHER
+    assert consultation_kind_for_category_name("Вся голова") == ConsultationKind.BRAIDING
+    assert consultation_kind_for_category_name("Миниатюра") == ConsultationKind.BRAIDING
+
+
+def test_filter_consultation_catalog_by_types() -> None:
+    catalog = [
+        {"id": 1, "name": "Вся голова", "consultation_kind": "BRAIDING", "subcategories": []},
+        {"id": 2, "name": "Наращивание", "consultation_kind": "EXTENSION", "subcategories": []},
+        {"id": 3, "name": "Уход", "consultation_kind": "OTHER", "subcategories": []},
+    ]
+    assert [c["name"] for c in filter_consultation_catalog_by_types(catalog, ["BRAIDING"])] == ["Вся голова"]
+    assert [c["name"] for c in filter_consultation_catalog_by_types(catalog, ["EXTENSION"])] == ["Наращивание"]
+    assert [c["name"] for c in filter_consultation_catalog_by_types(catalog, ["BRAIDING", "OTHER"])] == [
+        "Вся голова",
+        "Уход",
+    ]
+    assert filter_consultation_catalog_by_types(catalog, []) == []
 
 
 @pytest.fixture()

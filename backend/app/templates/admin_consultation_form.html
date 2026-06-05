@@ -74,46 +74,43 @@
       <div style="margin-top:12px;">
         <label>Услуги (можно несколько)</label>
         <input type="hidden" name="planned_service_ids" id="planned_service_ids" value="{{ fp.get('planned_service_ids', '') }}" />
-        <div style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+        <div id="consultation-services-empty" class="muted" style="display:none; margin-top:6px; font-size:12px;">
+          Выберите вид консультации — появятся подходящие услуги.
+        </div>
+        <div id="consultation-services-list" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
           {% for c in service_catalog %}
-            {% for sc in c.subcategories %}
-              <div class="muted" style="font-size:12px;margin-top:6px;">{{ c.name }} → {{ sc.name }}</div>
-              {% for s in sc.services %}
-                <label style="display:flex;align-items:center;gap:8px;font-weight:normal;">
-                  <input type="checkbox" class="consultation-service-on" value="{{ s.id }}"
-                    {% if selected_service_ids is defined and s.id in selected_service_ids %}checked{% elif fp.get('service_id')|string == s.id|string %}checked{% endif %} />
-                  {{ s.name }}
-                </label>
+            <div class="consultation-cat-group" data-consultation-kind="{{ c.consultation_kind }}">
+              {% for sc in c.subcategories %}
+                <div class="consultation-subcat-group" data-consultation-kind="{{ c.consultation_kind }}">
+                  <div class="muted consultation-subcat-title" style="font-size:12px;margin-top:6px;">{{ c.name }} → {{ sc.name }}</div>
+                  {% for s in sc.services %}
+                    <label class="consultation-service-label" style="display:flex;align-items:center;gap:8px;font-weight:normal;" data-consultation-kind="{{ c.consultation_kind }}">
+                      <input type="checkbox" class="consultation-service-on" value="{{ s.id }}"
+                        data-service-name="{{ s.name }}"
+                        data-price-middle-from="{{ s.price_middle_from if s.price_middle_from is not none else '' }}"
+                        data-price-middle-to="{{ s.price_middle_to if s.price_middle_to is not none else '' }}"
+                        {% if selected_service_ids is defined and s.id in selected_service_ids %}checked{% elif fp.get('service_id')|string == s.id|string %}checked{% endif %} />
+                      {{ s.name }}
+                    </label>
+                  {% endfor %}
+                </div>
               {% endfor %}
-            {% endfor %}
+            </div>
           {% endfor %}
         </div>
         <p class="muted" style="font-size:12px;margin:6px 0 0;">При создании брони все отмеченные услуги попадут в план визита.</p>
       </div>
-      <script>
-        (function () {
-          function syncPlannedIds() {
-            var ids = Array.from(document.querySelectorAll('.consultation-service-on:checked')).map(function (x) { return parseInt(x.value, 10); }).filter(function (x) { return x > 0; });
-            var el = document.getElementById('planned_service_ids');
-            if (el) el.value = JSON.stringify(ids);
-            var first = ids[0];
-            var old = document.querySelector('input[name="service_id"]');
-            if (!old) {
-              old = document.createElement('input');
-              old.type = 'hidden';
-              old.name = 'service_id';
-              document.getElementById('consultation-form') && document.getElementById('consultation-form').appendChild(old);
-            }
-            if (old) old.value = first ? String(first) : '';
-          }
-          document.querySelectorAll('.consultation-service-on').forEach(function (cb) { cb.addEventListener('change', syncPlannedIds); });
-          syncPlannedIds();
-        })();
-      </script>
 
       <div style="margin-top:12px;">
+        <div id="lbConsultPricePreview" style="margin-bottom:10px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; max-width:520px;">
+          <div style="font-weight:700;">Предварительный расчёт</div>
+          <div class="muted" style="font-size:12px; margin-top:4px;">
+            Расчёт предварительный и может отличаться от финальной суммы.
+          </div>
+          <div id="lbConsultPricePreviewLines" style="margin-top:8px; font-size:13px;"></div>
+        </div>
         <label>Предварительная стоимость (озвученная)</label>
-        <input type="text" name="preliminary_cost_text" maxlength="120" value="{{ fp.get('preliminary_cost_text','') }}" style="width:100%;max-width:320px;" />
+        <input type="text" name="preliminary_cost_text" maxlength="120" value="{{ fp.get('preliminary_cost_text','') }}" style="width:100%;max-width:320px;" placeholder="Напр.: 3500 или 3500–4000" />
       </div>
 
       <div style="margin-top:12px;">
@@ -147,6 +144,7 @@
       </p>
     </form>
   </div>
+  <script id="lb-consultation-service-catalog-json" type="application/json">{{ service_catalog | tojson }}</script>
   <script>
     (function () {
       var boxes = document.querySelectorAll('input[data-lb-consult-other-toggle]');
@@ -157,6 +155,138 @@
       }
       boxes[0].addEventListener('change', sync);
       sync();
+    })();
+  </script>
+  <script>
+    (function () {
+      function toInt(v) {
+        var n = Number(v);
+        if (isNaN(n)) return 0;
+        n = Math.floor(n);
+        return n < 0 ? 0 : n;
+      }
+      function readPriceRange(minV, maxV) {
+        var a = String(minV || '').trim();
+        var b = String(maxV || '').trim();
+        if (!a && !b) return null;
+        var aN = Number(a);
+        var bN = Number(b);
+        if (!isNaN(aN) && !isNaN(bN) && a && b) {
+          if (Math.abs(aN - bN) < 0.0005) return { min: aN, max: aN };
+          return { min: Math.min(aN, bN), max: Math.max(aN, bN) };
+        }
+        if (!isNaN(aN) && a) return { min: aN, max: aN };
+        if (!isNaN(bN) && b) return { min: bN, max: bN };
+        return null;
+      }
+      function fmtRub(n) {
+        try { return Math.round(Number(n || 0)) + ' ₽'; } catch (e) { return '0 ₽'; }
+      }
+      function fmtRange(r) {
+        if (!r) return '—';
+        if (r.min === r.max) return fmtRub(r.min);
+        return fmtRub(r.min) + ' – ' + fmtRub(r.max);
+      }
+      function sumRange(total, add) {
+        if (!add) return total;
+        if (!total) return { min: add.min, max: add.max };
+        return { min: total.min + add.min, max: total.max + add.max };
+      }
+      function selectedConsultationKinds() {
+        return Array.from(document.querySelectorAll('input[name="consultation_types"]:checked')).map(function (cb) {
+          return String(cb.value || '').trim().toUpperCase();
+        }).filter(Boolean);
+      }
+      function syncConsultationServicesFilter() {
+        var kinds = selectedConsultationKinds();
+        var emptyEl = document.getElementById('consultation-services-empty');
+        var listEl = document.getElementById('consultation-services-list');
+        var hasKinds = kinds.length > 0;
+        if (emptyEl) emptyEl.style.display = hasKinds ? 'none' : 'block';
+        if (listEl) listEl.style.display = hasKinds ? 'flex' : 'none';
+
+        document.querySelectorAll('.consultation-cat-group, .consultation-subcat-group, .consultation-service-label').forEach(function (el) {
+          var kind = String(el.getAttribute('data-consultation-kind') || '').toUpperCase();
+          var show = hasKinds && kinds.indexOf(kind) >= 0;
+          el.style.display = show ? '' : 'none';
+          if (!show && el.classList.contains('consultation-service-label')) {
+            var cb = el.querySelector('.consultation-service-on');
+            if (cb) cb.checked = false;
+          }
+        });
+
+        document.querySelectorAll('.consultation-subcat-group').forEach(function (sub) {
+          if (sub.style.display === 'none') return;
+          var visible = Array.from(sub.querySelectorAll('.consultation-service-label')).some(function (lbl) {
+            return lbl.style.display !== 'none';
+          });
+          var title = sub.querySelector('.consultation-subcat-title');
+          if (title) title.style.display = visible ? '' : 'none';
+        });
+
+        syncPlannedIds();
+        updateConsultationPricePreview();
+      }
+      function syncPlannedIds() {
+        var ids = Array.from(document.querySelectorAll('.consultation-service-on:checked')).map(function (x) {
+          return parseInt(x.value, 10);
+        }).filter(function (x) { return x > 0; });
+        var el = document.getElementById('planned_service_ids');
+        if (el) el.value = JSON.stringify(ids);
+        var first = ids[0];
+        var old = document.querySelector('input[name="service_id"]');
+        if (!old) {
+          old = document.createElement('input');
+          old.type = 'hidden';
+          old.name = 'service_id';
+          var form = document.getElementById('consultation-form');
+          if (form) form.appendChild(old);
+        }
+        if (old) old.value = first ? String(first) : '';
+      }
+      function updateConsultationPricePreview() {
+        var box = document.getElementById('lbConsultPricePreviewLines');
+        if (!box) return;
+        var lines = [];
+        var total = null;
+        Array.from(document.querySelectorAll('.consultation-service-on:checked')).forEach(function (cb) {
+          var name = String(cb.getAttribute('data-service-name') || ('Услуга #' + cb.value));
+          var range = readPriceRange(
+            cb.getAttribute('data-price-middle-from'),
+            cb.getAttribute('data-price-middle-to')
+          );
+          if (!range) return;
+          lines.push({ label: name + ' — ориентир по прайсу (мастер)', r: range });
+          total = sumRange(total, range);
+        });
+        if (!lines.length) {
+          box.innerHTML = '<div class="muted">Отметьте услуги — появится предрасчёт.</div>';
+          return;
+        }
+        var h = '';
+        for (var i = 0; i < lines.length; i++) {
+          h += '<div style="display:flex; justify-content:space-between; gap:10px;">' +
+            '<div>' + lines[i].label + '</div>' +
+            '<div style="font-weight:700; white-space:nowrap;">' + fmtRange(lines[i].r) + '</div>' +
+          '</div>';
+        }
+        h += '<div style="margin-top:8px; padding-top:8px; border-top:1px solid #e5e7eb; display:flex; justify-content:space-between; gap:10px;">' +
+          '<div style="font-weight:700;">Итого</div>' +
+          '<div style="font-weight:800; white-space:nowrap;">' + fmtRange(total) + '</div>' +
+        '</div>';
+        box.innerHTML = h;
+      }
+
+      document.querySelectorAll('input[name="consultation_types"]').forEach(function (cb) {
+        cb.addEventListener('change', syncConsultationServicesFilter);
+      });
+      document.querySelectorAll('.consultation-service-on').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          syncPlannedIds();
+          updateConsultationPricePreview();
+        });
+      });
+      syncConsultationServicesFilter();
     })();
   </script>
 {% endblock %}

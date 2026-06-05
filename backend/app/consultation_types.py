@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from sqlalchemy import select
+
+from app.db.models import ConsultationKind, ServiceCategory
+
 CONSULTATION_TYPE_OTHER = "OTHER"
 
 CONSULTATION_TYPE_CHOICES: list[tuple[str, str]] = [
@@ -14,6 +18,23 @@ CONSULTATION_TYPE_CHOICES: list[tuple[str, str]] = [
 ]
 
 _CONSULTATION_TYPE_LABELS = dict(CONSULTATION_TYPE_CHOICES)
+
+_EXTENSION_CATEGORY_NAMES = frozenset({"Наращивание"})
+_OTHER_CATEGORY_NAMES = frozenset({"Снятие", "Уход", "Обучение"})
+
+
+def consultation_kind_for_category_name(name: str) -> ConsultationKind:
+    nm = (name or "").strip()
+    if nm in _EXTENSION_CATEGORY_NAMES:
+        return ConsultationKind.EXTENSION
+    if nm in _OTHER_CATEGORY_NAMES:
+        return ConsultationKind.OTHER
+    return ConsultationKind.BRAIDING
+
+
+def consultation_kind_label(kind: ConsultationKind | str | None) -> str:
+    code = kind.value if isinstance(kind, ConsultationKind) else str(kind or "")
+    return _CONSULTATION_TYPE_LABELS.get(code, code or "—")
 
 
 def parse_types_from_form(form_types: list[str], other_text: str | None) -> dict[str, Any]:
@@ -58,15 +79,33 @@ def format_types_display(raw: str | None) -> str:
     return ", ".join(parts) if parts else "—"
 
 
-_CONSULTATION_SERVICE_CATEGORIES = frozenset({"Вся голова", "Наращивание"})
-
-
 def list_consultation_services_catalog(db) -> list[dict]:
-    """Каталог услуг для консультации: только «Вся голова» и «Наращивание»."""
+    """Каталог услуг для консультации с consultation_kind у каждой категории."""
     from app.kit_inlay_visit import list_master_visit_services_catalog
 
+    kinds = {
+        int(c.id): c.consultation_kind
+        for c in db.scalars(select(ServiceCategory)).all()
+    }
     full = list_master_visit_services_catalog(db)
-    return [c for c in full if (c.get("name") or "") in _CONSULTATION_SERVICE_CATEGORIES]
+    for c in full:
+        kind = kinds.get(int(c.get("id") or 0), ConsultationKind.BRAIDING)
+        c["consultation_kind"] = kind.value if isinstance(kind, ConsultationKind) else str(kind)
+    return full
+
+
+def filter_consultation_catalog_by_types(catalog: list[dict], selected_types: list[str]) -> list[dict]:
+    """Оставить категории, чей consultation_kind совпадает с выбранными видами консультации."""
+    allowed = {str(t).strip().upper() for t in (selected_types or []) if str(t).strip()}
+    if not allowed:
+        return []
+    out: list[dict] = []
+    for c in catalog or []:
+        kind = str(c.get("consultation_kind") or "").upper()
+        if kind not in allowed:
+            continue
+        out.append(c)
+    return out
 
 
 def validate_types_selected(data: dict[str, Any]) -> str | None:

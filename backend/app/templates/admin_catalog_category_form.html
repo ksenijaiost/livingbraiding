@@ -16,6 +16,20 @@
         <input type="checkbox" name="is_active" {% if form_active %}checked{% endif %} />
         Активна (показывать в прайсе)
       </label>
+      <div style="margin-top: 12px;">
+        <div style="font-weight: 600; margin-bottom: 6px;">Вид консультации</div>
+        <div style="display:flex; flex-wrap:wrap; gap:12px;">
+          {% for code, label in consultation_kind_choices %}
+            <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+              <input type="radio" name="consultation_kind" value="{{ code }}" {% if form_consultation_kind == code %}checked{% endif %} />
+              {{ label }}
+            </label>
+          {% endfor %}
+        </div>
+        <p class="muted" style="margin:6px 0 0; font-size:12px;">
+          Определяет, в каких консультациях показываются услуги этой категории.
+        </p>
+      </div>
       <p style="margin-top: 16px;">
         <button type="submit">Сохранить</button>
         {% if not is_new %}
