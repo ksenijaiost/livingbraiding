@@ -113,11 +113,6 @@
         <label><input type="checkbox" name="client_is_self" {% if fp.get('client_is_self') == 'on' %}checked{% endif %} />
           Свой клиент</label>
         <p class="muted" style="font-size: 12px; margin: 6px 0 10px;">Если не отмечено — обычный платный визит (не «свой»).</p>
-        <div style="margin-top: 10px;">
-          <label for="client_discount_percent">Скидка клиенту, % <span class="muted">(целое; на себестоимость не влияет, хранится для истории)</span></label>
-          <input type="number" name="client_discount_percent" id="client_discount_percent" min="0" max="100" step="1" inputmode="numeric"
-            value="{{ fp.get('client_discount_percent', '0') }}" style="max-width: 6rem; display: block; margin-top: 6px;" />
-        </div>
       </div>
 
       <h3>Работа</h3>
@@ -192,23 +187,9 @@
           <p class="muted" style="margin: 8px 0 0;">Нет активных пользователей с ролью «мастер» — обратитесь к администратору.</p>
         {% endif %}
       </div>
-      <div id="line0_service_masters_block" class="card" style="margin-top:12px; display:none;">
-        <div style="font-weight:600; margin-bottom:8px;">Мастера для услуги 1</div>
-        <p class="muted" style="font-size:12px; margin-top:-4px;">Заполняется, когда выбран режим «По услугам». Для одного мастера % можно оставить пустым (100).</p>
-        {% for m in masters_for_visit %}
-          <div class="row" style="align-items:center; flex-wrap:wrap; gap: 10px 16px;">
-            <label style="display:flex; align-items:center; gap:8px; flex:1; min-width: 12rem;">
-              <input type="checkbox" name="line_0_service_master_on" value="{{ m.id }}" />
-              <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
-            </label>
-            <div style="display:flex; align-items:center; gap:6px;">
-              <label class="muted" style="font-size:12px; margin:0;">Доля, %</label>
-              <input type="number" name="line_0_service_master_pct_{{ m.id }}" min="0" max="100" step="1" style="width:5rem;" />
-            </div>
-          </div>
-        {% endfor %}
-      </div>
-      <div class="row">
+      <div class="card" style="margin-top:12px; background:#f1f5f9;">
+      <strong class="lb-line-title">Услуга 1</strong>
+      <div class="row" style="margin-top:8px;">
         <div>
           <label>Категория</label>
           <select id="service_category_id" name="service_category_id" onchange="serviceCatalogOnCategory()" {% if not service_catalog %}disabled{% endif %} style="width: 100%; box-sizing: border-box;">
@@ -224,23 +205,41 @@
           </select>
         </div>
       </div>
-      <div style="margin-top: 12px;">
+      <div style="margin-top: 8px;">
         <label for="service_id">Услуга *</label>
         <select id="service_id" name="service_id" required onchange="updateServiceDerivedUI()"
           style="width: 100%; max-width: 100%; box-sizing: border-box; min-height: 2.5rem;">
         </select>
       </div>
 
-      <div class="card" style="margin-top: 14px; background: #f8fafc;">
+      <div class="row" style="margin-top:8px;">
+        <div>
+          <label>Время начала выполнения услуги</label>
+          <input type="time" name="started_time" step="60" value="{{ fp.get('started_time','') }}" />
+        </div>
+        <div></div>
+      </div>
+
+      <div class="card" style="margin-top: 10px; background: #f8fafc;">
         <strong id="amount_from_client_label" style="font-size: 1.05rem; display: block;">Сколько взяли с клиента</strong>
         <p id="visit_recommended_price_hint" class="muted" style="font-size: 13px; margin: 8px 0 6px; min-height: 1.25em;"></p>
-        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 10px;">
-          <input id="amount_from_client" type="number" name="amount_from_client" min="0" step="1" inputmode="numeric" autocomplete="off"
-            value="{{ fp.get('amount_from_client', '') }}" placeholder=""
-            style="max-width: 12rem; font-size: 1.05rem;" />
-          <span class="muted">₽</span>
+        <div class="row" style="align-items:flex-end;">
+          <div>
+            <label for="client_discount_percent">Скидка клиенту, %</label>
+            <input type="number" name="client_discount_percent" id="client_discount_percent" min="0" max="100" step="1" inputmode="numeric"
+              value="{{ fp.get('client_discount_percent', '0') }}" style="max-width: 8rem;" />
+          </div>
+          <div>
+            <label>Сумма с клиента, ₽</label>
+            <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 10px;">
+              <input id="amount_from_client" type="number" name="amount_from_client" min="0" step="1" inputmode="numeric" autocomplete="off"
+                value="{{ fp.get('amount_from_client', '') }}" placeholder=""
+                style="max-width: 12rem; font-size: 1.05rem;" />
+              <span class="muted">₽</span>
+            </div>
+          </div>
         </div>
-        <p class="muted" style="font-size: 12px; margin: 8px 0 0;">Для визита «свой клиент» сумму можно оставить 0.</p>
+        <p class="muted" style="font-size: 12px; margin: 8px 0 0;">Подсказка учитывает уровень мастера и скидку. Для визита «свой клиент» сумму можно оставить 0.</p>
 
         <div style="margin-top: 14px;">
           <div style="font-weight: 600; margin-bottom: 8px;">Амортизация *</div>
@@ -263,7 +262,7 @@
         </div>
       </div>
 
-      <h3>Материал</h3>
+      <h3 style="margin-top:10px;">Материал</h3>
       <div class="row">
         <div>
           <label>Канекалон, г</label>
@@ -301,6 +300,27 @@
           <label style="margin:0;"><input type="radio" name="mix_complexity" value="THERMO" {% if mxc == 'THERMO' or mxc == 'HARD' %}checked{% endif %} /> сложная термо</label>
           <label style="margin:0;"><input type="radio" name="mix_complexity" value="LENGTH" {% if mxc == 'LENGTH' %}checked{% endif %} /> сложная длина</label>
         </div>
+      </div>
+      <div style="margin-top:8px;">
+        <label>Комментарий к услуге</label>
+        <textarea name="comment" rows="2" maxlength="1000" style="width:100%; box-sizing:border-box;">{{ fp.get('comment','') }}</textarea>
+      </div>
+      <div id="line0_service_masters_block" class="card" style="margin-top:12px; display:none;">
+        <div style="font-weight:600; margin-bottom:8px;">Мастера для услуги 1</div>
+        <p class="muted" style="font-size:12px; margin-top:-4px;">Если выбран один мастер, его доля = 100% и поле процента блокируется.</p>
+        {% for m in masters_for_visit %}
+          <div class="row" style="align-items:center; flex-wrap:wrap; gap: 10px 16px;">
+            <label style="display:flex; align-items:center; gap:8px; flex:1; min-width: 12rem;">
+              <input type="checkbox" name="line_0_service_master_on" value="{{ m.id }}" />
+              <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
+            </label>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <label class="muted" style="font-size:12px; margin:0;">Доля, %</label>
+              <input type="number" name="line_0_service_master_pct_{{ m.id }}" min="0" max="100" step="1" style="width:5rem;" />
+            </div>
+          </div>
+        {% endfor %}
+      </div>
       </div>
 
       <div id="lb-extra-service-lines" class="card" style="margin-top:14px;background:#f1f5f9;display:none;">
@@ -621,6 +641,35 @@
         sameShares.disabled = scope !== 'VISIT';
         if (scope !== 'VISIT') sameShares.checked = false;
       }
+      syncPerServiceMasterPctInputs();
+    }
+
+    function syncPerServiceMasterPctInputs() {
+      function applyForLine(idx) {
+        const cbs = Array.from(document.querySelectorAll('input[name="line_' + idx + '_service_master_on"]'));
+        const checked = cbs.filter(function (cb) { return cb.checked; });
+        const single = checked.length === 1;
+        cbs.forEach(function (cb) {
+          const pct = document.querySelector('input[name="line_' + idx + '_service_master_pct_' + cb.value + '"]');
+          if (!pct) return;
+          if (!cb.checked) {
+            pct.disabled = true;
+            pct.value = '';
+            return;
+          }
+          if (single) {
+            pct.disabled = true;
+            pct.value = '100';
+          } else {
+            pct.disabled = false;
+          }
+        });
+      }
+      applyForLine(0);
+      document.querySelectorAll('[data-extra-line-idx]').forEach(function (row) {
+        const idx = parseInt(row.getAttribute('data-extra-line-idx') || '0');
+        if (idx > 0) applyForLine(idx);
+      });
     }
 
     function escapeHtml(s) {
@@ -1874,6 +1923,10 @@
       box.querySelector('[data-remove-line="' + idx + '"]').addEventListener('click', function () {
         box.remove();
         syncExtraLinesVisibility();
+        syncPerServiceMasterPctInputs();
+      });
+      box.querySelectorAll('input[name="line_' + idx + '_service_master_on"]').forEach(function (cb) {
+        cb.addEventListener('change', syncPerServiceMasterPctInputs);
       });
 
       const hd = document.getElementById('lb-line-hidden-defaults');
@@ -1891,6 +1944,7 @@
       }
       syncExtraLinesVisibility();
       syncMastersScopeUi();
+      syncPerServiceMasterPctInputs();
     }
 
     function nextExtraLineIndex() {
@@ -1941,6 +1995,10 @@
       });
       syncExtraLinesVisibility();
       syncMastersScopeUi();
+      document.querySelectorAll('input[name="line_0_service_master_on"]').forEach(function (cb) {
+        cb.addEventListener('change', syncPerServiceMasterPctInputs);
+      });
+      syncPerServiceMasterPctInputs();
     })();
 
     document.querySelectorAll('input[name="masters_scope"]').forEach(function (r) {
