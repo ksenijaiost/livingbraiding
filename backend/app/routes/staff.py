@@ -19,7 +19,7 @@ from app.db.models import (
     UserRoleAssignment,
 )
 from app.db.session import get_db
-from app.forms_parse import parse_bool
+from app.forms_parse import parse_bool, parse_float
 from app.security import hash_password
 from app.user_roles import (
     get_roles_for_user,
@@ -61,6 +61,18 @@ def _parse_master_level_from_form(form: Any, roles: list[UserRole]) -> MasterLev
     except ValueError:
         # По умолчанию: мастер (middle)
         return MasterLevel.MIDDLE
+
+
+def _parse_salon_cut_override_from_form(form: Any, roles: list[UserRole]) -> float | None:
+    if UserRole.MASTER not in roles:
+        return None
+    raw = str(form.get("salon_cut_pct_override") or "").strip()
+    if not raw:
+        return None
+    try:
+        return parse_float(raw, min=0.0, max=1.0, field_name="salon_cut_pct_override")
+    except ValueError:
+        raise ValueError("Индивидуальный процент салона: число от 0 до 1.")
 
 
 def _count_other_active_superadmins(db: Session, exclude_user_id: int) -> int:
@@ -170,6 +182,14 @@ async def admin_settings_staff_new_post(
             status_code=400,
         )
     ml = _parse_master_level_from_form(form, roles)
+    try:
+        salon_cut_override = _parse_salon_cut_override_from_form(form, roles)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            "admin_settings_staff_form.html",
+            _ctx(request, current_user=current_user, is_new=True, user=None, error=str(exc)),
+            status_code=400,
+        )
     u = User(
         username=username,
         display_name=display_name,
@@ -177,6 +197,7 @@ async def admin_settings_staff_new_post(
         password_hash=hash_password(password),
         is_active=True,
         master_level=ml,
+        salon_cut_pct_override=salon_cut_override,
         phone=phone_canon,
     )
     db.add(u)
@@ -196,6 +217,7 @@ async def admin_settings_staff_new_post(
             FieldChange("phone", None, u.phone),
             FieldChange("roles", None, rs),
             FieldChange("master_level", None, u.master_level.value if u.master_level else None),
+            FieldChange("salon_cut_pct_override", None, str(u.salon_cut_pct_override) if u.salon_cut_pct_override is not None else None),
         ],
     )
     db.commit()
@@ -296,17 +318,23 @@ async def admin_settings_staff_edit_post(
         return _form_err(phone_err)
 
     ml = _parse_master_level_from_form(form, roles)
+    try:
+        salon_cut_override = _parse_salon_cut_override_from_form(form, roles)
+    except ValueError as exc:
+        return _form_err(str(exc))
     before = SimpleNamespace(
         display_name=u.display_name,
         phone=u.phone,
         is_active=u.is_active,
         master_level=u.master_level,
+        salon_cut_pct_override=u.salon_cut_pct_override,
         roles_summary=_roles_audit_summary(db, u.id),
     )
     u.display_name = display_name
     u.phone = phone_canon
     u.is_active = new_active
     u.master_level = ml
+    u.salon_cut_pct_override = salon_cut_override
     pwd_changed = bool(new_password)
     if pwd_changed:
         u.password_hash = hash_password(new_password)
@@ -317,9 +345,10 @@ async def admin_settings_staff_edit_post(
         phone=u.phone,
         is_active=u.is_active,
         master_level=u.master_level,
+        salon_cut_pct_override=u.salon_cut_pct_override,
         roles_summary=_roles_audit_summary(db, u.id),
     )
-    raw_changes = diff_fields(before, after, ("display_name", "phone", "is_active", "master_level", "roles_summary"))
+    raw_changes = diff_fields(before, after, ("display_name", "phone", "is_active", "master_level", "salon_cut_pct_override", "roles_summary"))
     changes = [FieldChange("roles" if c.field_name == "roles_summary" else c.field_name, c.old_value, c.new_value) for c in raw_changes]
     if pwd_changed:
         changes.append(FieldChange("password", None, "изменён"))

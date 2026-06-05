@@ -140,7 +140,16 @@ def service_requires_tail_block(service: Service) -> bool:
     return bool(sub and getattr(sub, "show_tail_section", False))
 
 
-def get_salon_cut_pct(db: Session) -> float:
+def get_salon_cut_pct(db: Session, master_id: int | None = None) -> float:
+    if master_id is not None and int(master_id) > 0:
+        u = db.get(User, int(master_id))
+        if u is not None and u.salon_cut_pct_override is not None:
+            try:
+                v = float(u.salon_cut_pct_override)
+            except Exception:
+                v = -1.0
+            if 0.0 <= v <= 1.0:
+                return v
     row = db.get(Setting, SALON_CUT_PCT)
     if not row:
         return 0.5

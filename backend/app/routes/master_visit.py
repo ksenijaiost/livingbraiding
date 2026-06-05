@@ -285,7 +285,7 @@ def _master_visit_step1_template_response(
     draft_saved: bool = False,
 ):
     performed = (form_prefill.get("performed_date") or "").strip() or (default_date or date.today().isoformat())
-    salon_cut_pct = get_salon_cut_pct(db)
+    salon_cut_pct = get_salon_cut_pct(db, current_user.id)
     pk = db.get(MaterialPriceCurrent, MaterialType.KANEKALON)
     pku = db.get(MaterialPriceCurrent, MaterialType.KUDRI)
     material_price_per_gram = {

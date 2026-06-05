@@ -27,6 +27,7 @@
             <th>Имя</th>
             <th>Роли</th>
             <th>Уровень мастера</th>
+            <th>Инд. % салона</th>
             <th>Статус</th>
             <th></th>
           </tr>
@@ -45,6 +46,9 @@
               </td>
               <td class="muted">
                 {% if u.master_level %}{{ ru_master_level(u.master_level) }}{% else %}—{% endif %}
+              </td>
+              <td class="muted">
+                {% if u.salon_cut_pct_override is not none %}{{ u.salon_cut_pct_override }}{% else %}—{% endif %}
               </td>
               <td>{% if u.is_active %}<span class="muted">активен</span>{% else %}<strong>отключён</strong>{% endif %}</td>
               <td class="lb-nowrap">
