@@ -169,22 +169,51 @@
 
     {% if booking.kind.value == "VISIT" %}
       <h3 class="lb-mt-18">Параметры визита</h3>
-      <p style="margin:6px 0;"><strong>Услуга</strong>:
-        {% if booking.planned_service %}
-          {{ booking.planned_service.subcategory.name }} — {{ booking.planned_service.name }}
-        {% else %}
-          <span class="muted">—</span>
-        {% endif %}
-      </p>
-      <p style="margin:6px 0;"><strong>Мастера</strong>:
-        {% if booking.masters %}
-          {% for bm in booking.masters %}
-            {{ bm.master.display_name if bm.master else ("#" ~ bm.master_id) }}{% if not loop.last %}, {% endif %}
+      <p style="margin:6px 0;"><strong>Услуги в брони</strong>:</p>
+      {% if booking.planned_services %}
+        <div class="card lb-card-bg-subtle">
+          {% for ps in booking.planned_services %}
+            {% set svc = ps.service %}
+            {% set local_start = format_naive_utc_datetime(ps.planned_start_time, display_tz, "%H:%M") if ps.planned_start_time else format_naive_utc_datetime(booking.planned_date, display_tz, "%H:%M") %}
+            <div style="{% if not loop.first %}margin-top:10px; padding-top:10px; border-top:1px solid #e5e7eb;{% endif %}">
+              <div style="font-weight:600;">
+                {{ loop.index }}.
+                {% if svc and svc.subcategory %}
+                  {{ svc.subcategory.name }} — {{ svc.name }}
+                {% elif svc %}
+                  {{ svc.name }}
+                {% else %}
+                  <span class="muted">Услуга #{{ ps.service_id }}</span>
+                {% endif %}
+              </div>
+              <div class="muted" style="margin-top:4px;">Предварительное время: <strong>{{ local_start or "—" }}</strong></div>
+              <div style="margin-top:4px;">
+                <span class="muted">Мастера:</span>
+                {% if ps.masters %}
+                  {% for psm in ps.masters %}
+                    {{ psm.master.display_name if psm.master else ("#" ~ psm.master_id) }}{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                {% elif booking.masters %}
+                  {% for bm in booking.masters %}
+                    {{ bm.master.display_name if bm.master else ("#" ~ bm.master_id) }}{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                {% else %}
+                  <span class="muted">—</span>
+                {% endif %}
+              </div>
+              {% if ps.comment %}
+                <div class="muted" style="margin-top:4px; white-space:pre-wrap;">{{ ps.comment }}</div>
+              {% endif %}
+            </div>
           {% endfor %}
-        {% else %}
-          <span class="muted">—</span>
-        {% endif %}
-      </p>
+        </div>
+      {% elif booking.planned_service %}
+        <p style="margin:6px 0;">
+          {{ booking.planned_service.subcategory.name }} — {{ booking.planned_service.name }}
+        </p>
+      {% else %}
+        <p class="muted" style="margin:6px 0;">—</p>
+      {% endif %}
 
       {% if details %}
         <div class="card lb-card-bg-subtle lb-mt-12">

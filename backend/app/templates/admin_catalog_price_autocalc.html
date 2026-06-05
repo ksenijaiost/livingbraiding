@@ -16,7 +16,44 @@
 
     <form method="post" action="/admin/catalog/price-autocalc" data-lb-autocalc-form>
       <div class="lb-mb-12">
-        <div class="lb-strong-head lb-mb-6">1) Выбор позиций</div>
+        <div class="lb-strong-head lb-mb-6">1) Уровень, кому считаем</div>
+        <label class="lb-inline-center-gap lb-mb-6">
+          <input type="radio" name="target_level" value="JUNIOR" {% if fp.target_level == 'JUNIOR' %}checked{% endif %} />
+          <span>{{ ru_master_level('JUNIOR') }}</span>
+        </label>
+        <label class="lb-inline-center-gap lb-mb-6">
+          <input type="radio" name="target_level" value="MIDDLE" {% if fp.target_level == 'MIDDLE' %}checked{% endif %} />
+          <span>{{ ru_master_level('MIDDLE') }}</span>
+        </label>
+        <label class="lb-inline-center-gap">
+          <input type="radio" name="target_level" value="SENIOR" {% if fp.target_level == 'SENIOR' %}checked{% endif %} />
+          <span>{{ ru_master_level('SENIOR') }}</span>
+        </label>
+      </div>
+
+      <div class="lb-mb-12">
+        <div class="lb-strong-head lb-mb-6">2) Уровень, от кого считаем</div>
+        <label class="lb-inline-center-gap lb-mb-6">
+          <input type="radio" name="source_level" value="JUNIOR" {% if fp.source_level == 'JUNIOR' %}checked{% endif %} />
+          <span>{{ ru_master_level('JUNIOR') }}</span>
+        </label>
+        <label class="lb-inline-center-gap lb-mb-6">
+          <input type="radio" name="source_level" value="MIDDLE" {% if fp.source_level == 'MIDDLE' %}checked{% endif %} />
+          <span>{{ ru_master_level('MIDDLE') }}</span>
+        </label>
+        <label class="lb-inline-center-gap">
+          <input type="radio" name="source_level" value="SENIOR" {% if fp.source_level == 'SENIOR' %}checked{% endif %} />
+          <span>{{ ru_master_level('SENIOR') }}</span>
+        </label>
+      </div>
+
+      <div class="lb-mb-16">
+        <label>3) Процент</label>
+        <input name="percent" type="number" min="0" max="100" step="0.01" value="{{ fp.percent }}" required />
+      </div>
+
+      <div class="lb-mb-12">
+        <div class="lb-strong-head lb-mb-6">4) Выбор позиций</div>
         <label class="lb-inline-center-gap lb-mb-6">
           <input type="radio" name="scope_mode" value="all" {% if fp.scope_mode == 'all' %}checked{% endif %} />
           <span>Все услуги</span>
@@ -77,43 +114,6 @@
             </label>
           {% endfor %}
         </div>
-      </div>
-
-      <div class="lb-mb-12">
-        <div class="lb-strong-head lb-mb-6">2) Уровень, кому считаем</div>
-        <label class="lb-inline-center-gap lb-mb-6">
-          <input type="radio" name="target_level" value="JUNIOR" {% if fp.target_level == 'JUNIOR' %}checked{% endif %} />
-          <span>{{ ru_master_level('JUNIOR') }}</span>
-        </label>
-        <label class="lb-inline-center-gap lb-mb-6">
-          <input type="radio" name="target_level" value="MIDDLE" {% if fp.target_level == 'MIDDLE' %}checked{% endif %} />
-          <span>{{ ru_master_level('MIDDLE') }}</span>
-        </label>
-        <label class="lb-inline-center-gap">
-          <input type="radio" name="target_level" value="SENIOR" {% if fp.target_level == 'SENIOR' %}checked{% endif %} />
-          <span>{{ ru_master_level('SENIOR') }}</span>
-        </label>
-      </div>
-
-      <div class="lb-mb-12">
-        <div class="lb-strong-head lb-mb-6">3) Уровень, от кого считаем</div>
-        <label class="lb-inline-center-gap lb-mb-6">
-          <input type="radio" name="source_level" value="JUNIOR" {% if fp.source_level == 'JUNIOR' %}checked{% endif %} />
-          <span>{{ ru_master_level('JUNIOR') }}</span>
-        </label>
-        <label class="lb-inline-center-gap lb-mb-6">
-          <input type="radio" name="source_level" value="MIDDLE" {% if fp.source_level == 'MIDDLE' %}checked{% endif %} />
-          <span>{{ ru_master_level('MIDDLE') }}</span>
-        </label>
-        <label class="lb-inline-center-gap">
-          <input type="radio" name="source_level" value="SENIOR" {% if fp.source_level == 'SENIOR' %}checked{% endif %} />
-          <span>{{ ru_master_level('SENIOR') }}</span>
-        </label>
-      </div>
-
-      <div class="lb-mb-16">
-        <label>4) Процент</label>
-        <input name="percent" type="number" min="0" max="100" step="0.01" value="{{ fp.percent }}" required />
       </div>
 
       <button type="submit">Рассчитать</button>

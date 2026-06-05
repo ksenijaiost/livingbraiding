@@ -731,6 +731,7 @@ class BookingPlannedService(Base):
     service_id: Mapped[int] = mapped_column(ForeignKey("services.id"), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     planned_start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     booking: Mapped["Booking"] = relationship(back_populates="planned_services")
     service: Mapped["Service"] = relationship()

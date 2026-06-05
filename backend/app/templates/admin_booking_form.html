@@ -118,6 +118,10 @@
             <label>Услуга *</label>
             <select id="service_id" name="service_id" required style="width: 100%; max-width: 100%; box-sizing: border-box; min-height: 2.5rem;"></select>
           </div>
+          <div style="margin-top:8px;">
+            <label>Комментарий к первой услуге</label>
+            <textarea id="lbBookingLine0Comment" rows="2" maxlength="1000" style="width:100%; box-sizing:border-box;"></textarea>
+          </div>
 
           <div style="margin-top: 14px;">
             <div style="font-weight: 600; margin-bottom: 8px;">Мастера для услуг</div>
@@ -633,6 +637,11 @@
               out.push({
                 id: toInt(s.id),
                 label: String(c.name || '') + ' / ' + String(sc.name || '') + ' / ' + String(s.name || ''),
+                category_id: toInt(c.id),
+                subcategory_id: toInt(sc.id),
+                category_name: String(c.name || ''),
+                subcategory_name: String(sc.name || ''),
+                service_name: String(s.name || ''),
               });
             }
           }
@@ -641,6 +650,21 @@
       }
 
       var servicesFlat = flattenServices().filter(function (x) { return x.id > 0; });
+      var categoriesById = {};
+      var subcategoriesById = {};
+      for (var sf = 0; sf < servicesFlat.length; sf++) {
+        var svcMeta = servicesFlat[sf];
+        if (!categoriesById[svcMeta.category_id]) {
+          categoriesById[svcMeta.category_id] = { id: svcMeta.category_id, name: svcMeta.category_name };
+        }
+        if (!subcategoriesById[svcMeta.subcategory_id]) {
+          subcategoriesById[svcMeta.subcategory_id] = {
+            id: svcMeta.subcategory_id,
+            category_id: svcMeta.category_id,
+            name: svcMeta.subcategory_name
+          };
+        }
+      }
       var mastersMeta = Array.from(document.querySelectorAll('input[name="booking_master_on"]')).map(function (cb) {
         var label = cb.closest('label');
         var txt = label ? (label.textContent || '') : '';
@@ -657,6 +681,7 @@
       var perBlock = document.getElementById('lbBookingPerServiceMastersBlock');
       var msgAll = document.getElementById('lbBookingScheduleAvailMsg');
       var msgLine0 = document.getElementById('lbBookingLine0AvailMsg');
+      var line0Comment = document.getElementById('lbBookingLine0Comment');
       var hidIds = document.getElementById('planned_service_ids');
       var hidLines = document.getElementById('booking_service_lines_json');
       var bookingForm = document.querySelector('form[method="post"]');
@@ -680,12 +705,43 @@
         }
       }
 
-      function serviceOptionsHtml(selectedId) {
+      function categoryOptionsHtml(selectedId) {
+        var arr = Object.keys(categoriesById).map(function (k) { return categoriesById[k]; });
+        arr.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+        var h = '<option value="">— выберите категорию —</option>';
+        for (var i = 0; i < arr.length; i++) {
+          var c = arr[i];
+          var sel = (toInt(selectedId) === toInt(c.id)) ? ' selected' : '';
+          h += '<option value="' + toInt(c.id) + '"' + sel + '>' + esc(c.name) + '</option>';
+        }
+        return h;
+      }
+      function subcategoryOptionsHtml(categoryId, selectedId) {
+        var cid = toInt(categoryId);
+        var arr = Object.keys(subcategoriesById).map(function (k) { return subcategoriesById[k]; })
+          .filter(function (x) { return cid > 0 ? toInt(x.category_id) === cid : true; })
+          .sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+        var h = '<option value="">— выберите подкатегорию —</option>';
+        for (var i = 0; i < arr.length; i++) {
+          var sc = arr[i];
+          var sel = (toInt(selectedId) === toInt(sc.id)) ? ' selected' : '';
+          h += '<option value="' + toInt(sc.id) + '"' + sel + '>' + esc(sc.name) + '</option>';
+        }
+        return h;
+      }
+      function serviceOptionsHtml(categoryId, subcategoryId, selectedId) {
+        var cid = toInt(categoryId);
+        var sid = toInt(subcategoryId);
+        var arr = servicesFlat.filter(function (x) {
+          if (cid > 0 && toInt(x.category_id) !== cid) return false;
+          if (sid > 0 && toInt(x.subcategory_id) !== sid) return false;
+          return true;
+        });
         var h = '<option value="">— выберите услугу —</option>';
-        for (var i = 0; i < servicesFlat.length; i++) {
-          var s = servicesFlat[i];
+        for (var i = 0; i < arr.length; i++) {
+          var s = arr[i];
           var sel = (toInt(selectedId) === s.id) ? ' selected' : '';
-          h += '<option value="' + s.id + '"' + sel + '>' + esc(s.label) + '</option>';
+          h += '<option value="' + s.id + '"' + sel + '>' + esc(s.service_name) + '</option>';
         }
         return h;
       }
@@ -703,6 +759,10 @@
       function addExtraLine(prefill) {
         if (!linesWrap) return;
         var idx = state.extraLines.length + 1;
+        var prefillSid = toInt(prefill && prefill.service_id);
+        var preMeta = servicesFlat.find(function (x) { return x.id === prefillSid; }) || null;
+        var preCategoryId = preMeta ? toInt(preMeta.category_id) : 0;
+        var preSubcategoryId = preMeta ? toInt(preMeta.subcategory_id) : 0;
         var box = document.createElement('div');
         box.className = 'card';
         box.setAttribute('data-service-line-idx', String(idx));
@@ -714,14 +774,34 @@
             '<button type="button" class="secondary" data-line-remove="1">Убрать</button>' +
           '</div>' +
           '<div style="margin-top:8px;">' +
-            '<label>Услуга *</label>' +
-            '<select data-line-service="1" style="width:100%; box-sizing:border-box; min-height:2.5rem;">' +
-              serviceOptionsHtml(toInt(prefill && prefill.service_id)) +
-            '</select>' +
+            '<div class="row">' +
+              '<div>' +
+                '<label>Категория</label>' +
+                '<select data-line-category="1" style="width:100%; box-sizing:border-box;">' +
+                  categoryOptionsHtml(preCategoryId) +
+                '</select>' +
+              '</div>' +
+              '<div>' +
+                '<label>Подкатегория</label>' +
+                '<select data-line-subcategory="1" style="width:100%; box-sizing:border-box;">' +
+                  subcategoryOptionsHtml(preCategoryId, preSubcategoryId) +
+                '</select>' +
+              '</div>' +
+            '</div>' +
+            '<div style="margin-top:8px;">' +
+              '<label>Услуга *</label>' +
+              '<select data-line-service="1" style="width:100%; box-sizing:border-box; min-height:2.5rem;">' +
+                serviceOptionsHtml(preCategoryId, preSubcategoryId, prefillSid) +
+              '</select>' +
+            '</div>' +
           '</div>' +
           '<div style="margin-top:8px; max-width:16rem;">' +
             '<label>Время начала</label>' +
             '<input type="time" data-line-time="1" step="60" value="' + esc((prefill && prefill.planned_time) || '') + '" />' +
+          '</div>' +
+          '<div style="margin-top:8px;">' +
+            '<label>Комментарий к услуге</label>' +
+            '<textarea data-line-comment="1" rows="2" style="width:100%; box-sizing:border-box;" maxlength="1000">' + esc((prefill && prefill.comment) || '') + '</textarea>' +
           '</div>' +
           '<div data-line-masters-wrap style="margin-top:8px; display:none;">' +
             '<div style="font-weight:600; margin-bottom:6px;">Мастера для этой услуги *</div>' +
@@ -735,7 +815,30 @@
           state.extraLines = state.extraLines.filter(function (x) { return x.el !== box; });
           refreshAvailableMasters();
         });
-        box.querySelector('[data-line-service]').addEventListener('change', refreshAvailableMasters);
+        var catSel = box.querySelector('[data-line-category]');
+        var subSel = box.querySelector('[data-line-subcategory]');
+        var svcSel = box.querySelector('[data-line-service]');
+        function syncLineSubcategories() {
+          if (!catSel || !subSel) return;
+          var cid = toInt(catSel.value);
+          subSel.innerHTML = subcategoryOptionsHtml(cid, toInt(subSel.value || 0));
+          if (toInt(subSel.value) <= 0) {
+            var firstReal = subSel.querySelector('option[value]:not([value=""])');
+            if (firstReal) subSel.value = String(toInt(firstReal.value));
+          }
+          syncLineServices();
+        }
+        function syncLineServices() {
+          if (!svcSel) return;
+          var cid = toInt(catSel ? catSel.value : 0);
+          var sid = toInt(subSel ? subSel.value : 0);
+          var old = toInt(svcSel.value || 0);
+          svcSel.innerHTML = serviceOptionsHtml(cid, sid, old);
+          refreshAvailableMasters();
+        }
+        if (catSel) catSel.addEventListener('change', syncLineSubcategories);
+        if (subSel) subSel.addEventListener('change', syncLineServices);
+        if (svcSel) svcSel.addEventListener('change', refreshAvailableMasters);
         box.querySelector('[data-line-time]').addEventListener('change', refreshAvailableMasters);
         box.querySelectorAll('input[data-line-master]').forEach(function (cb) {
           cb.addEventListener('change', refreshAvailableMasters);
@@ -746,6 +849,7 @@
             cb.checked = mids.indexOf(toInt(cb.value)) >= 0;
           });
         }
+        syncLineSubcategories();
         setModeUi();
       }
 
@@ -782,9 +886,17 @@
             service_id: sid,
             planned_time: lineTimeValue(idx),
             master_ids: mids,
+            comment: lineCommentValue(idx),
           });
         }
         return out;
+      }
+      function lineCommentValue(idx) {
+        if (idx === 0) return String((line0Comment && line0Comment.value) || '').trim();
+        var row = state.extraLines.find(function (x) { return x.idx === idx; });
+        if (!row || !row.el) return '';
+        var cEl = row.el.querySelector('[data-line-comment]');
+        return String((cEl && cEl.value) || '').trim();
       }
 
       function durationOverrideMinutes() {
@@ -882,6 +994,7 @@
             cb.checked = mids0.indexOf(toInt(cb.value)) >= 0;
           });
         }
+        if (line0Comment) line0Comment.value = String((first && first.comment) || '');
         for (var i = 1; i < arr.length; i++) addExtraLine(arr[i]);
       }
 
