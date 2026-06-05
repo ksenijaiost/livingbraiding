@@ -172,6 +172,7 @@
             <div class="row" style="align-items: center; flex-wrap: wrap; gap: 10px 16px;">
               <label style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 12rem;">
                 <input type="checkbox" name="visit_master_on" value="{{ m.id }}"
+                  data-master-level="{{ m.master_level.value if m.master_level else '' }}"
                   {% if m.id in visit_master_on_ids %}checked{% endif %} />
                 <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
               </label>
@@ -218,6 +219,24 @@
           <input type="time" name="started_time" step="60" value="{{ fp.get('started_time','') }}" />
         </div>
         <div></div>
+      </div>
+
+      <div id="line0_service_masters_block" class="card" style="margin-top:12px; display:none;">
+        <div style="font-weight:600; margin-bottom:8px;">Мастера для услуги 1</div>
+        <p class="muted" style="font-size:12px; margin-top:-4px;">Если выбран один мастер, его доля = 100% и поле процента блокируется.</p>
+        {% for m in masters_for_visit %}
+          <div class="row" style="align-items:center; flex-wrap:wrap; gap: 10px 16px;">
+            <label style="display:flex; align-items:center; gap:8px; flex:1; min-width: 12rem;">
+              <input type="checkbox" name="line_0_service_master_on" value="{{ m.id }}"
+                data-master-level="{{ m.master_level.value if m.master_level else '' }}" />
+              <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
+            </label>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <label class="muted" style="font-size:12px; margin:0;">Доля, %</label>
+              <input type="number" name="line_0_service_master_pct_{{ m.id }}" min="0" max="100" step="1" style="width:5rem;" />
+            </div>
+          </div>
+        {% endfor %}
       </div>
 
       <div class="card" style="margin-top: 10px; background: #f8fafc;">
@@ -304,22 +323,6 @@
       <div style="margin-top:8px;">
         <label>Комментарий к услуге</label>
         <textarea name="comment" rows="2" maxlength="1000" style="width:100%; box-sizing:border-box;">{{ fp.get('comment','') }}</textarea>
-      </div>
-      <div id="line0_service_masters_block" class="card" style="margin-top:12px; display:none;">
-        <div style="font-weight:600; margin-bottom:8px;">Мастера для услуги 1</div>
-        <p class="muted" style="font-size:12px; margin-top:-4px;">Если выбран один мастер, его доля = 100% и поле процента блокируется.</p>
-        {% for m in masters_for_visit %}
-          <div class="row" style="align-items:center; flex-wrap:wrap; gap: 10px 16px;">
-            <label style="display:flex; align-items:center; gap:8px; flex:1; min-width: 12rem;">
-              <input type="checkbox" name="line_0_service_master_on" value="{{ m.id }}" />
-              <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
-            </label>
-            <div style="display:flex; align-items:center; gap:6px;">
-              <label class="muted" style="font-size:12px; margin:0;">Доля, %</label>
-              <input type="number" name="line_0_service_master_pct_{{ m.id }}" min="0" max="100" step="1" style="width:5rem;" />
-            </div>
-          </div>
-        {% endfor %}
       </div>
       </div>
 
@@ -622,6 +625,7 @@
       if (blk) blk.style.display = m ? 'flex' : 'none';
       if (sn) sn.style.display = m ? 'none' : 'block';
       if (mn) mn.style.display = m ? 'block' : 'none';
+      updateRecommendedPriceHint();
     }
     document.addEventListener('DOMContentLoaded', visitMastersModeSync);
 
@@ -670,6 +674,7 @@
         const idx = parseInt(row.getAttribute('data-extra-line-idx') || '0');
         if (idx > 0) applyForLine(idx);
       });
+      updateRecommendedPriceHint();
     }
 
     function escapeHtml(s) {
@@ -1055,7 +1060,9 @@
       el.addEventListener('change', syncVisitPreview);
       el.addEventListener('input', syncVisitPreview);
     });
-    document.querySelectorAll('input[name="visit_master_on"]').forEach(function (el) { el.addEventListener('change', syncVisitPreview); });
+    document.querySelectorAll('input[name="visit_master_on"]').forEach(function (el) {
+      el.addEventListener('change', function () { syncVisitPreview(); updateRecommendedPriceHint(); });
+    });
     document.querySelectorAll('input[name^="visit_master_pct_"]').forEach(function (el) { el.addEventListener('input', syncVisitPreview); el.addEventListener('change', syncVisitPreview); });
     function syncVisitStockEntireUi() {
       document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row').forEach(syncVisitStockRowEntireUi);
@@ -1527,16 +1534,39 @@
       if (!host) return;
       const svc = getSelectedService();
       const pct = visitClientDiscountPct();
-      const level = visitMasterLevel && { JUNIOR: 1, MIDDLE: 1, SENIOR: 1 }[visitMasterLevel]
-        ? visitMasterLevel
-        : 'MIDDLE';
+      const levelRank = { JUNIOR: 1, MIDDLE: 2, SENIOR: 3 };
+      const levelRuByCode = { JUNIOR: 'младший мастер', MIDDLE: 'мастер', SENIOR: 'старший мастер' };
+      function highestLevel(levels) {
+        let best = null;
+        for (const lv of (levels || [])) {
+          const code = String(lv || '').trim().toUpperCase();
+          if (!levelRank[code]) continue;
+          if (!best || levelRank[code] > levelRank[best]) best = code;
+        }
+        return best;
+      }
+      function selectedLevelsByScope() {
+        const scope = (document.querySelector('input[name="masters_scope"]:checked') || {}).value || 'VISIT';
+        if (scope === 'PER_SERVICE') {
+          return Array.from(document.querySelectorAll('input[name="line_0_service_master_on"]:checked'))
+            .map((x) => String(x.getAttribute('data-master-level') || '').toUpperCase())
+            .filter((x) => !!levelRank[x]);
+        }
+        const multiOn = !!(document.getElementById('visit_use_multi_masters') || {}).checked;
+        if (!multiOn) return [];
+        return Array.from(document.querySelectorAll('input[name="visit_master_on"]:checked'))
+          .map((x) => String(x.getAttribute('data-master-level') || '').toUpperCase())
+          .filter((x) => !!levelRank[x]);
+      }
+      const selectedLevels = selectedLevelsByScope();
+      const level = highestLevel(selectedLevels) || (visitMasterLevel && levelRank[visitMasterLevel] ? visitMasterLevel : 'MIDDLE');
       const byLevel = {
         JUNIOR: ['price_junior_from', 'price_junior_to'],
         MIDDLE: ['price_middle_from', 'price_middle_to'],
         SENIOR: ['price_senior_from', 'price_senior_to'],
       };
       const keys = byLevel[level];
-      const lvlRu = visitMasterLevelRu || 'мастер';
+      const lvlRu = levelRuByCode[level] || visitMasterLevelRu || 'мастер';
       if (!svc) {
         host.textContent = '';
         return;
@@ -1559,6 +1589,9 @@
         priceStr = String(rHi) + ' ₽';
       }
       let tail = pct > 0 ? ' с учётом скидки' : '';
+      if (selectedLevels.length > 1) {
+        tail += (tail ? '; ' : ' ') + 'выбрано несколько мастеров, расчёт по уровню более высокого мастера';
+      }
       host.textContent = 'Рекомендуемая цена по прайсу (' + lvlRu + '): ' + priceStr + tail;
     }
 

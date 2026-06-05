@@ -138,7 +138,7 @@
               <div id="lbBookingLine0Masters" style="display:flex; flex-direction: column; gap: 8px;">
                 {% for m in masters %}
                   <label style="display:flex; gap: 8px; align-items: center;">
-                    <input type="checkbox" data-line-master="0" value="{{ m.id }}" />
+                    <input type="checkbox" data-line-master="0" value="{{ m.id }}" data-master-level="{{ m.master_level.value if m.master_level else '' }}" />
                     <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
                   </label>
                 {% endfor %}
@@ -189,7 +189,7 @@
               <div style="display:flex; flex-direction: column; gap: 8px;">
                 {% for m in masters %}
                   <label style="display:flex; gap: 8px; align-items: center;">
-                    <input type="checkbox" name="booking_master_on" value="{{ m.id }}"
+                    <input type="checkbox" name="booking_master_on" value="{{ m.id }}" data-master-level="{{ m.master_level.value if m.master_level else '' }}"
                       {% if m.id in (booking_master_on_ids or []) %}checked{% endif %} />
                     <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
                   </label>
@@ -688,7 +688,7 @@
       var mastersMeta = Array.from(document.querySelectorAll('input[name="booking_master_on"]')).map(function (cb) {
         var label = cb.closest('label');
         var txt = label ? (label.textContent || '') : '';
-        return { id: toInt(cb.value), label: txt.trim() };
+        return { id: toInt(cb.value), label: txt.trim(), level: String(cb.getAttribute('data-master-level') || '').toUpperCase() };
       }).filter(function (m) { return m.id > 0; });
 
       var state = { extraLines: [] };
@@ -778,7 +778,7 @@
         for (var i = 0; i < mastersMeta.length; i++) {
           var m = mastersMeta[i];
           h += '<label style="display:flex; gap: 8px; align-items: center;">' +
-            '<input type="checkbox" data-line-master="' + lineIdx + '" value="' + m.id + '" />' +
+            '<input type="checkbox" data-line-master="' + lineIdx + '" value="' + m.id + '" data-master-level="' + esc(m.level || '') + '" />' +
             '<span>' + esc(m.label) + '</span>' +
           '</label>';
         }
@@ -1252,18 +1252,128 @@
 
         var svcR = readPriceRange(svcMin, svcMax);
         var prodR = readPriceRange(prodMin, prodMax);
+        var levelRank = { JUNIOR: 1, MIDDLE: 2, SENIOR: 3 };
+        var levelRu = { JUNIOR: 'младший мастер', MIDDLE: 'мастер', SENIOR: 'старший мастер' };
+        function readServiceCatalog() {
+          var cfg = document.getElementById('lb-booking-service-catalog-json');
+          if (!cfg) return [];
+          try {
+            var parsed = JSON.parse(cfg.textContent || '[]');
+            return Array.isArray(parsed) ? parsed : [];
+          } catch (e) {
+            return [];
+          }
+        }
+        function flattenCatalogWithPrices() {
+          var data = readServiceCatalog();
+          var out = [];
+          for (var i = 0; i < data.length; i++) {
+            var c = data[i] || {};
+            var subs = c.subcategories || [];
+            for (var j = 0; j < subs.length; j++) {
+              var sc = subs[j] || {};
+              var svcs = sc.services || [];
+              for (var k = 0; k < svcs.length; k++) {
+                var s = svcs[k] || {};
+                out.push({
+                  id: toInt(s.id),
+                  name: String(s.name || ''),
+                  price_junior_from: s.price_junior_from,
+                  price_junior_to: s.price_junior_to,
+                  price_middle_from: s.price_middle_from,
+                  price_middle_to: s.price_middle_to,
+                  price_senior_from: s.price_senior_from,
+                  price_senior_to: s.price_senior_to
+                });
+              }
+            }
+          }
+          return out;
+        }
+        function highestLevel(levels) {
+          var best = '';
+          for (var i = 0; i < levels.length; i++) {
+            var lv = String(levels[i] || '').toUpperCase();
+            if (!levelRank[lv]) continue;
+            if (!best || levelRank[lv] > levelRank[best]) best = lv;
+          }
+          return best || 'MIDDLE';
+        }
+        function levelsForLine(idx) {
+          var mode = ((document.querySelector('input[name="booking_masters_mode"]:checked') || {}).value || 'all');
+          var selector = (mode === 'per_service') ? ('input[data-line-master="' + idx + '"]:checked') : 'input[name="booking_master_on"]:checked';
+          return Array.from(document.querySelectorAll(selector)).map(function (cb) {
+            return String(cb.getAttribute('data-master-level') || '').toUpperCase();
+          }).filter(function (lv) { return !!levelRank[lv]; });
+        }
+        function priceRangeForServiceAndLevel(svc, level) {
+          if (!svc) return null;
+          var keysByLevel = {
+            JUNIOR: ['price_junior_from', 'price_junior_to'],
+            MIDDLE: ['price_middle_from', 'price_middle_to'],
+            SENIOR: ['price_senior_from', 'price_senior_to']
+          };
+          var keys = keysByLevel[level] || keysByLevel.MIDDLE;
+          return readPriceRange(svc[keys[0]], svc[keys[1]]);
+        }
+        function sumRange(total, add) {
+          if (!add) return total;
+          if (!total) return { min: add.min, max: add.max };
+          return { min: total.min + add.min, max: total.max + add.max };
+        }
+        function collectVisitServiceRows(serviceById) {
+          var rows = [];
+          var sid0 = toInt((document.getElementById('service_id') || {}).value || 0);
+          if (sid0 > 0) rows.push({ idx: 0, sid: sid0, title: 'Услуга 1' });
+          Array.from(document.querySelectorAll('[data-service-line-idx]')).forEach(function (row) {
+            var idx = toInt(row.getAttribute('data-service-line-idx') || 0);
+            if (idx <= 0) return;
+            var sel = row.querySelector('[data-line-service]');
+            var sid = toInt((sel && sel.value) || 0);
+            if (sid <= 0) return;
+            rows.push({ idx: idx, sid: sid, title: 'Услуга ' + String(idx + 1) });
+          });
+          return rows.map(function (r) {
+            var svc = serviceById[r.sid] || null;
+            var levels = levelsForLine(r.idx);
+            var level = highestLevel(levels);
+            var range = priceRangeForServiceAndLevel(svc, level);
+            return {
+              title: r.title + (svc ? ': ' + svc.name : ''),
+              range: range,
+              level: level,
+              mastersCount: levels.length
+            };
+          }).filter(function (x) { return !!x.range; });
+        }
 
         var lines = [];
-        if (kindVisit && svcR) lines.push({ label: 'Услуга по прайсу', r: svcR });
-        if (kindVisit && prodR) lines.push({ label: 'Работа/комплект/материалы', r: prodR });
-        if (kindSale && prodR) lines.push({ label: 'Товар', r: prodR });
-
         var total = null;
-        for (var i = 0; i < lines.length; i++) {
-          var rr = lines[i].r;
-          if (!rr) continue;
-          if (!total) total = { min: rr.min, max: rr.max };
-          else total = { min: total.min + rr.min, max: total.max + rr.max };
+        if (kindVisit) {
+          var byId = {};
+          flattenCatalogWithPrices().forEach(function (s) { byId[s.id] = s; });
+          var serviceRows = collectVisitServiceRows(byId);
+          var serviceTotal = null;
+          for (var sr = 0; sr < serviceRows.length; sr++) {
+            var row = serviceRows[sr];
+            serviceTotal = sumRange(serviceTotal, row.range);
+            var label = row.title + ' — ориентир по прайсу (' + (levelRu[row.level] || 'мастер') + ')';
+            if (row.mastersCount > 1) label += ', взят более высокий уровень из выбранных мастеров';
+            lines.push({ label: label, r: row.range });
+          }
+          if (serviceTotal) total = sumRange(total, serviceTotal);
+          else if (svcR) {
+            lines.push({ label: 'Услуга — ориентир по прайсу', r: svcR });
+            total = sumRange(total, svcR);
+          }
+          if (prodR) {
+            lines.push({ label: 'Комплект, материалы и доп. расчёты', r: prodR });
+            total = sumRange(total, prodR);
+          }
+        }
+        if (kindSale && prodR) {
+          lines.push({ label: 'Продажа товара', r: prodR });
+          total = sumRange(total, prodR);
         }
 
         var box = document.getElementById('lbBookingPricePreviewLines');
