@@ -207,7 +207,7 @@ def _booking_details_audit_changes(db: Session, before_raw: str | None, after_ra
         b = after.get(k)
         if a == b:
             continue
-        if k == "sale_kit_order_master_ids":
+        if k in ("sale_kit_order_master_ids", "visit_order_master_ids"):
             out.append(
                 FieldChange(
                     field_name=str(k),
@@ -216,14 +216,21 @@ def _booking_details_audit_changes(db: Session, before_raw: str | None, after_ra
                 )
             )
             continue
-        if k in ("sale_kit_order_master_ids", "sale_rubber_order_master_id"):
+        if k in ("sale_kit_order_master_ids", "visit_order_master_ids", "sale_rubber_order_master_id"):
             continue
         out.append(FieldChange(field_name=str(k), old_value=None if a is None else str(a), new_value=None if b is None else str(b)))
     return out
 
 
 def _refresh_sale_order_master_ids_in_fp(db: Session, *, booking_id: int, fp: dict[str, str]) -> None:
-    """Держим sale_*_master_ids в fp синхронно с booking_staff (источник истины для назначений)."""
+    """Держим *_master_ids в fp синхронно с booking_staff (источник истины для назначений)."""
+    b = db.get(Booking, int(booking_id))
+    if b is None:
+        fp.pop("sale_kit_order_master_ids", None)
+        fp.pop("sale_rubber_order_master_id", None)
+        fp.pop("visit_order_master_ids", None)
+        fp.pop("visit_order_use_masters", None)
+        return
     staff = list(
         db.scalars(
             select(BookingStaff).where(
@@ -239,14 +246,31 @@ def _refresh_sale_order_master_ids_in_fp(db: Session, *, booking_id: int, fp: di
         (int(r.user_id) for r in staff if r.kind == BookingStaffKind.SALE_RUBBER_ORDER and int(r.user_id) > 0),
         None,
     )
-    if kit_ids:
-        fp["sale_kit_order_master_ids"] = ",".join([str(i) for i in kit_ids])
+    if b.kind == BookingKind.PRODUCT_SALE:
+        if kit_ids:
+            fp["sale_kit_order_master_ids"] = ",".join([str(i) for i in kit_ids])
+        else:
+            fp.pop("sale_kit_order_master_ids", None)
+        if rub_id:
+            fp["sale_rubber_order_master_id"] = str(rub_id)
+        else:
+            fp.pop("sale_rubber_order_master_id", None)
+        fp.pop("visit_order_master_ids", None)
+        fp.pop("visit_order_use_masters", None)
+    elif b.kind == BookingKind.VISIT:
+        if kit_ids:
+            fp["visit_order_master_ids"] = ",".join([str(i) for i in kit_ids])
+            fp["visit_order_use_masters"] = "1"
+        else:
+            fp.pop("visit_order_master_ids", None)
+            fp.pop("visit_order_use_masters", None)
+        fp.pop("sale_kit_order_master_ids", None)
+        fp.pop("sale_rubber_order_master_id", None)
     else:
         fp.pop("sale_kit_order_master_ids", None)
-    if rub_id:
-        fp["sale_rubber_order_master_id"] = str(rub_id)
-    else:
         fp.pop("sale_rubber_order_master_id", None)
+        fp.pop("visit_order_master_ids", None)
+        fp.pop("visit_order_use_masters", None)
 
 
 def _utc_naive_to_local(dt: datetime | None, tz_name: str) -> datetime | None:
@@ -897,6 +921,8 @@ _BOOKING_VISIT_KIT_DETAIL_KEYS: frozenset[str] = frozenset(
         "visit_extra_stock_use_entire",
         "visit_order_blanks_qty",
         "visit_order_blanks_desc",
+        "visit_order_use_masters",
+        "visit_order_master_ids",
         "visit_extra_order_blanks_qty",
         "visit_extra_order_blanks_desc",
         "corr_trim_qty",
@@ -921,6 +947,7 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
         "visit_own_need_extra_blanks",
         "visit_stock_use_entire",
         "visit_extra_stock_use_entire",
+        "visit_order_use_masters",
         "sale_stock_use_entire",
     )
     d: dict[str, object] = {}
@@ -945,6 +972,8 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
             "visit_extra_stock_use_entire",
             "visit_order_blanks_qty",
             "visit_order_blanks_desc",
+            "visit_order_use_masters",
+            "visit_order_master_ids",
             "visit_extra_order_blanks_qty",
             "visit_extra_order_blanks_desc",
         ) + calc_keys
@@ -1047,6 +1076,31 @@ def _sync_booking_staff_rows_for_sale(db: Session, *, booking_id: int, fp: dict[
     ):
         db.delete(r)
     db.flush()
+
+    if (fp.get("kind") or "") == BookingKind.VISIT.value and (fp.get("visit_kit_mode") or "") == "ORDER":
+        if parse_bool(fp.get("visit_order_use_masters")):
+            ids: list[int] = []
+            for v in form_raw.getlist("visit_order_master_on"):
+                try:
+                    ids.append(parse_int(v, min=1, field_name="visit_order_master_on"))
+                except Exception:
+                    pass
+            ids = sorted(set([i for i in ids if i > 0]))
+            for uid in ids:
+                if db.get(User, uid) is None:
+                    continue
+                db.add(BookingStaff(booking_id=booking_id, user_id=uid, kind=BookingStaffKind.SALE_KIT_ORDER))
+            if ids:
+                fp["visit_order_master_ids"] = ",".join([str(i) for i in ids])
+                fp["visit_order_use_masters"] = "1"
+            else:
+                fp.pop("visit_order_master_ids", None)
+                fp.pop("visit_order_use_masters", None)
+        else:
+            fp.pop("visit_order_master_ids", None)
+            fp.pop("visit_order_use_masters", None)
+        db.flush()
+        return
 
     if (fp.get("product_kind") or "") == "KIT" and (fp.get("sale_kit_mode") or "") == "ORDER":
         ids: list[int] = []
@@ -1296,6 +1350,8 @@ def admin_booking_new_get(
         "visit_extra_stock_use_entire",
         "visit_order_blanks_qty",
         "visit_order_blanks_desc",
+        "visit_order_use_masters",
+        "visit_order_master_ids",
         "visit_extra_order_blanks_qty",
         "visit_extra_order_blanks_desc",
         "corr_trim_qty",
@@ -1370,7 +1426,17 @@ async def admin_booking_new_post(  # noqa: C901
 ):
     form_raw = await request.form()
     fp = {k: form_raw.get(k) for k in form_raw.keys() if not isinstance(form_raw.get(k), UploadFile)}
-
+    visit_order_master_ids: list[int] = []
+    for v in form_raw.getlist("visit_order_master_on"):
+        try:
+            visit_order_master_ids.append(parse_int(v, min=1, field_name="visit_order_master_on"))
+        except Exception:
+            pass
+    visit_order_master_ids = sorted(set([i for i in visit_order_master_ids if i > 0]))
+    if visit_order_master_ids:
+        fp["visit_order_master_ids"] = ",".join([str(i) for i in visit_order_master_ids])
+    else:
+        fp.pop("visit_order_master_ids", None)
     client_id_raw = str(fp.get("client_id") or "").strip()
     kind_raw = str(fp.get("kind") or "").strip() or BookingKind.VISIT.value
     quoted_price_text = strip_or_none(str(fp.get("quoted_price_text") or ""), 120)
@@ -1426,6 +1492,9 @@ async def admin_booking_new_post(  # noqa: C901
         )
         if svc_err:
             err = svc_err
+        elif (fp.get("visit_kit_mode") or "") == "ORDER" and parse_bool(fp.get("visit_order_use_masters")):
+            if not visit_order_master_ids:
+                err = "Выберите хотя бы одного мастера для заказа комплекта."
 
     if not err and kind_raw == BookingKind.PRODUCT_SALE.value:
         pk = str(fp.get("product_kind") or "").strip()
@@ -1863,6 +1932,17 @@ async def admin_booking_edit_post(
         raise HTTPException(status_code=404, detail="Бронь не найдена")
     form_raw = await request.form()
     fp = {k: form_raw.get(k) for k in form_raw.keys() if not isinstance(form_raw.get(k), UploadFile)}
+    visit_order_master_ids: list[int] = []
+    for v in form_raw.getlist("visit_order_master_on"):
+        try:
+            visit_order_master_ids.append(parse_int(v, min=1, field_name="visit_order_master_on"))
+        except Exception:
+            pass
+    visit_order_master_ids = sorted(set([i for i in visit_order_master_ids if i > 0]))
+    if visit_order_master_ids:
+        fp["visit_order_master_ids"] = ",".join([str(i) for i in visit_order_master_ids])
+    else:
+        fp.pop("visit_order_master_ids", None)
 
     client_id_raw = str(fp.get("client_id") or "").strip()
     kind_raw = str(fp.get("kind") or "").strip() or BookingKind.VISIT.value
@@ -1919,6 +1999,9 @@ async def admin_booking_edit_post(
         )
         if svc_err:
             err = svc_err
+        elif (fp.get("visit_kit_mode") or "") == "ORDER" and parse_bool(fp.get("visit_order_use_masters")):
+            if not visit_order_master_ids:
+                err = "Выберите хотя бы одного мастера для заказа комплекта."
 
     if not err and kind_raw == BookingKind.PRODUCT_SALE.value:
         pk = str(fp.get("product_kind") or "").strip()

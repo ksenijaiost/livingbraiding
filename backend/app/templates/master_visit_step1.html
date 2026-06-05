@@ -221,7 +221,7 @@
       </div>
 
       <div class="card" style="margin-top: 10px; background: #f8fafc;">
-        <strong id="amount_from_client_label" style="font-size: 1.05rem; display: block;">Сколько взяли с клиента</strong>
+        <div id="amount_from_client_label" style="font-size: 0.95rem; font-weight: 600; display: block;">Сколько взяли с клиента</div>
         <p id="visit_recommended_price_hint" class="muted" style="font-size: 13px; margin: 8px 0 6px; min-height: 1.25em;"></p>
         <div class="row" style="align-items:flex-end;">
           <div>
@@ -262,7 +262,7 @@
         </div>
       </div>
 
-      <h3 style="margin-top:10px;">Материал</h3>
+      <div style="margin-top:10px; font-weight:600; font-size:0.95rem;">Материал</div>
       <div class="row">
         <div>
           <label>Канекалон, г</label>
@@ -1886,20 +1886,34 @@
         '</div>' +
         '<div class="row" style="margin-top:8px;">' +
           '<div><label>Услуга *</label><select name="line_' + idx + '_service_id" id="line_' + idx + '_service_id" style="width:100%; box-sizing:border-box;"></select></div>' +
-          '<div><label>Сумма с клиента, ₽</label><input type="number" name="line_' + idx + '_amount_from_client" min="0" step="1" value="' + escAttr(prefill.amount_from_client || '') + '" /></div>' +
-        '</div>' +
-        '<div class="row" style="margin-top:8px;">' +
-          '<div><label>Время услуги</label><input type="time" name="line_' + idx + '_started_time" step="60" value="' + escAttr(prefill.started_time || '') + '" /></div>' +
           '<div></div>' +
         '</div>' +
         '<div class="row" style="margin-top:8px;">' +
-          '<div><label>Скидка клиенту, %</label><input type="number" name="line_' + idx + '_client_discount_percent" min="0" max="100" step="1" value="' + escAttr(prefill.client_discount_percent || '0') + '" /></div>' +
-          '<div><label>Комментарий</label><input type="text" name="line_' + idx + '_comment" maxlength="1000" value="' + escAttr(prefill.comment || '') + '" /></div>' +
+          '<div><label>Время начала выполнения услуги</label><input type="time" name="line_' + idx + '_started_time" step="60" value="' + escAttr(prefill.started_time || '') + '" /></div>' +
+          '<div></div>' +
         '</div>' +
-        '<div class="row" style="margin-top:8px;">' +
-          '<div><label>Канекалон, г</label><input type="number" name="line_' + idx + '_kanekalon_grams" min="0" step="1" value="' + escAttr(prefill.kanekalon_grams || '0') + '" /></div>' +
-          '<div><label>Кудри/термо, г</label><input type="number" name="line_' + idx + '_kudri_grams" min="0" step="1" value="' + escAttr(prefill.kudri_grams || '0') + '" /></div>' +
+        '<div class="card" style="margin-top:8px; background:#f8fafc;">' +
+          '<div style="font-size:0.95rem; font-weight:600; margin-bottom:6px;">Сколько взяли с клиента</div>' +
+          '<div class="row" style="align-items:flex-end;">' +
+            '<div><label>Скидка клиенту, %</label><input type="number" name="line_' + idx + '_client_discount_percent" min="0" max="100" step="1" value="' + escAttr(prefill.client_discount_percent || '0') + '" /></div>' +
+            '<div><label>Сумма с клиента, ₽</label><input type="number" name="line_' + idx + '_amount_from_client" min="0" step="1" value="' + escAttr(prefill.amount_from_client || '') + '" /></div>' +
+          '</div>' +
+          '<div style="margin-top:10px;">' +
+            '<div style="font-weight:600; margin-bottom:6px;">Амортизация *</div>' +
+            '<label style="display:block; margin-bottom:4px;"><input type="radio" name="line_' + idx + '_amortization_level" value="NONE"' + ((String(prefill.amortization_level || '') === 'NONE') ? ' checked' : '') + ' /> Нет — 0 ₽</label>' +
+            '<label style="display:block; margin-bottom:4px;"><input type="radio" name="line_' + idx + '_amortization_level" value="MIN"' + (((!prefill.amortization_level) || String(prefill.amortization_level) === 'MIN') ? ' checked' : '') + ' /> Минимальная — {{ (amortization_rubles.get("MIN") or 0)|int }} ₽</label>' +
+            '<label style="display:block; margin-bottom:4px;"><input type="radio" name="line_' + idx + '_amortization_level" value="MID"' + ((String(prefill.amortization_level || '') === 'MID') ? ' checked' : '') + ' /> Средняя — {{ (amortization_rubles.get("MID") or 0)|int }} ₽</label>' +
+            '<label style="display:block;"><input type="radio" name="line_' + idx + '_amortization_level" value="MAX"' + ((String(prefill.amortization_level || '') === 'MAX') ? ' checked' : '') + ' /> Увеличенная — {{ (amortization_rubles.get("MAX") or 0)|int }} ₽</label>' +
+          '</div>' +
         '</div>' +
+        '<div style="margin-top:8px;">' +
+          '<div style="font-weight:600; font-size:0.95rem; margin-bottom:6px;">Материал</div>' +
+          '<div class="row">' +
+            '<div><label>Канекалон, г</label><input type="number" name="line_' + idx + '_kanekalon_grams" min="0" step="1" value="' + escAttr(prefill.kanekalon_grams || '0') + '" /></div>' +
+            '<div><label>Кудри/термо, г</label><input type="number" name="line_' + idx + '_kudri_grams" min="0" step="1" value="' + escAttr(prefill.kudri_grams || '0') + '" /></div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="margin-top:8px;"><label>Комментарий к услуге</label><textarea name="line_' + idx + '_comment" rows="2" maxlength="1000" style="width:100%; box-sizing:border-box;">' + escAttr(prefill.comment || '') + '</textarea></div>' +
         '<div class="card" data-extra-line-masters-wrap="1" style="margin-top:8px; display:none; background:#f8fafc;">' +
           '<div style="font-weight:600; margin-bottom:6px;">Мастера для этой услуги</div>' +
           extraMastersHtml(idx) +
@@ -1985,6 +1999,7 @@
           amount_from_client: fpAll['line_' + idx + '_amount_from_client'] || '',
           started_time: fpAll['line_' + idx + '_started_time'] || '',
           client_discount_percent: fpAll['line_' + idx + '_client_discount_percent'] || '0',
+          amortization_level: fpAll['line_' + idx + '_amortization_level'] || 'MIN',
           comment: fpAll['line_' + idx + '_comment'] || '',
           kanekalon_grams: fpAll['line_' + idx + '_kanekalon_grams'] || '0',
           kudri_grams: fpAll['line_' + idx + '_kudri_grams'] || '0',
