@@ -19,3 +19,8 @@ KIT_MAX_RESERVES_PER_KIT = "kit_max_reserves_per_kit"
 CALENDAR_DISPLAY_HOUR_FROM = "calendar_display_hour_from"
 CALENDAR_DISPLAY_HOUR_TO = "calendar_display_hour_to"
 
+# Master levels display labels
+MASTER_LEVEL_LABEL_JUNIOR = "master_level_label_junior"
+MASTER_LEVEL_LABEL_MIDDLE = "master_level_label_middle"
+MASTER_LEVEL_LABEL_SENIOR = "master_level_label_senior"
+

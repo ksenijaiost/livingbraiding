@@ -39,6 +39,21 @@
         <input name="calendar_display_hour_to" type="number" step="1" min="1" max="24" value="{{ calendar_display_hour_to }}" />
       </div>
       <p class="muted lb-mb-12">Сетка «Занятость» в модалке дня: от начала до конца (например 9–21 — часы 9:00…20:00).</p>
+      <div class="card lb-card-subtle lb-mb-12">
+        <div style="font-weight: 600; margin-bottom: 8px;">Названия уровней мастера</div>
+        <div class="lb-mb-8">
+          <label>JUNIOR</label>
+          <input name="master_level_label_junior" maxlength="80" value="{{ master_level_labels.JUNIOR }}" />
+        </div>
+        <div class="lb-mb-8">
+          <label>MIDDLE</label>
+          <input name="master_level_label_middle" maxlength="80" value="{{ master_level_labels.MIDDLE }}" />
+        </div>
+        <div>
+          <label>SENIOR</label>
+          <input name="master_level_label_senior" maxlength="80" value="{{ master_level_labels.SENIOR }}" />
+        </div>
+      </div>
       <div class="lb-mt-16 lb-pt-12 lb-bt">
         <button type="submit">Сохранить</button>
       </div>
