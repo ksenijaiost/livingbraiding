@@ -84,9 +84,7 @@
           <input type="date" name="planned_date" value="{{ fp.get('planned_date','') }}" required />
         </div>
         <div>
-          <label>Время первой услуги (часы:минуты)</label>
-          <input type="time" name="planned_time" value="{{ fp.get('planned_time','') }}" step="60" required />
-          <p class="muted" style="margin:4px 0 0;font-size:0.9em;">Без секунд; время обязательно.</p>
+          <p class="muted" style="margin:26px 0 0;font-size:0.9em;">Дата общая для брони. Время задаётся в блоке первой услуги.</p>
         </div>
         <div>
           <label>Тип *</label>
@@ -97,9 +95,37 @@
         </div>
       </div>
 
+      <div id="lbBookingMastersModeTop" class="card" style="margin-top: 12px; background:#f8fafc; display:none;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Выбор мастера для услуг</div>
+        <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+          {% set masters_mode = fp.get('booking_masters_mode') or 'all' %}
+          <label><input type="radio" name="booking_masters_mode" value="all" {% if masters_mode != 'per_service' %}checked{% endif %} /> На все услуги</label>
+          <label><input type="radio" name="booking_masters_mode" value="per_service" {% if masters_mode == 'per_service' %}checked{% endif %} /> Отдельно по услугам</label>
+        </div>
+        <div id="lbBookingAllMastersBlock" style="margin-top: 10px;">
+          <div style="font-weight: 600; margin-bottom: 8px;">Мастера на все услуги *</div>
+          {% if not masters %}
+            <p class="muted" style="margin: 0;">Нет активных мастеров.</p>
+          {% else %}
+            <div style="display:flex; flex-direction: column; gap: 8px;">
+              {% for m in masters %}
+                <label style="display:flex; gap: 8px; align-items: center;">
+                  <input type="checkbox" name="booking_master_on" value="{{ m.id }}"
+                    {% if m.id in (booking_master_on_ids or []) %}checked{% endif %} />
+                  <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
+                </label>
+              {% endfor %}
+            </div>
+            <div id="lbBookingScheduleAvailMsg" class="muted" style="margin-top:10px; font-size:12px;"></div>
+          {% endif %}
+        </div>
+      </div>
+
       <div id="kind_visit_block" style="margin-top: 14px; display:none;">
         <div class="card" style="background:#f8fafc;">
           <h3 style="margin-top:0;">Бронь визита</h3>
+          <div class="card" style="margin-top: 10px; background:#fff;">
+            <strong>Услуга 1</strong>
           <div class="row">
             <div>
               <label>Категория</label>
@@ -118,10 +144,26 @@
             <label>Услуга *</label>
             <select id="service_id" name="service_id" required style="width: 100%; max-width: 100%; box-sizing: border-box; min-height: 2.5rem;"></select>
           </div>
-          <div style="margin-top:8px;">
-            <label>Комментарий к первой услуге</label>
-            <textarea id="lbBookingLine0Comment" rows="2" maxlength="1000" style="width:100%; box-sizing:border-box;"></textarea>
+          <div style="margin-top:8px; max-width:16rem;">
+            <label>Время начала первой услуги *</label>
+            <input type="time" name="planned_time" value="{{ fp.get('planned_time','') }}" step="60" required />
           </div>
+
+          {% if masters %}
+            <div id="lbBookingPerServiceMastersBlock" style="margin-top: 10px; display:none;">
+              <div style="font-weight: 600; margin-bottom: 8px;">Мастера для первой услуги *</div>
+              <div id="lbBookingLine0Masters" style="display:flex; flex-direction: column; gap: 8px;">
+                {% for m in masters %}
+                  <label style="display:flex; gap: 8px; align-items: center;">
+                    <input type="checkbox" data-line-master="0" value="{{ m.id }}" />
+                    <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
+                  </label>
+                {% endfor %}
+              </div>
+              <div id="lbBookingLine0AvailMsg" class="muted" style="margin-top:10px; font-size:12px;"></div>
+            </div>
+          {% endif %}
+
           <div style="margin-top:8px;">
             <div style="font-weight:600; margin-bottom:6px;">Время выполнения первой услуги</div>
             <label style="display:flex; gap:10px; align-items:center;">
@@ -139,48 +181,11 @@
               </div>
             </div>
           </div>
-
-          <div style="margin-top: 14px;">
-            <div style="font-weight: 600; margin-bottom: 8px;">Мастера для услуг</div>
-            <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
-              {% set masters_mode = fp.get('booking_masters_mode') or 'all' %}
-              <label><input type="radio" name="booking_masters_mode" value="all" {% if masters_mode != 'per_service' %}checked{% endif %} /> На все услуги</label>
-              <label><input type="radio" name="booking_masters_mode" value="per_service" {% if masters_mode == 'per_service' %}checked{% endif %} /> Отдельно по услугам</label>
-            </div>
+          <div style="margin-top:8px;">
+            <label>Комментарий к первой услуге</label>
+            <textarea id="lbBookingLine0Comment" rows="2" maxlength="1000" style="width:100%; box-sizing:border-box;"></textarea>
           </div>
-
-          <div id="lbBookingAllMastersBlock" style="margin-top: 10px;">
-            <div style="font-weight: 600; margin-bottom: 8px;">Мастера на все услуги *</div>
-            {% if not masters %}
-              <p class="muted" style="margin: 0;">Нет активных мастеров.</p>
-            {% else %}
-              <div style="display:flex; flex-direction: column; gap: 8px;">
-                {% for m in masters %}
-                  <label style="display:flex; gap: 8px; align-items: center;">
-                    <input type="checkbox" name="booking_master_on" value="{{ m.id }}"
-                      {% if m.id in (booking_master_on_ids or []) %}checked{% endif %} />
-                    <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
-                  </label>
-                {% endfor %}
-              </div>
-              <div id="lbBookingScheduleAvailMsg" class="muted" style="margin-top:10px; font-size:12px;"></div>
-            {% endif %}
           </div>
-
-          {% if masters %}
-            <div id="lbBookingPerServiceMastersBlock" style="margin-top: 10px; display:none;">
-              <div style="font-weight: 600; margin-bottom: 8px;">Мастера для первой услуги *</div>
-              <div id="lbBookingLine0Masters" style="display:flex; flex-direction: column; gap: 8px;">
-                {% for m in masters %}
-                  <label style="display:flex; gap: 8px; align-items: center;">
-                    <input type="checkbox" data-line-master="0" value="{{ m.id }}" />
-                    <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
-                  </label>
-                {% endfor %}
-              </div>
-              <div id="lbBookingLine0AvailMsg" class="muted" style="margin-top:10px; font-size:12px;"></div>
-            </div>
-          {% endif %}
 
           <div class="card" style="margin-top: 12px; background:#f1f5f9;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
@@ -670,6 +675,7 @@
       var serviceSel = document.getElementById('service_id');
       var addBtn = document.getElementById('lbBookingAddServiceBtn');
       var linesWrap = document.getElementById('lbBookingServiceLines');
+      var mastersModeTop = document.getElementById('lbBookingMastersModeTop');
       var allBlock = document.getElementById('lbBookingAllMastersBlock');
       var perBlock = document.getElementById('lbBookingPerServiceMastersBlock');
       var msgAll = document.getElementById('lbBookingScheduleAvailMsg');
@@ -687,7 +693,14 @@
         return (r && r.value === 'per_service') ? 'per_service' : 'all';
       }
       function setModeUi() {
+        var kindVisit = !!((document.querySelector('input[name="kind"][value="VISIT"]') || {}).checked);
         var per = modeValue() === 'per_service';
+        if (plannedTime) {
+          plannedTime.disabled = !kindVisit;
+          plannedTime.required = kindVisit;
+        }
+        if (mastersModeTop) mastersModeTop.style.display = kindVisit ? '' : 'none';
+        if (!kindVisit) per = false;
         if (allBlock) allBlock.style.display = per ? 'none' : '';
         if (perBlock) perBlock.style.display = per ? '' : 'none';
         for (var i = 0; i < state.extraLines.length; i++) {
@@ -1049,6 +1062,9 @@
       if (line0DurH) line0DurH.addEventListener('input', refreshAvailableMasters);
       if (line0DurM) line0DurM.addEventListener('input', refreshAvailableMasters);
       document.querySelectorAll('input[name="booking_masters_mode"]').forEach(function (r) {
+        r.addEventListener('change', function () { setModeUi(); refreshAvailableMasters(); });
+      });
+      document.querySelectorAll('input[name="kind"]').forEach(function (r) {
         r.addEventListener('change', function () { setModeUi(); refreshAvailableMasters(); });
       });
       document.querySelectorAll('input[name="booking_master_on"]').forEach(function (cb) {
