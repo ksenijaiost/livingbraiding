@@ -127,6 +127,9 @@
             <label>Услуга *</label>
             <select id="service_id" name="service_id" required style="width: 100%; max-width: 100%; box-sizing: border-box; min-height: 2.5rem;"></select>
           </div>
+          <div id="lbBookingLine0ServiceFlags" class="muted" style="margin-top:8px; font-size:12px; display:none;"></div>
+          <div id="lbBookingLine0ServiceEditor" style="margin-top:8px; display:none;"></div>
+          <div id="lbBookingLine0AdvancedBlocks" style="margin-top:8px;"></div>
           <div style="margin-top:8px; max-width:16rem;">
             <label>Время начала первой услуги *</label>
             <input type="time" name="planned_time" value="{{ fp.get('planned_time','') }}" step="60" required />
@@ -662,6 +665,10 @@
                 category_name: String(c.name || ''),
                 subcategory_name: String(sc.name || ''),
                 service_name: String(s.name || ''),
+                requires_kit_block: !!s.requires_kit_block,
+                requires_tail_block: !!s.requires_tail_block,
+                requires_thermo: !!s.requires_thermo,
+                questionnaire_count: Array.isArray(s.questionnaire_fields) ? s.questionnaire_fields.length : 0,
               });
             }
           }
@@ -773,6 +780,97 @@
         }
         return h;
       }
+      function serviceById(sid) {
+        var id = toInt(sid);
+        if (id <= 0) return null;
+        for (var i = 0; i < servicesFlat.length; i++) {
+          if (toInt(servicesFlat[i].id) === id) return servicesFlat[i];
+        }
+        return null;
+      }
+      function serviceFlagsHtml(svc) {
+        if (!svc) return '';
+        var tags = [];
+        if (svc.requires_kit_block) tags.push('Комплект (склад) для услуг');
+        if (svc.requires_tail_block) tags.push('Хвост/резинка');
+        if (svc.requires_thermo) tags.push('Термозамещения');
+        if (toInt(svc.questionnaire_count) > 0) tags.push('Описание/вопросы по услуге');
+        if (!tags.length) return '';
+        return 'Для этой услуги включено: ' + tags.join(' • ');
+      }
+      function serviceEditorHtml(svc, idx) {
+        if (!svc) return '';
+        var h = '';
+        if (svc.requires_kit_block) {
+          h += '<div class="card" style="margin-top:8px; background:#f8fafc;">' +
+            '<div style="font-weight:600; margin-bottom:6px;">Комплект по услуге</div>' +
+            '<div class="row">' +
+              '<div><label>Режим</label><select data-line-kit-mode="1"><option value="IN_STOCK">Из наличия</option><option value="OWN">Свой</option><option value="ORDER">Заказ</option></select></div>' +
+              '<div><label>Количество (если нужно)</label><input type="number" min="0" step="1" data-line-kit-qty="1" /></div>' +
+            '</div>' +
+            '<div style="margin-top:6px;"><label>Комментарий по комплекту</label><textarea rows="2" maxlength="600" data-line-kit-note="1" style="width:100%; box-sizing:border-box;"></textarea></div>' +
+          '</div>';
+        }
+        if (svc.requires_tail_block) {
+          h += '<div class="card" style="margin-top:8px; background:#f8fafc;">' +
+            '<div style="font-weight:600; margin-bottom:6px;">Хвост/резинка</div>' +
+            '<textarea rows="2" maxlength="600" data-line-tail-note="1" style="width:100%; box-sizing:border-box;" placeholder="Параметры/пожелания"></textarea>' +
+          '</div>';
+        }
+        if (svc.requires_thermo) {
+          h += '<div class="card" style="margin-top:8px; background:#f8fafc;">' +
+            '<div style="font-weight:600; margin-bottom:6px;">Термозамещения</div>' +
+            '<textarea rows="2" maxlength="600" data-line-thermo-note="1" style="width:100%; box-sizing:border-box;" placeholder="Параметры термозамещений"></textarea>' +
+          '</div>';
+        }
+        if (toInt(svc.questionnaire_count) > 0) {
+          h += '<div class="card" style="margin-top:8px; background:#f8fafc;">' +
+            '<div style="font-weight:600; margin-bottom:6px;">Описание по услуге</div>' +
+            '<textarea rows="2" maxlength="1000" data-line-questionnaire-note="1" style="width:100%; box-sizing:border-box;" placeholder="Важные ответы/описание"></textarea>' +
+          '</div>';
+        }
+        return h;
+      }
+      function normalizeLineComment(base, details) {
+        var out = String(base || '').trim();
+        var parts = [];
+        if (details.kit) parts.push('Комплект: ' + details.kit);
+        if (details.tail) parts.push('Хвост/резинка: ' + details.tail);
+        if (details.thermo) parts.push('Термо: ' + details.thermo);
+        if (details.q) parts.push('Описание: ' + details.q);
+        if (!parts.length) return out;
+        var extra = parts.join(' | ');
+        return out ? (out + '\n' + extra) : extra;
+      }
+      function renderLineServiceFlags(idx) {
+        var sid = lineServiceId(idx);
+        var svc = serviceById(sid);
+        var text = serviceFlagsHtml(svc);
+        var host = null;
+        if (idx === 0) host = document.getElementById('lbBookingLine0ServiceFlags');
+        else {
+          var row = state.extraLines.find(function (x) { return x.idx === idx; });
+          host = row && row.el ? row.el.querySelector('[data-line-service-flags]') : null;
+        }
+        if (!host) return;
+        host.textContent = text;
+        host.style.display = text ? '' : 'none';
+        var editorHost = null;
+        if (idx === 0) editorHost = document.getElementById('lbBookingLine0ServiceEditor');
+        else {
+          var row2 = state.extraLines.find(function (x) { return x.idx === idx; });
+          editorHost = row2 && row2.el ? row2.el.querySelector('[data-line-service-editor]') : null;
+        }
+        if (editorHost) {
+          var editor = serviceEditorHtml(svc, idx);
+          editorHost.innerHTML = editor;
+          editorHost.style.display = editor ? '' : 'none';
+        }
+      }
+      function renderAllServiceFlags() {
+        renderLineServiceFlags(0);
+        for (var i = 0; i < state.extraLines.length; i++) renderLineServiceFlags(state.extraLines[i].idx);
+      }
       function mastersChecksHtml(lineIdx) {
         var h = '';
         for (var i = 0; i < mastersMeta.length; i++) {
@@ -822,6 +920,8 @@
                 serviceOptionsHtml(preCategoryId, preSubcategoryId, prefillSid) +
               '</select>' +
             '</div>' +
+          '<div data-line-service-flags="1" class="muted" style="margin-top:8px; font-size:12px; display:none;"></div>' +
+          '<div data-line-service-editor="1" style="margin-top:8px; display:none;"></div>' +
           '</div>' +
           '<div style="margin-top:8px; max-width:16rem;">' +
             '<label>Время начала</label>' +
@@ -872,11 +972,13 @@
           var sid = toInt(subSel ? subSel.value : 0);
           var old = toInt(svcSel.value || 0);
           svcSel.innerHTML = serviceOptionsHtml(cid, sid, old);
+          renderLineServiceFlags(idx);
           refreshAvailableMasters();
         }
         if (catSel) catSel.addEventListener('change', syncLineSubcategories);
         if (subSel) subSel.addEventListener('change', syncLineServices);
         if (svcSel) svcSel.addEventListener('change', refreshAvailableMasters);
+        if (svcSel) svcSel.addEventListener('change', function () { renderLineServiceFlags(idx); });
         box.querySelector('[data-line-time]').addEventListener('change', refreshAvailableMasters);
         var durOnCb = box.querySelector('[data-line-dur-on]');
         if (durOnCb) {
@@ -900,6 +1002,7 @@
           });
         }
         syncLineSubcategories();
+        renderLineServiceFlags(idx);
         setModeUi();
       }
 
@@ -943,11 +1046,23 @@
         return out;
       }
       function lineCommentValue(idx) {
-        if (idx === 0) return String((line0Comment && line0Comment.value) || '').trim();
-        var row = state.extraLines.find(function (x) { return x.idx === idx; });
-        if (!row || !row.el) return '';
-        var cEl = row.el.querySelector('[data-line-comment]');
-        return String((cEl && cEl.value) || '').trim();
+        var base = '';
+        var row = null;
+        if (idx === 0) base = String((line0Comment && line0Comment.value) || '').trim();
+        else {
+          row = state.extraLines.find(function (x) { return x.idx === idx; });
+          if (!row || !row.el) return '';
+          var cEl = row.el.querySelector('[data-line-comment]');
+          base = String((cEl && cEl.value) || '').trim();
+        }
+        var root = idx === 0 ? (document.getElementById('lbBookingLine0ServiceEditor') || document) : ((row && row.el) ? row.el : document);
+        var details = {
+          kit: String(((root.querySelector('[data-line-kit-note]') || {}).value) || '').trim(),
+          tail: String(((root.querySelector('[data-line-tail-note]') || {}).value) || '').trim(),
+          thermo: String(((root.querySelector('[data-line-thermo-note]') || {}).value) || '').trim(),
+          q: String(((root.querySelector('[data-line-questionnaire-note]') || {}).value) || '').trim()
+        };
+        return normalizeLineComment(base, details);
       }
 
       function durationOverrideMinutes() {
@@ -1109,6 +1224,7 @@
       if (plannedDate) plannedDate.addEventListener('change', refreshAvailableMasters);
       if (plannedTime) plannedTime.addEventListener('change', refreshAvailableMasters);
       if (serviceSel) serviceSel.addEventListener('change', refreshAvailableMasters);
+      if (serviceSel) serviceSel.addEventListener('change', function () { renderLineServiceFlags(0); });
       if (line0DurOn) {
         line0DurOn.addEventListener('change', function () {
           var wrap = document.getElementById('lbBookingLine0DurInputs');
@@ -1132,6 +1248,12 @@
       });
 
       initPrefillLines();
+      (function moveAdvancedVisitBlocksToLine0() {
+        var host = document.getElementById('lbBookingLine0AdvancedBlocks');
+        var kit = document.getElementById('visit_kit_card');
+        if (host && kit && kit.parentElement !== host) host.appendChild(kit);
+      })();
+      renderAllServiceFlags();
       setModeUi();
       refreshAvailableMasters();
 
