@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.consultation_types import consultation_kind_for_category_name
 from app.db.models import Service, ServiceCategory, ServiceSubcategory
 
 
@@ -50,7 +51,7 @@ def _get_or_create_category(db: Session, name: str) -> ServiceCategory:
     cat = db.scalar(select(ServiceCategory).where(ServiceCategory.name == name))
     if cat:
         return cat
-    cat = ServiceCategory(name=name)
+    cat = ServiceCategory(name=name, consultation_kind=consultation_kind_for_category_name(name))
     db.add(cat)
     db.flush()
     return cat

@@ -279,12 +279,23 @@ class StudioExpense(Base):
     subcategory: Mapped["StudioExpenseSubcategory"] = relationship()
 
 
+class ConsultationKind(str, enum.Enum):
+    BRAIDING = "BRAIDING"
+    EXTENSION = "EXTENSION"
+    OTHER = "OTHER"
+
+
 class ServiceCategory(Base):
     __tablename__ = "service_categories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    consultation_kind: Mapped[ConsultationKind] = mapped_column(
+        Enum(ConsultationKind),
+        default=ConsultationKind.BRAIDING,
+        nullable=False,
+    )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 

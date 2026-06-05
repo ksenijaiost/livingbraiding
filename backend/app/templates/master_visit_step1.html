@@ -212,6 +212,9 @@
           style="width: 100%; max-width: 100%; box-sizing: border-box; min-height: 2.5rem;">
         </select>
       </div>
+      <div id="line0_service_feature_flags" class="muted" style="margin-top:8px; font-size:12px; display:none;"></div>
+      <div id="line0_service_feature_editor" style="margin-top:8px; display:none;"></div>
+      <div id="line0_service_advanced_blocks" style="margin-top:8px;"></div>
 
       <div class="row" style="margin-top:8px;">
         <div>
@@ -1089,6 +1092,34 @@
     }
 
     document.getElementById('visit-form').addEventListener('submit', function (e) {
+      function mergeLineCommentWithFeatureNotes(idx) {
+        const baseEl = idx === 0
+          ? document.querySelector('textarea[name="comment"]')
+          : document.querySelector('input[name="line_' + idx + '_comment"], textarea[name="line_' + idx + '_comment"]');
+        if (!baseEl) return;
+        const base = String(baseEl.value || '').trim();
+        const root = idx === 0
+          ? (document.getElementById('line0_service_feature_editor') || document)
+          : (document.querySelector('[data-extra-line-idx="' + String(idx) + '"]') || document);
+        const parts = [];
+        const k = (root.querySelector('[data-line-kit-note="' + String(idx) + '"]') || {}).value || '';
+        const t = (root.querySelector('[data-line-tail-note="' + String(idx) + '"]') || {}).value || '';
+        const th = (root.querySelector('[data-line-thermo-note="' + String(idx) + '"]') || {}).value || '';
+        const q = (root.querySelector('[data-line-q-note="' + String(idx) + '"]') || {}).value || '';
+        if (String(k).trim()) parts.push('Комплект: ' + String(k).trim());
+        if (String(t).trim()) parts.push('Хвост/резинка: ' + String(t).trim());
+        if (String(th).trim()) parts.push('Термо: ' + String(th).trim());
+        if (String(q).trim()) parts.push('Описание: ' + String(q).trim());
+        if (!parts.length) return;
+        const addon = parts.join(' | ');
+        baseEl.value = base ? (base + '\n' + addon) : addon;
+      }
+      mergeLineCommentWithFeatureNotes(0);
+      document.querySelectorAll('[data-extra-line-idx]').forEach(function (row) {
+        const idx = parseInt(row.getAttribute('data-extra-line-idx') || '0', 10) || 0;
+        if (idx > 0) mergeLineCommentWithFeatureNotes(idx);
+      });
+
       const mode = document.querySelector('input[name="client_mode"]:checked').value;
       if (mode === 'existing') {
         const id = document.getElementById('existing_client_id').value.trim();
@@ -1598,6 +1629,7 @@
     function updateServiceDerivedUI() {
       updateKitSectionVisibility();
       updateRecommendedPriceHint();
+      renderLine0ServiceFlags();
       rebuildVisitQuestionnaire();
       syncVisitThermoSection();
       syncVisitPreview();
@@ -1711,8 +1743,284 @@
     for (const c of serviceCatalog || []) {
       for (const sc of (c.subcategories || [])) {
         for (const s of (sc.services || [])) {
-          serviceMetaById[s.id] = { categoryId: c.id, subcategoryId: sc.id };
+          serviceMetaById[s.id] = {
+            categoryId: c.id,
+            subcategoryId: sc.id,
+            requires_kit_block: !!s.requires_kit_block,
+            requires_tail_block: !!s.requires_tail_block,
+            requires_thermo: !!s.requires_thermo,
+            questionnaire_count: Array.isArray(s.questionnaire_fields) ? s.questionnaire_fields.length : 0,
+            questionnaire_fields: Array.isArray(s.questionnaire_fields) ? s.questionnaire_fields : [],
+          };
         }
+      }
+    }
+
+    function serviceFeatureFlagsText(meta) {
+      if (!meta) return '';
+      const tags = [];
+      if (meta.requires_kit_block) tags.push('Комплект (склад) для услуг');
+      if (meta.requires_tail_block) tags.push('Хвост/резинка');
+      if (meta.requires_thermo) tags.push('Термозамещения');
+      if ((meta.questionnaire_count || 0) > 0) tags.push('Описание/вопросы по услуге');
+      if (!tags.length) return '';
+      return 'Для этой услуги включено: ' + tags.join(' • ');
+    }
+
+    function serviceFeatureEditorHtml(idx, meta) {
+      if (!meta) return '';
+      function pf(name, def) {
+        const key = 'line_' + String(idx) + '_' + String(name);
+        const v = (formPrefill && Object.prototype.hasOwnProperty.call(formPrefill, key)) ? String(formPrefill[key] || '') : '';
+        return v || (def || '');
+      }
+      function checkedAttr(name, truthyList) {
+        const v = String(pf(name, '') || '').trim().toLowerCase();
+        return (truthyList || ['1', 'on', 'true', 'yes']).indexOf(v) >= 0 ? ' checked' : '';
+      }
+      function mixBonusOptions(selected) {
+        const cur = String(selected || '');
+        let out = '<option value="">— выберите —</option>';
+        document.querySelectorAll('input[name="visit_master_on"]').forEach(function (cb) {
+          const id = String(cb.value || '');
+          const lbl = cb.closest('label');
+          const txt = lbl ? String(lbl.textContent || '').trim() : ('ID ' + id);
+          out += '<option value="' + escapeHtml(id) + '"' + (cur === id ? ' selected' : '') + '>' + escapeHtml(txt) + '</option>';
+        });
+        return out;
+      }
+      let h = '';
+      h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+        '<div style="font-weight:600; margin-bottom:6px;">Доп. параметры материала</div>' +
+        '<div style="margin-top:8px;">' +
+          '<div class="muted" style="font-size:12px; margin-bottom:6px;">Смешка</div>' +
+          '<div style="display:flex; gap:12px; flex-wrap:wrap;">' +
+            '<label><input type="radio" name="line_' + String(idx) + '_mix_source" value="NO_MIX"' + ((pf('mix_source', 'NO_MIX') === 'NO_MIX') ? ' checked' : '') + ' /> Без смешки</label>' +
+            '<label><input type="radio" name="line_' + String(idx) + '_mix_source" value="FROM_STOCK"' + ((pf('mix_source', '') === 'FROM_STOCK') ? ' checked' : '') + ' /> Из наличия</label>' +
+            '<label><input type="radio" name="line_' + String(idx) + '_mix_source" value="SELF_MIXED"' + ((pf('mix_source', '') === 'SELF_MIXED') ? ' checked' : '') + ' /> Сама мешала</label>' +
+          '</div>' +
+          '<div style="margin-top:6px; display:flex; gap:12px; flex-wrap:wrap;">' +
+            '<label><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="LIGHT"' + ((pf('mix_complexity', '') === 'LIGHT') ? ' checked' : '') + ' /> лёгкая</label>' +
+            '<label><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="STANDARD"' + ((pf('mix_complexity', 'STANDARD') === 'STANDARD') ? ' checked' : '') + ' /> стандарт</label>' +
+            '<label><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="KANEK"' + ((pf('mix_complexity', '') === 'KANEK') ? ' checked' : '') + ' /> сложная канекалон</label>' +
+            '<label><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="THERMO"' + ((pf('mix_complexity', '') === 'THERMO') ? ' checked' : '') + ' /> сложная термо</label>' +
+            '<label><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="LENGTH"' + ((pf('mix_complexity', '') === 'LENGTH') ? ' checked' : '') + ' /> сложная длина</label>' +
+          '</div>' +
+          '<div style="margin-top:6px;"><label>Мастер — бонус за смешку</label><select name="line_' + String(idx) + '_mix_bonus_master_id" style="max-width:320px;">' + mixBonusOptions(pf('mix_bonus_master_id', '')) + '</select></div>' +
+        '</div>' +
+      '</div>';
+
+      if (meta.requires_kit_block) {
+        const kk = (pf('kit_kind', 'STOCK') || 'STOCK').toUpperCase();
+        h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+          '<div style="font-weight:600; margin-bottom:6px;">Комплект по услуге</div>' +
+          '<div style="display:flex; gap:12px; flex-wrap:wrap;">' +
+            '<label><input type="radio" name="line_' + String(idx) + '_kit_kind" value="STOCK"' + (kk === 'STOCK' ? ' checked' : '') + ' /> Из наличия</label>' +
+            '<label><input type="radio" name="line_' + String(idx) + '_kit_kind" value="OWN"' + (kk === 'OWN' ? ' checked' : '') + ' /> Свой</label>' +
+          '</div>' +
+          '<div data-line-kit-stock="' + String(idx) + '" style="margin-top:8px;">' +
+            '<input type="hidden" name="line_' + String(idx) + '_stock_kit_id" value="' + escapeHtml(pf('stock_kit_id', '')) + '" />' +
+            '<input type="hidden" name="line_' + String(idx) + '_stock_breakdown_json" value="' + escapeHtml(pf('stock_breakdown_json', '')) + '" />' +
+            '<input type="hidden" name="line_' + String(idx) + '_stock_kit_lines_json" value="' + escapeHtml(pf('stock_kit_lines_json', '')) + '" />' +
+            '<div class="row">' +
+              '<div><label>Поиск комплекта</label><input type="search" data-line-kit-search="' + String(idx) + '" placeholder="Артикул или название" /></div>' +
+              '<div><button type="button" class="secondary" data-line-kit-find="' + String(idx) + '">Найти</button></div>' +
+            '</div>' +
+            '<ul data-line-kit-suggest="' + String(idx) + '" style="list-style:none; padding-left:0; margin:8px 0 0; max-height:180px; overflow:auto;"></ul>' +
+            '<div data-line-kit-selected="' + String(idx) + '" class="muted" style="margin-top:6px;"></div>' +
+            '<label style="display:flex; gap:8px; align-items:center; margin-top:8px;"><input type="checkbox" name="line_' + String(idx) + '_stock_use_entire"' + checkedAttr('stock_use_entire') + ' /> Весь свободный остаток</label>' +
+            '<div style="margin-top:6px;"><label>Или заготовок зарезервировать</label><input type="number" name="line_' + String(idx) + '_stock_blanks_used" min="0" step="1" value="' + escapeHtml(pf('stock_blanks_used', '')) + '" /></div>' +
+          '</div>' +
+          '<div data-line-kit-own="' + String(idx) + '" style="margin-top:8px;">' +
+            '<div class="row">' +
+              '<div><label>Происхождение</label><select name="line_' + String(idx) + '_own_origin"><option value="STUDIO"' + (pf('own_origin', '') === 'STUDIO' ? ' selected' : '') + '>Студия</option><option value="FOREIGN"' + (pf('own_origin', '') === 'FOREIGN' ? ' selected' : '') + '>Чужой</option></select></div>' +
+              '<div></div>' +
+            '</div>' +
+            '<label style="display:block; margin-top:6px;"><input type="checkbox" name="line_' + String(idx) + '_own_correction"' + checkedAttr('own_correction') + ' /> Нужна коррекция</label>' +
+            '<div data-line-own-correction="' + String(idx) + '" style="margin-top:6px; padding:8px; border:1px solid #e5e7eb; border-radius:8px;">' +
+              '<div class="row">' +
+                '<div><label>Стрижка (шт)</label><input type="number" name="line_' + String(idx) + '_own_corr_trim_qty" min="0" step="1" value="' + escapeHtml(pf('own_corr_trim_qty', '0')) + '" /></div>' +
+                '<div><label>Почасовая коррекция (ч)</label><input type="number" name="line_' + String(idx) + '_own_corr_hourly_hours" min="0" step="0.25" value="' + escapeHtml(pf('own_corr_hourly_hours', '')) + '" /></div>' +
+              '</div>' +
+              '<div class="row" style="margin-top:6px;">' +
+                '<div><label>Описание комплекта</label><input type="text" name="line_' + String(idx) + '_own_corr_kit_description" value="' + escapeHtml(pf('own_corr_kit_description', '')) + '" /></div>' +
+                '<div><label>Заготовок в комплекте</label><input type="number" name="line_' + String(idx) + '_own_corr_kit_blanks_count" min="0" step="1" value="' + escapeHtml(pf('own_corr_kit_blanks_count', '')) + '" /></div>' +
+              '</div>' +
+              '<div style="margin-top:6px; display:flex; gap:12px; flex-wrap:wrap;">' +
+                '<label><input type="checkbox" name="line_' + String(idx) + '_own_corr_wash"' + checkedAttr('own_corr_wash') + ' /> Стирка</label>' +
+                '<label><input type="checkbox" name="line_' + String(idx) + '_own_corr_steam"' + checkedAttr('own_corr_steam') + ' /> Отпаривание</label>' +
+                '<label><input type="checkbox" name="line_' + String(idx) + '_own_corr_circle"' + checkedAttr('own_corr_circle') + ' /> Одевание на круг</label>' +
+              '</div>' +
+            '</div>' +
+            '<label style="display:block; margin-top:6px;"><input type="checkbox" name="line_' + String(idx) + '_own_extra_blanks"' + checkedAttr('own_extra_blanks') + ' /> Нужны доп. заготовки</label>' +
+            '<div data-line-own-extra="' + String(idx) + '" style="margin-top:6px; padding:8px; border:1px solid #e5e7eb; border-radius:8px;">' +
+              '<div class="row">' +
+                '<div><label>ID комплекта для доп. заготовок</label><input type="number" name="line_' + String(idx) + '_own_extra_stock_kit_id" min="0" step="1" value="' + escapeHtml(pf('own_extra_stock_kit_id', '')) + '" /></div>' +
+                '<div><label>Заготовок использовать</label><input type="number" name="line_' + String(idx) + '_own_extra_stock_blanks_used" min="0" step="1" value="' + escapeHtml(pf('own_extra_stock_blanks_used', '')) + '" /></div>' +
+              '</div>' +
+              '<label style="display:block; margin-top:6px;"><input type="checkbox" name="line_' + String(idx) + '_own_extra_stock_use_entire"' + checkedAttr('own_extra_stock_use_entire') + ' /> Весь свободный остаток</label>' +
+              '<input type="hidden" name="line_' + String(idx) + '_own_extra_stock_breakdown_json" value="' + escapeHtml(pf('own_extra_stock_breakdown_json', '')) + '" />' +
+            '</div>' +
+          '</div>' +
+          '<label style="display:flex; gap:8px; align-items:center; margin-top:8px;"><input type="checkbox" name="line_' + String(idx) + '_kit_paid_separately"' + checkedAttr('kit_paid_separately') + ' /> Комплект оплачен отдельно</label>' +
+        '</div>';
+      }
+      if (meta.requires_tail_block) {
+        h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+          '<div style="font-weight:600; margin-bottom:6px;">Хвост/резинка</div>' +
+          '<textarea rows="2" maxlength="600" data-line-tail-note="' + String(idx) + '" style="width:100%; box-sizing:border-box;" placeholder="Параметры/пожелания"></textarea>' +
+        '</div>';
+      }
+      if (meta.requires_thermo) {
+        h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+          '<div style="font-weight:600; margin-bottom:6px;">Термозамещения</div>' +
+          '<div class="row">' +
+            '<div><label>Материал</label><input type="text" name="line_' + String(idx) + '_thermo_curls" value="' + escapeHtml(pf('thermo_curls', '')) + '" /></div>' +
+            '<div><label>Длина</label><input type="text" name="line_' + String(idx) + '_thermo_length" value="' + escapeHtml(pf('thermo_length', '')) + '" /></div>' +
+          '</div>' +
+          '<div class="row" style="margin-top:6px;">' +
+            '<div><label>Оттенок</label><input type="text" name="line_' + String(idx) + '_thermo_shade" value="' + escapeHtml(pf('thermo_shade', '')) + '" /></div>' +
+            '<div><label>Базы всего</label><input type="number" name="line_' + String(idx) + '_thermo_bases_total" min="0" step="1" value="' + escapeHtml(pf('thermo_bases_total', '')) + '" /></div>' +
+          '</div>' +
+          '<div style="margin-top:6px;"><label>Вес с запасом</label><input type="number" name="line_' + String(idx) + '_thermo_weight" min="0" step="any" value="' + escapeHtml(pf('thermo_weight', '')) + '" /></div>' +
+          '<div style="margin-top:6px; display:flex; gap:12px; flex-wrap:wrap;">' +
+            '<label><input type="radio" name="line_' + String(idx) + '_thermo_template_mode" value="NEW"' + ((pf('thermo_template_mode', 'NEW') === 'NEW') ? ' checked' : '') + ' /> Новый шаблон</label>' +
+            '<label><input type="radio" name="line_' + String(idx) + '_thermo_template_mode" value="OLD"' + ((pf('thermo_template_mode', '') === 'OLD') ? ' checked' : '') + ' /> Из сохранённого</label>' +
+          '</div>' +
+          '<div style="margin-top:6px;"><label>ID сохранённого шаблона</label><input type="number" name="line_' + String(idx) + '_thermo_old_template_id" min="0" step="1" value="' + escapeHtml(pf('thermo_old_template_id', '')) + '" /></div>' +
+          '<div style="margin-top:6px; padding:8px; border:1px solid #e5e7eb; border-radius:8px;">' +
+            '<div class="row">' +
+              '<div><label>Средний вес пряди</label><input type="number" name="line_' + String(idx) + '_thermo_tpl_strand_weight_avg" min="0" step="any" value="' + escapeHtml(pf('thermo_tpl_strand_weight_avg', '')) + '" /></div>' +
+              '<div><label>1 ряд</label><input type="number" name="line_' + String(idx) + '_thermo_tpl_row_1" min="0" step="1" value="' + escapeHtml(pf('thermo_tpl_row_1', '')) + '" /></div>' +
+            '</div>' +
+            '<div class="row" style="margin-top:6px;">' +
+              '<div><label>2 ряд</label><input type="number" name="line_' + String(idx) + '_thermo_tpl_row_2" min="0" step="1" value="' + escapeHtml(pf('thermo_tpl_row_2', '')) + '" /></div>' +
+              '<div><label>3 ряд</label><input type="number" name="line_' + String(idx) + '_thermo_tpl_row_3" min="0" step="1" value="' + escapeHtml(pf('thermo_tpl_row_3', '')) + '" /></div>' +
+            '</div>' +
+            '<div class="row" style="margin-top:6px;">' +
+              '<div><label>Виски</label><input type="number" name="line_' + String(idx) + '_thermo_tpl_temples" min="0" step="1" value="' + escapeHtml(pf('thermo_tpl_temples', '')) + '" /></div>' +
+              '<div><label>Треугольники</label><input type="number" name="line_' + String(idx) + '_thermo_tpl_triangles" min="0" step="1" value="' + escapeHtml(pf('thermo_tpl_triangles', '')) + '" /></div>' +
+            '</div>' +
+            '<div class="row" style="margin-top:6px;">' +
+              '<div><label>Птичка</label><input type="number" name="line_' + String(idx) + '_thermo_tpl_bird" min="0" step="1" value="' + escapeHtml(pf('thermo_tpl_bird', '')) + '" /></div>' +
+              '<div><label>Квадрат</label><input type="number" name="line_' + String(idx) + '_thermo_tpl_square" min="0" step="1" value="' + escapeHtml(pf('thermo_tpl_square', '')) + '" /></div>' +
+            '</div>' +
+            '<div style="margin-top:6px;"><label>Другие ряды</label><textarea rows="2" maxlength="600" name="line_' + String(idx) + '_thermo_tpl_other_rows" style="width:100%; box-sizing:border-box;">' + escapeHtml(pf('thermo_tpl_other_rows', '')) + '</textarea></div>' +
+            '<div style="margin-top:6px;"><label>Комментарий шаблона</label><textarea rows="2" maxlength="600" name="line_' + String(idx) + '_thermo_tpl_comment" style="width:100%; box-sizing:border-box;">' + escapeHtml(pf('thermo_tpl_comment', '')) + '</textarea></div>' +
+          '</div>' +
+          '<div style="margin-top:6px;"><label>Изменения по алгоритму</label><textarea rows="2" maxlength="600" name="line_' + String(idx) + '_thermo_algorithm_changes" style="width:100%; box-sizing:border-box;">' + escapeHtml(pf('thermo_algorithm_changes', '')) + '</textarea></div>' +
+        '</div>';
+      }
+      if ((meta.questionnaire_count || 0) > 0) {
+        h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+          '<div style="font-weight:600; margin-bottom:6px;">Описание/вопросы по услуге</div>';
+        for (const f of (meta.questionnaire_fields || [])) {
+          const qn = 'line_' + String(idx) + '_q_' + String(f.field_key || '');
+          const vv = pf('q_' + String(f.field_key || ''), '');
+          h += '<div style="margin-bottom:8px;">';
+          h += '<div style="font-size:12px; margin-bottom:4px;">' + escapeHtml(String(f.label || 'Вопрос')) + (f.required ? ' *' : '') + '</div>';
+          if (String(f.field_type || '') === 'SELECT') {
+            h += '<select name="' + qn + '" style="width:100%; box-sizing:border-box;">';
+            h += '<option value="">—</option>';
+            for (const o of (f.options || [])) {
+              const ov = String(o.value || '');
+              h += '<option value="' + escapeHtml(ov) + '"' + (String(vv) === ov ? ' selected' : '') + '>' + escapeHtml(String(o.label || ov)) + '</option>';
+            }
+            h += '</select>';
+          } else {
+            h += '<input type="text" name="' + qn + '" value="' + escapeHtml(vv) + '" style="width:100%; box-sizing:border-box;" />';
+          }
+          h += '</div>';
+        }
+        h += '<textarea rows="2" maxlength="1000" data-line-q-note="' + String(idx) + '" style="width:100%; box-sizing:border-box;" placeholder="Важные ответы и описание"></textarea>' +
+        '</div>';
+      }
+      return h;
+    }
+
+    function renderLine0ServiceFlags() {
+      const host = document.getElementById('line0_service_feature_flags');
+      if (!host) return;
+      const sid = parseInt((document.getElementById('service_id') || {}).value || '0', 10) || 0;
+      const meta = sid ? serviceMetaById[sid] : null;
+      const text = serviceFeatureFlagsText(meta);
+      host.textContent = text;
+      host.style.display = text ? 'block' : 'none';
+      const ed = document.getElementById('line0_service_feature_editor');
+      if (ed) {
+        const html = serviceFeatureEditorHtml(0, meta);
+        ed.innerHTML = html;
+        ed.style.display = html ? 'block' : 'none';
+      }
+    }
+
+    function renderExtraLineServiceFlags(idx) {
+      const row = document.querySelector('[data-extra-line-idx="' + String(idx) + '"]');
+      if (!row) return;
+      const host = row.querySelector('[data-extra-line-service-flags]');
+      if (!host) return;
+      const sid = parseInt((document.getElementById('line_' + idx + '_service_id') || {}).value || '0', 10) || 0;
+      const meta = sid ? serviceMetaById[sid] : null;
+      const text = serviceFeatureFlagsText(meta);
+      host.textContent = text;
+      host.style.display = text ? 'block' : 'none';
+      const ed = row.querySelector('[data-extra-line-service-editor]');
+      if (ed) {
+        const html = serviceFeatureEditorHtml(idx, meta);
+        ed.innerHTML = html;
+        ed.style.display = html ? 'block' : 'none';
+        if (html) bindExtraLineFeatureEditors(idx, row, meta);
+      }
+    }
+
+    function bindExtraLineFeatureEditors(idx, row, meta) {
+      if (!row || !meta) return;
+      if (meta.requires_kit_block) {
+        const radios = row.querySelectorAll('input[name="line_' + idx + '_kit_kind"]');
+        const stockBlk = row.querySelector('[data-line-kit-stock="' + idx + '"]');
+        const ownBlk = row.querySelector('[data-line-kit-own="' + idx + '"]');
+        const corrOn = row.querySelector('input[name="line_' + idx + '_own_correction"]');
+        const corrWrap = row.querySelector('[data-line-own-correction="' + idx + '"]');
+        const extraOn = row.querySelector('input[name="line_' + idx + '_own_extra_blanks"]');
+        const extraWrap = row.querySelector('[data-line-own-extra="' + idx + '"]');
+        function syncKind() {
+          const v = (row.querySelector('input[name="line_' + idx + '_kit_kind"]:checked') || {}).value || 'STOCK';
+          if (stockBlk) stockBlk.style.display = v === 'STOCK' ? 'block' : 'none';
+          if (ownBlk) ownBlk.style.display = v === 'OWN' ? 'block' : 'none';
+        }
+        function syncOwnSubsections() {
+          if (corrWrap) corrWrap.style.display = (corrOn && corrOn.checked) ? 'block' : 'none';
+          if (extraWrap) extraWrap.style.display = (extraOn && extraOn.checked) ? 'block' : 'none';
+        }
+        radios.forEach(function (r) { r.addEventListener('change', syncKind); });
+        if (corrOn) corrOn.addEventListener('change', syncOwnSubsections);
+        if (extraOn) extraOn.addEventListener('change', syncOwnSubsections);
+        syncKind();
+        syncOwnSubsections();
+
+        const searchEl = row.querySelector('[data-line-kit-search="' + idx + '"]');
+        const findBtn = row.querySelector('[data-line-kit-find="' + idx + '"]');
+        const listEl = row.querySelector('[data-line-kit-suggest="' + idx + '"]');
+        const hidEl = row.querySelector('input[name="line_' + idx + '_stock_kit_id"]');
+        const selEl = row.querySelector('[data-line-kit-selected="' + idx + '"]');
+        let timer = null;
+        function pickKit(k) {
+          if (hidEl) hidEl.value = String(k.id || '');
+          if (selEl) selEl.textContent = (k && k.id) ? ('Выбрано: ' + stockLineForVisitKit(k)) : '';
+          if (listEl) listEl.innerHTML = '';
+        }
+        async function suggestKit() {
+          const q = searchEl ? String(searchEl.value || '').trim() : '';
+          const kits = await fetchKitSuggest(q);
+          renderKitSuggestListInto(listEl, kits, pickKit);
+        }
+        if (searchEl) {
+          searchEl.addEventListener('input', function () {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(suggestKit, 300);
+          });
+        }
+        if (findBtn) findBtn.addEventListener('click', suggestKit);
       }
     }
 
@@ -1836,6 +2144,7 @@
         if (keep && Number(s.id) === keep) opt.selected = true;
         svcSel.appendChild(opt);
       }
+      renderExtraLineServiceFlags(idx);
     }
 
     (function initServiceCatalog() {
@@ -1921,6 +2230,8 @@
           '<div><label>Услуга *</label><select name="line_' + idx + '_service_id" id="line_' + idx + '_service_id" style="width:100%; box-sizing:border-box;"></select></div>' +
           '<div></div>' +
         '</div>' +
+        '<div data-extra-line-service-flags="1" class="muted" style="margin-top:8px; font-size:12px; display:none;"></div>' +
+        '<div data-extra-line-service-editor="1" style="margin-top:8px; display:none;"></div>' +
         '<div class="row" style="margin-top:8px;">' +
           '<div><label>Время начала выполнения услуги</label><input type="time" name="line_' + idx + '_started_time" step="60" value="' + escAttr(prefill.started_time || '') + '" /></div>' +
           '<div></div>' +
@@ -1967,6 +2278,7 @@
       if (initialServiceId) svcSel.value = String(initialServiceId);
       catSel.addEventListener('change', function () { fillLineSubcategories(idx); });
       subSel.addEventListener('change', function () { fillLineServices(idx); });
+      svcSel.addEventListener('change', function () { renderExtraLineServiceFlags(idx); });
       box.querySelector('[data-remove-line="' + idx + '"]').addEventListener('click', function () {
         box.remove();
         syncExtraLinesVisibility();
@@ -2015,6 +2327,11 @@
     (function initExtraServiceLines() {
       const btn = document.getElementById('lb-add-extra-service');
       if (!btn) return;
+      const advHost = document.getElementById('line0_service_advanced_blocks');
+      ['kit-section-wrap', 'visit_questionnaire_section', 'visit_thermo_section'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (advHost && el && el.parentElement !== advHost) advHost.appendChild(el);
+      });
       const fpAll = {{ fp | tojson }};
       const indices = [];
       Object.keys(fpAll || {}).forEach(function (k) {
