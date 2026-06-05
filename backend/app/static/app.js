@@ -722,8 +722,21 @@ function initAdminBookingForm() {
     if (stock) stock.style.display = (m === "IN_STOCK") ? "block" : "none";
     if (own) own.style.display = (m === "OWN") ? "block" : "none";
     if (order) order.style.display = (m === "ORDER") ? "block" : "none";
+    syncVisitOrderMasters();
     syncOwnKitExtras();
     syncBookingEntireKitPieceInputs();
+  }
+
+  function syncVisitOrderMasters() {
+    var m = getVisitKitMode();
+    var on = !!(document.querySelector('input[name="visit_order_use_masters"]') || {}).checked;
+    var block = byId("visit_order_masters_block");
+    var show = (m === "ORDER" && on);
+    if (block) block.style.display = show ? "block" : "none";
+    qa('input[name="visit_order_master_on"]').forEach(function (cb) {
+      cb.disabled = !show;
+      if (!show) cb.checked = false;
+    });
   }
 
   // --- Sale kind / modes ---
@@ -979,6 +992,8 @@ function initAdminBookingForm() {
   if (svcSel) svcSel.addEventListener("change", updateVisitKitVisibility);
 
   qa('input[name="visit_kit_mode"]').forEach(function (r) { r.addEventListener("change", syncVisitKitMode); });
+  var visitOrderUseMasters = document.querySelector('input[name="visit_order_use_masters"]');
+  if (visitOrderUseMasters) visitOrderUseMasters.addEventListener("change", syncVisitOrderMasters);
   var ownC = document.querySelector('input[name="visit_own_need_correction"]');
   if (ownC) ownC.addEventListener("change", syncOwnKitExtras);
   var ownE = document.querySelector('input[name="visit_own_need_extra_blanks"]');
@@ -1033,6 +1048,7 @@ function initAdminBookingForm() {
   syncKind();
   serviceCatalogOnCategory();
   syncVisitKitMode();
+  syncVisitOrderMasters();
   syncSaleKind();
   updateVisitKitVisibility();
 

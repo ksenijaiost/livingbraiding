@@ -102,23 +102,6 @@
           <label><input type="radio" name="booking_masters_mode" value="all" {% if masters_mode != 'per_service' %}checked{% endif %} /> На все услуги</label>
           <label><input type="radio" name="booking_masters_mode" value="per_service" {% if masters_mode == 'per_service' %}checked{% endif %} /> Отдельно по услугам</label>
         </div>
-        <div id="lbBookingAllMastersBlock" style="margin-top: 10px;">
-          <div style="font-weight: 600; margin-bottom: 8px;">Мастера на все услуги *</div>
-          {% if not masters %}
-            <p class="muted" style="margin: 0;">Нет активных мастеров.</p>
-          {% else %}
-            <div style="display:flex; flex-direction: column; gap: 8px;">
-              {% for m in masters %}
-                <label style="display:flex; gap: 8px; align-items: center;">
-                  <input type="checkbox" name="booking_master_on" value="{{ m.id }}"
-                    {% if m.id in (booking_master_on_ids or []) %}checked{% endif %} />
-                  <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
-                </label>
-              {% endfor %}
-            </div>
-            <div id="lbBookingScheduleAvailMsg" class="muted" style="margin-top:10px; font-size:12px;"></div>
-          {% endif %}
-        </div>
       </div>
 
       <div id="kind_visit_block" style="margin-top: 14px; display:none;">
@@ -198,6 +181,24 @@
             <div id="lbBookingServiceLines" style="margin-top:10px; display:flex; flex-direction:column; gap:10px;"></div>
           </div>
 
+          <div id="lbBookingAllMastersBlock" class="card" style="margin-top: 12px; background:#f8fafc;">
+            <div style="font-weight: 600; margin-bottom: 8px;">Мастера на все услуги *</div>
+            {% if not masters %}
+              <p class="muted" style="margin: 0;">Нет активных мастеров.</p>
+            {% else %}
+              <div style="display:flex; flex-direction: column; gap: 8px;">
+                {% for m in masters %}
+                  <label style="display:flex; gap: 8px; align-items: center;">
+                    <input type="checkbox" name="booking_master_on" value="{{ m.id }}"
+                      {% if m.id in (booking_master_on_ids or []) %}checked{% endif %} />
+                    <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
+                  </label>
+                {% endfor %}
+              </div>
+              <div id="lbBookingScheduleAvailMsg" class="muted" style="margin-top:10px; font-size:12px;"></div>
+            {% endif %}
+          </div>
+
         </div>
 
         <div id="visit_kit_card" class="card" style="margin-top: 12px; background:#f8fafc; display:none;">
@@ -262,6 +263,27 @@
               <div>
                 <label>Описание (вид, материал и пр.)</label>
                 <input name="visit_order_blanks_desc" maxlength="400" value="{{ fp.get('visit_order_blanks_desc','') }}" />
+              </div>
+            </div>
+            <div style="margin-top: 10px;">
+              <label style="display:flex; align-items:center; gap:8px; font-weight:normal;">
+                <input type="checkbox" name="visit_order_use_masters" id="visit_order_use_masters"
+                  {% if fp.get('visit_order_use_masters') in ('1', 'on', 'true', 'yes') %}checked{% endif %} />
+                <span>Выбрать мастера</span>
+              </label>
+            </div>
+            <div id="visit_order_masters_block" style="margin-top: 10px; display:none;">
+              <div style="font-weight: 600; margin-bottom: 8px;">Мастер (можно несколько, вне графика)</div>
+              {% set ids_csv = fp.get('visit_order_master_ids') or '' %}
+              {% set pre_ids = ids_csv.split(',') if ids_csv else [] %}
+              <div style="display:flex; flex-direction: column; gap: 8px;">
+                {% for m in masters %}
+                  <label style="display:flex; gap: 8px; align-items: center;">
+                    <input type="checkbox" name="visit_order_master_on" value="{{ m.id }}"
+                      {% if (m.id|string) in pre_ids %}checked{% endif %} />
+                    <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
+                  </label>
+                {% endfor %}
               </div>
             </div>
           </div>
@@ -965,9 +987,44 @@
       }
 
       async function refreshAvailableMasters() {
-        if (!plannedDate || !plannedDate.value) return;
-        var day = plannedDate.value;
+        var kindVisit = !!((document.querySelector('input[name="kind"][value="VISIT"]') || {}).checked);
+        if (!kindVisit) return;
+        var day = plannedDate ? String(plannedDate.value || '').trim() : '';
         var idxs = allLineIndices();
+        function disableAllMasters(reason) {
+          Array.from(document.querySelectorAll('input[name="booking_master_on"]')).forEach(function (cb) {
+            cb.disabled = true;
+            cb.checked = false;
+          });
+          idxs.forEach(function (lid) {
+            Array.from(document.querySelectorAll('input[data-line-master="' + lid + '"]')).forEach(function (cb) {
+              cb.disabled = true;
+              cb.checked = false;
+            });
+            var msgEl = (lid === 0) ? msgLine0 : ((function () {
+              var row = state.extraLines.find(function (x) { return x.idx === lid; });
+              return row && row.el ? row.el.querySelector('[data-line-msg]') : null;
+            })());
+            if (msgEl) msgEl.textContent = reason || '';
+          });
+          if (msgAll) msgAll.textContent = reason || '';
+        }
+        var hasService = false;
+        var allTimesReady = !!day;
+        for (var ci = 0; ci < idxs.length; ci++) {
+          var lid0 = idxs[ci];
+          var sid0 = lineServiceId(lid0);
+          if (sid0 <= 0) continue;
+          hasService = true;
+          if (!lineTimeValue(lid0)) {
+            allTimesReady = false;
+            break;
+          }
+        }
+        if (!day || !hasService || !allTimesReady) {
+          disableAllMasters('Сначала выберите дату брони и время начала для всех услуг.');
+          return;
+        }
         var lineAllow = {};
         try {
           for (var i = 0; i < idxs.length; i++) {
@@ -1000,7 +1057,7 @@
           if (!intersect) intersect = new Set();
           for (var ci = 0; ci < allCbs.length; ci++) {
             var cb = allCbs[ci];
-            var ok = intersect.size === 0 ? true : intersect.has(String(cb.value));
+            var ok = intersect.has(String(cb.value));
             cb.disabled = !ok;
             if (!ok) cb.checked = false;
           }
@@ -1013,7 +1070,7 @@
             var cbs = Array.from(document.querySelectorAll('input[data-line-master="' + lid + '"]'));
             for (var cc = 0; cc < cbs.length; cc++) {
               var cb2 = cbs[cc];
-              var ok2 = allow ? allow.has(String(cb2.value)) : true;
+              var ok2 = allow ? allow.has(String(cb2.value)) : false;
               cb2.disabled = !ok2;
               if (!ok2) cb2.checked = false;
             }
