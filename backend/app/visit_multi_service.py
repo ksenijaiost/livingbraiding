@@ -752,10 +752,13 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
             except ValueError:
                 comp = None
     amort_raw = g("amortization_level", "") or "MIN"
-    try:
-        amort = AmortizationLevel(amort_raw)
-    except ValueError:
-        amort = AmortizationLevel.MIN
+    if str(amort_raw).strip().upper() in ("NONE", "NO", "0"):
+        amort = None
+    else:
+        try:
+            amort = AmortizationLevel(amort_raw)
+        except ValueError:
+            amort = AmortizationLevel.MIN
 
     stock_lines = _parse_stock_kit_lines_from_form(
         _LineFormAdapter(form, prefix),
