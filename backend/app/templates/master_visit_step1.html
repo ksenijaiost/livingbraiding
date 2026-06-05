@@ -213,8 +213,6 @@
         </select>
       </div>
       <div id="line0_service_feature_flags" class="muted" style="margin-top:8px; font-size:12px; display:none;"></div>
-      <div id="line0_service_feature_editor" style="margin-top:8px; display:none;"></div>
-      <div id="line0_service_advanced_blocks" style="margin-top:8px;"></div>
 
       <div class="row" style="margin-top:8px;">
         <div>
@@ -323,6 +321,8 @@
           <label style="margin:0;"><input type="radio" name="mix_complexity" value="LENGTH" {% if mxc == 'LENGTH' %}checked{% endif %} /> сложная длина</label>
         </div>
       </div>
+      <div id="line0_service_feature_editor" style="margin-top:8px; display:none;"></div>
+      <div id="line0_service_advanced_blocks" style="margin-top:8px;"></div>
       <div style="margin-top:8px;">
         <label>Комментарий к услуге</label>
         <textarea name="comment" rows="2" maxlength="1000" style="width:100%; box-sizing:border-box;">{{ fp.get('comment','') }}</textarea>
@@ -649,6 +649,7 @@
         if (scope !== 'VISIT') sameShares.checked = false;
       }
       syncPerServiceMasterPctInputs();
+      updateAllExtraLinePriceHints();
     }
 
     function syncPerServiceMasterPctInputs() {
@@ -678,6 +679,7 @@
         if (idx > 0) applyForLine(idx);
       });
       updateRecommendedPriceHint();
+      updateAllExtraLinePriceHints();
     }
 
     function escapeHtml(s) {
@@ -1064,7 +1066,7 @@
       el.addEventListener('input', syncVisitPreview);
     });
     document.querySelectorAll('input[name="visit_master_on"]').forEach(function (el) {
-      el.addEventListener('change', function () { syncVisitPreview(); updateRecommendedPriceHint(); });
+      el.addEventListener('change', function () { syncVisitPreview(); updateRecommendedPriceHint(); updateAllExtraLinePriceHints(); });
     });
     document.querySelectorAll('input[name^="visit_master_pct_"]').forEach(function (el) { el.addEventListener('input', syncVisitPreview); el.addEventListener('change', syncVisitPreview); });
     function syncVisitStockEntireUi() {
@@ -1539,6 +1541,19 @@
       return services.find((x) => x.id === sid) || null;
     }
 
+    function getServiceById(serviceId) {
+      const sid = parseInt(String(serviceId || '0'), 10) || 0;
+      if (!sid) return null;
+      for (const c of serviceCatalog || []) {
+        for (const ssc of (c.subcategories || [])) {
+          for (const s of (ssc.services || [])) {
+            if (Number(s.id) === sid) return s;
+          }
+        }
+      }
+      return null;
+    }
+
     function updateKitSectionVisibility() {
       const wrap = document.getElementById('kit-section-wrap');
       if (!wrap) return;
@@ -1767,50 +1782,68 @@
       return 'Для этой услуги включено: ' + tags.join(' • ');
     }
 
-    function serviceFeatureEditorHtml(idx, meta) {
-      if (!meta) return '';
-      function pf(name, def) {
-        const key = 'line_' + String(idx) + '_' + String(name);
-        const v = (formPrefill && Object.prototype.hasOwnProperty.call(formPrefill, key)) ? String(formPrefill[key] || '') : '';
-        return v || (def || '');
-      }
-      function checkedAttr(name, truthyList) {
-        const v = String(pf(name, '') || '').trim().toLowerCase();
-        return (truthyList || ['1', 'on', 'true', 'yes']).indexOf(v) >= 0 ? ' checked' : '';
-      }
-      function mixBonusOptions(selected) {
-        const cur = String(selected || '');
-        let out = '<option value="">— выберите —</option>';
-        document.querySelectorAll('input[name="visit_master_on"]').forEach(function (cb) {
-          const id = String(cb.value || '');
-          const lbl = cb.closest('label');
-          const txt = lbl ? String(lbl.textContent || '').trim() : ('ID ' + id);
-          out += '<option value="' + escapeHtml(id) + '"' + (cur === id ? ' selected' : '') + '>' + escapeHtml(txt) + '</option>';
-        });
-        return out;
-      }
-      let h = '';
-      h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+    function lineFeaturePrefill(idx, name, def) {
+      const key = 'line_' + String(idx) + '_' + String(name);
+      const v = (formPrefill && Object.prototype.hasOwnProperty.call(formPrefill, key)) ? String(formPrefill[key] || '') : '';
+      return v || (def || '');
+    }
+
+    function lineFeatureCheckedAttr(idx, name, truthyList) {
+      const v = String(lineFeaturePrefill(idx, name, '') || '').trim().toLowerCase();
+      return (truthyList || ['1', 'on', 'true', 'yes']).indexOf(v) >= 0 ? ' checked' : '';
+    }
+
+    function lineFeatureMixBonusOptions(selected) {
+      const cur = String(selected || '');
+      let out = '<option value="">— выберите —</option>';
+      document.querySelectorAll('input[name="visit_master_on"]').forEach(function (cb) {
+        const id = String(cb.value || '');
+        const lbl = cb.closest('label');
+        const txt = lbl ? String(lbl.textContent || '').trim() : ('ID ' + id);
+        out += '<option value="' + escapeHtml(id) + '"' + (cur === id ? ' selected' : '') + '>' + escapeHtml(txt) + '</option>';
+      });
+      return out;
+    }
+
+    function serviceFeatureMixHtml(idx) {
+      const pf = function (name, def) { return lineFeaturePrefill(idx, name, def); };
+      return '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
         '<div style="font-weight:600; margin-bottom:6px;">Доп. параметры материала</div>' +
-        '<div style="margin-top:8px;">' +
-          '<div class="muted" style="font-size:12px; margin-bottom:6px;">Смешка</div>' +
-          '<div style="display:flex; gap:12px; flex-wrap:wrap;">' +
-            '<label><input type="radio" name="line_' + String(idx) + '_mix_source" value="NO_MIX"' + ((pf('mix_source', 'NO_MIX') === 'NO_MIX') ? ' checked' : '') + ' /> Без смешки</label>' +
-            '<label><input type="radio" name="line_' + String(idx) + '_mix_source" value="FROM_STOCK"' + ((pf('mix_source', '') === 'FROM_STOCK') ? ' checked' : '') + ' /> Из наличия</label>' +
-            '<label><input type="radio" name="line_' + String(idx) + '_mix_source" value="SELF_MIXED"' + ((pf('mix_source', '') === 'SELF_MIXED') ? ' checked' : '') + ' /> Сама мешала</label>' +
+        '<div class="muted" style="font-size:12px; margin-bottom:6px;">Укажите граммы канекалона и/или кудрей — затем выберите вариант смешки.</div>' +
+        '<div style="display:flex; gap:12px; flex-wrap:wrap;">' +
+          '<label><input type="radio" name="line_' + String(idx) + '_mix_source" value="NO_MIX"' + ((pf('mix_source', 'NO_MIX') === 'NO_MIX') ? ' checked' : '') + ' /> Без смешки</label>' +
+          '<label><input type="radio" name="line_' + String(idx) + '_mix_source" value="FROM_STOCK"' + ((pf('mix_source', '') === 'FROM_STOCK') ? ' checked' : '') + ' /> Из наличия</label>' +
+          '<label><input type="radio" name="line_' + String(idx) + '_mix_source" value="SELF_MIXED"' + ((pf('mix_source', '') === 'SELF_MIXED') ? ' checked' : '') + ' /> Сама мешала</label>' +
+        '</div>' +
+        '<div data-line-mix-complexity="' + String(idx) + '" style="margin-top:8px; display:none;">' +
+          '<div style="font-weight:600; margin-bottom:6px;">Сложность смешки *</div>' +
+          '<div style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; font-size:14px;">' +
+            '<label style="margin:0;"><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="LIGHT"' + ((pf('mix_complexity', '') === 'LIGHT') ? ' checked' : '') + ' /> лёгкая (домешивание)</label>' +
+            '<label style="margin:0;"><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="STANDARD"' + ((pf('mix_complexity', 'STANDARD') === 'STANDARD') ? ' checked' : '') + ' /> стандарт</label>' +
+            '<label style="margin:0;"><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="KANEK"' + ((pf('mix_complexity', '') === 'KANEK') ? ' checked' : '') + ' /> сложная канекалон (омбре, мелирование)</label>' +
+            '<label style="margin:0;"><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="THERMO"' + ((pf('mix_complexity', '') === 'THERMO') ? ' checked' : '') + ' /> сложная термо</label>' +
+            '<label style="margin:0;"><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="LENGTH"' + ((pf('mix_complexity', '') === 'LENGTH') ? ' checked' : '') + ' /> сложная длина</label>' +
           '</div>' +
-          '<div style="margin-top:6px; display:flex; gap:12px; flex-wrap:wrap;">' +
-            '<label><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="LIGHT"' + ((pf('mix_complexity', '') === 'LIGHT') ? ' checked' : '') + ' /> лёгкая</label>' +
-            '<label><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="STANDARD"' + ((pf('mix_complexity', 'STANDARD') === 'STANDARD') ? ' checked' : '') + ' /> стандарт</label>' +
-            '<label><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="KANEK"' + ((pf('mix_complexity', '') === 'KANEK') ? ' checked' : '') + ' /> сложная канекалон</label>' +
-            '<label><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="THERMO"' + ((pf('mix_complexity', '') === 'THERMO') ? ' checked' : '') + ' /> сложная термо</label>' +
-            '<label><input type="radio" name="line_' + String(idx) + '_mix_complexity" value="LENGTH"' + ((pf('mix_complexity', '') === 'LENGTH') ? ' checked' : '') + ' /> сложная длина</label>' +
-          '</div>' +
-          '<div style="margin-top:6px;"><label>Мастер — бонус за смешку</label><select name="line_' + String(idx) + '_mix_bonus_master_id" style="max-width:320px;">' + mixBonusOptions(pf('mix_bonus_master_id', '')) + '</select></div>' +
+        '</div>' +
+        '<div data-line-mix-bonus="' + String(idx) + '" style="margin-top:8px; display:none;">' +
+          '<label>Мастер — бонус за смешку</label>' +
+          '<select name="line_' + String(idx) + '_mix_bonus_master_id" style="max-width:320px;">' + lineFeatureMixBonusOptions(pf('mix_bonus_master_id', '')) + '</select>' +
         '</div>' +
       '</div>';
+    }
 
-      if (meta.requires_kit_block) {
+    function serviceFeatureEditorHtml(idx, meta, opts) {
+      if (!meta) return '';
+      const options = opts || {};
+      const includeKit = options.kit !== false;
+      const includeTail = options.tail !== false;
+      const includeThermo = options.thermo !== false;
+      const includeQuestionnaire = options.questionnaire !== false;
+      function pf(name, def) { return lineFeaturePrefill(idx, name, def); }
+      function checkedAttr(name, truthyList) { return lineFeatureCheckedAttr(idx, name, truthyList); }
+      let h = '';
+
+      if (includeKit && meta.requires_kit_block) {
         const kk = (pf('kit_kind', 'STOCK') || 'STOCK').toUpperCase();
         h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
           '<div style="font-weight:600; margin-bottom:6px;">Комплект по услуге</div>' +
@@ -1865,13 +1898,13 @@
           '<label style="display:flex; gap:8px; align-items:center; margin-top:8px;"><input type="checkbox" name="line_' + String(idx) + '_kit_paid_separately"' + checkedAttr('kit_paid_separately') + ' /> Комплект оплачен отдельно</label>' +
         '</div>';
       }
-      if (meta.requires_tail_block) {
+      if (includeTail && meta.requires_tail_block) {
         h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
           '<div style="font-weight:600; margin-bottom:6px;">Хвост/резинка</div>' +
           '<textarea rows="2" maxlength="600" data-line-tail-note="' + String(idx) + '" style="width:100%; box-sizing:border-box;" placeholder="Параметры/пожелания"></textarea>' +
         '</div>';
       }
-      if (meta.requires_thermo) {
+      if (includeThermo && meta.requires_thermo) {
         h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
           '<div style="font-weight:600; margin-bottom:6px;">Термозамещения</div>' +
           '<div class="row">' +
@@ -1911,7 +1944,7 @@
           '<div style="margin-top:6px;"><label>Изменения по алгоритму</label><textarea rows="2" maxlength="600" name="line_' + String(idx) + '_thermo_algorithm_changes" style="width:100%; box-sizing:border-box;">' + escapeHtml(pf('thermo_algorithm_changes', '')) + '</textarea></div>' +
         '</div>';
       }
-      if ((meta.questionnaire_count || 0) > 0) {
+      if (includeQuestionnaire && (meta.questionnaire_count || 0) > 0) {
         h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
           '<div style="font-weight:600; margin-bottom:6px;">Описание/вопросы по услуге</div>';
         for (const f of (meta.questionnaire_fields || [])) {
@@ -1948,10 +1981,89 @@
       host.style.display = text ? 'block' : 'none';
       const ed = document.getElementById('line0_service_feature_editor');
       if (ed) {
-        const html = serviceFeatureEditorHtml(0, meta);
+        const html = serviceFeatureEditorHtml(0, meta, { kit: false, thermo: false, questionnaire: false });
         ed.innerHTML = html;
         ed.style.display = html ? 'block' : 'none';
       }
+    }
+
+    function updateExtraLinePriceHint(idx) {
+      const row = document.querySelector('[data-extra-line-idx="' + String(idx) + '"]');
+      if (!row) return;
+      const host = row.querySelector('[data-extra-line-price-hint]');
+      if (!host) return;
+      const sid = parseInt((document.getElementById('line_' + idx + '_service_id') || {}).value || '0', 10) || 0;
+      const svc = sid ? getServiceById(sid) : null;
+      const discEl = row.querySelector('input[name="line_' + idx + '_client_discount_percent"]');
+      let pct = parseInt(String((discEl && discEl.value) || '0').trim(), 10);
+      if (isNaN(pct) || pct < 0) pct = 0;
+      if (pct > 100) pct = 100;
+      const levelRank = { JUNIOR: 1, MIDDLE: 2, SENIOR: 3 };
+      const levelRuByCode = { JUNIOR: 'младший мастер', MIDDLE: 'мастер', SENIOR: 'старший мастер' };
+      function highestLevel(levels) {
+        let best = null;
+        for (const lv of (levels || [])) {
+          const code = String(lv || '').trim().toUpperCase();
+          if (!levelRank[code]) continue;
+          if (!best || levelRank[code] > levelRank[best]) best = code;
+        }
+        return best;
+      }
+      const scope = (document.querySelector('input[name="masters_scope"]:checked') || {}).value || 'VISIT';
+      let selectedLevels = [];
+      if (scope === 'PER_SERVICE') {
+        selectedLevels = Array.from(row.querySelectorAll('input[name="line_' + idx + '_service_master_on"]:checked'))
+          .map((x) => String(x.getAttribute('data-master-level') || '').toUpperCase())
+          .filter((x) => !!levelRank[x]);
+      } else {
+        const multiOn = !!(document.getElementById('visit_use_multi_masters') || {}).checked;
+        if (multiOn) {
+          selectedLevels = Array.from(document.querySelectorAll('input[name="visit_master_on"]:checked'))
+            .map((x) => String(x.getAttribute('data-master-level') || '').toUpperCase())
+            .filter((x) => !!levelRank[x]);
+        }
+      }
+      const level = highestLevel(selectedLevels) || (visitMasterLevel && levelRank[visitMasterLevel] ? visitMasterLevel : 'MIDDLE');
+      const byLevel = {
+        JUNIOR: ['price_junior_from', 'price_junior_to'],
+        MIDDLE: ['price_middle_from', 'price_middle_to'],
+        SENIOR: ['price_senior_from', 'price_senior_to'],
+      };
+      const keys = byLevel[level];
+      const lvlRu = levelRuByCode[level] || visitMasterLevelRu || 'мастер';
+      if (!svc) {
+        host.textContent = '';
+        return;
+      }
+      const lo = svc[keys[0]];
+      const hi = svc[keys[1]];
+      if (lo == null && hi == null) {
+        host.textContent = '';
+        return;
+      }
+      const mul = (100 - pct) / 100.0;
+      const rLo = lo != null ? Math.round(parseFloat(lo) * mul) : null;
+      const rHi = hi != null ? Math.round(parseFloat(hi) * mul) : null;
+      let priceStr = '';
+      if (rLo != null && rHi != null && rLo !== rHi) {
+        priceStr = String(rLo) + ' – ' + String(rHi) + ' ₽';
+      } else if (rLo != null) {
+        priceStr = String(rLo) + ' ₽';
+      } else if (rHi != null) {
+        priceStr = String(rHi) + ' ₽';
+      }
+      let tail = pct > 0 ? ' с учётом скидки' : '';
+      if (selectedLevels.length > 1) {
+        tail += (tail ? '; ' : ' ') + 'выбрано несколько мастеров, расчёт по уровню более высокого мастера';
+      }
+      host.textContent = 'Рекомендуемая цена по прайсу (' + lvlRu + '): ' + priceStr + tail;
+    }
+
+    function updateAllExtraLinePriceHints() {
+      document.querySelectorAll('[data-extra-line-idx]').forEach(function (row) {
+        const idx = parseInt(row.getAttribute('data-extra-line-idx') || '0', 10) || 0;
+        if (idx > 0) updateExtraLinePriceHint(idx);
+      });
     }
 
     function renderExtraLineServiceFlags(idx) {
@@ -1964,6 +2076,12 @@
       const text = serviceFeatureFlagsText(meta);
       host.textContent = text;
       host.style.display = text ? 'block' : 'none';
+      const mixEd = row.querySelector('[data-extra-line-mix-wrap]');
+      if (mixEd) {
+        mixEd.innerHTML = serviceFeatureMixHtml(idx);
+        mixEd.style.display = '';
+        bindExtraLineMixEditors(idx, row);
+      }
       const ed = row.querySelector('[data-extra-line-service-editor]');
       if (ed) {
         const html = serviceFeatureEditorHtml(idx, meta);
@@ -1971,6 +2089,32 @@
         ed.style.display = html ? 'block' : 'none';
         if (html) bindExtraLineFeatureEditors(idx, row, meta);
       }
+      updateExtraLinePriceHint(idx);
+    }
+
+    function bindExtraLineMixEditors(idx, row) {
+      if (!row) return;
+      const grams = function () {
+        const k = row.querySelector('input[name="line_' + idx + '_kanekalon_grams"]');
+        const u = row.querySelector('input[name="line_' + idx + '_kudri_grams"]');
+        return (parseInt(String((k && k.value) || '0'), 10) || 0) + (parseInt(String((u && u.value) || '0'), 10) || 0);
+      };
+      function syncMixUi() {
+        const total = grams();
+        const src = (row.querySelector('input[name="line_' + idx + '_mix_source"]:checked') || {}).value || 'NO_MIX';
+        const compBlk = row.querySelector('[data-line-mix-complexity="' + idx + '"]');
+        const bonusBlk = row.querySelector('[data-line-mix-bonus="' + idx + '"]');
+        const showMix = total > 0 && src !== 'NO_MIX';
+        if (compBlk) compBlk.style.display = showMix ? 'block' : 'none';
+        if (bonusBlk) bonusBlk.style.display = (showMix && src === 'SELF_MIXED') ? 'block' : 'none';
+      }
+      row.querySelectorAll('input[name="line_' + idx + '_mix_source"]').forEach(function (r) {
+        r.addEventListener('change', syncMixUi);
+      });
+      row.querySelectorAll('input[name="line_' + idx + '_kanekalon_grams"], input[name="line_' + idx + '_kudri_grams"]').forEach(function (inp) {
+        inp.addEventListener('input', syncMixUi);
+      });
+      syncMixUi();
     }
 
     function bindExtraLineFeatureEditors(idx, row, meta) {
@@ -2195,12 +2339,13 @@
         const rows = [];
         document.querySelectorAll('input[name="visit_master_on"]').forEach(function (cb) {
           const id = cb.value;
+          const lvl = cb.getAttribute('data-master-level') || '';
           const lbl = cb.closest('label');
           const txt = lbl ? (lbl.textContent || '').trim() : ('#' + id);
           rows.push(
             '<div class="row" style="align-items:center; flex-wrap:wrap; gap:10px 16px;">' +
               '<label style="display:flex; align-items:center; gap:8px; flex:1; min-width:12rem;">' +
-                '<input type="checkbox" name="line_' + lineIdx + '_service_master_on" value="' + escAttr(id) + '" />' +
+                '<input type="checkbox" name="line_' + lineIdx + '_service_master_on" value="' + escAttr(id) + '" data-master-level="' + escAttr(lvl) + '" />' +
                 '<span>' + escAttr(txt) + '</span>' +
               '</label>' +
               '<div style="display:flex; align-items:center; gap:6px;">' +
@@ -2231,17 +2376,23 @@
           '<div></div>' +
         '</div>' +
         '<div data-extra-line-service-flags="1" class="muted" style="margin-top:8px; font-size:12px; display:none;"></div>' +
-        '<div data-extra-line-service-editor="1" style="margin-top:8px; display:none;"></div>' +
         '<div class="row" style="margin-top:8px;">' +
           '<div><label>Время начала выполнения услуги</label><input type="time" name="line_' + idx + '_started_time" step="60" value="' + escAttr(prefill.started_time || '') + '" /></div>' +
           '<div></div>' +
         '</div>' +
+        '<div class="card" data-extra-line-masters-wrap="1" style="margin-top:8px; display:none; background:#f8fafc;">' +
+          '<div style="font-weight:600; margin-bottom:6px;">Мастера для услуги ' + (idx + 1) + '</div>' +
+          '<p class="muted" style="font-size:12px; margin-top:-4px;">Если выбран один мастер, его доля = 100% и поле процента блокируется.</p>' +
+          extraMastersHtml(idx) +
+        '</div>' +
         '<div class="card" style="margin-top:8px; background:#f8fafc;">' +
           '<div style="font-size:0.95rem; font-weight:600; margin-bottom:6px;">Сколько взяли с клиента</div>' +
+          '<p data-extra-line-price-hint class="muted" style="font-size:13px; margin:0 0 6px; min-height:1.25em;"></p>' +
           '<div class="row" style="align-items:flex-end;">' +
             '<div><label>Скидка клиенту, %</label><input type="number" name="line_' + idx + '_client_discount_percent" min="0" max="100" step="1" value="' + escAttr(prefill.client_discount_percent || '0') + '" /></div>' +
             '<div><label>Сумма с клиента, ₽</label><input type="number" name="line_' + idx + '_amount_from_client" min="0" step="1" value="' + escAttr(prefill.amount_from_client || '') + '" /></div>' +
           '</div>' +
+          '<p class="muted" style="font-size:12px; margin:8px 0 0;">Подсказка учитывает уровень мастера и скидку.</p>' +
           '<div style="margin-top:10px;">' +
             '<div style="font-weight:600; margin-bottom:6px;">Амортизация *</div>' +
             '<label style="display:block; margin-bottom:4px;"><input type="radio" name="line_' + idx + '_amortization_level" value="NONE"' + ((String(prefill.amortization_level || '') === 'NONE') ? ' checked' : '') + ' /> Нет — 0 ₽</label>' +
@@ -2257,11 +2408,9 @@
             '<div><label>Кудри/термо, г</label><input type="number" name="line_' + idx + '_kudri_grams" min="0" step="1" value="' + escAttr(prefill.kudri_grams || '0') + '" /></div>' +
           '</div>' +
         '</div>' +
-        '<div style="margin-top:8px;"><label>Комментарий к услуге</label><textarea name="line_' + idx + '_comment" rows="2" maxlength="1000" style="width:100%; box-sizing:border-box;">' + escAttr(prefill.comment || '') + '</textarea></div>' +
-        '<div class="card" data-extra-line-masters-wrap="1" style="margin-top:8px; display:none; background:#f8fafc;">' +
-          '<div style="font-weight:600; margin-bottom:6px;">Мастера для этой услуги</div>' +
-          extraMastersHtml(idx) +
-        '</div>';
+        '<div data-extra-line-mix-wrap="1" style="margin-top:8px;"></div>' +
+        '<div data-extra-line-service-editor="1" style="margin-top:8px; display:none;"></div>' +
+        '<div style="margin-top:8px;"><label>Комментарий к услуге</label><textarea name="line_' + idx + '_comment" rows="2" maxlength="1000" style="width:100%; box-sizing:border-box;">' + escAttr(prefill.comment || '') + '</textarea></div>';
       list.appendChild(box);
 
       const catSel = document.getElementById('line_' + idx + '_service_category_id');
@@ -2285,8 +2434,14 @@
         syncPerServiceMasterPctInputs();
       });
       box.querySelectorAll('input[name="line_' + idx + '_service_master_on"]').forEach(function (cb) {
-        cb.addEventListener('change', syncPerServiceMasterPctInputs);
+        cb.addEventListener('change', function () {
+          syncPerServiceMasterPctInputs();
+          updateExtraLinePriceHint(idx);
+        });
       });
+      const discIn = box.querySelector('input[name="line_' + idx + '_client_discount_percent"]');
+      if (discIn) discIn.addEventListener('input', function () { updateExtraLinePriceHint(idx); });
+      renderExtraLineServiceFlags(idx);
 
       const hd = document.getElementById('lb-line-hidden-defaults');
       if (hd) {
