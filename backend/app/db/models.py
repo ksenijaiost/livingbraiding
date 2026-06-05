@@ -130,6 +130,8 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     master_level: Mapped[MasterLevel | None] = mapped_column(Enum(MasterLevel), nullable=True)
+    # Индивидуальная доля салона для мастера (0..1). Если NULL — используется общий процент.
+    salon_cut_pct_override: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Нормализованный номер (только цифры, ≥10), для входа вместо логина; уникален среди непустых.
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
 

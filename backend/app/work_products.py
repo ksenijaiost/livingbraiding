@@ -295,7 +295,7 @@ def _kit_table_state_json(
             "prefill": kit_qty_prefill,
             "kitWorkPayByKey": _kit_work_pay_map_from_catalog(db),
             "kitPriceByKey": _kit_price_map_from_catalog(db),
-            "salonCutPct": float(get_salon_cut_pct(db)),
+            "salonCutPct": float(get_salon_cut_pct(db, current_user.id)),
             "excludeFromInventoryPieceCount": sorted(KIT_INVENTORY_PIECE_EXCLUDE_KEYS),
             "materialPricePerGram": {"kanekalon": kpg, "kudri": kudpg},
         },
@@ -1164,7 +1164,7 @@ async def work_new_post(
                 corr_steam=bool(bd.get("steam")),
             )
             used_total = used_client_total_for_lines(db, composition_lines)
-            salon_pct = float(get_salon_cut_pct(db))
+            salon_pct = float(get_salon_cut_pct(db, current_user.id))
             max_corr_pay = max(0.0, used_total * (1.0 - salon_pct))
             corr_pay = float(corr_fin.master_total)
             if corr_pay > max_corr_pay + 0.01:

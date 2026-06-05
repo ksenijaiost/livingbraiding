@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, require_role
 from app.db.models import (
+    MasterLevel,
     MaterialPriceCurrent,
     MaterialType,
     Setting,
@@ -25,6 +26,7 @@ from app.display_time import ALLOWED_TIMEZONES, ALLOWED_TIMEZONE_IDS, get_displa
 from app.forms_parse import parse_bool, parse_float, parse_int
 from app.mix_rates import mix_rates_for_admin_form
 from app.audit import diff_fields, write_audit_rows
+from app.ru_labels import RU_MASTER_LEVEL_DEFAULTS, invalidate_master_level_labels_cache
 from app.time_utils import utcnow_naive
 from app.calendar_display import get_calendar_display_hours
 from app.setting_keys import (
@@ -34,6 +36,9 @@ from app.setting_keys import (
     DISPLAY_TIMEZONE,
     EDIT_WINDOW_DAYS,
     KIT_MAX_RESERVES_PER_KIT,
+    MASTER_LEVEL_LABEL_JUNIOR,
+    MASTER_LEVEL_LABEL_MIDDLE,
+    MASTER_LEVEL_LABEL_SENIOR,
     SALON_CUT_PCT,
 )
 from app.work_rate_keys import (
@@ -53,6 +58,19 @@ from app.webui import templates, ctx as _ctx
 
 
 router = APIRouter()
+
+
+def _master_level_labels_for_settings(db: Session) -> dict[str, str]:
+    def _read(key: str, default: str) -> str:
+        row = db.get(Setting, key)
+        val = str(row.value).strip() if row and row.value is not None else ""
+        return val or default
+
+    return {
+        "JUNIOR": _read(MASTER_LEVEL_LABEL_JUNIOR, RU_MASTER_LEVEL_DEFAULTS[MasterLevel.JUNIOR]),
+        "MIDDLE": _read(MASTER_LEVEL_LABEL_MIDDLE, RU_MASTER_LEVEL_DEFAULTS[MasterLevel.MIDDLE]),
+        "SENIOR": _read(MASTER_LEVEL_LABEL_SENIOR, RU_MASTER_LEVEL_DEFAULTS[MasterLevel.SENIOR]),
+    }
 
 
 @router.get("/admin/settings", response_class=HTMLResponse)
@@ -82,6 +100,7 @@ def admin_settings_page(
     kit_max_row = db.get(Setting, KIT_MAX_RESERVES_PER_KIT)
     kit_max_reserves_per_kit = kit_max_row.value if kit_max_row else "3"
     cal_hour_from, cal_hour_to = get_calendar_display_hours(db)
+    master_level_labels = _master_level_labels_for_settings(db)
 
     def _wr_float(key: str, default: float) -> float:
         r = db.scalar(select(WorkRate).where(WorkRate.key == key, WorkRate.is_active.is_(True)))
@@ -133,6 +152,7 @@ def admin_settings_page(
             kit_max_reserves_per_kit=kit_max_reserves_per_kit,
             calendar_display_hour_from=cal_hour_from,
             calendar_display_hour_to=cal_hour_to,
+            master_level_labels=master_level_labels,
             timezone_choices=ALLOWED_TIMEZONES,
             saved=bool(saved),
             work_rates=work_rates,
@@ -152,6 +172,9 @@ def admin_settings_save(
     kit_max_reserves_per_kit: str = Form(...),
     calendar_display_hour_from: str = Form(...),
     calendar_display_hour_to: str = Form(...),
+    master_level_label_junior: str = Form(""),
+    master_level_label_middle: str = Form(""),
+    master_level_label_senior: str = Form(""),
     current_user=Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -164,6 +187,13 @@ def admin_settings_save(
         cal_to = parse_int(calendar_display_hour_to, min=1, max=24, field_name=CALENDAR_DISPLAY_HOUR_TO)
         if cal_from >= cal_to:
             raise ValueError("calendar hours")
+        lbl_j = str(master_level_label_junior or "").strip()
+        lbl_m = str(master_level_label_middle or "").strip()
+        lbl_s = str(master_level_label_senior or "").strip()
+        if not lbl_j or not lbl_m or not lbl_s:
+            raise ValueError("master level labels required")
+        if len(lbl_j) > 80 or len(lbl_m) > 80 or len(lbl_s) > 80:
+            raise ValueError("master level labels too long")
     except ValueError:
         return RedirectResponse(url="/admin/settings?saved=0", status_code=303)
 
@@ -236,7 +266,31 @@ def admin_settings_save(
             changes=diff_fields(before_cal, cal_row, ("value",)),
         )
 
+    for lbl_key, lbl_val in (
+        (MASTER_LEVEL_LABEL_JUNIOR, lbl_j),
+        (MASTER_LEVEL_LABEL_MIDDLE, lbl_m),
+        (MASTER_LEVEL_LABEL_SENIOR, lbl_s),
+    ):
+        lbl_row = db.get(Setting, lbl_key)
+        before_lbl = SimpleNamespace(value=(lbl_row.value if lbl_row else None))
+        if not lbl_row:
+            lbl_row = Setting(key=lbl_key, value=str(lbl_val))
+            db.add(lbl_row)
+        else:
+            lbl_row.value = str(lbl_val)
+        lbl_row.updated_at = now
+        lbl_row.updated_by_user_id = current_user.id
+        write_audit_rows(
+            db,
+            log_model=SettingAuditLog,
+            entity_field="setting_key",
+            entity_id=lbl_row.key,
+            changed_by_user_id=current_user.id,
+            changes=diff_fields(before_lbl, lbl_row, ("value",)),
+        )
+
     db.commit()
+    invalidate_master_level_labels_cache()
     return RedirectResponse(url="/admin/settings?saved=1", status_code=303)
 
 
@@ -403,6 +457,7 @@ async def admin_settings_work_rates_save(
         display_tz = get_display_timezone(db)
         km_row = db.get(Setting, KIT_MAX_RESERVES_PER_KIT)
         kit_max_reserves_per_kit_val = km_row.value if km_row else "3"
+        master_level_labels = _master_level_labels_for_settings(db)
 
         studio_share_override = parse_bool(form.get(STUDIO_SHARE_OVERRIDE))
         work_rates = {
@@ -437,6 +492,7 @@ async def admin_settings_work_rates_save(
                 kudri_per_100g=kudri_per_100,
                 display_timezone=display_tz,
                 kit_max_reserves_per_kit=kit_max_reserves_per_kit_val,
+                master_level_labels=master_level_labels,
                 timezone_choices=ALLOWED_TIMEZONES,
                 saved=False,
                 work_rates=work_rates,

@@ -119,12 +119,14 @@ function initAdminStaffForm() {
 
   var masterCb = form.querySelector('input[name="role_master"]');
   var radios = Array.from(form.querySelectorAll('input[name="master_level"]'));
+  var salonPctInput = form.querySelector('input[name="salon_cut_pct_override"]');
   var block = form.querySelector("[data-lb-master-level-block]");
   if (!masterCb || radios.length === 0) return;
 
   function sync() {
     var on = !!masterCb.checked;
     radios.forEach(function (r) { r.disabled = !on; });
+    if (salonPctInput) salonPctInput.disabled = !on;
     if (block) {
       block.style.opacity = on ? "1" : "0.55";
       block.style.pointerEvents = on ? "auto" : "none";

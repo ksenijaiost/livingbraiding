@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -16,6 +17,35 @@ ALLOWED_CONTENT_TYPES = {
     "image/heif",
 }
 MAX_BYTES = 10 * 1024 * 1024  # 10MB
+
+# Имена как у save_upload_image: <32 hex>.<ext> (бэкап — без HEIC).
+_BACKUP_STORED_NAME_RE = re.compile(r"^[a-f0-9]{32}\.(?:jpg|jpeg|png|webp)$", re.IGNORECASE)
+_BACKUP_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+def is_stored_media_backup_filename(name: str) -> bool:
+    return bool(_BACKUP_STORED_NAME_RE.match(name)) and Path(name).suffix.lower() in _BACKUP_ALLOWED_EXTS
+
+
+def iter_media_backup_paths(root: Path) -> list[Path]:
+    return sorted(p for p in root.iterdir() if p.is_file() and is_stored_media_backup_filename(p.name))
+
+
+def media_backup_stats() -> dict[str, int | str]:
+    """Статистика файлов, попадающих в /techspec/media/backup.zip."""
+    root = media_root_dir().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    files = iter_media_backup_paths(root)
+    other_files = sum(
+        1 for p in root.iterdir() if p.is_file() and not is_stored_media_backup_filename(p.name)
+    )
+    total_bytes = sum(int(p.stat().st_size) for p in files)
+    return {
+        "file_count": len(files),
+        "total_bytes": total_bytes,
+        "skipped_other_files": other_files,
+        "media_root": str(root),
+    }
 
 
 def media_root_dir() -> Path:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -28,6 +28,8 @@ from app.db.models import (
     BookingAuditLog,
     BookingKind,
     BookingMaster,
+    BookingPlannedService,
+    BookingPlannedServiceMaster,
     BookingStaff,
     BookingStaffKind,
     BookingStatus,
@@ -269,16 +271,17 @@ def _parse_planned_booking_datetime(fp: dict[str, str], tz_name: str) -> datetim
         raise ValueError("planned_date required")
     d = datetime.strptime(date_raw, "%Y-%m-%d")
     d = d.replace(second=0, microsecond=0)
-    if time_raw:
-        parts = time_raw.replace(".", ":").split(":")
-        try:
-            h = int(parts[0])
-            m = int(parts[1]) if len(parts) > 1 else 0
-            d = d.replace(hour=h % 24, minute=min(max(m, 0), 59))
-        except (ValueError, IndexError):
-            d = d.replace(hour=0, minute=0)
-    else:
-        d = d.replace(hour=0, minute=0)
+    if not time_raw:
+        raise ValueError("planned_time required")
+    parts = time_raw.replace(".", ":").split(":")
+    try:
+        h = int(parts[0])
+        m = int(parts[1]) if len(parts) > 1 else 0
+    except (ValueError, IndexError):
+        raise ValueError("planned_time invalid")
+    if h < 0 or h > 23 or m < 0 or m > 59:
+        raise ValueError("planned_time invalid")
+    d = d.replace(hour=h, minute=m)
     return _local_naive_to_utc_naive(d, tz_name).replace(second=0, microsecond=0)
 
 
@@ -295,9 +298,47 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
         "comment": b.comment or "",
     }
     if b.kind == BookingKind.VISIT:
-        fp["service_id"] = str(b.planned_service_id or "")
-        if b.planned_service_id:
-            svc = db.get(Service, b.planned_service_id)
+        service_ids_for_hidden: list[int] = []
+        line_payload: list[dict[str, Any]] = []
+        lines = list(b.planned_services or [])
+        if lines:
+            for ps in sorted(lines, key=lambda x: (int(x.sort_order or 0), int(x.id or 0))):
+                sid = int(ps.service_id or 0)
+                if sid <= 0:
+                    continue
+                service_ids_for_hidden.append(sid)
+                local_start = _utc_naive_to_local(ps.planned_start_time, tz) if ps.planned_start_time else None
+                line_payload.append(
+                    {
+                        "service_id": sid,
+                        "planned_time": local_start.strftime("%H:%M") if local_start else fp.get("planned_time", ""),
+                        "master_ids": [int(x.master_id) for x in (ps.masters or []) if x.master_id],
+                    }
+                )
+        if not service_ids_for_hidden and b.planned_service_id:
+            service_ids_for_hidden = [int(b.planned_service_id)]
+            line_payload = [
+                {
+                    "service_id": int(b.planned_service_id),
+                    "planned_time": fp.get("planned_time", ""),
+                    "master_ids": [],
+                }
+            ]
+        fp["service_id"] = str(service_ids_for_hidden[0] if service_ids_for_hidden else "")
+        if service_ids_for_hidden:
+            fp["planned_service_ids"] = json.dumps(service_ids_for_hidden, ensure_ascii=False)
+            fp["booking_service_lines_json"] = json.dumps(line_payload, ensure_ascii=False)
+            booking_master_set = set([int(x.master_id) for x in (b.masters or []) if x.master_id])
+            all_same_as_booking = bool(line_payload)
+            for x in line_payload:
+                mids = set([int(v) for v in (x.get("master_ids") or []) if int(v) > 0])
+                if mids != booking_master_set:
+                    all_same_as_booking = False
+                    break
+            fp["booking_masters_mode"] = "all" if all_same_as_booking else "per_service"
+
+        if service_ids_for_hidden:
+            svc = db.get(Service, service_ids_for_hidden[0])
             if svc:
                 sub = db.get(ServiceSubcategory, svc.subcategory_id)
                 if sub:
@@ -316,6 +357,11 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
         except Exception:
             pass
     master_ids = [bm.master_id for bm in (b.masters or [])]
+    if not master_ids:
+        for ps in (b.planned_services or []):
+            for psm in (ps.masters or []):
+                if psm.master_id and psm.master_id not in master_ids:
+                    master_ids.append(int(psm.master_id))
     return fp, master_ids
 
 
@@ -361,6 +407,18 @@ def _prefill_booking_fp_from_consultation(db: Session, cons: Consultation, fp: d
 
         fp["planned_service_ids"] = _json.dumps(svc_ids)
         fp["service_id"] = str(svc_ids[0])
+        fp["booking_service_lines_json"] = _json.dumps(
+            [
+                {
+                    "service_id": int(sid),
+                    "planned_time": fp.get("planned_time", ""),
+                    "master_ids": [],
+                }
+                for sid in svc_ids
+            ],
+            ensure_ascii=False,
+        )
+        fp["booking_masters_mode"] = "all"
         fp["kind"] = BookingKind.VISIT.value
         svc = db.get(Service, svc_ids[0])
         if svc:
@@ -403,6 +461,226 @@ def _parse_booking_visit_planned_services(
         if db.get(Service, sid) is None:
             return "Услуга не найдена.", [], None
     return None, ids, ids[0]
+
+
+def _parse_hhmm_to_time(raw: str) -> time | None:
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    parts = s.replace(".", ":").split(":")
+    try:
+        hh = int(parts[0])
+        mm = int(parts[1]) if len(parts) > 1 else 0
+    except Exception:
+        return None
+    if hh < 0 or hh > 23 or mm < 0 or mm > 59:
+        return None
+    hh = hh % 24
+    mm = min(max(mm, 0), 59)
+    return time(hour=hh, minute=mm)
+
+
+def _parse_booking_visit_lines_and_masters(
+    db: Session, form_raw: Any, fp: dict[str, str]
+) -> tuple[str | None, list[int], int | None, list[dict[str, Any]], list[int]]:
+    """Парсим услуги/время/мастеров для брони визита."""
+    base_time = str(fp.get("planned_time") or "").strip()
+    lines_json_raw = str(fp.get("booking_service_lines_json") or "").strip()
+    lines_json: list[dict[str, Any]] = []
+    if lines_json_raw:
+        try:
+            parsed = json.loads(lines_json_raw)
+            if isinstance(parsed, list):
+                lines_json = [x for x in parsed if isinstance(x, dict)]
+        except Exception:
+            lines_json = []
+
+    line_specs: list[dict[str, Any]] = []
+    if lines_json:
+        for i, item in enumerate(lines_json):
+            try:
+                sid = parse_int(str(item.get("service_id") or "").strip(), min=1, field_name="service_id")
+            except ValueError:
+                continue
+            t_raw = str(item.get("planned_time") or "").strip()
+            if i == 0 and not t_raw:
+                t_raw = base_time
+            tm = _parse_hhmm_to_time(t_raw)
+            if tm is None:
+                return "Укажите время начала для каждой услуги.", [], None, [], []
+            mids_raw = item.get("master_ids")
+            mids: list[int] = []
+            if isinstance(mids_raw, list):
+                for x in mids_raw:
+                    try:
+                        mid = int(x)
+                    except Exception:
+                        continue
+                    if mid > 0 and mid not in mids:
+                        mids.append(mid)
+            line_specs.append(
+                {
+                    "service_id": sid,
+                    "planned_time": tm,
+                    "master_ids": mids,
+                }
+            )
+    else:
+        svc_err, ids, _ = _parse_booking_visit_planned_services(db, form_raw, fp)
+        if svc_err:
+            return svc_err, [], None, [], []
+        for i, sid in enumerate(ids):
+            tm = _parse_hhmm_to_time(base_time if i == 0 else "")
+            if tm is None:
+                return "Укажите время начала для каждой услуги.", [], None, [], []
+            line_specs.append(
+                {
+                    "service_id": sid,
+                    "planned_time": tm,
+                    "master_ids": [],
+                }
+            )
+
+    if not line_specs:
+        return "Выберите хотя бы одну услугу для брони визита.", [], None, [], []
+
+    for spec in line_specs:
+        if db.get(Service, int(spec["service_id"])) is None:
+            return "Услуга не найдена.", [], None, [], []
+
+    masters_mode = str(fp.get("booking_masters_mode") or "all").strip().lower()
+    if masters_mode not in ("all", "per_service"):
+        masters_mode = "all"
+    fp["booking_masters_mode"] = masters_mode
+
+    on_ids: list[int] = []
+    if masters_mode == "all":
+        for v in form_raw.getlist("booking_master_on"):
+            try:
+                on_ids.append(parse_int(v, min=1, field_name="booking_master_on"))
+            except Exception:
+                pass
+        on_ids = sorted(set([i for i in on_ids if i > 0]))
+        if not on_ids:
+            return "Выберите хотя бы одного мастера.", [], None, [], []
+        for spec in line_specs:
+            spec["master_ids"] = list(on_ids)
+    else:
+        union_ids: set[int] = set()
+        for spec in line_specs:
+            mids = sorted(set([int(x) for x in (spec.get("master_ids") or []) if int(x) > 0]))
+            if not mids:
+                return "Для каждой услуги выберите хотя бы одного мастера.", [], None, [], []
+            spec["master_ids"] = mids
+            union_ids.update(mids)
+        on_ids = sorted(union_ids)
+
+    service_ids = [int(spec["service_id"]) for spec in line_specs]
+    planned_service_id = service_ids[0] if service_ids else None
+    return None, service_ids, planned_service_id, line_specs, on_ids
+
+
+def _booking_local_day_from_fp(fp: dict[str, str], *, planned_date_utc: datetime | None, tz_name: str) -> date:
+    raw = str(fp.get("planned_date") or "").strip()
+    try:
+        return date.fromisoformat(raw)
+    except Exception:
+        local_dt = _utc_naive_to_local(planned_date_utc, tz_name) if planned_date_utc else None
+        return local_dt.date() if local_dt else date.today()
+
+
+def _booking_custom_duration_override_minutes(fp: dict[str, str]) -> int:
+    if not parse_bool(fp.get("visit_custom_duration_on")):
+        return 0
+    raw_h = str(fp.get("visit_custom_duration_h") or "").strip()
+    raw_m = str(fp.get("visit_custom_duration_m") or "").strip()
+    try:
+        hh = int(parse_float(raw_h or "0", min=0.0, field_name="visit_custom_duration_h"))
+    except Exception:
+        hh = 0
+    try:
+        mm = int(parse_float(raw_m or "0", min=0.0, field_name="visit_custom_duration_m"))
+    except Exception:
+        mm = 0
+    if mm < 0:
+        mm = 0
+    if mm > 59:
+        mm = 59
+    total = int(hh) * 60 + int(mm)
+    return total if total > 0 else 0
+
+
+def _validate_booking_visit_line_availability(
+    db: Session,
+    *,
+    local_day: date,
+    line_specs: list[dict[str, Any]],
+    duration_override_minutes: int = 0,
+) -> str | None:
+    unavailable_names: list[str] = []
+    seen_mid: set[int] = set()
+    for spec in line_specs:
+        sid = int(spec["service_id"])
+        svc = db.get(Service, sid)
+        if svc is None:
+            return "Услуга не найдена."
+        dur = int(svc.estimated_duration_minutes or 0)
+        if duration_override_minutes > 0 and len(line_specs) == 1:
+            dur = int(duration_override_minutes)
+        if dur <= 0:
+            continue
+        t0 = spec.get("planned_time")
+        if not isinstance(t0, time):
+            t0 = time(0, 0)
+        start_dt = datetime.combine(local_day, t0).replace(second=0, microsecond=0)
+        end_dt = start_dt + timedelta(minutes=dur)
+        for mid in [int(x) for x in (spec.get("master_ids") or []) if int(x) > 0]:
+            if is_master_available_for_interval(
+                db,
+                master_id=mid,
+                start_dt=start_dt,
+                end_dt=end_dt,
+            ):
+                continue
+            if mid in seen_mid:
+                continue
+            seen_mid.add(mid)
+            u = db.get(User, mid)
+            unavailable_names.append((u.display_name or u.username) if u else f"#{mid}")
+    if unavailable_names:
+        return "Следующие мастера недоступны по графику на выбранное время: " + ", ".join(unavailable_names)
+    return None
+
+
+def _sync_booking_planned_services_with_lines(
+    db: Session,
+    *,
+    booking_id: int,
+    local_day: date,
+    tz_name: str,
+    line_specs: list[dict[str, Any]],
+) -> None:
+    db.execute(delete(BookingPlannedService).where(BookingPlannedService.booking_id == booking_id))
+    db.flush()
+    for i, spec in enumerate(line_specs):
+        sid = int(spec["service_id"])
+        t0 = spec.get("planned_time")
+        if not isinstance(t0, time):
+            t0 = time(0, 0)
+        start_local = datetime.combine(local_day, t0).replace(second=0, microsecond=0)
+        start_utc = _local_naive_to_utc_naive(start_local, tz_name).replace(second=0, microsecond=0)
+        ps = BookingPlannedService(
+            booking_id=booking_id,
+            service_id=sid,
+            sort_order=i,
+            planned_start_time=start_utc,
+        )
+        db.add(ps)
+        db.flush()
+        for mid in sorted(set([int(x) for x in (spec.get("master_ids") or []) if int(x) > 0])):
+            if db.get(User, mid) is None:
+                continue
+            db.add(BookingPlannedServiceMaster(booking_planned_service_id=ps.id, master_id=mid))
 
 
 def try_auto_complete_booking(db: Session, booking_id: int) -> None:
@@ -989,7 +1267,7 @@ def admin_booking_new_get(
     masters = _masters_for_visit_form(db)
     service_catalog = list_master_visit_services_catalog(db)
     staff_users = list(db.scalars(select_users_with_any_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)).all())
-    fp: dict[str, str] = {"planned_date": date.today().isoformat(), "planned_time": ""}
+    fp: dict[str, str] = {"planned_date": "", "planned_time": ""}
     allow = {
         "kind",
         "service_id",
@@ -1040,6 +1318,9 @@ def admin_booking_new_get(
         "calc_service_max",
         "planned_date",
         "planned_time",
+        "planned_service_ids",
+        "booking_service_lines_json",
+        "booking_masters_mode",
     }
     for k, v in request.query_params.items():
         if k in allow and v is not None:
@@ -1096,6 +1377,8 @@ async def admin_booking_new_post(  # noqa: C901
     planned_service_id: int | None = None
     planned_product_kind: str | None = None
     planned_service_ids: list[int] = []
+    planned_service_lines: list[dict[str, Any]] = []
+    on_ids: list[int] = []
 
     try:
         client_id = parse_int(client_id_raw, min=1, field_name="client_id")
@@ -1128,7 +1411,7 @@ async def admin_booking_new_post(  # noqa: C901
             err = "Предоплата должна быть числом."
 
     if not err and kind_raw == BookingKind.VISIT.value:
-        svc_err, planned_service_ids, planned_service_id = _parse_booking_visit_planned_services(
+        svc_err, planned_service_ids, planned_service_id, planned_service_lines, on_ids = _parse_booking_visit_lines_and_masters(
             db, form_raw, fp
         )
         if svc_err:
@@ -1184,22 +1467,22 @@ async def admin_booking_new_post(  # noqa: C901
         tz_name = get_display_timezone(db)
 
     # --- График мастеров (жёсткая server-validation при создании брони) ---
-    on_ids: list[int] = []
+    local_day = _booking_local_day_from_fp(fp, planned_date_utc=planned_date, tz_name=tz_name)
     if kind_raw == BookingKind.VISIT.value:
-        for v in form_raw.getlist("booking_master_on"):
-            try:
-                on_ids.append(parse_int(v, min=1, field_name="booking_master_on"))
-            except Exception:
-                pass
-        on_ids = sorted(set([i for i in on_ids if i > 0]))
-
-        if not on_ids:
+        dur_override = _booking_custom_duration_override_minutes(fp)
+        avail_err = _validate_booking_visit_line_availability(
+            db,
+            local_day=local_day,
+            line_specs=planned_service_lines,
+            duration_override_minutes=dur_override,
+        )
+        if avail_err:
             return templates.TemplateResponse(
                 "admin_booking_form.html",
                 _ctx(
                     request,
                     current_user=current_user,
-                    error="Выберите хотя бы одного мастера.",
+                    error=avail_err,
                     is_new=True,
                     booking=None,
                     selected_client=client,
@@ -1211,72 +1494,12 @@ async def admin_booking_new_post(  # noqa: C901
                     product_kind_options=[k.value for k in ProductSaleKind],
                     rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
                     fp=fp,
-                    booking_master_on_ids=[],
+                    booking_master_on_ids=on_ids,
                     consultation_id=int(fp["consultation_id"]) if str(fp.get("consultation_id") or "").isdigit() else None,
                     consultation_comment=None,
                 ),
                 status_code=400,
             )
-
-        # Интервал для проверки: от planned_time до end = start + (override или sum(estimated_duration_minutes)).
-        local_start = _utc_naive_to_local(planned_date, tz_name).replace(second=0, microsecond=0)
-        # Override длительности (Fix 43)
-        dur_override = 0
-        try:
-            dj = _booking_details_from_form(db, fp)
-            dur_override = int(dj.get("visit_custom_duration_minutes") or 0)
-        except Exception:
-            dur_override = 0
-
-        dur_total = 0
-        for sid in planned_service_ids:
-            svc = db.get(Service, sid)
-            if not svc:
-                continue
-            dur_total += int(svc.estimated_duration_minutes or 0)
-
-        dur_use = dur_override if dur_override > 0 else dur_total
-        if dur_use > 0 and on_ids:
-            local_end = local_start + timedelta(minutes=dur_use)
-            unavailable_names: list[str] = []
-            for mid in on_ids:
-                if not is_master_available_for_interval(
-                    db,
-                    master_id=mid,
-                    start_dt=local_start,
-                    end_dt=local_end,
-                ):
-                    u = db.get(User, mid)
-                    unavailable_names.append((u.display_name or u.username) if u else f"#{mid}")
-
-            if unavailable_names:
-                err = (
-                    "Следующие мастера недоступны по графику на выбранное время: "
-                    + ", ".join(unavailable_names)
-                )
-                return templates.TemplateResponse(
-                    "admin_booking_form.html",
-                    _ctx(
-                        request,
-                        current_user=current_user,
-                        error=err,
-                        is_new=True,
-                        booking=None,
-                        selected_client=client,
-                        masters=masters,
-                        staff_users=staff_users,
-                        after_reserve=str(request.url),
-                        service_catalog=service_catalog,
-                        kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
-                        product_kind_options=[k.value for k in ProductSaleKind],
-                        rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
-                        fp=fp,
-                        booking_master_on_ids=on_ids,
-                        consultation_id=int(fp["consultation_id"]) if str(fp.get("consultation_id") or "").isdigit() else None,
-                        consultation_comment=None,
-                    ),
-                    status_code=400,
-                )
     try:
         up1 = get_nonempty_upload(form_raw, "photo_1")
         up2 = get_nonempty_upload(form_raw, "photo_2")
@@ -1379,10 +1602,14 @@ async def admin_booking_new_post(  # noqa: C901
     db.add(booking)
     db.flush()
 
-    if kind_raw == BookingKind.VISIT.value and planned_service_ids:
-        from app.planned_services_db import sync_booking_planned_services
-
-        sync_booking_planned_services(db, booking.id, planned_service_ids, planned_date=planned_date)
+    if kind_raw == BookingKind.VISIT.value and planned_service_lines:
+        _sync_booking_planned_services_with_lines(
+            db,
+            booking_id=booking.id,
+            local_day=local_day,
+            tz_name=tz_name,
+            line_specs=planned_service_lines,
+        )
 
     if kind_raw == BookingKind.VISIT.value:
         for mid in on_ids:
@@ -1563,7 +1790,14 @@ def admin_booking_edit_get(
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    b = db.scalar(select(Booking).where(Booking.id == booking_id).options(selectinload(Booking.masters)))
+    b = db.scalar(
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(
+            selectinload(Booking.masters),
+            selectinload(Booking.planned_services).selectinload(BookingPlannedService.masters),
+        )
+    )
     if b is None:
         raise HTTPException(status_code=404, detail="Бронь не найдена")
     selected_client = db.get(Client, b.client_id)
@@ -1601,7 +1835,14 @@ async def admin_booking_edit_post(
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    b = db.scalar(select(Booking).where(Booking.id == booking_id).options(selectinload(Booking.masters)))
+    b = db.scalar(
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(
+            selectinload(Booking.masters),
+            selectinload(Booking.planned_services).selectinload(BookingPlannedService.masters),
+        )
+    )
     if b is None:
         raise HTTPException(status_code=404, detail="Бронь не найдена")
     form_raw = await request.form()
@@ -1622,6 +1863,9 @@ async def admin_booking_edit_post(
     deposit_amount: int | None = None
     planned_service_id: int | None = None
     planned_product_kind: str | None = None
+    planned_service_ids: list[int] = []
+    planned_service_lines: list[dict[str, Any]] = []
+    on_ids: list[int] = []
     tz_name: str | None = None
 
     try:
@@ -1654,16 +1898,11 @@ async def admin_booking_edit_post(
             err = "Предоплата должна быть числом."
 
     if not err and kind_raw == BookingKind.VISIT.value:
-        svc_raw = str(fp.get("service_id") or "").strip()
-        try:
-            planned_service_id = parse_int(svc_raw, min=1, field_name="service_id")
-        except ValueError:
-            planned_service_id = None
-        if planned_service_id is None:
-            err = "Выберите услугу для брони визита."
-        else:
-            if db.get(Service, planned_service_id) is None:
-                err = "Услуга не найдена."
+        svc_err, planned_service_ids, planned_service_id, planned_service_lines, on_ids = _parse_booking_visit_lines_and_masters(
+            db, form_raw, fp
+        )
+        if svc_err:
+            err = svc_err
 
     if not err and kind_raw == BookingKind.PRODUCT_SALE.value:
         pk = str(fp.get("product_kind") or "").strip()
@@ -1685,55 +1924,24 @@ async def admin_booking_edit_post(
     service_catalog = list_master_visit_services_catalog(db)
     staff_users = list(db.scalars(select_users_with_any_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)).all())
     selected_client = client
-    on_ids: list[int] = []
-    if kind_raw == BookingKind.VISIT.value:
-        for v in form_raw.getlist("booking_master_on"):
-            try:
-                on_ids.append(parse_int(v, min=1, field_name="booking_master_on"))
-            except Exception:
-                pass
-        on_ids = sorted(set([i for i in on_ids if i > 0]))
-
-    if not err and kind_raw == BookingKind.VISIT.value and not on_ids:
-        err = "Выберите хотя бы одного мастера."
 
     # --- График мастеров (жёсткая server-validation при редактировании) ---
     if (
         not err
         and kind_raw == BookingKind.VISIT.value
-        and planned_service_id is not None
+        and planned_service_lines
         and planned_date is not None
         and tz_name is not None
         and on_ids
     ):
-        local_start = _utc_naive_to_local(planned_date, tz_name).replace(second=0, microsecond=0)
-        svc = db.get(Service, planned_service_id)
-        dur_total = int(svc.estimated_duration_minutes or 0) if svc else 0
-        dur_override = 0
-        try:
-            dj = _booking_details_from_form(db, fp)
-            dur_override = int(dj.get("visit_custom_duration_minutes") or 0)
-        except Exception:
-            dur_override = 0
-        dur_use = dur_override if dur_override > 0 else dur_total
-        if dur_use > 0:
-            local_end = local_start + timedelta(minutes=dur_use)
-            unavailable_names: list[str] = []
-            for mid in on_ids:
-                if not is_master_available_for_interval(
-                    db,
-                    master_id=mid,
-                    start_dt=local_start,
-                    end_dt=local_end,
-                ):
-                    u = db.get(User, mid)
-                    unavailable_names.append((u.display_name or u.username) if u else f"#{mid}")
-
-            if unavailable_names:
-                err = (
-                    "Следующие мастера недоступны по графику на выбранное время: "
-                    + ", ".join(unavailable_names)
-                )
+        local_day = _booking_local_day_from_fp(fp, planned_date_utc=planned_date, tz_name=tz_name)
+        dur_override = _booking_custom_duration_override_minutes(fp)
+        err = _validate_booking_visit_line_availability(
+            db,
+            local_day=local_day,
+            line_specs=planned_service_lines,
+            duration_override_minutes=dur_override,
+        )
 
     if err:
         return templates.TemplateResponse(
@@ -1848,6 +2056,18 @@ async def admin_booking_edit_post(
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
 
+    local_day = _booking_local_day_from_fp(fp, planned_date_utc=planned_date, tz_name=tz_name or get_display_timezone(db))
+    if kind_raw == BookingKind.VISIT.value and planned_service_lines:
+        _sync_booking_planned_services_with_lines(
+            db,
+            booking_id=b.id,
+            local_day=local_day,
+            tz_name=tz_name or get_display_timezone(db),
+            line_specs=planned_service_lines,
+        )
+    else:
+        db.execute(delete(BookingPlannedService).where(BookingPlannedService.booking_id == b.id))
+
     db.execute(delete(BookingMaster).where(BookingMaster.booking_id == b.id))
     db.flush()
     db.expire(b, ["masters"])
@@ -1942,11 +2162,14 @@ def admin_bookings(
     request: Request,
     show: str | None = None,
     mine: str | None = Query(None),
+    sort_date: str | None = Query(None),
     current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     show_mode = (show or "").strip().lower() or "active"
     mine_raw = (mine or "").strip().lower()
+    sort_date_raw = (sort_date or "").strip().lower()
+    sort_date_mode = "desc" if sort_date_raw == "desc" else "asc"
     can_manage = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
     has_admin_roles = UserRole.ADMIN in current_user.roles or UserRole.ADMIN_SUPER in current_user.roles
     if has_admin_roles:
@@ -1956,7 +2179,7 @@ def admin_bookings(
         if mine_raw not in ("0", "false", "no", "all"):
             bookings_mine_only = True
 
-    stmt = select(Booking).options(selectinload(Booking.client)).order_by(Booking.planned_date.asc(), Booking.id.asc()).limit(1000)
+    stmt = select(Booking).options(selectinload(Booking.client)).limit(1000)
     if show_mode != "all":
         stmt = stmt.where(
             Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE))
@@ -1968,6 +2191,10 @@ def admin_bookings(
                 exists(select(1).where(and_(BookingStaff.booking_id == Booking.id, BookingStaff.user_id == current_user.id))),
             )
         )
+    if sort_date_mode == "desc":
+        stmt = stmt.order_by(Booking.planned_date.desc(), Booking.id.desc())
+    else:
+        stmt = stmt.order_by(Booking.planned_date.asc(), Booking.id.asc())
     rows = list(db.scalars(stmt).all())
     display_tz = get_display_timezone(db)
     return templates.TemplateResponse(
@@ -1980,6 +2207,7 @@ def admin_bookings(
             display_tz=display_tz,
             can_manage=can_manage,
             bookings_mine_only=bookings_mine_only,
+            sort_date_mode=sort_date_mode,
         ),
     )
 

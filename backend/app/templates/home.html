@@ -3,6 +3,52 @@
   <div class="card">
     <h2 style="margin-top: 0;">Главная</h2>
 
+    {% if techspec_home %}
+      <div class="card" style="margin-bottom: 16px; background: #f8fafc;">
+        <h3 style="margin-top: 0;">Техническая сводка</h3>
+        <div style="display: flex; flex-direction: column; gap: 12px; font-size: 14px;">
+          <div>
+            <div class="muted" style="font-size: 12px;">Медиа-бэкап (<code>/techspec/media/backup.zip</code>)</div>
+            <div style="margin-top: 4px;">
+              <strong>{{ techspec_home.media.file_count }}</strong>
+              {{ "файл" if techspec_home.media.file_count == 1 else ("файла" if techspec_home.media.file_count in [2,3,4] else "файлов") }},
+              <strong>{{ techspec_home.media.total_size_human }}</strong>
+            </div>
+            <div style="margin-top: 8px;">
+              <a href="/techspec/media/backup.zip"><button type="button" class="secondary">Скачать backup.zip</button></a>
+            </div>
+          </div>
+          <div>
+            <div class="muted" style="font-size: 12px;">Каталог загрузок</div>
+            <div style="margin-top: 4px; word-break: break-all;"><code>{{ techspec_home.media.media_root }}</code></div>
+            {% if techspec_home.media.skipped_other_files %}
+              <div class="muted" style="margin-top: 4px; font-size: 12px;">
+                Прочих файлов в каталоге (не в архиве): {{ techspec_home.media.skipped_other_files }}
+              </div>
+            {% endif %}
+          </div>
+          <div>
+            <div class="muted" style="font-size: 12px;">База данных</div>
+            <div style="margin-top: 4px;"><code>{{ techspec_home.database }}</code></div>
+          </div>
+          <div>
+            <div class="muted" style="font-size: 12px;">Записи в системе</div>
+            <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 10px 16px;">
+              <span>пользователей: <strong>{{ techspec_home.counts.users_active }}</strong></span>
+              <span>клиентов: <strong>{{ techspec_home.counts.clients }}</strong></span>
+              <span>визитов: <strong>{{ techspec_home.counts.visits }}</strong></span>
+              <span>броней: <strong>{{ techspec_home.counts.bookings }}</strong></span>
+            </div>
+          </div>
+          <div class="muted" style="font-size: 12px;">
+            Окружение: <strong>{{ techspec_home.app_env }}</strong> ·
+            Python <strong>{{ techspec_home.python_version }}</strong> ·
+            часовой пояс отображения: <strong>{{ techspec_home.display_tz }}</strong>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
     {% if sections_ctx and sections_ctx.is_master %}
       <div class="card" style="margin-bottom: 16px; background: #f8fafc;">
         <h3 style="margin-top:0;">График работы</h3>

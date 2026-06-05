@@ -276,7 +276,7 @@ def compute_visit_service_line(
         kanekalon_grams=line.kanekalon_grams,
         kudri_grams=line.kudri_grams,
     )
-    salon_pct = get_salon_cut_pct(db)
+    salon_pct = get_salon_cut_pct(db, default_mix_bonus_master_id)
 
     kit_cost_total = 0.0
     usages: list[tuple[int, int, float, dict[str, int] | None]] = []
@@ -522,7 +522,7 @@ def save_visit_with_services(
         addons_total=0,
         cost_total=0,
         profit_before_split=0,
-        salon_cut_pct_at_time=get_salon_cut_pct(db),
+        salon_cut_pct_at_time=get_salon_cut_pct(db, master_id),
         salon_profit=0,
         masters_pool=0,
         studio_fund_amount=0,

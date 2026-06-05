@@ -155,11 +155,14 @@ def build_occupancy_for_day(
         if lines:
             # Для multi-service занятости по строкам planned_services оставляем
             # длительности услуг (override относится к "времени визита" в простой форме).
+            use_override_for_single_line = dur_override > 0 and len(lines) == 1
             for ps in sorted(lines, key=lambda x: (int(x.sort_order or 0), int(x.id or 0))):
                 svc = ps.service
                 if svc is None:
                     continue
                 dur = int(svc.estimated_duration_minutes or 0)
+                if use_override_for_single_line:
+                    dur = int(dur_override)
                 if dur <= 0:
                     continue
                 if ps.planned_start_time:
