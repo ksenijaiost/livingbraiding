@@ -526,6 +526,7 @@ def _parse_booking_visit_lines_and_masters(
                     "planned_time": tm,
                     "master_ids": mids,
                     "comment": str(item.get("comment") or "").strip(),
+                    "duration_minutes": int(item.get("duration_minutes") or 0) if str(item.get("duration_minutes") or "").strip().isdigit() else 0,
                 }
             )
     else:
@@ -542,6 +543,7 @@ def _parse_booking_visit_lines_and_masters(
                     "planned_time": tm,
                     "master_ids": [],
                     "comment": "",
+                    "duration_minutes": 0,
                 }
             )
 
@@ -629,7 +631,10 @@ def _validate_booking_visit_line_availability(
         if svc is None:
             return "Услуга не найдена."
         dur = int(svc.estimated_duration_minutes or 0)
-        if duration_override_minutes > 0 and len(line_specs) == 1:
+        line_dur = int(spec.get("duration_minutes") or 0)
+        if line_dur > 0:
+            dur = line_dur
+        elif duration_override_minutes > 0 and len(line_specs) == 1:
             dur = int(duration_override_minutes)
         if dur <= 0:
             continue

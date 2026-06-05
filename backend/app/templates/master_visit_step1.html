@@ -192,10 +192,27 @@
           <p class="muted" style="margin: 8px 0 0;">Нет активных пользователей с ролью «мастер» — обратитесь к администратору.</p>
         {% endif %}
       </div>
+      <div id="line0_service_masters_block" class="card" style="margin-top:12px; display:none;">
+        <div style="font-weight:600; margin-bottom:8px;">Мастера для услуги 1</div>
+        <p class="muted" style="font-size:12px; margin-top:-4px;">Заполняется, когда выбран режим «По услугам». Для одного мастера % можно оставить пустым (100).</p>
+        {% for m in masters_for_visit %}
+          <div class="row" style="align-items:center; flex-wrap:wrap; gap: 10px 16px;">
+            <label style="display:flex; align-items:center; gap:8px; flex:1; min-width: 12rem;">
+              <input type="checkbox" name="line_0_service_master_on" value="{{ m.id }}" />
+              <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
+            </label>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <label class="muted" style="font-size:12px; margin:0;">Доля, %</label>
+              <input type="number" name="line_0_service_master_pct_{{ m.id }}" min="0" max="100" step="1" style="width:5rem;" />
+            </div>
+          </div>
+        {% endfor %}
+      </div>
       <div class="row">
         <div>
           <label>Категория</label>
           <select id="service_category_id" name="service_category_id" onchange="serviceCatalogOnCategory()" {% if not service_catalog %}disabled{% endif %} style="width: 100%; box-sizing: border-box;">
+            <option value="">— выберите категорию —</option>
             {% for c in service_catalog %}
               <option value="{{ c.id }}" {% if fp.get('service_category_id')|string == c.id|string %}selected{% endif %}>{{ c.name }}</option>
             {% endfor %}
@@ -227,6 +244,10 @@
 
         <div style="margin-top: 14px;">
           <div style="font-weight: 600; margin-bottom: 8px;">Амортизация *</div>
+          <label style="display: block; margin-bottom: 6px;">
+            <input type="radio" name="amortization_level" value="NONE" {% if fp.get('amortization_level') == 'NONE' %}checked{% endif %} />
+            Нет — 0 ₽
+          </label>
           <label style="display: block; margin-bottom: 6px;">
             <input type="radio" name="amortization_level" value="MIN" {% if not fp.get('amortization_level') or fp.get('amortization_level') == 'MIN' %}checked{% endif %} />
             Минимальная — {{ (amortization_rubles.get('MIN') or 0)|int }} ₽
@@ -583,6 +604,24 @@
       if (mn) mn.style.display = m ? 'block' : 'none';
     }
     document.addEventListener('DOMContentLoaded', visitMastersModeSync);
+
+    function syncMastersScopeUi() {
+      const scope = (document.querySelector('input[name="masters_scope"]:checked') || {}).value || 'VISIT';
+      const per = scope === 'PER_SERVICE';
+      const visitMastersCard = document.getElementById('visit_masters_multi_block') ? document.getElementById('visit_masters_multi_block').closest('.card') : null;
+      const line0 = document.getElementById('line0_service_masters_block');
+      const sameShares = document.querySelector('input[name="same_master_shares_all_services"]');
+      if (visitMastersCard) visitMastersCard.style.display = per ? 'none' : '';
+      if (line0) line0.style.display = per ? '' : 'none';
+      document.querySelectorAll('[data-extra-line-masters-wrap]').forEach(function (el) {
+        el.style.display = per ? '' : 'none';
+      });
+      if (sameShares) {
+        // active only for VISIT mode per request
+        sameShares.disabled = scope !== 'VISIT';
+        if (scope !== 'VISIT') sameShares.checked = false;
+      }
+    }
 
     function escapeHtml(s) {
       const d = document.createElement('div');
@@ -1606,6 +1645,14 @@
       const subs = (cat && cat.subcategories) ? cat.subcategories : [];
 
       subSel.innerHTML = '';
+      if (!catId) {
+        subSel.innerHTML = '<option value="">—</option>';
+        subSel.disabled = true;
+        serviceSel.innerHTML = '<option value="">— выберите услугу —</option>';
+        if (subWrap) subWrap.style.opacity = '0.85';
+        updateServiceDerivedUI();
+        return;
+      }
       for (const sc of subs) {
         const opt = document.createElement('option');
         opt.value = sc.id;
@@ -1633,6 +1680,11 @@
       const serviceSel = document.getElementById('service_id');
 
       const subId = parseInt(subSel.value || '0');
+      if (!subId) {
+        serviceSel.innerHTML = '<option value="">— выберите услугу —</option>';
+        updateServiceDerivedUI();
+        return;
+      }
       let sc = null;
       for (const c of serviceCatalog || []) {
         for (const ssc of (c.subcategories || [])) {
@@ -1644,7 +1696,7 @@
       }
       const services = (sc && sc.services) ? sc.services : [];
 
-      serviceSel.innerHTML = '';
+      serviceSel.innerHTML = '<option value="">— выберите услугу —</option>';
       for (const s of services) {
         const opt = document.createElement('option');
         opt.value = s.id;
@@ -1709,6 +1761,8 @@
 
       // If user came back with a service_id, try to restore category/subcategory.
       const initialServiceId = parseInt({{ (fp.get('service_id') or 0)|int }} || 0);
+      const initialCategoryId = parseInt({{ (fp.get('service_category_id') or 0)|int }} || 0);
+      const initialSubcategoryId = parseInt({{ (fp.get('service_subcategory_id') or 0)|int }} || 0);
       const meta = initialServiceId ? serviceMetaById[initialServiceId] : null;
 
       const catSel = document.getElementById('service_category_id');
@@ -1716,10 +1770,15 @@
       const serviceSel = document.getElementById('service_id');
 
       if (meta && meta.categoryId) catSel.value = String(meta.categoryId);
+      else if (initialCategoryId > 0) catSel.value = String(initialCategoryId);
+      else catSel.value = '';
       fillSubcategories();
 
       if (meta && meta.subcategoryId) {
         subSel.value = String(meta.subcategoryId);
+        fillServices();
+      } else if (initialSubcategoryId > 0) {
+        subSel.value = String(initialSubcategoryId);
         fillServices();
       }
 
@@ -1741,6 +1800,27 @@
           .replace(/\x27/g, '\x26#39;');
       }
       const box = document.createElement('div');
+      function extraMastersHtml(lineIdx) {
+        const rows = [];
+        document.querySelectorAll('input[name="visit_master_on"]').forEach(function (cb) {
+          const id = cb.value;
+          const lbl = cb.closest('label');
+          const txt = lbl ? (lbl.textContent || '').trim() : ('#' + id);
+          rows.push(
+            '<div class="row" style="align-items:center; flex-wrap:wrap; gap:10px 16px;">' +
+              '<label style="display:flex; align-items:center; gap:8px; flex:1; min-width:12rem;">' +
+                '<input type="checkbox" name="line_' + lineIdx + '_service_master_on" value="' + escAttr(id) + '" />' +
+                '<span>' + escAttr(txt) + '</span>' +
+              '</label>' +
+              '<div style="display:flex; align-items:center; gap:6px;">' +
+                '<label class="muted" style="font-size:12px; margin:0;">Доля, %</label>' +
+                '<input type="number" name="line_' + lineIdx + '_service_master_pct_' + escAttr(id) + '" min="0" max="100" step="1" style="width:5rem;" />' +
+              '</div>' +
+            '</div>'
+          );
+        });
+        return rows.join('');
+      }
       box.className = 'card';
       box.setAttribute('data-extra-line-idx', String(idx));
       box.style.background = '#fff';
@@ -1770,6 +1850,10 @@
         '<div class="row" style="margin-top:8px;">' +
           '<div><label>Канекалон, г</label><input type="number" name="line_' + idx + '_kanekalon_grams" min="0" step="1" value="' + escAttr(prefill.kanekalon_grams || '0') + '" /></div>' +
           '<div><label>Кудри/термо, г</label><input type="number" name="line_' + idx + '_kudri_grams" min="0" step="1" value="' + escAttr(prefill.kudri_grams || '0') + '" /></div>' +
+        '</div>' +
+        '<div class="card" data-extra-line-masters-wrap="1" style="margin-top:8px; display:none; background:#f8fafc;">' +
+          '<div style="font-weight:600; margin-bottom:6px;">Мастера для этой услуги</div>' +
+          extraMastersHtml(idx) +
         '</div>';
       list.appendChild(box);
 
@@ -1806,6 +1890,7 @@
         });
       }
       syncExtraLinesVisibility();
+      syncMastersScopeUi();
     }
 
     function nextExtraLineIndex() {
@@ -1855,7 +1940,12 @@
         addExtraServiceLine(nextExtraLineIndex(), {});
       });
       syncExtraLinesVisibility();
+      syncMastersScopeUi();
     })();
+
+    document.querySelectorAll('input[name="masters_scope"]').forEach(function (r) {
+      r.addEventListener('change', syncMastersScopeUi);
+    });
 
     function syncOwnCorrWashCircle() {
       const wash = document.getElementById('own_corr_wash');

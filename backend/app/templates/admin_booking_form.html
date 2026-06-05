@@ -122,6 +122,23 @@
             <label>Комментарий к первой услуге</label>
             <textarea id="lbBookingLine0Comment" rows="2" maxlength="1000" style="width:100%; box-sizing:border-box;"></textarea>
           </div>
+          <div style="margin-top:8px;">
+            <div style="font-weight:600; margin-bottom:6px;">Время выполнения первой услуги</div>
+            <label style="display:flex; gap:10px; align-items:center;">
+              <input type="checkbox" id="lbBookingLine0DurOn" />
+              <span>Выбрать время</span>
+            </label>
+            <div class="row" id="lbBookingLine0DurInputs" style="margin-top:8px; display:none; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+              <div>
+                <label>Часы</label>
+                <input type="number" id="lbBookingLine0DurH" min="0" step="1" style="max-width:7rem;" />
+              </div>
+              <div>
+                <label>Минуты</label>
+                <input type="number" id="lbBookingLine0DurM" min="0" max="59" step="1" style="max-width:7rem;" />
+              </div>
+            </div>
+          </div>
 
           <div style="margin-top: 14px;">
             <div style="font-weight: 600; margin-bottom: 8px;">Мастера для услуг</div>
@@ -176,30 +193,6 @@
             <div id="lbBookingServiceLines" style="margin-top:10px; display:flex; flex-direction:column; gap:10px;"></div>
           </div>
 
-          <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
-            <div style="font-weight: 700; margin-bottom: 8px;">Время выполнения услуги</div>
-            <label style="display:flex; gap:10px; align-items:center;">
-              <input type="checkbox" id="lbBookingCustomDurOn" name="visit_custom_duration_on" value="1"
-                {% if fp.get('visit_custom_duration_on') in ('1','on','true','yes') %}checked{% endif %} />
-              <span>Выбрать время</span>
-            </label>
-
-            <div class="muted" id="lbBookingDurDefaultText" style="margin-top:6px; font-size:12px;"></div>
-
-            <div class="row" id="lbBookingDurInputs" style="margin-top:10px; display:none; align-items:flex-end; gap:12px; flex-wrap:wrap;">
-              <div>
-                <label>Часы</label>
-                <input type="number" id="lbBookingDurH" name="visit_custom_duration_h" min="0" step="1" value="{{ fp.get('visit_custom_duration_h','') }}" style="max-width:7rem;" />
-              </div>
-              <div>
-                <label>Минуты</label>
-                <input type="number" id="lbBookingDurM" name="visit_custom_duration_m" min="0" max="59" step="1" value="{{ fp.get('visit_custom_duration_m','') }}" style="max-width:7rem;" />
-              </div>
-              <div class="muted" style="font-size:12px; align-self:center;">
-                Для БД будет сохранено суммарно в минутах.
-              </div>
-            </div>
-          </div>
         </div>
 
         <div id="visit_kit_card" class="card" style="margin-top: 12px; background:#f8fafc; display:none;">
@@ -682,12 +675,12 @@
       var msgAll = document.getElementById('lbBookingScheduleAvailMsg');
       var msgLine0 = document.getElementById('lbBookingLine0AvailMsg');
       var line0Comment = document.getElementById('lbBookingLine0Comment');
+      var line0DurOn = document.getElementById('lbBookingLine0DurOn');
+      var line0DurH = document.getElementById('lbBookingLine0DurH');
+      var line0DurM = document.getElementById('lbBookingLine0DurM');
       var hidIds = document.getElementById('planned_service_ids');
       var hidLines = document.getElementById('booking_service_lines_json');
       var bookingForm = document.querySelector('form[method="post"]');
-      var customOn = document.getElementById('lbBookingCustomDurOn');
-      var durH = document.getElementById('lbBookingDurH');
-      var durM = document.getElementById('lbBookingDurM');
 
       function modeValue() {
         var r = document.querySelector('input[name="booking_masters_mode"]:checked');
@@ -800,6 +793,16 @@
             '<input type="time" data-line-time="1" step="60" value="' + esc((prefill && prefill.planned_time) || '') + '" />' +
           '</div>' +
           '<div style="margin-top:8px;">' +
+            '<label style="display:flex; gap:8px; align-items:center;">' +
+              '<input type="checkbox" data-line-dur-on="1" ' + ((prefill && prefill.duration_minutes && prefill.duration_minutes > 0) ? 'checked' : '') + ' />' +
+              '<span>Время выполнения услуги</span>' +
+            '</label>' +
+            '<div class="row" data-line-dur-wrap="1" style="margin-top:6px; display:' + ((prefill && prefill.duration_minutes && prefill.duration_minutes > 0) ? '' : 'none') + ';">' +
+              '<div><label>Часы</label><input type="number" data-line-dur-h="1" min="0" step="1" value="' + esc(String(Math.floor(((prefill && prefill.duration_minutes) || 0) / 60))) + '" style="max-width:7rem;" /></div>' +
+              '<div><label>Минуты</label><input type="number" data-line-dur-m="1" min="0" max="59" step="1" value="' + esc(String(((prefill && prefill.duration_minutes) || 0) % 60)) + '" style="max-width:7rem;" /></div>' +
+            '</div>' +
+          '</div>' +
+          '<div style="margin-top:8px;">' +
             '<label>Комментарий к услуге</label>' +
             '<textarea data-line-comment="1" rows="2" style="width:100%; box-sizing:border-box;" maxlength="1000">' + esc((prefill && prefill.comment) || '') + '</textarea>' +
           '</div>' +
@@ -840,6 +843,18 @@
         if (subSel) subSel.addEventListener('change', syncLineServices);
         if (svcSel) svcSel.addEventListener('change', refreshAvailableMasters);
         box.querySelector('[data-line-time]').addEventListener('change', refreshAvailableMasters);
+        var durOnCb = box.querySelector('[data-line-dur-on]');
+        if (durOnCb) {
+          durOnCb.addEventListener('change', function () {
+            var wrap = box.querySelector('[data-line-dur-wrap]');
+            if (wrap) wrap.style.display = durOnCb.checked ? '' : 'none';
+            refreshAvailableMasters();
+          });
+        }
+        var dhEl = box.querySelector('[data-line-dur-h]');
+        var dmEl = box.querySelector('[data-line-dur-m]');
+        if (dhEl) dhEl.addEventListener('input', refreshAvailableMasters);
+        if (dmEl) dmEl.addEventListener('input', refreshAvailableMasters);
         box.querySelectorAll('input[data-line-master]').forEach(function (cb) {
           cb.addEventListener('change', refreshAvailableMasters);
         });
@@ -887,6 +902,7 @@
             planned_time: lineTimeValue(idx),
             master_ids: mids,
             comment: lineCommentValue(idx),
+            duration_minutes: lineDurationOverrideValue(idx),
           });
         }
         return out;
@@ -900,9 +916,23 @@
       }
 
       function durationOverrideMinutes() {
-        if (!customOn || !customOn.checked) return null;
-        var h = toInt(durH ? durH.value : 0);
-        var m = toInt(durM ? durM.value : 0);
+        if (!line0DurOn || !line0DurOn.checked) return null;
+        var h = toInt(line0DurH ? line0DurH.value : 0);
+        var m = toInt(line0DurM ? line0DurM.value : 0);
+        if (m > 59) m = 59;
+        var total = h * 60 + m;
+        return total > 0 ? total : null;
+      }
+      function lineDurationOverrideValue(idx) {
+        if (idx === 0) return durationOverrideMinutes();
+        var row = state.extraLines.find(function (x) { return x.idx === idx; });
+        if (!row || !row.el) return null;
+        var onEl = row.el.querySelector('[data-line-dur-on]');
+        if (!onEl || !onEl.checked) return null;
+        var hEl = row.el.querySelector('[data-line-dur-h]');
+        var mEl = row.el.querySelector('[data-line-dur-m]');
+        var h = toInt(hEl ? hEl.value : 0);
+        var m = toInt(mEl ? mEl.value : 0);
         if (m > 59) m = 59;
         var total = h * 60 + m;
         return total > 0 ? total : null;
@@ -932,7 +962,7 @@
             var sid = lineServiceId(idx);
             var t = lineTimeValue(idx);
             if (sid <= 0 || !t) continue;
-            var dur = (idx === 0) ? durationOverrideMinutes() : null;
+            var dur = lineDurationOverrideValue(idx);
             lineAllow[idx] = await fetchAllowSet(day, t, sid, dur);
           }
         } catch (e) {
@@ -995,6 +1025,13 @@
           });
         }
         if (line0Comment) line0Comment.value = String((first && first.comment) || '');
+        if (line0DurOn && first && first.duration_minutes && Number(first.duration_minutes) > 0) {
+          line0DurOn.checked = true;
+          if (line0DurH) line0DurH.value = String(Math.floor(Number(first.duration_minutes) / 60));
+          if (line0DurM) line0DurM.value = String(Number(first.duration_minutes) % 60);
+          var line0DurWrap = document.getElementById('lbBookingLine0DurInputs');
+          if (line0DurWrap) line0DurWrap.style.display = '';
+        }
         for (var i = 1; i < arr.length; i++) addExtraLine(arr[i]);
       }
 
@@ -1002,9 +1039,15 @@
       if (plannedDate) plannedDate.addEventListener('change', refreshAvailableMasters);
       if (plannedTime) plannedTime.addEventListener('change', refreshAvailableMasters);
       if (serviceSel) serviceSel.addEventListener('change', refreshAvailableMasters);
-      if (customOn) customOn.addEventListener('change', refreshAvailableMasters);
-      if (durH) durH.addEventListener('input', refreshAvailableMasters);
-      if (durM) durM.addEventListener('input', refreshAvailableMasters);
+      if (line0DurOn) {
+        line0DurOn.addEventListener('change', function () {
+          var wrap = document.getElementById('lbBookingLine0DurInputs');
+          if (wrap) wrap.style.display = line0DurOn.checked ? '' : 'none';
+          refreshAvailableMasters();
+        });
+      }
+      if (line0DurH) line0DurH.addEventListener('input', refreshAvailableMasters);
+      if (line0DurM) line0DurM.addEventListener('input', refreshAvailableMasters);
       document.querySelectorAll('input[name="booking_masters_mode"]').forEach(function (r) {
         r.addEventListener('change', function () { setModeUi(); refreshAvailableMasters(); });
       });
@@ -1104,14 +1147,10 @@
       }
 
       function updateDurationBlock() {
-        var on = document.getElementById('lbBookingCustomDurOn');
-        var h = document.getElementById('lbBookingDurH');
-        var m = document.getElementById('lbBookingDurM');
+        var on = document.getElementById('lbBookingLine0DurOn');
+        var h = document.getElementById('lbBookingLine0DurH');
+        var m = document.getElementById('lbBookingLine0DurM');
         var svcSel = document.getElementById('service_id');
-        var defaultText = '';
-
-        // Пытаемся взять длительность из data-атрибутов options (если есть),
-        // иначе fallback: по умолчанию 120 мин (без точного вычисления).
         var defMin = 120;
         if (svcSel && svcSel.selectedOptions && svcSel.selectedOptions.length) {
           var opt = svcSel.selectedOptions[0];
@@ -1120,15 +1159,13 @@
         }
         var dh = Math.floor(defMin / 60);
         var dmm = defMin % 60;
-        defaultText = 'По умолчанию: ' + dh + ' ч ' + String(dmm).padStart(2,'0') + ' мин (из настроек услуги).';
-        setText('lbBookingDurDefaultText', defaultText);
 
         if (on && on.checked) {
-          show('lbBookingDurInputs');
+          show('lbBookingLine0DurInputs');
           if (h && !String(h.value || '').trim()) h.value = String(dh);
           if (m && !String(m.value || '').trim()) m.value = String(dmm);
         } else {
-          hide('lbBookingDurInputs');
+          hide('lbBookingLine0DurInputs');
         }
       }
 
@@ -1178,12 +1215,12 @@
 
       document.addEventListener('change', function (e) {
         var id = (e && e.target && e.target.id) ? e.target.id : '';
-        if (id === 'service_id' || id === 'lbBookingCustomDurOn') updateDurationBlock();
+        if (id === 'service_id' || id === 'lbBookingLine0DurOn') updateDurationBlock();
         updatePricePreview();
       });
       document.addEventListener('input', function (e) {
         var id = (e && e.target && e.target.id) ? e.target.id : '';
-        if (id === 'lbBookingDurH' || id === 'lbBookingDurM') updateDurationBlock();
+        if (id === 'lbBookingLine0DurH' || id === 'lbBookingLine0DurM') updateDurationBlock();
       });
 
       updateDurationBlock();

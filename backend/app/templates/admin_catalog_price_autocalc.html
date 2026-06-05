@@ -101,7 +101,7 @@
           <button type="button" class="secondary" data-lb-services-select-all>Выбрать все</button>
           <button type="button" class="secondary" data-lb-services-clear-all>Снять все</button>
         </div>
-        <div class="lb-scroll-y" style="max-height:280px; border:1px solid rgba(0,0,0,.12); border-radius:8px; padding:8px;">
+        <div class="lb-scroll-y" style="max-height:280px; overflow-y:auto; border:1px solid rgba(0,0,0,.12); border-radius:8px; padding:8px;">
           {% for s in scope_options.services %}
             <label class="lb-inline-center-gap lb-mb-6" style="display:flex;">
               <input

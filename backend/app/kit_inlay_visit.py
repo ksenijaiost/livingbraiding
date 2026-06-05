@@ -684,10 +684,13 @@ def parse_kit_inlay_form(
                 comp = None
 
     amort_raw = g("amortization_level", "") or "MIN"
-    try:
-        amort = AmortizationLevel(amort_raw)
-    except ValueError:
-        amort = AmortizationLevel.MIN
+    if str(amort_raw).strip().upper() in ("NONE", "NO", "0"):
+        amort = None
+    else:
+        try:
+            amort = AmortizationLevel(amort_raw)
+        except ValueError:
+            amort = AmortizationLevel.MIN
 
     stock_kit_lines = _parse_stock_kit_lines_from_form(form, g, g_int, g_bool)
     stock_id = stock_kit_lines[0].kit_id if stock_kit_lines else 0
