@@ -313,6 +313,7 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
                         "service_id": sid,
                         "planned_time": local_start.strftime("%H:%M") if local_start else fp.get("planned_time", ""),
                         "master_ids": [int(x.master_id) for x in (ps.masters or []) if x.master_id],
+                        "comment": (ps.comment or ""),
                     }
                 )
         if not service_ids_for_hidden and b.planned_service_id:
@@ -322,6 +323,7 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
                     "service_id": int(b.planned_service_id),
                     "planned_time": fp.get("planned_time", ""),
                     "master_ids": [],
+                    "comment": "",
                 }
             ]
         fp["service_id"] = str(service_ids_for_hidden[0] if service_ids_for_hidden else "")
@@ -523,6 +525,7 @@ def _parse_booking_visit_lines_and_masters(
                     "service_id": sid,
                     "planned_time": tm,
                     "master_ids": mids,
+                    "comment": str(item.get("comment") or "").strip(),
                 }
             )
     else:
@@ -538,6 +541,7 @@ def _parse_booking_visit_lines_and_masters(
                     "service_id": sid,
                     "planned_time": tm,
                     "master_ids": [],
+                    "comment": "",
                 }
             )
 
@@ -674,6 +678,7 @@ def _sync_booking_planned_services_with_lines(
             service_id=sid,
             sort_order=i,
             planned_start_time=start_utc,
+            comment=str(spec.get("comment") or "").strip() or None,
         )
         db.add(ps)
         db.flush()
@@ -1649,6 +1654,12 @@ def admin_booking_detail(
             selectinload(Booking.cancelled_by_user),
             selectinload(Booking.planned_service).selectinload(Service.subcategory),
             selectinload(Booking.masters).selectinload(BookingMaster.master),
+            selectinload(Booking.planned_services)
+            .selectinload(BookingPlannedService.service)
+            .selectinload(Service.subcategory),
+            selectinload(Booking.planned_services)
+            .selectinload(BookingPlannedService.masters)
+            .selectinload(BookingPlannedServiceMaster.master),
             selectinload(Booking.consultation),
         )
     )

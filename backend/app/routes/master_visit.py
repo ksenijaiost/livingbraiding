@@ -456,7 +456,11 @@ def master_visit_new_get(
     selected_client = None
     default_date = date.today().isoformat()
     if booking_id:
-        b = db.scalar(select(Booking).where(Booking.id == int(booking_id)).options(selectinload(Booking.client)))
+        b = db.scalar(
+            select(Booking)
+            .where(Booking.id == int(booking_id))
+            .options(selectinload(Booking.client), selectinload(Booking.planned_services))
+        )
         if b and b.client:
             form_prefill["client_mode"] = "existing"
             form_prefill["existing_client_id"] = str(b.client_id)
@@ -469,6 +473,20 @@ def master_visit_new_get(
                 form_prefill["planned_service_ids"] = _json.dumps(svc_ids)
                 for i, sid in enumerate(svc_ids):
                     form_prefill[f"line_{i}_service_id"] = str(sid)
+            if b.planned_services:
+                tz = get_display_timezone(db)
+                ps_rows = sorted(
+                    list(b.planned_services or []),
+                    key=lambda x: (int(x.sort_order or 0), int(x.id or 0)),
+                )
+                for i, ps in enumerate(ps_rows):
+                    if i <= 0:
+                        continue
+                    if ps.comment:
+                        form_prefill[f"line_{i}_comment"] = str(ps.comment)
+                    local_start = _utc_naive_to_local(ps.planned_start_time, tz) if ps.planned_start_time else None
+                    if local_start:
+                        form_prefill[f"line_{i}_started_time"] = local_start.strftime("%H:%M")
             elif b.planned_service_id:
                 form_prefill["service_id"] = str(b.planned_service_id)
             form_prefill["booking_id"] = str(b.id)
@@ -627,7 +645,11 @@ def master_visit_draft_new_get(
     selected_client = None
     default_date = date.today().isoformat()
     if booking_id:
-        b = db.scalar(select(Booking).where(Booking.id == int(booking_id)).options(selectinload(Booking.client)))
+        b = db.scalar(
+            select(Booking)
+            .where(Booking.id == int(booking_id))
+            .options(selectinload(Booking.client), selectinload(Booking.planned_services))
+        )
         if b and b.client:
             form_prefill["client_mode"] = "existing"
             form_prefill["existing_client_id"] = str(b.client_id)
@@ -638,6 +660,20 @@ def master_visit_draft_new_get(
                 form_prefill["planned_service_ids"] = json.dumps(svc_ids)
                 for i, sid in enumerate(svc_ids):
                     form_prefill[f"line_{i}_service_id"] = str(sid)
+            if b.planned_services:
+                tz = get_display_timezone(db)
+                ps_rows = sorted(
+                    list(b.planned_services or []),
+                    key=lambda x: (int(x.sort_order or 0), int(x.id or 0)),
+                )
+                for i, ps in enumerate(ps_rows):
+                    if i <= 0:
+                        continue
+                    if ps.comment:
+                        form_prefill[f"line_{i}_comment"] = str(ps.comment)
+                    local_start = _utc_naive_to_local(ps.planned_start_time, tz) if ps.planned_start_time else None
+                    if local_start:
+                        form_prefill[f"line_{i}_started_time"] = local_start.strftime("%H:%M")
             elif b.planned_service_id:
                 form_prefill["service_id"] = str(b.planned_service_id)
             form_prefill["booking_id"] = str(b.id)

@@ -283,22 +283,13 @@
       </div>
 
       <div id="lb-extra-service-lines" class="card" style="margin-top:14px;background:#f1f5f9;display:none;">
-        <strong class="lb-line-title">Услуга 2</strong>
-        <p class="muted" style="font-size:12px;">Упрощённый блок второй услуги (без комплекта/анкеты). Для полного второго блока — доработка формы.</p>
-        <div class="row" style="margin-top:8px;">
-          <div>
-            <label>ID услуги *</label>
-            <input type="number" name="line_1_service_id" min="1" step="1" value="{{ fp.get('line_1_service_id','') }}" />
-          </div>
-          <div>
-            <label>Сумма с клиента, ₽</label>
-            <input type="number" name="line_1_amount_from_client" min="0" step="1" value="{{ fp.get('line_1_amount_from_client','') }}" />
-          </div>
-        </div>
-        <div id="lb-line-1-hidden-defaults"></div>
+        <strong class="lb-line-title">Дополнительные услуги</strong>
+        <p class="muted" style="font-size:12px;">Для каждой услуги: категория/подкатегория/услуга, сумма, скидка, материал и комментарий.</p>
+        <div id="lb-extra-service-lines-list" style="display:flex; flex-direction:column; gap:10px; margin-top:8px;"></div>
+        <div id="lb-line-hidden-defaults"></div>
       </div>
       <p style="margin-top:10px;">
-        <button type="button" class="secondary" id="lb-toggle-second-service">Добавить вторую услугу</button>
+        <button type="button" class="secondary" id="lb-add-extra-service">Добавить услугу</button>
       </p>
 
       <h3>Доп. продажи</h3>
@@ -1672,6 +1663,47 @@
       fillServices();
     }
 
+    function fillLineSubcategories(idx) {
+      const catSel = document.getElementById('line_' + idx + '_service_category_id');
+      const subSel = document.getElementById('line_' + idx + '_service_subcategory_id');
+      if (!catSel || !subSel || !serviceCatalog.length) return;
+      const catId = parseInt(catSel.value || '0');
+      const cat = serviceCatalog.find(function (c) { return Number(c.id) === catId; }) || serviceCatalog[0];
+      const subs = (cat && cat.subcategories) ? cat.subcategories : [];
+      subSel.innerHTML = '';
+      for (let i = 0; i < subs.length; i++) {
+        const sc = subs[i];
+        const opt = document.createElement('option');
+        opt.value = String(sc.id);
+        opt.textContent = sc.name;
+        subSel.appendChild(opt);
+      }
+      fillLineServices(idx);
+    }
+
+    function fillLineServices(idx) {
+      const catSel = document.getElementById('line_' + idx + '_service_category_id');
+      const subSel = document.getElementById('line_' + idx + '_service_subcategory_id');
+      const svcSel = document.getElementById('line_' + idx + '_service_id');
+      if (!catSel || !subSel || !svcSel || !serviceCatalog.length) return;
+      const catId = parseInt(catSel.value || '0');
+      const subId = parseInt(subSel.value || '0');
+      const cat = serviceCatalog.find(function (c) { return Number(c.id) === catId; }) || serviceCatalog[0];
+      const subs = (cat && cat.subcategories) ? cat.subcategories : [];
+      const sub = subs.find(function (x) { return Number(x.id) === subId; }) || subs[0] || null;
+      const services = (sub && sub.services) ? sub.services : [];
+      const keep = parseInt(svcSel.value || '0');
+      svcSel.innerHTML = '<option value="">— выберите услугу —</option>';
+      for (let i = 0; i < services.length; i++) {
+        const s = services[i];
+        const opt = document.createElement('option');
+        opt.value = String(s.id);
+        opt.textContent = s.name;
+        if (keep && Number(s.id) === keep) opt.selected = true;
+        svcSel.appendChild(opt);
+      }
+    }
+
     (function initServiceCatalog() {
       if (!serviceCatalog || serviceCatalog.length === 0) return;
 
@@ -1695,6 +1727,134 @@
         serviceSel.value = String(initialServiceId);
       }
       updateServiceDerivedUI();
+    })();
+
+    function addExtraServiceLine(idx, prefill) {
+      const list = document.getElementById('lb-extra-service-lines-list');
+      if (!list) return;
+      function escAttr(v) {
+        return String(v || '')
+          .replace(/\x26/g, '\x26amp;')
+          .replace(/\x3c/g, '\x26lt;')
+          .replace(/\x3e/g, '\x26gt;')
+          .replace(/\x22/g, '\x26quot;')
+          .replace(/\x27/g, '\x26#39;');
+      }
+      const box = document.createElement('div');
+      box.className = 'card';
+      box.setAttribute('data-extra-line-idx', String(idx));
+      box.style.background = '#fff';
+      box.innerHTML =
+        '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">' +
+          '<strong>Услуга ' + (idx + 1) + '</strong>' +
+          '<button type="button" class="secondary" data-remove-line="' + idx + '">Удалить</button>' +
+        '</div>' +
+        '<div class="row" style="margin-top:8px;">' +
+          '<div><label>Категория</label><select id="line_' + idx + '_service_category_id" style="width:100%; box-sizing:border-box;">' +
+            serviceCatalog.map(function (c) { return '<option value="' + c.id + '">' + escAttr(c.name) + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div><label>Подкатегория</label><select id="line_' + idx + '_service_subcategory_id" style="width:100%; box-sizing:border-box;"></select></div>' +
+        '</div>' +
+        '<div class="row" style="margin-top:8px;">' +
+          '<div><label>Услуга *</label><select name="line_' + idx + '_service_id" id="line_' + idx + '_service_id" style="width:100%; box-sizing:border-box;"></select></div>' +
+          '<div><label>Сумма с клиента, ₽</label><input type="number" name="line_' + idx + '_amount_from_client" min="0" step="1" value="' + escAttr(prefill.amount_from_client || '') + '" /></div>' +
+        '</div>' +
+        '<div class="row" style="margin-top:8px;">' +
+          '<div><label>Время услуги</label><input type="time" name="line_' + idx + '_started_time" step="60" value="' + escAttr(prefill.started_time || '') + '" /></div>' +
+          '<div></div>' +
+        '</div>' +
+        '<div class="row" style="margin-top:8px;">' +
+          '<div><label>Скидка клиенту, %</label><input type="number" name="line_' + idx + '_client_discount_percent" min="0" max="100" step="1" value="' + escAttr(prefill.client_discount_percent || '0') + '" /></div>' +
+          '<div><label>Комментарий</label><input type="text" name="line_' + idx + '_comment" maxlength="1000" value="' + escAttr(prefill.comment || '') + '" /></div>' +
+        '</div>' +
+        '<div class="row" style="margin-top:8px;">' +
+          '<div><label>Канекалон, г</label><input type="number" name="line_' + idx + '_kanekalon_grams" min="0" step="1" value="' + escAttr(prefill.kanekalon_grams || '0') + '" /></div>' +
+          '<div><label>Кудри/термо, г</label><input type="number" name="line_' + idx + '_kudri_grams" min="0" step="1" value="' + escAttr(prefill.kudri_grams || '0') + '" /></div>' +
+        '</div>';
+      list.appendChild(box);
+
+      const catSel = document.getElementById('line_' + idx + '_service_category_id');
+      const subSel = document.getElementById('line_' + idx + '_service_subcategory_id');
+      const svcSel = document.getElementById('line_' + idx + '_service_id');
+      const initialServiceId = parseInt(prefill.service_id || '0');
+      const meta = initialServiceId ? serviceMetaById[initialServiceId] : null;
+      if (meta && meta.categoryId) catSel.value = String(meta.categoryId);
+      fillLineSubcategories(idx);
+      if (meta && meta.subcategoryId) {
+        subSel.value = String(meta.subcategoryId);
+        fillLineServices(idx);
+      }
+      if (initialServiceId) svcSel.value = String(initialServiceId);
+      catSel.addEventListener('change', function () { fillLineSubcategories(idx); });
+      subSel.addEventListener('change', function () { fillLineServices(idx); });
+      box.querySelector('[data-remove-line="' + idx + '"]').addEventListener('click', function () {
+        box.remove();
+        syncExtraLinesVisibility();
+      });
+
+      const hd = document.getElementById('lb-line-hidden-defaults');
+      if (hd) {
+        [
+          ['line_' + idx + '_kit_kind', 'STOCK'],
+          ['line_' + idx + '_mix_source', 'NO_MIX'],
+        ].forEach(function (pair) {
+          const el = document.createElement('input');
+          el.type = 'hidden';
+          el.name = pair[0];
+          el.value = pair[1];
+          hd.appendChild(el);
+        });
+      }
+      syncExtraLinesVisibility();
+    }
+
+    function nextExtraLineIndex() {
+      const rows = Array.from(document.querySelectorAll('[data-extra-line-idx]'));
+      let mx = 0;
+      rows.forEach(function (r) {
+        const n = parseInt(r.getAttribute('data-extra-line-idx') || '0');
+        if (n > mx) mx = n;
+      });
+      return Math.max(1, mx + 1);
+    }
+
+    function syncExtraLinesVisibility() {
+      const wrap = document.getElementById('lb-extra-service-lines');
+      const btn = document.getElementById('lb-add-extra-service');
+      const has = document.querySelectorAll('[data-extra-line-idx]').length > 0;
+      if (wrap) wrap.style.display = has ? 'block' : 'none';
+      if (btn) btn.textContent = has ? 'Добавить ещё услугу' : 'Добавить услугу';
+    }
+
+    (function initExtraServiceLines() {
+      const btn = document.getElementById('lb-add-extra-service');
+      if (!btn) return;
+      const fpAll = {{ fp | tojson }};
+      const indices = [];
+      Object.keys(fpAll || {}).forEach(function (k) {
+        const m = /^line_(\d+)_service_id$/.exec(String(k));
+        if (!m) return;
+        const idx = parseInt(m[1]);
+        const sid = parseInt(fpAll[k] || '0');
+        if (idx >= 1 && sid > 0 && indices.indexOf(idx) < 0) indices.push(idx);
+      });
+      indices.sort(function (a, b) { return a - b; });
+      for (let i = 0; i < indices.length; i++) {
+        const idx = indices[i];
+        addExtraServiceLine(idx, {
+          service_id: fpAll['line_' + idx + '_service_id'] || '',
+          amount_from_client: fpAll['line_' + idx + '_amount_from_client'] || '',
+          started_time: fpAll['line_' + idx + '_started_time'] || '',
+          client_discount_percent: fpAll['line_' + idx + '_client_discount_percent'] || '0',
+          comment: fpAll['line_' + idx + '_comment'] || '',
+          kanekalon_grams: fpAll['line_' + idx + '_kanekalon_grams'] || '0',
+          kudri_grams: fpAll['line_' + idx + '_kudri_grams'] || '0',
+        });
+      }
+      btn.addEventListener('click', function () {
+        addExtraServiceLine(nextExtraLineIndex(), {});
+      });
+      syncExtraLinesVisibility();
     })();
 
     function syncOwnCorrWashCircle() {
@@ -1748,39 +1908,5 @@
     updateMixBlockUI();
     syncAmountRequired();
     updateServiceDerivedUI();
-    const lbSecond = document.getElementById('lb-toggle-second-service');
-    const lbExtra = document.getElementById('lb-extra-service-lines');
-    const lbLine1Defaults = document.getElementById('lb-line-1-hidden-defaults');
-    function lbSetLine1HiddenDefaults(on) {
-      if (!lbLine1Defaults) return;
-      lbLine1Defaults.innerHTML = '';
-      if (!on) return;
-      [
-        ['line_1_kit_kind', 'STOCK'],
-        ['line_1_kanekalon_grams', '0'],
-        ['line_1_kudri_grams', '0'],
-        ['line_1_mix_source', 'NO_MIX'],
-      ].forEach(function (pair) {
-        const el = document.createElement('input');
-        el.type = 'hidden';
-        el.name = pair[0];
-        el.value = pair[1];
-        lbLine1Defaults.appendChild(el);
-      });
-    }
-    if (lbSecond && lbExtra) {
-      const line1Svc = document.querySelector('input[name="line_1_service_id"]');
-      if (line1Svc && line1Svc.value) {
-        lbExtra.style.display = 'block';
-        lbSecond.textContent = 'Скрыть вторую услугу';
-        lbSetLine1HiddenDefaults(true);
-      }
-      lbSecond.addEventListener('click', function () {
-        const show = lbExtra.style.display !== 'block';
-        lbExtra.style.display = show ? 'block' : 'none';
-        lbSecond.textContent = show ? 'Скрыть вторую услугу' : 'Добавить вторую услугу';
-        lbSetLine1HiddenDefaults(show);
-      });
-    }
   </script>
 {% endblock %}
