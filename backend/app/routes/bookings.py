@@ -2162,11 +2162,14 @@ def admin_bookings(
     request: Request,
     show: str | None = None,
     mine: str | None = Query(None),
+    sort_date: str | None = Query(None),
     current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     show_mode = (show or "").strip().lower() or "active"
     mine_raw = (mine or "").strip().lower()
+    sort_date_raw = (sort_date or "").strip().lower()
+    sort_date_mode = "desc" if sort_date_raw == "desc" else "asc"
     can_manage = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
     has_admin_roles = UserRole.ADMIN in current_user.roles or UserRole.ADMIN_SUPER in current_user.roles
     if has_admin_roles:
@@ -2176,7 +2179,7 @@ def admin_bookings(
         if mine_raw not in ("0", "false", "no", "all"):
             bookings_mine_only = True
 
-    stmt = select(Booking).options(selectinload(Booking.client)).order_by(Booking.planned_date.asc(), Booking.id.asc()).limit(1000)
+    stmt = select(Booking).options(selectinload(Booking.client)).limit(1000)
     if show_mode != "all":
         stmt = stmt.where(
             Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE))
@@ -2188,6 +2191,10 @@ def admin_bookings(
                 exists(select(1).where(and_(BookingStaff.booking_id == Booking.id, BookingStaff.user_id == current_user.id))),
             )
         )
+    if sort_date_mode == "desc":
+        stmt = stmt.order_by(Booking.planned_date.desc(), Booking.id.desc())
+    else:
+        stmt = stmt.order_by(Booking.planned_date.asc(), Booking.id.asc())
     rows = list(db.scalars(stmt).all())
     display_tz = get_display_timezone(db)
     return templates.TemplateResponse(
@@ -2200,6 +2207,7 @@ def admin_bookings(
             display_tz=display_tz,
             can_manage=can_manage,
             bookings_mine_only=bookings_mine_only,
+            sort_date_mode=sort_date_mode,
         ),
     )
 
