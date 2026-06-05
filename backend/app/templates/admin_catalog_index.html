@@ -6,7 +6,10 @@
     </div>
     <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
       <h2 style="margin-top: 0;">Управление прайсом</h2>
-      <a href="/admin/catalog/categories/new"><button type="button">Новая категория</button></a>
+      <div class="lb-inline-center-gap">
+        <a href="/admin/catalog/price-autocalc"><button type="button" class="secondary">Авторасчёт прайса</button></a>
+        <a href="/admin/catalog/categories/new"><button type="button">Новая категория</button></a>
+      </div>
     </div>
     <p class="muted">Категории → подкатегории → позиции прайса (только суперадмин). Здесь <strong>услуги</strong> (в т.ч. для формы визита) — у каждой услуги три шкалы цен. Вопросы анкеты — кнопка «Анкета» у категории, подкатегории или услуги.</p>
     {% if cat_rows %}

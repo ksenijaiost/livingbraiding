@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card lb-card-max-920">
+    <p><a href="/admin/catalog">← Управление прайсом</a></p>
+    <h2 class="lb-mt-0">Авторасчёт прайса услуг</h2>
+    <p class="muted">Расчёт меняет поля «от» и «до» у выбранного уровня. Пустые значения источника (NULL) пропускаются и не перезаписываются.</p>
+
+    {% if error %}
+      <div class="error lb-mb-12">{{ error }}</div>
+    {% endif %}
+    {% if msg == "done" %}
+      <div class="card lb-card-ok lb-mb-12">
+        Готово: выбрано услуг — <strong>{{ selected_count or 0 }}</strong>, обновлено — <strong>{{ updated_count or 0 }}</strong>.
+      </div>
+    {% endif %}
+
+    <form method="post" action="/admin/catalog/price-autocalc" data-lb-autocalc-form>
+      <div class="lb-mb-12">
+        <div class="lb-strong-head lb-mb-6">1) Выбор позиций</div>
+        <label class="lb-inline-center-gap lb-mb-6">
+          <input type="radio" name="scope_mode" value="all" {% if fp.scope_mode == 'all' %}checked{% endif %} />
+          <span>Все услуги</span>
+        </label>
+        <label class="lb-inline-center-gap lb-mb-6">
+          <input type="radio" name="scope_mode" value="category" {% if fp.scope_mode == 'category' %}checked{% endif %} />
+          <span>Категория</span>
+        </label>
+        <label class="lb-inline-center-gap lb-mb-6">
+          <input type="radio" name="scope_mode" value="subcategory" {% if fp.scope_mode == 'subcategory' %}checked{% endif %} />
+          <span>Подкатегория</span>
+        </label>
+        <label class="lb-inline-center-gap">
+          <input type="radio" name="scope_mode" value="services" {% if fp.scope_mode == 'services' %}checked{% endif %} />
+          <span>Отдельные услуги</span>
+        </label>
+      </div>
+
+      <div class="lb-mb-12" data-lb-scope-category>
+        <label>Категория</label>
+        <select name="category_id" data-lb-category-select>
+          <option value="">— выберите —</option>
+          {% for c in scope_options.categories %}
+            <option value="{{ c.id }}" {% if fp.category_id == (c.id|string) %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="lb-mb-12" data-lb-scope-subcategory>
+        <label>Подкатегория</label>
+        <select name="subcategory_id" data-lb-subcategory-select>
+          <option value="">— выберите —</option>
+          {% for s in scope_options.subcategories %}
+            <option
+              value="{{ s.id }}"
+              data-category-id="{{ s.category_id }}"
+              {% if fp.subcategory_id == (s.id|string) %}selected{% endif %}
+            >{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="lb-mb-12" data-lb-scope-services>
+        <div class="lb-inline-center-gap lb-mb-6">
+          <button type="button" class="secondary" data-lb-services-select-all>Выбрать все</button>
+          <button type="button" class="secondary" data-lb-services-clear-all>Снять все</button>
+        </div>
+        <div class="lb-scroll-y" style="max-height:280px; border:1px solid rgba(0,0,0,.12); border-radius:8px; padding:8px;">
+          {% for s in scope_options.services %}
+            <label class="lb-inline-center-gap lb-mb-6" style="display:flex;">
+              <input
+                type="checkbox"
+                name="service_ids"
+                value="{{ s.id }}"
+                {% if s.id in fp.service_ids %}checked{% endif %}
+              />
+              <span>{{ s.category_name }} → {{ s.subcategory_name }} → {{ s.name }}{% if not s.is_active %} <span class="muted">(неактивна)</span>{% endif %}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="lb-mb-12">
+        <div class="lb-strong-head lb-mb-6">2) Уровень, кому считаем</div>
+        <label class="lb-inline-center-gap lb-mb-6">
+          <input type="radio" name="target_level" value="JUNIOR" {% if fp.target_level == 'JUNIOR' %}checked{% endif %} />
+          <span>{{ ru_master_level('JUNIOR') }}</span>
+        </label>
+        <label class="lb-inline-center-gap lb-mb-6">
+          <input type="radio" name="target_level" value="MIDDLE" {% if fp.target_level == 'MIDDLE' %}checked{% endif %} />
+          <span>{{ ru_master_level('MIDDLE') }}</span>
+        </label>
+        <label class="lb-inline-center-gap">
+          <input type="radio" name="target_level" value="SENIOR" {% if fp.target_level == 'SENIOR' %}checked{% endif %} />
+          <span>{{ ru_master_level('SENIOR') }}</span>
+        </label>
+      </div>
+
+      <div class="lb-mb-12">
+        <div class="lb-strong-head lb-mb-6">3) Уровень, от кого считаем</div>
+        <label class="lb-inline-center-gap lb-mb-6">
+          <input type="radio" name="source_level" value="JUNIOR" {% if fp.source_level == 'JUNIOR' %}checked{% endif %} />
+          <span>{{ ru_master_level('JUNIOR') }}</span>
+        </label>
+        <label class="lb-inline-center-gap lb-mb-6">
+          <input type="radio" name="source_level" value="MIDDLE" {% if fp.source_level == 'MIDDLE' %}checked{% endif %} />
+          <span>{{ ru_master_level('MIDDLE') }}</span>
+        </label>
+        <label class="lb-inline-center-gap">
+          <input type="radio" name="source_level" value="SENIOR" {% if fp.source_level == 'SENIOR' %}checked{% endif %} />
+          <span>{{ ru_master_level('SENIOR') }}</span>
+        </label>
+      </div>
+
+      <div class="lb-mb-16">
+        <label>4) Процент</label>
+        <input name="percent" type="number" min="0" max="100" step="0.01" value="{{ fp.percent }}" required />
+      </div>
+
+      <button type="submit">Рассчитать</button>
+      <a href="/admin/catalog" class="lb-ml-8"><button type="button" class="secondary">Отмена</button></a>
+    </form>
+  </div>
+
+  <script>
+    (function () {
+      var form = document.querySelector("form[data-lb-autocalc-form]");
+      if (!form) return;
+      var modeRadios = Array.from(form.querySelectorAll('input[name="scope_mode"]'));
+      var catWrap = form.querySelector("[data-lb-scope-category]");
+      var subWrap = form.querySelector("[data-lb-scope-subcategory]");
+      var svcWrap = form.querySelector("[data-lb-scope-services]");
+      var catSelect = form.querySelector("[data-lb-category-select]");
+      var subSelect = form.querySelector("[data-lb-subcategory-select]");
+      var allSvcBtn = form.querySelector("[data-lb-services-select-all]");
+      var clrSvcBtn = form.querySelector("[data-lb-services-clear-all]");
+
+      function activeMode() {
+        var cur = form.querySelector('input[name="scope_mode"]:checked');
+        return cur ? cur.value : "all";
+      }
+
+      function syncSubcategoryByCategory() {
+        if (!subSelect || !catSelect) return;
+        var catId = String(catSelect.value || "");
+        var opts = Array.from(subSelect.querySelectorAll("option[data-category-id]"));
+        var hasSelectedVisible = false;
+        opts.forEach(function (opt) {
+          var show = !catId || String(opt.getAttribute("data-category-id")) === catId;
+          opt.hidden = !show;
+          if (!show && opt.selected) opt.selected = false;
+          if (show && opt.selected) hasSelectedVisible = true;
+        });
+        if (catId && !hasSelectedVisible) {
+          subSelect.value = "";
+        }
+      }
+
+      function syncModeUI() {
+        var mode = activeMode();
+        if (catWrap) catWrap.style.display = (mode === "category" || mode === "subcategory") ? "" : "none";
+        if (subWrap) subWrap.style.display = mode === "subcategory" ? "" : "none";
+        if (svcWrap) svcWrap.style.display = mode === "services" ? "" : "none";
+      }
+
+      if (catSelect) catSelect.addEventListener("change", syncSubcategoryByCategory);
+      modeRadios.forEach(function (r) { r.addEventListener("change", syncModeUI); });
+      if (allSvcBtn) {
+        allSvcBtn.addEventListener("click", function () {
+          Array.from(form.querySelectorAll('input[name="service_ids"]')).forEach(function (cb) { cb.checked = true; });
+        });
+      }
+      if (clrSvcBtn) {
+        clrSvcBtn.addEventListener("click", function () {
+          Array.from(form.querySelectorAll('input[name="service_ids"]')).forEach(function (cb) { cb.checked = false; });
+        });
+      }
+      syncSubcategoryByCategory();
+      syncModeUI();
+    })();
+  </script>
+{% endblock %}

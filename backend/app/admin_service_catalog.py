@@ -9,6 +9,7 @@ from __future__ import annotations
 from urllib.parse import quote
 from datetime import datetime
 from types import SimpleNamespace
+from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -40,6 +41,11 @@ router = APIRouter(prefix="/admin/catalog", tags=["admin-catalog"])
 
 _SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
 _PRODUCT_CATALOG_ONLY_CATEGORIES = {"Заказ", "Продажа материала"}
+_PRICE_LEVEL_FIELDS: dict[str, tuple[str, str]] = {
+    "JUNIOR": ("price_junior_from", "price_junior_to"),
+    "MIDDLE": ("price_middle_from", "price_middle_to"),
+    "SENIOR": ("price_senior_from", "price_senior_to"),
+}
 
 
 def _ctx(request: Request, current_user: AuthUser, **kwargs):
@@ -68,6 +74,211 @@ def _parse_optional_price(raw: object) -> float | None:
     if not t:
         return None
     return float(t.replace(",", "."))
+
+
+def _parse_percent_0_100(raw: object | None) -> float:
+    if raw is None:
+        raise ValueError("pct missing")
+    t = str(raw).strip()
+    if not t:
+        raise ValueError("pct empty")
+    v = float(t.replace(",", "."))
+    if v < 0 or v > 100:
+        raise ValueError("pct range")
+    return v
+
+
+def _round_rubles(v: float) -> float:
+    if v >= 0:
+        return float(int(v + 0.5))
+    return float(int(v - 0.5))
+
+
+def _autocalc_price(
+    source: float | None,
+    *,
+    pct: float,
+) -> float | None:
+    if source is None:
+        return None
+    return _round_rubles(float(source) * float(pct) / 100.0)
+
+
+def _allowed_service_scope_rows(db: Session) -> list[tuple[ServiceCategory, ServiceSubcategory, Service]]:
+    return list(
+        db.execute(
+            select(ServiceCategory, ServiceSubcategory, Service)
+            .join(ServiceSubcategory, ServiceSubcategory.category_id == ServiceCategory.id)
+            .join(Service, Service.subcategory_id == ServiceSubcategory.id)
+            .where(ServiceCategory.name.not_in(_PRODUCT_CATALOG_ONLY_CATEGORIES))
+            .order_by(ServiceCategory.name.asc(), ServiceSubcategory.name.asc(), Service.name.asc(), Service.id.asc())
+        ).all()
+    )
+
+
+def _autocalc_scope_options(db: Session) -> dict[str, list[dict[str, Any]]]:
+    rows = _allowed_service_scope_rows(db)
+    categories: dict[int, dict[str, Any]] = {}
+    subcategories: dict[int, dict[str, Any]] = {}
+    services: list[dict[str, Any]] = []
+    for cat, sub, svc in rows:
+        categories[int(cat.id)] = {"id": int(cat.id), "name": cat.name}
+        subcategories[int(sub.id)] = {"id": int(sub.id), "name": sub.name, "category_id": int(cat.id)}
+        services.append(
+            {
+                "id": int(svc.id),
+                "name": svc.name,
+                "is_active": bool(svc.is_active),
+                "category_id": int(cat.id),
+                "category_name": cat.name,
+                "subcategory_id": int(sub.id),
+                "subcategory_name": sub.name,
+            }
+        )
+    return {
+        "categories": sorted(categories.values(), key=lambda x: str(x["name"]).lower()),
+        "subcategories": sorted(subcategories.values(), key=lambda x: (x["category_id"], str(x["name"]).lower())),
+        "services": services,
+    }
+
+
+def _resolve_autocalc_service_ids(
+    db: Session,
+    *,
+    scope_mode: str,
+    category_id: int | None,
+    subcategory_id: int | None,
+    service_ids: list[int],
+) -> list[int]:
+    rows = _allowed_service_scope_rows(db)
+    allowed_cat_ids = {int(cat.id) for cat, _sub, _svc in rows}
+    allowed_sub_ids = {int(sub.id) for _cat, sub, _svc in rows}
+    allowed_service_ids = {int(svc.id) for _cat, _sub, svc in rows}
+
+    if scope_mode == "all":
+        return sorted(allowed_service_ids)
+    if scope_mode == "category":
+        if category_id is None or int(category_id) not in allowed_cat_ids:
+            raise ValueError("Выберите категорию.")
+        return sorted({int(svc.id) for cat, _sub, svc in rows if int(cat.id) == int(category_id)})
+    if scope_mode == "subcategory":
+        if category_id is None or int(category_id) not in allowed_cat_ids:
+            raise ValueError("Выберите категорию.")
+        if subcategory_id is None or int(subcategory_id) not in allowed_sub_ids:
+            raise ValueError("Выберите подкатегорию.")
+        return sorted(
+            {
+                int(svc.id)
+                for cat, sub, svc in rows
+                if int(cat.id) == int(category_id) and int(sub.id) == int(subcategory_id)
+            }
+        )
+    if scope_mode == "services":
+        clean_ids = sorted({int(i) for i in service_ids if int(i) > 0})
+        if not clean_ids:
+            raise ValueError("Выберите хотя бы одну услугу.")
+        bad = [i for i in clean_ids if i not in allowed_service_ids]
+        if bad:
+            raise ValueError("Выбраны недопустимые услуги.")
+        return clean_ids
+    raise ValueError("Некорректный режим выбора позиций.")
+
+
+def _autocalc_apply_for_services(
+    db: Session,
+    *,
+    services: list[Service],
+    source_level: str,
+    target_level: str,
+    pct: float,
+    changed_by_user_id: int,
+) -> int:
+    source_from, source_to = _PRICE_LEVEL_FIELDS[source_level]
+    target_from, target_to = _PRICE_LEVEL_FIELDS[target_level]
+    updated_count = 0
+    for svc in services:
+        before = SimpleNamespace(
+            price_junior_from=svc.price_junior_from,
+            price_junior_to=svc.price_junior_to,
+            price_middle_from=svc.price_middle_from,
+            price_middle_to=svc.price_middle_to,
+            price_senior_from=svc.price_senior_from,
+            price_senior_to=svc.price_senior_to,
+        )
+        changed = False
+        src_from_val = getattr(svc, source_from)
+        src_to_val = getattr(svc, source_to)
+        new_from = _autocalc_price(src_from_val, pct=pct)
+        new_to = _autocalc_price(src_to_val, pct=pct)
+        if new_from is not None and getattr(svc, target_from) != new_from:
+            setattr(svc, target_from, new_from)
+            changed = True
+        if new_to is not None and getattr(svc, target_to) != new_to:
+            setattr(svc, target_to, new_to)
+            changed = True
+        if not changed:
+            continue
+        svc.updated_at = utcnow_naive()
+        svc.updated_by_user_id = changed_by_user_id
+        write_audit_rows(
+            db,
+            log_model=ServiceAuditLog,
+            entity_field="service_id",
+            entity_id=svc.id,
+            changed_by_user_id=changed_by_user_id,
+            changes=diff_fields(
+                before,
+                svc,
+                (
+                    "price_junior_from",
+                    "price_junior_to",
+                    "price_middle_from",
+                    "price_middle_to",
+                    "price_senior_from",
+                    "price_senior_to",
+                ),
+            ),
+        )
+        updated_count += 1
+    return updated_count
+
+
+def _render_price_autocalc_page(
+    request: Request,
+    *,
+    current_user: AuthUser,
+    db: Session,
+    error: str | None = None,
+    msg: str | None = None,
+    selected_count: int | None = None,
+    updated_count: int | None = None,
+    fp: dict[str, Any] | None = None,
+    status_code: int = 200,
+):
+    options = _autocalc_scope_options(db)
+    data = fp or {}
+    return templates.TemplateResponse(
+        "admin_catalog_price_autocalc.html",
+        _ctx(
+            request,
+            current_user,
+            error=error,
+            msg=msg,
+            selected_count=selected_count,
+            updated_count=updated_count,
+            scope_options=options,
+            fp={
+                "scope_mode": data.get("scope_mode") or "all",
+                "category_id": str(data.get("category_id") or ""),
+                "subcategory_id": str(data.get("subcategory_id") or ""),
+                "service_ids": [int(x) for x in (data.get("service_ids") or []) if int(x) > 0],
+                "target_level": str(data.get("target_level") or "JUNIOR"),
+                "source_level": str(data.get("source_level") or "MIDDLE"),
+                "percent": str(data.get("percent") or "60"),
+            },
+        ),
+        status_code=status_code,
+    )
 
 
 def _fmt_price_input(v: float | None) -> str:
@@ -164,6 +375,126 @@ def catalog_index(
             total_services=total_services,
             err=err,
         ),
+    )
+
+
+@router.get("/price-autocalc", response_class=HTMLResponse)
+def catalog_price_autocalc_form(
+    request: Request,
+    msg: str | None = None,
+    selected: int | None = Query(None),
+    updated: int | None = Query(None),
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    return _render_price_autocalc_page(
+        request,
+        current_user=current_user,
+        db=db,
+        msg=msg,
+        selected_count=selected,
+        updated_count=updated,
+    )
+
+
+@router.post("/price-autocalc", response_class=HTMLResponse)
+async def catalog_price_autocalc_apply(
+    request: Request,
+    current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    scope_mode = str(form.get("scope_mode") or "all").strip().lower()
+    category_raw = str(form.get("category_id") or "").strip()
+    subcategory_raw = str(form.get("subcategory_id") or "").strip()
+    service_ids_raw = form.getlist("service_ids")
+    target_level = str(form.get("target_level") or "").strip().upper()
+    source_level = str(form.get("source_level") or "").strip().upper()
+    percent_raw = str(form.get("percent") or "").strip()
+    fp = {
+        "scope_mode": scope_mode,
+        "category_id": category_raw,
+        "subcategory_id": subcategory_raw,
+        "service_ids": [int(x) for x in service_ids_raw if str(x).strip().isdigit()],
+        "target_level": target_level,
+        "source_level": source_level,
+        "percent": percent_raw,
+    }
+
+    if target_level not in _PRICE_LEVEL_FIELDS:
+        return _render_price_autocalc_page(
+            request,
+            current_user=current_user,
+            db=db,
+            error="Выберите уровень, кому считаем.",
+            fp=fp,
+            status_code=400,
+        )
+    if source_level not in _PRICE_LEVEL_FIELDS:
+        return _render_price_autocalc_page(
+            request,
+            current_user=current_user,
+            db=db,
+            error="Выберите уровень, от кого считаем.",
+            fp=fp,
+            status_code=400,
+        )
+    try:
+        pct = _parse_percent_0_100(percent_raw)
+    except ValueError:
+        return _render_price_autocalc_page(
+            request,
+            current_user=current_user,
+            db=db,
+            error="Процент: число от 0 до 100.",
+            fp=fp,
+            status_code=400,
+        )
+
+    category_id = int(category_raw) if category_raw.isdigit() else None
+    subcategory_id = int(subcategory_raw) if subcategory_raw.isdigit() else None
+    service_ids = [int(x) for x in service_ids_raw if str(x).strip().isdigit()]
+    try:
+        resolved_service_ids = _resolve_autocalc_service_ids(
+            db,
+            scope_mode=scope_mode,
+            category_id=category_id,
+            subcategory_id=subcategory_id,
+            service_ids=service_ids,
+        )
+    except ValueError as exc:
+        return _render_price_autocalc_page(
+            request,
+            current_user=current_user,
+            db=db,
+            error=str(exc),
+            fp=fp,
+            status_code=400,
+        )
+    if not resolved_service_ids:
+        return _render_price_autocalc_page(
+            request,
+            current_user=current_user,
+            db=db,
+            error="Нет услуг для выбранной области.",
+            fp=fp,
+            status_code=400,
+        )
+    services = list(
+        db.scalars(select(Service).where(Service.id.in_(resolved_service_ids)).order_by(Service.id.asc())).all()
+    )
+    updated_count = _autocalc_apply_for_services(
+        db,
+        services=services,
+        source_level=source_level,
+        target_level=target_level,
+        pct=pct,
+        changed_by_user_id=current_user.id,
+    )
+    db.commit()
+    return RedirectResponse(
+        url=f"/admin/catalog/price-autocalc?msg=done&selected={len(resolved_service_ids)}&updated={updated_count}",
+        status_code=303,
     )
 
 
