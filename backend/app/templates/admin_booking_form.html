@@ -1368,7 +1368,8 @@
           var initialCount = parseJsonArray(initialLinesJson).length;
           if (editingBookingId > 0 && initialCount > 0 && lines.length < initialCount) {
             var dropMsg =
-              'В этой брони было ' + initialCount + ' услуг, сейчас сохранится ' + lines.length + '.\n' +;
+              'В этой брони было ' + initialCount + ' услуг, сейчас сохранится ' + lines.length + '.\n' +
+              'Убрать лишние услуги из брони?';
             if (!window.confirm(dropMsg)) {
               e.preventDefault();
               return;
