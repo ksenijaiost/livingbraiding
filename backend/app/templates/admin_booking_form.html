@@ -131,7 +131,6 @@
           </div>
           <div id="lbBookingLine0ServiceFlags" class="muted" style="margin-top:8px; font-size:12px; display:none;"></div>
           <div id="lbBookingLine0ServiceEditor" style="margin-top:8px; display:none;"></div>
-          <div id="lbBookingLine0AdvancedBlocks" style="margin-top:8px;"></div>
           <div style="margin-top:8px; max-width:16rem;">
             <label>Время начала первой услуги *</label>
             <input type="time" name="planned_time" value="{{ fp.get('planned_time','') }}" step="60" required />
@@ -185,6 +184,8 @@
             </p>
             <div id="lbBookingServiceLines" style="margin-top:10px; display:flex; flex-direction:column; gap:10px;"></div>
           </div>
+
+          <div id="lbBookingSharedKitHost" style="margin-top:12px;"></div>
 
           <div id="lbBookingAllMastersBlock" class="card" style="margin-top: 12px; background:#f8fafc;">
             <div style="font-weight: 600; margin-bottom: 8px;">Мастера на все услуги *</div>
@@ -611,6 +612,7 @@
   <script type="application/json" id="lb-booking-initial-service-json">
     {{ {'category_id': (fp.get('service_category_id') or 0)|int, 'subcategory_id': (fp.get('service_subcategory_id') or 0)|int, 'service_id': (fp.get('service_id') or 0)|int } | tojson }}
   </script>
+  <script type="application/json" id="lb-booking-initial-kit-json">{{ visit_stock_kit_initial | default(none) | tojson }}</script>
 
   <script>
     (function () {
@@ -804,16 +806,6 @@
       function serviceEditorHtml(svc, idx) {
         if (!svc) return '';
         var h = '';
-        if (svc.requires_kit_block) {
-          h += '<div class="card" style="margin-top:8px; background:#f8fafc;">' +
-            '<div style="font-weight:600; margin-bottom:6px;">Комплект по услуге</div>' +
-            '<div class="row">' +
-              '<div><label>Режим</label><select data-line-kit-mode="1"><option value="IN_STOCK">Из наличия</option><option value="OWN">Свой</option><option value="ORDER">Заказ</option></select></div>' +
-              '<div><label>Количество (если нужно)</label><input type="number" min="0" step="1" data-line-kit-qty="1" /></div>' +
-            '</div>' +
-            '<div style="margin-top:6px;"><label>Комментарий по комплекту</label><textarea rows="2" maxlength="600" data-line-kit-note="1" style="width:100%; box-sizing:border-box;"></textarea></div>' +
-          '</div>';
-        }
         if (svc.requires_tail_block) {
           h += '<div class="card" style="margin-top:8px; background:#f8fafc;">' +
             '<div style="font-weight:600; margin-bottom:6px;">Хвост/резинка</div>' +
@@ -868,6 +860,9 @@
           var editor = serviceEditorHtml(svc, idx);
           editorHost.innerHTML = editor;
           editorHost.style.display = editor ? '' : 'none';
+        }
+        if (typeof window.lbBookingUpdateKitVisibility === 'function') {
+          window.lbBookingUpdateKitVisibility();
         }
       }
       function renderAllServiceFlags() {
@@ -1342,8 +1337,8 @@
       });
 
       initPrefillLines();
-      (function moveAdvancedVisitBlocksToLine0() {
-        var host = document.getElementById('lbBookingLine0AdvancedBlocks');
+      (function moveVisitKitCardToSharedHost() {
+        var host = document.getElementById('lbBookingSharedKitHost');
         var kit = document.getElementById('visit_kit_card');
         if (host && kit && kit.parentElement !== host) host.appendChild(kit);
       })();

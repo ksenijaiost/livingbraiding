@@ -908,6 +908,30 @@ def _amount_hint_from_booking(b: Booking) -> str:
     return digits if digits else ""
 
 
+def _visit_stock_kit_initial_for_form(db: Session, fp: dict[str, str] | None) -> dict[str, Any] | None:
+    if not fp:
+        return None
+    raw = str(fp.get("visit_stock_kit_id") or "").strip()
+    if not raw.isdigit():
+        return None
+    kit = db.get(Kit, int(raw))
+    if kit is None:
+        return None
+    return {
+        "id": int(kit.id),
+        "sku": str(kit.sku or ""),
+        "title": str(kit.title or ""),
+        "pieces_available": int(kit.pieces_available or 0),
+    }
+
+
+def _visit_stock_kit_from_details(db: Session, details: dict[str, Any]) -> Kit | None:
+    raw = str(details.get("visit_stock_kit_id") or "").strip()
+    if not raw.isdigit():
+        return None
+    return db.get(Kit, int(raw))
+
+
 def _prefill_visit_stock_kit_from_booking(db: Session, b: Booking, form_prefill: dict[str, str]) -> None:
     vs = (form_prefill.get("visit_stock_kit_id") or "").strip()
     if vs.isdigit() and not (form_prefill.get("stock_kit_id") or "").strip():
@@ -1541,6 +1565,7 @@ def admin_booking_new_get(
             rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
             fp=fp,
             booking_master_on_ids=[],
+            visit_stock_kit_initial=_visit_stock_kit_initial_for_form(db, fp),
             consultation_id=consultation.id if consultation else None,
             consultation_comment=consultation_comment,
         ),
@@ -2003,6 +2028,7 @@ def admin_booking_detail(
             visit_create_url=visit_create_url,
             sale_create_url=sale_create_url,
             booking_kit_reserves=booking_kit_reserves,
+            visit_stock_kit=_visit_stock_kit_from_details(db, details),
         ),
     )
 
@@ -2047,6 +2073,7 @@ def admin_booking_edit_get(
             rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
             fp=fp,
             booking_master_on_ids=master_ids,
+            visit_stock_kit_initial=_visit_stock_kit_initial_for_form(db, fp),
         ),
     )
 
@@ -2222,6 +2249,7 @@ async def admin_booking_edit_post(
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
                 fp=fp,
                 booking_master_on_ids=on_ids,
+                visit_stock_kit_initial=_visit_stock_kit_initial_for_form(db, fp),
             ),
             status_code=400,
         )
@@ -2299,6 +2327,7 @@ async def admin_booking_edit_post(
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
                 fp=fp,
                 booking_master_on_ids=on_ids,
+                visit_stock_kit_initial=_visit_stock_kit_initial_for_form(db, fp),
             ),
             status_code=400,
         )

@@ -229,6 +229,10 @@
             {% set _km = (details.get('visit_kit_mode') or '') %}
             <p style="margin:6px 0;"><strong>Комплект</strong>:
               {% if _km == 'ORDER' %}На заказ{% elif _km == 'IN_STOCK' %}Из наличия{% elif _km == 'OWN' %}Свой{% else %}{{ _km }}{% endif %}
+              {% if _km == 'IN_STOCK' and visit_stock_kit %}
+                — <a href="/kits/{{ visit_stock_kit.id }}">{{ visit_stock_kit.sku }}</a>
+                <span class="muted">{{ visit_stock_kit.title }}</span>
+              {% endif %}
             </p>
           {% endif %}
           {% if details.get('visit_order_blanks_qty') or details.get('visit_order_blanks_desc') %}
