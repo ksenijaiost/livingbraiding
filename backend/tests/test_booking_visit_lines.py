@@ -23,11 +23,18 @@ from app.db.models import (
     User,
     UserRole,
 )
+from app.kit_inlay_visit import service_requires_kit_block
 from app.routes.bookings import (
     _apply_parsed_visit_lines_to_fp,
+    _booking_details_from_form,
+    _collect_line_service_kits_from_fp,
+    _expand_line_service_kits_to_fp,
     _parse_booking_visit_lines_and_masters,
     _planned_services_audit_label,
     _sync_booking_planned_services_with_lines,
+    _validate_line_service_kits_for_reserve,
+    _validate_visit_stock_kit_for_reserve,
+    _visit_kit_mode_is_in_stock,
 )
 from app.setting_keys import DISPLAY_TIMEZONE
 
@@ -182,3 +189,76 @@ def test_planned_services_audit_label_includes_duration(memory_db) -> None:
     label = _planned_services_audit_label(db, booking.id)
     assert "240 мин" in label
     assert "Услуга 1" in label
+
+
+def test_line_service_kits_roundtrip_fp_and_details(memory_db) -> None:
+    db = memory_db
+    svc1, svc2, _, _ = _visit_setup(db)
+    sub = db.get(ServiceSubcategory, svc2.subcategory_id)
+    assert sub is not None
+    sub.show_kit_section = True
+    db.commit()
+
+    lines_json = (
+        '[{"service_id": %d, "planned_time": "10:00", "master_ids": [1]},'
+        '{"service_id": %d, "planned_time": "14:00", "master_ids": [1]}]'
+    ) % (svc1.id, svc2.id)
+    fp = {
+        "kind": BookingKind.VISIT.value,
+        "service_id": str(svc1.id),
+        "booking_service_lines_json": lines_json,
+        "line_1_kit_mode": "IN_STOCK",
+        "line_1_stock_kit_id": "42",
+        "line_1_stock_kit_pieces": "3",
+    }
+    collected = _collect_line_service_kits_from_fp(fp)
+    assert collected["1"]["kit_mode"] == "IN_STOCK"
+    assert collected["1"]["stock_kit_id"] == "42"
+
+    details = _booking_details_from_form(db, fp)
+    assert details["line_service_kits"]["1"]["stock_kit_id"] == "42"
+
+    fp2: dict[str, str] = {"line_service_kits": '{"1": {"kit_mode": "ORDER", "order_blanks_qty": "5"}}'}
+    _expand_line_service_kits_to_fp(fp2)
+    assert fp2["line_1_kit_mode"] == "ORDER"
+    assert fp2["line_1_order_blanks_qty"] == "5"
+
+
+def test_visit_kit_in_stock_validation(memory_db) -> None:
+    db = memory_db
+    svc1, svc2, _, _ = _visit_setup(db)
+    sub = db.get(ServiceSubcategory, svc1.subcategory_id)
+    assert sub is not None
+    sub.show_kit_section = True
+    db.commit()
+    svc1 = db.get(Service, svc1.id)
+    assert svc1 is not None
+    assert service_requires_kit_block(svc1)
+
+    fp_missing = {
+        "kind": BookingKind.VISIT.value,
+        "service_id": str(svc1.id),
+        "visit_kit_mode": "IN_STOCK",
+    }
+    assert _validate_visit_stock_kit_for_reserve(db, fp_missing) is not None
+    assert _visit_kit_mode_is_in_stock(fp_missing)
+
+    fp_ok = dict(fp_missing)
+    fp_ok["visit_stock_kit_id"] = "99"
+    assert _validate_visit_stock_kit_for_reserve(db, fp_ok) is None
+
+    sub2 = db.get(ServiceSubcategory, svc2.subcategory_id)
+    assert sub2 is not None
+    sub2.show_kit_section = True
+    db.commit()
+    lines_json = (
+        '[{"service_id": %d, "planned_time": "10:00", "master_ids": [1]},'
+        '{"service_id": %d, "planned_time": "14:00", "master_ids": [1]}]'
+    ) % (svc1.id, svc2.id)
+    fp_line = {
+        "kind": BookingKind.VISIT.value,
+        "service_id": str(svc1.id),
+        "booking_service_lines_json": lines_json,
+        "line_1_kit_mode": "IN_STOCK",
+    }
+    assert _validate_line_service_kits_for_reserve(db, fp_line) is not None

@@ -709,12 +709,13 @@ function initAdminBookingForm() {
     var extra = byId("visit_extra_blanks_block");
     if (corr) corr.style.display = (m === "OWN" && needCorr) ? "block" : "none";
     if (extra) extra.style.display = (m === "OWN" && needExtra) ? "block" : "none";
+    if (extra && !document.querySelector('input[name="visit_own_need_extra_blanks"]')) {
+      extra.style.display = "none";
+    }
     syncExtraBlanksMode();
   }
 
   function syncVisitKitMode() {
-    var kitCard = byId("visit_kit_card");
-    if (!kitCard || kitCard.style.display === "none") return;
     var m = getVisitKitMode();
     var stock = byId("visit_kit_stock_block");
     var own = byId("visit_kit_own_block");
@@ -838,12 +839,25 @@ function initAdminBookingForm() {
 
   /** Скрытые поля комплекта не должны уходить в POST (иначе в details_json попадает лишний префилл). */
   function setBookingVisitKitControlsDisabled(disabled) {
-    ["visit_kit_card", "visit_correction_block", "visit_extra_blanks_block"].forEach(function (wrapId) {
+    var roots = [];
+    var kit0 = document.querySelector("[data-line-kit-root=\"0\"]");
+    if (kit0) roots.push(kit0);
+    ["visit_correction_block", "visit_extra_blanks_block"].forEach(function (wrapId) {
       var wrap = byId(wrapId);
-      if (!wrap) return;
+      if (wrap) roots.push(wrap);
+    });
+    roots.forEach(function (wrap) {
       qa("input, select, textarea, button", wrap).forEach(function (el) {
+        if (el.type === "hidden") return;
         el.disabled = !!disabled;
       });
+    });
+  }
+
+  function enableKitFieldsForSubmit() {
+    setBookingVisitKitControlsDisabled(false);
+    qa("[data-line-kit-root] input, [data-line-kit-root] select, [data-line-kit-root] textarea, [data-line-kit-root] button").forEach(function (el) {
+      el.disabled = false;
     });
   }
 
@@ -865,11 +879,9 @@ function initAdminBookingForm() {
   }
 
   function updateVisitKitVisibility() {
-    var kitCard = byId("visit_kit_card");
-    if (!kitCard) return;
-    var needsKit = anyBookingLineNeedsKit();
-    kitCard.style.display = needsKit ? "block" : "none";
-    if (needsKit) {
+    var svcSel = byId("service_id");
+    var needsLine0Kit = !!(svcSel && serviceNeedsKitBlock(svcSel.value));
+    if (needsLine0Kit) {
       setBookingVisitKitControlsDisabled(false);
       syncVisitKitMode();
     } else {
@@ -954,7 +966,8 @@ function initAdminBookingForm() {
   function bindKitSuggest(inputId, ulId, onPick) {
     var t = null;
     var inp = byId(inputId);
-    if (!inp) return;
+    if (!inp || inp.dataset.lbKitSuggestBound === "1") return;
+    inp.dataset.lbKitSuggestBound = "1";
     inp.addEventListener("input", function () {
       clearTimeout(t);
       t = setTimeout(function () { kitSuggest(inp.value.trim(), ulId, onPick); }, 350);
@@ -987,6 +1000,60 @@ function initAdminBookingForm() {
     });
   }
 
+  function bindVisitKitControls() {
+    qa('input[name="visit_kit_mode"]').forEach(function (r) {
+      if (r.dataset.lbKitModeBound === "1") return;
+      r.dataset.lbKitModeBound = "1";
+      r.addEventListener("change", syncVisitKitMode);
+    });
+    bindKitSuggest("visit_kit_search_q", "visit_kit_suggest_list", function (k) {
+      setSelectedKit("visit_stock_kit_id", "visit_selected_kit_box", "visit_selected_kit_line", k);
+      var ul = byId("visit_kit_suggest_list");
+      if (ul) ul.innerHTML = "";
+    });
+    [
+      ["visit_kit_stock_find_btn", "visit_kit_search_q", "visit_kit_suggest_list", "visit_stock_kit_id", "visit_selected_kit_box", "visit_selected_kit_line"]
+    ].forEach(function (row) {
+      var btn = byId(row[0]);
+      if (!btn || btn.dataset.lbKitFindBound === "1") return;
+      btn.dataset.lbKitFindBound = "1";
+      btn.addEventListener("click", function () {
+        var inp = byId(row[1]);
+        var q = inp ? String(inp.value || "").trim() : "";
+        kitSuggest(q, row[2], function (k) {
+          setSelectedKit(row[3], row[4], row[5], k);
+          var ul = byId(row[2]);
+          if (ul) ul.innerHTML = "";
+        });
+      });
+    });
+    ["visit_stock_use_entire"].forEach(function (name) {
+      var cb = document.querySelector('input[name="' + name + '"]');
+      if (!cb || cb.dataset.lbKitEntireBound === "1") return;
+      cb.dataset.lbKitEntireBound = "1";
+      cb.addEventListener("change", syncBookingEntireKitPieceInputs);
+    });
+    var visitOrderUseMasters = document.querySelector('input[name="visit_order_use_masters"]');
+    if (visitOrderUseMasters && visitOrderUseMasters.dataset.lbKitOrderMastersBound !== "1") {
+      visitOrderUseMasters.dataset.lbKitOrderMastersBound = "1";
+      visitOrderUseMasters.addEventListener("change", syncVisitOrderMasters);
+    }
+    var ownCorr = document.querySelector('input[name="visit_own_need_correction"]');
+    if (ownCorr && ownCorr.dataset.lbKitOwnBound !== "1") {
+      ownCorr.dataset.lbKitOwnBound = "1";
+      ownCorr.addEventListener("change", syncOwnKitExtras);
+    }
+    var ownExtra = document.querySelector('input[name="visit_own_need_extra_blanks"]');
+    if (ownExtra && ownExtra.dataset.lbKitOwnBound !== "1") {
+      ownExtra.dataset.lbKitOwnBound = "1";
+      ownExtra.addEventListener("change", syncOwnKitExtras);
+    }
+    syncVisitKitMode();
+    syncOwnKitExtras();
+    syncVisitOrderMasters();
+    syncBookingEntireKitPieceInputs();
+  }
+
   // --- Bind listeners ---
   var qEl = byId("client_search_q");
   if (qEl) qEl.addEventListener("input", scheduleSuggest);
@@ -1005,13 +1072,6 @@ function initAdminBookingForm() {
   var svcSel = byId("service_id");
   if (svcSel) svcSel.addEventListener("change", updateVisitKitVisibility);
 
-  qa('input[name="visit_kit_mode"]').forEach(function (r) { r.addEventListener("change", syncVisitKitMode); });
-  var visitOrderUseMasters = document.querySelector('input[name="visit_order_use_masters"]');
-  if (visitOrderUseMasters) visitOrderUseMasters.addEventListener("change", syncVisitOrderMasters);
-  var ownC = document.querySelector('input[name="visit_own_need_correction"]');
-  if (ownC) ownC.addEventListener("change", syncOwnKitExtras);
-  var ownE = document.querySelector('input[name="visit_own_need_extra_blanks"]');
-  if (ownE) ownE.addEventListener("change", syncOwnKitExtras);
   qa('input[name="visit_extra_blanks_mode"]').forEach(function (r) { r.addEventListener("change", syncExtraBlanksMode); });
 
   qa('input[name="product_kind"]').forEach(function (r) { r.addEventListener("change", syncSaleKind); });
@@ -1019,11 +1079,6 @@ function initAdminBookingForm() {
   qa('input[name="sale_rubber_mode"]').forEach(function (r) { r.addEventListener("change", syncSaleRubberMode); });
   qa('input[name="sale_rubber_type"]').forEach(function (r) { r.addEventListener("change", syncSaleRubberTypeFields); });
 
-  bindKitSuggest("visit_kit_search_q", "visit_kit_suggest_list", function (k) {
-    setSelectedKit("visit_stock_kit_id", "visit_selected_kit_box", "visit_selected_kit_line", k);
-    var ul = byId("visit_kit_suggest_list");
-    if (ul) ul.innerHTML = "";
-  });
   bindKitSuggest("visit_extra_kit_search_q", "visit_extra_kit_suggest_list", function (k) {
     setSelectedKit("visit_extra_stock_kit_id", "visit_extra_selected_kit_box", "visit_extra_selected_kit_line", k);
     var ul = byId("visit_extra_kit_suggest_list");
@@ -1036,12 +1091,12 @@ function initAdminBookingForm() {
   });
 
   [
-    ["visit_kit_stock_find_btn", "visit_kit_search_q", "visit_kit_suggest_list", "visit_stock_kit_id", "visit_selected_kit_box", "visit_selected_kit_line"],
     ["visit_extra_kit_stock_find_btn", "visit_extra_kit_search_q", "visit_extra_kit_suggest_list", "visit_extra_stock_kit_id", "visit_extra_selected_kit_box", "visit_extra_selected_kit_line"],
     ["sale_kit_stock_find_btn", "sale_kit_search_q", "sale_kit_suggest_list", "sale_stock_kit_id", "sale_selected_kit_box", "sale_selected_kit_line"]
   ].forEach(function (row) {
     var btn = byId(row[0]);
-    if (!btn) return;
+    if (!btn || btn.dataset.lbKitFindBound === "1") return;
+    btn.dataset.lbKitFindBound = "1";
     btn.addEventListener("click", function () {
       var inp = byId(row[1]);
       var q = inp ? String(inp.value || "").trim() : "";
@@ -1052,13 +1107,14 @@ function initAdminBookingForm() {
       });
     });
   });
-  ["visit_stock_use_entire", "visit_extra_stock_use_entire", "sale_stock_use_entire"].forEach(function (name) {
+  ["visit_extra_stock_use_entire", "sale_stock_use_entire"].forEach(function (name) {
     var cb = document.querySelector('input[name="' + name + '"]');
     if (cb) cb.addEventListener("change", syncBookingEntireKitPieceInputs);
   });
   syncBookingEntireKitPieceInputs();
 
   // --- init ---
+  bindVisitKitControls();
   syncKind();
   serviceCatalogOnCategory();
   syncVisitKitMode();
@@ -1080,6 +1136,9 @@ function initAdminBookingForm() {
     window.lbBookingRefreshMasters();
   }
   window.lbBookingUpdateKitVisibility = updateVisitKitVisibility;
+  window.lbBookingBindVisitKitControls = bindVisitKitControls;
+  window.lbBookingSyncVisitKitMode = syncVisitKitMode;
+  window.lbBookingEnableKitFieldsForSubmit = enableKitFieldsForSubmit;
 
   var initKit = jsonById("lb-booking-initial-kit-json", null);
   if (initKit && initKit.id) {
