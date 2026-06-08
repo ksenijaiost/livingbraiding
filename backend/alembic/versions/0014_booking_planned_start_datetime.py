@@ -19,20 +19,26 @@ depends_on = None
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
+        op.add_column(
+            "booking_planned_services",
+            sa.Column("planned_start_time_new", sa.DateTime(), nullable=True),
+        )
         op.execute(
             """
-            ALTER TABLE booking_planned_services
-            ALTER COLUMN planned_start_time TYPE TIMESTAMP WITHOUT TIME ZONE
-            USING (
-                CASE
-                    WHEN planned_start_time IS NULL THEN NULL
-                    ELSE (
-                        (SELECT date(b.planned_date) FROM bookings b WHERE b.id = booking_planned_services.booking_id)
-                        + planned_start_time::time
-                    )::timestamp without time zone
-                END
-            )
+            UPDATE booking_planned_services ps
+            SET planned_start_time_new = (
+                date(b.planned_date) + ps.planned_start_time::time
+            )::timestamp without time zone
+            FROM bookings b
+            WHERE b.id = ps.booking_id
+              AND ps.planned_start_time IS NOT NULL
             """
+        )
+        op.drop_column("booking_planned_services", "planned_start_time")
+        op.alter_column(
+            "booking_planned_services",
+            "planned_start_time_new",
+            new_column_name="planned_start_time",
         )
     else:
         op.alter_column(
@@ -47,17 +53,22 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
+        op.add_column(
+            "booking_planned_services",
+            sa.Column("planned_start_time_old", sa.Time(), nullable=True),
+        )
         op.execute(
             """
-            ALTER TABLE booking_planned_services
-            ALTER COLUMN planned_start_time TYPE TIME WITHOUT TIME ZONE
-            USING (
-                CASE
-                    WHEN planned_start_time IS NULL THEN NULL
-                    ELSE planned_start_time::time without time zone
-                END
-            )
+            UPDATE booking_planned_services
+            SET planned_start_time_old = planned_start_time::time without time zone
+            WHERE planned_start_time IS NOT NULL
             """
+        )
+        op.drop_column("booking_planned_services", "planned_start_time")
+        op.alter_column(
+            "booking_planned_services",
+            "planned_start_time_old",
+            new_column_name="planned_start_time",
         )
     else:
         op.alter_column(
