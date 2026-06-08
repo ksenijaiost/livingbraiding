@@ -7,6 +7,22 @@ from app.db.models import Service, VisitService
 _ARROW = " → "
 
 
+def format_duration_minutes_ru(minutes: int | None, *, default_minutes: int | None = None) -> str:
+    """Человекочитаемая длительность: «2 ч», «2 ч 30 мин», «45 мин»."""
+    m = int(minutes or 0)
+    if m <= 0 and default_minutes is not None:
+        m = int(default_minutes or 0)
+    if m <= 0:
+        return "—"
+    h, mm = divmod(m, 60)
+    parts: list[str] = []
+    if h > 0:
+        parts.append(f"{h} ч")
+    if mm > 0:
+        parts.append(f"{mm} мин")
+    return " ".join(parts) if parts else "—"
+
+
 def format_service_catalog_path(service: Service | None) -> str:
     if service is None:
         return ""

@@ -187,6 +187,13 @@
                 {% endif %}
               </div>
               <div class="muted" style="margin-top:4px;">Предварительное время: <strong>{{ local_start or "—" }}</strong></div>
+              <div class="muted" style="margin-top:4px;">
+                Предварительная длительность:
+                <strong>{{ format_duration_minutes_ru(ps.duration_minutes, default_minutes=(svc.estimated_duration_minutes if svc else none)) }}</strong>
+                {% if ps.duration_minutes %}
+                  <span class="muted">(задана вручную)</span>
+                {% endif %}
+              </div>
               <div style="margin-top:4px;">
                 <span class="muted">Мастера:</span>
                 {% if ps.masters %}

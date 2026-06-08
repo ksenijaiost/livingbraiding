@@ -950,9 +950,11 @@
           '</div>';
         linesWrap.appendChild(box);
         state.extraLines.push({ idx: idx, el: box });
+        syncBookingHiddenLines();
         box.querySelector('[data-line-remove]').addEventListener('click', function () {
           box.remove();
           state.extraLines = state.extraLines.filter(function (x) { return x.el !== box; });
+          syncBookingHiddenLines();
           refreshAvailableMasters();
         });
         var catSel = box.querySelector('[data-line-category]');
@@ -980,8 +982,8 @@
         if (catSel) catSel.addEventListener('change', syncLineSubcategories);
         if (subSel) subSel.addEventListener('change', syncLineServices);
         if (svcSel) svcSel.addEventListener('change', refreshAvailableMasters);
-        if (svcSel) svcSel.addEventListener('change', function () { renderLineServiceFlags(idx); });
-        box.querySelector('[data-line-time]').addEventListener('change', refreshAvailableMasters);
+        if (svcSel) svcSel.addEventListener('change', function () { renderLineServiceFlags(idx); syncBookingHiddenLines(); });
+        box.querySelector('[data-line-time]').addEventListener('change', function () { refreshAvailableMasters(); syncBookingHiddenLines(); });
         var durOnCb = box.querySelector('[data-line-dur-on]');
         if (durOnCb) {
           durOnCb.addEventListener('change', function () {
@@ -1011,21 +1013,42 @@
       function readLineMasters(lineIdx) {
         return uniqIds(Array.from(document.querySelectorAll('input[data-line-master="' + lineIdx + '"]:checked')).map(function (x) { return x.value; }));
       }
+      function lineRowEl(idx) {
+        if (idx === 0) return null;
+        var row = state.extraLines.find(function (x) { return x.idx === idx; });
+        if (row && row.el) return row.el;
+        return document.querySelector('[data-service-line-idx="' + idx + '"]');
+      }
       function lineTimeValue(idx) {
         if (idx === 0) return String((plannedTime && plannedTime.value) || '').trim();
-        var row = state.extraLines.find(function (x) { return x.idx === idx; });
-        if (!row || !row.el) return '';
-        var tEl = row.el.querySelector('[data-line-time]');
+        var row = lineRowEl(idx);
+        if (!row) return '';
+        var tEl = row.querySelector('[data-line-time]');
         return String((tEl && tEl.value) || '').trim();
       }
       function lineServiceId(idx) {
         if (idx === 0) return toInt(serviceSel && serviceSel.value);
-        var row = state.extraLines.find(function (x) { return x.idx === idx; });
-        if (!row || !row.el) return 0;
-        return toInt((row.el.querySelector('[data-line-service]') || {}).value || 0);
+        var row = lineRowEl(idx);
+        if (!row) return 0;
+        return toInt((row.querySelector('[data-line-service]') || {}).value || 0);
       }
       function allLineIndices() {
-        return [0].concat(state.extraLines.map(function (x) { return x.idx; }));
+        var merged = [0];
+        var seen = { 0: true };
+        state.extraLines.forEach(function (x) {
+          if (x.idx > 0 && !seen[x.idx]) {
+            seen[x.idx] = true;
+            merged.push(x.idx);
+          }
+        });
+        Array.from(document.querySelectorAll('[data-service-line-idx]')).forEach(function (el) {
+          var idx = toInt(el.getAttribute('data-service-line-idx') || 0);
+          if (idx > 0 && !seen[idx]) {
+            seen[idx] = true;
+            merged.push(idx);
+          }
+        });
+        return merged;
       }
       function buildLinesForSubmit() {
         var out = [];
@@ -1042,10 +1065,17 @@
             planned_time: lineTimeValue(idx),
             master_ids: mids,
             comment: lineCommentValue(idx),
-            duration_minutes: lineDurationOverrideValue(idx),
+            duration_minutes: lineDurationOverrideValue(idx) || 0,
           });
         }
         return out;
+      }
+      function syncBookingHiddenLines() {
+        var kindVisit = document.querySelector('input[name="kind"][value="VISIT"]');
+        if (!kindVisit || !kindVisit.checked) return;
+        var lines = buildLinesForSubmit();
+        if (hidIds) hidIds.value = JSON.stringify(lines.map(function (x) { return x.service_id; }));
+        if (hidLines) hidLines.value = JSON.stringify(lines);
       }
       function lineCommentValue(idx) {
         var base = '';
@@ -1077,8 +1107,8 @@
       }
       function lineDurationOverrideValue(idx) {
         if (idx === 0) return durationOverrideMinutes();
-        var row = state.extraLines.find(function (x) { return x.idx === idx; });
-        if (!row || !row.el) return null;
+        var row = lineRowEl(idx);
+        if (!row) return null;
         var onEl = row.el.querySelector('[data-line-dur-on]');
         if (!onEl || !onEl.checked) return null;
         var hEl = row.el.querySelector('[data-line-dur-h]');
@@ -1243,8 +1273,11 @@
           refreshAvailableMasters();
         });
       }
-      if (line0DurH) line0DurH.addEventListener('input', refreshAvailableMasters);
-      if (line0DurM) line0DurM.addEventListener('input', refreshAvailableMasters);
+      if (line0DurH) line0DurH.addEventListener('input', function () { refreshAvailableMasters(); syncBookingHiddenLines(); });
+      if (line0DurM) line0DurM.addEventListener('input', function () { refreshAvailableMasters(); syncBookingHiddenLines(); });
+      if (line0DurOn) line0DurOn.addEventListener('change', syncBookingHiddenLines);
+      if (serviceSel) serviceSel.addEventListener('change', syncBookingHiddenLines);
+      if (plannedTime) plannedTime.addEventListener('change', syncBookingHiddenLines);
       document.querySelectorAll('input[name="booking_masters_mode"]').forEach(function (r) {
         r.addEventListener('change', function () { setModeUi(); refreshAvailableMasters(); });
       });
@@ -1259,6 +1292,7 @@
       });
 
       initPrefillLines();
+      syncBookingHiddenLines();
       (function moveAdvancedVisitBlocksToLine0() {
         var host = document.getElementById('lbBookingLine0AdvancedBlocks');
         var kit = document.getElementById('visit_kit_card');
@@ -1269,6 +1303,9 @@
       window.lbBookingRefreshMasters = refreshAvailableMasters;
 
       if (bookingForm) {
+        bookingForm.addEventListener('submit', function (e) {
+          syncBookingHiddenLines();
+        }, true);
         bookingForm.addEventListener('submit', function (e) {
           var kindVisit = document.querySelector('input[name="kind"][value="VISIT"]');
           if (!kindVisit || !kindVisit.checked) return;
@@ -1302,8 +1339,7 @@
               return;
             }
           }
-          if (hidIds) hidIds.value = JSON.stringify(lines.map(function (x) { return x.service_id; }));
-          if (hidLines) hidLines.value = JSON.stringify(lines);
+          syncBookingHiddenLines();
         });
       }
     })();
