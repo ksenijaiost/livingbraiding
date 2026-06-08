@@ -168,6 +168,48 @@ def _pretty_user_ids_csv(db: Session, raw: str | None) -> str:
     return _audit_user_names(db, ids)
 
 
+def _parse_line_duration_minutes(raw: Any) -> int:
+    if raw is None or raw == "":
+        return 0
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _planned_services_audit_label(db: Session, booking_id: int) -> str:
+    rows = list(
+        db.scalars(
+            select(BookingPlannedService)
+            .where(BookingPlannedService.booking_id == booking_id)
+            .options(selectinload(BookingPlannedService.service))
+            .order_by(BookingPlannedService.sort_order.asc(), BookingPlannedService.id.asc())
+        ).all()
+    )
+    if not rows:
+        return "—"
+    tz = get_display_timezone(db)
+    booking = db.get(Booking, booking_id)
+    parts: list[str] = []
+    for ps in rows:
+        svc = ps.service
+        name = (svc.name if svc else f"#{ps.service_id}")
+        dur = int(ps.duration_minutes or 0)
+        if dur <= 0 and svc is not None:
+            dur = int(svc.estimated_duration_minutes or 0)
+        if ps.planned_start_time:
+            local_start = planned_start_local_datetime(
+                ps.planned_start_time,
+                booking_planned_date=booking.planned_date if booking else None,
+                tz_name=tz,
+            )
+            t_s = local_start.strftime("%H:%M") if local_start else "?"
+        else:
+            t_s = "?"
+        parts.append(f"{name} {t_s} ({dur} мин)")
+    return "; ".join(parts)
+
+
 def _audit_sale_order_masters_label(db: Session, booking_id: int) -> str:
     staff = list(
         db.scalars(
@@ -325,9 +367,20 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
     if b.kind == BookingKind.VISIT:
         service_ids_for_hidden: list[int] = []
         line_payload: list[dict[str, Any]] = []
+        details_dur = 0
+        if b.details_json:
+            try:
+                d0 = json.loads(b.details_json)
+                if isinstance(d0, dict):
+                    details_dur = int(d0.get("visit_custom_duration_minutes") or 0)
+            except Exception:
+                details_dur = 0
+        if details_dur < 0:
+            details_dur = 0
         lines = list(b.planned_services or [])
         if lines:
-            for ps in sorted(lines, key=lambda x: (int(x.sort_order or 0), int(x.id or 0))):
+            sorted_lines = sorted(lines, key=lambda x: (int(x.sort_order or 0), int(x.id or 0)))
+            for i, ps in enumerate(sorted_lines):
                 sid = int(ps.service_id or 0)
                 if sid <= 0:
                     continue
@@ -341,14 +394,18 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
                     if ps.planned_start_time
                     else None
                 )
-                line_payload.append(
-                    {
-                        "service_id": sid,
-                        "planned_time": local_start.strftime("%H:%M") if local_start else fp.get("planned_time", ""),
-                        "master_ids": [int(x.master_id) for x in (ps.masters or []) if x.master_id],
-                        "comment": (ps.comment or ""),
-                    }
-                )
+                dur = int(ps.duration_minutes or 0)
+                if dur <= 0 and i == 0 and len(sorted_lines) == 1 and details_dur > 0:
+                    dur = details_dur
+                line_item: dict[str, Any] = {
+                    "service_id": sid,
+                    "planned_time": local_start.strftime("%H:%M") if local_start else fp.get("planned_time", ""),
+                    "master_ids": [int(x.master_id) for x in (ps.masters or []) if x.master_id],
+                    "comment": (ps.comment or ""),
+                }
+                if dur > 0:
+                    line_item["duration_minutes"] = dur
+                line_payload.append(line_item)
         if not service_ids_for_hidden and b.planned_service_id:
             service_ids_for_hidden = [int(b.planned_service_id)]
             line_payload = [
@@ -559,7 +616,7 @@ def _parse_booking_visit_lines_and_masters(
                     "planned_time": tm,
                     "master_ids": mids,
                     "comment": str(item.get("comment") or "").strip(),
-                    "duration_minutes": int(item.get("duration_minutes") or 0) if str(item.get("duration_minutes") or "").strip().isdigit() else 0,
+                    "duration_minutes": _parse_line_duration_minutes(item.get("duration_minutes")),
                 }
             )
     else:
@@ -711,11 +768,13 @@ def _sync_booking_planned_services_with_lines(
             t0 = time(0, 0)
         start_local = datetime.combine(local_day, t0).replace(second=0, microsecond=0)
         start_utc = _local_naive_to_utc_naive(start_local, tz_name).replace(second=0, microsecond=0)
+        line_dur = _parse_line_duration_minutes(spec.get("duration_minutes"))
         ps = BookingPlannedService(
             booking_id=booking_id,
             service_id=sid,
             sort_order=i,
             planned_start_time=start_utc,
+            duration_minutes=line_dur if line_dur > 0 else None,
             comment=str(spec.get("comment") or "").strip() or None,
         )
         db.add(ps)
@@ -1934,7 +1993,9 @@ async def admin_booking_edit_post(
         .where(Booking.id == booking_id)
         .options(
             selectinload(Booking.masters),
-            selectinload(Booking.planned_services).selectinload(BookingPlannedService.masters),
+            selectinload(Booking.planned_services)
+            .selectinload(BookingPlannedService.masters),
+            selectinload(Booking.planned_services).selectinload(BookingPlannedService.service),
         )
     )
     if b is None:
@@ -2078,6 +2139,7 @@ async def admin_booking_edit_post(
     before_visit_master_ids = [int(bm.master_id) for bm in (b.masters or [])]
     before_visit_masters = _audit_user_names(db, before_visit_master_ids)
     before_sale_staff = _audit_sale_order_masters_label(db, b.id)
+    before_planned_services = _planned_services_audit_label(db, b.id)
     before_details_json = b.details_json
     before = SimpleNamespace(
         client_id=b.client_id,
@@ -2199,6 +2261,7 @@ async def admin_booking_edit_post(
     after_details_json = b.details_json
     after_visit_masters = _audit_user_names(db, on_ids if kind_raw == BookingKind.VISIT.value else [])
     after_sale_staff = _audit_sale_order_masters_label(db, b.id)
+    after_planned_services = _planned_services_audit_label(db, b.id)
     after_audit = SimpleNamespace(
         client_id=b.client_id,
         planned_date=b.planned_date.replace(second=0, microsecond=0) if b.planned_date else None,
@@ -2259,6 +2322,18 @@ async def admin_booking_edit_post(
             SimpleNamespace(visit_masters=before_visit_masters, sale_order_masters=before_sale_staff),
             SimpleNamespace(visit_masters=after_visit_masters, sale_order_masters=after_sale_staff),
             ("visit_masters", "sale_order_masters"),
+        ),
+    )
+    write_audit_rows(
+        db,
+        log_model=BookingAuditLog,
+        entity_field="booking_id",
+        entity_id=b.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(
+            SimpleNamespace(planned_services=before_planned_services),
+            SimpleNamespace(planned_services=after_planned_services),
+            ("planned_services",),
         ),
     )
     db.commit()
