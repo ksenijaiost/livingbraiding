@@ -211,6 +211,14 @@
               {% if ps.comment %}
                 <div class="muted" style="margin-top:4px; white-space:pre-wrap;">{{ ps.comment }}</div>
               {% endif %}
+              {% set ps_kit = planned_service_kits.get(loop.index0) if planned_service_kits else none %}
+              {% if ps_kit %}
+                <div style="margin-top:4px;">
+                  <span class="muted">Комплект (из наличия):</span>
+                  <a href="/kits/{{ ps_kit.id }}">{{ ps_kit.sku }}</a>
+                  <span class="muted"> — {{ ps_kit.title }}</span>
+                </div>
+              {% endif %}
             </div>
           {% endfor %}
         </div>
@@ -229,9 +237,19 @@
             {% set _km = (details.get('visit_kit_mode') or '') %}
             <p style="margin:6px 0;"><strong>Комплект</strong>:
               {% if _km == 'ORDER' %}На заказ{% elif _km == 'IN_STOCK' %}Из наличия{% elif _km == 'OWN' %}Свой{% else %}{{ _km }}{% endif %}
-              {% if _km == 'IN_STOCK' and visit_stock_kit %}
-                — <a href="/kits/{{ visit_stock_kit.id }}">{{ visit_stock_kit.sku }}</a>
-                <span class="muted">{{ visit_stock_kit.title }}</span>
+              {% if _km == 'IN_STOCK' %}
+                {% if visit_stock_kit %}
+                  — <a href="/kits/{{ visit_stock_kit.id }}">{{ visit_stock_kit.sku }}</a>
+                  <span class="muted">{{ visit_stock_kit.title }}</span>
+                {% elif booking_kit_reserves %}
+                  {% for kr in booking_kit_reserves %}
+                    {% if kr.kit %}
+                      — <a href="/kits/{{ kr.kit.id }}">{{ kr.kit.sku }}</a>
+                      <span class="muted">{{ kr.kit.title }}</span>
+                      {% if kr.pieces_reserved %}<span class="muted"> ({{ kr.pieces_reserved }} шт.)</span>{% endif %}
+                    {% endif %}
+                  {% endfor %}
+                {% endif %}
               {% endif %}
             </p>
           {% endif %}

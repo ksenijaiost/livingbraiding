@@ -495,6 +495,7 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
                     fp[str(k)] = str(v) if not isinstance(v, bool) else ("1" if v else "")
         except Exception:
             pass
+    _expand_line_service_kits_to_fp(fp)
     master_ids = [bm.master_id for bm in (b.masters or [])]
     if not master_ids:
         for ps in (b.planned_services or []):
@@ -1046,6 +1047,171 @@ def _booking_work_new_query_params(db: Session, b: Booking, details: dict[str, A
 
 
 # Поля комплекта/коррекции брони визита — только для услуг с блоком комплекта (иначе из скрытой формы уезжали дефолты).
+_LINE_SERVICE_KIT_FP_RE = re.compile(
+    r"^line_(\d+)_(kit_mode|stock_kit_id|stock_kit_pieces|stock_use_entire|stock_breakdown_json|"
+    r"order_blanks_qty|order_blanks_desc|own_need_correction|corr_wash|corr_trim_qty|corr_hourly_hours|"
+    r"corr_kit_description|corr_kit_blanks_count)$"
+)
+
+
+def _expand_line_service_kits_to_fp(fp: dict[str, str]) -> None:
+    raw = fp.pop("line_service_kits", None)
+    if not raw:
+        return
+    try:
+        kits = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return
+    if not isinstance(kits, dict):
+        return
+    for idx, kit in kits.items():
+        if not isinstance(kit, dict):
+            continue
+        for field, val in kit.items():
+            if str(field).startswith("_"):
+                continue
+            if val is None:
+                continue
+            sv = str(val).strip()
+            if not sv:
+                continue
+            fp[f"line_{idx}_{field}"] = sv
+
+
+def _collect_line_service_kits_from_fp(fp: dict[str, str]) -> dict[str, dict[str, str]]:
+    acc: dict[str, dict[str, str]] = {}
+    for key, val in fp.items():
+        m = _LINE_SERVICE_KIT_FP_RE.match(str(key))
+        if not m:
+            continue
+        idx, field = m.group(1), m.group(2)
+        if field in ("stock_use_entire", "own_need_correction", "corr_wash"):
+            acc.setdefault(idx, {})[field] = "1" if parse_bool(val) else ""
+        else:
+            sv = str(val or "").strip()
+            if not sv:
+                continue
+            acc.setdefault(idx, {})[field] = sv
+    return acc
+
+
+def _strip_line_service_kits_without_kit_service(
+    db: Session, fp: dict[str, str], kits: dict[str, dict[str, str]]
+) -> dict[str, dict[str, str]]:
+    lines_raw = str(fp.get("booking_service_lines_json") or "").strip()
+    if not lines_raw:
+        return {}
+    try:
+        lines = json.loads(lines_raw)
+    except Exception:
+        return {}
+    if not isinstance(lines, list):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for i, line in enumerate(lines):
+        if i == 0 or not isinstance(line, dict):
+            continue
+        idx = str(i)
+        try:
+            sid = int(line.get("service_id") or 0)
+        except Exception:
+            sid = 0
+        if sid <= 0:
+            continue
+        svc = db.get(Service, sid)
+        if svc is None or not service_requires_kit_block(svc):
+            continue
+        if idx in kits:
+            out[idx] = kits[idx]
+    return out
+
+
+def _visit_kit_mode_is_in_stock(fp: dict[str, str]) -> bool:
+    return str(fp.get("visit_kit_mode") or "").strip().upper() == "IN_STOCK"
+
+
+def _validate_visit_stock_kit_for_reserve(db: Session, fp: dict[str, str]) -> str | None:
+    if str(fp.get("kind") or "").strip() != BookingKind.VISIT.value:
+        return None
+    if not _visit_kit_mode_is_in_stock(fp):
+        return None
+    try:
+        sid = parse_int(str(fp.get("service_id") or "").strip(), min=1, field_name="service_id")
+    except ValueError:
+        return None
+    svc = db.get(Service, sid)
+    if svc is None or not service_requires_kit_block(svc):
+        return None
+    kid = str(fp.get("visit_stock_kit_id") or "").strip()
+    if not kid.isdigit():
+        return "Выберите комплект из наличия для первой услуги."
+    return None
+
+
+def _validate_line_service_kits_for_reserve(db: Session, fp: dict[str, str]) -> str | None:
+    line_kits = _strip_line_service_kits_without_kit_service(
+        db, fp, _collect_line_service_kits_from_fp(fp)
+    )
+    for idx, kit_data in sorted(line_kits.items(), key=lambda x: int(x[0])):
+        if str(kit_data.get("kit_mode") or "").strip().upper() != "IN_STOCK":
+            continue
+        kid = str(kit_data.get("stock_kit_id") or "").strip()
+        if not kid.isdigit():
+            return f"Выберите комплект из наличия для услуги {int(idx) + 1}."
+    return None
+
+
+def _planned_service_kit_map(
+    db: Session, details: dict[str, Any], booking_kit_reserves: list[KitReserve]
+) -> dict[int, Kit]:
+    out: dict[int, Kit] = {}
+    if str(details.get("visit_kit_mode") or "").strip().upper() == "IN_STOCK":
+        k = _visit_stock_kit_from_details(db, details)
+        if k is None:
+            for r in booking_kit_reserves:
+                if r.kit is not None:
+                    k = r.kit
+                    break
+        if k is not None:
+            out[0] = k
+    kits = details.get("line_service_kits") or {}
+    if isinstance(kits, dict):
+        for idx_s, row in kits.items():
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("kit_mode") or "").strip().upper() != "IN_STOCK":
+                continue
+            raw = str(row.get("stock_kit_id") or "").strip()
+            if not raw.isdigit():
+                continue
+            kit = db.get(Kit, int(raw))
+            if kit is not None:
+                try:
+                    out[int(idx_s)] = kit
+                except ValueError:
+                    pass
+    return out
+
+
+def _line_service_kits_prefill_for_form(db: Session, fp: dict[str, str]) -> dict[str, Any]:
+    kits = _collect_line_service_kits_from_fp(fp)
+    out: dict[str, Any] = {}
+    for idx, kit in kits.items():
+        row = dict(kit)
+        raw_id = str(row.get("stock_kit_id") or "").strip()
+        if raw_id.isdigit():
+            k = db.get(Kit, int(raw_id))
+            if k is not None:
+                row["_kit_initial"] = {
+                    "id": int(k.id),
+                    "sku": str(k.sku or ""),
+                    "title": str(k.title or ""),
+                    "pieces_available": int(k.pieces_available or 0),
+                }
+        out[str(idx)] = row
+    return out
+
+
 _BOOKING_VISIT_KIT_DETAIL_KEYS: frozenset[str] = frozenset(
     (
         "visit_kit_mode",
@@ -1118,13 +1284,14 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
             "visit_extra_order_blanks_qty",
             "visit_extra_order_blanks_desc",
         ) + calc_keys
+        if str(fp.get("visit_kit_mode") or "").strip().upper() == "OWN":
+            keys = keys + ("corr_wash",)
         if parse_bool(fp.get("visit_own_need_correction")):
             keys = keys + (
                 "corr_trim_qty",
                 "corr_hourly_hours",
                 "corr_kit_description",
                 "corr_kit_blanks_count",
-                "corr_wash",
                 "corr_steam",
                 "corr_circle",
             )
@@ -1215,6 +1382,14 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
         if strip_visit_kit_keys:
             for k in _BOOKING_VISIT_KIT_DETAIL_KEYS:
                 d.pop(k, None)
+
+        line_kits = _strip_line_service_kits_without_kit_service(
+            db, fp, _collect_line_service_kits_from_fp(fp)
+        )
+        if line_kits:
+            d["line_service_kits"] = line_kits
+        else:
+            d.pop("line_service_kits", None)
 
     return {k: v for k, v in d.items() if not (isinstance(v, str) and str(v).strip() == "")}
 
@@ -1318,7 +1493,9 @@ def _apply_booking_auto_reserves(
         *,
         use_entire_field: str | None = None,
         breakdown_json_field: str | None = None,
+        reserve_fp: dict[str, str] | None = None,
     ) -> None:
+        fp_src = reserve_fp if reserve_fp is not None else fp
         if not kit_id_raw:
             return
         kit_id_raw = str(kit_id_raw).strip()
@@ -1336,8 +1513,8 @@ def _apply_booking_auto_reserves(
             )
             if sum(max_by_key.values()) <= 0:
                 return
-            use_entire = bool(use_entire_field and parse_bool(fp.get(use_entire_field)))
-            raw_j = (str(fp.get(breakdown_json_field) or "").strip() if breakdown_json_field else "")
+            use_entire = bool(use_entire_field and parse_bool(fp_src.get(use_entire_field)))
+            raw_j = (str(fp_src.get(breakdown_json_field) or "").strip() if breakdown_json_field else "")
             usage_by_key: dict[str, int] | None = None
             if raw_j:
                 try:
@@ -1346,7 +1523,7 @@ def _apply_booking_auto_reserves(
                         usage_by_key = {str(k): int(v) for k, v in d.items() if int(v) > 0}
                 except Exception:
                     usage_by_key = None
-            pq = "" if use_entire else (str(fp.get(pieces_field) or "").strip() if pieces_field else "")
+            pq = "" if use_entire else (str(fp_src.get(pieces_field) or "").strip() if pieces_field else "")
             try:
                 blanks_used = parse_int(pq, min=0, field_name="reserve_pieces") if pq else 0
             except ValueError:
@@ -1403,8 +1580,8 @@ def _apply_booking_auto_reserves(
             return
         if kit_reserve_slots_used(db, kit.id) >= get_kit_max_reserves_per_kit(db):
             return
-        use_entire = bool(use_entire_field and parse_bool(fp.get(use_entire_field)))
-        pq = "" if use_entire else (str(fp.get(pieces_field) or "").strip() if pieces_field else "")
+        use_entire = bool(use_entire_field and parse_bool(fp_src.get(use_entire_field)))
+        pq = "" if use_entire else (str(fp_src.get(pieces_field) or "").strip() if pieces_field else "")
         try:
             qty = parse_int(pq, min=1, field_name="reserve_pieces") if pq else avail
         except ValueError:
@@ -1434,12 +1611,33 @@ def _apply_booking_auto_reserves(
             changes=diff_fields(before, kit, ("pieces_available",)),
         )
 
-    if (fp.get("visit_kit_mode") or "") == "IN_STOCK":
+    if _visit_kit_mode_is_in_stock(fp):
         _reserve_kit(
             fp.get("visit_stock_kit_id"),
             "visit_stock_kit_pieces",
             use_entire_field="visit_stock_use_entire",
             breakdown_json_field="visit_stock_breakdown_json",
+        )
+    line_kits = _strip_line_service_kits_without_kit_service(
+        db, fp, _collect_line_service_kits_from_fp(fp)
+    )
+    for _idx, kit_data in line_kits.items():
+        if str(kit_data.get("kit_mode") or "").strip().upper() != "IN_STOCK":
+            continue
+        stock_id = str(kit_data.get("stock_kit_id") or "").strip()
+        if not stock_id:
+            continue
+        line_fp = {
+            "visit_stock_kit_pieces": str(kit_data.get("stock_kit_pieces") or ""),
+            "visit_stock_use_entire": str(kit_data.get("stock_use_entire") or ""),
+            "visit_stock_breakdown_json": str(kit_data.get("stock_breakdown_json") or ""),
+        }
+        _reserve_kit(
+            stock_id,
+            "visit_stock_kit_pieces",
+            use_entire_field="visit_stock_use_entire",
+            breakdown_json_field="visit_stock_breakdown_json",
+            reserve_fp=line_fp,
         )
     if (fp.get("visit_kit_mode") or "") == "OWN" and (fp.get("visit_own_need_extra_blanks") or ""):
         if (fp.get("visit_extra_blanks_mode") or "") == "IN_STOCK":
@@ -1566,6 +1764,7 @@ def admin_booking_new_get(
             fp=fp,
             booking_master_on_ids=[],
             visit_stock_kit_initial=_visit_stock_kit_initial_for_form(db, fp),
+            line_service_kits_prefill=_line_service_kits_prefill_for_form(db, fp),
             consultation_id=consultation.id if consultation else None,
             consultation_comment=consultation_comment,
         ),
@@ -1659,6 +1858,14 @@ async def admin_booking_new_post(  # noqa: C901
         if not err and (fp.get("visit_kit_mode") or "") == "ORDER" and parse_bool(fp.get("visit_order_use_masters")):
             if not visit_order_master_ids:
                 err = "Выберите хотя бы одного мастера для заказа комплекта."
+        if not err:
+            kit_err = _validate_visit_stock_kit_for_reserve(db, fp)
+            if kit_err:
+                err = kit_err
+        if not err:
+            line_kit_err = _validate_line_service_kits_for_reserve(db, fp)
+            if line_kit_err:
+                err = line_kit_err
 
     if not err and kind_raw == BookingKind.PRODUCT_SALE.value:
         pk = str(fp.get("product_kind") or "").strip()
@@ -2029,6 +2236,7 @@ def admin_booking_detail(
             sale_create_url=sale_create_url,
             booking_kit_reserves=booking_kit_reserves,
             visit_stock_kit=_visit_stock_kit_from_details(db, details),
+            planned_service_kits=_planned_service_kit_map(db, details, booking_kit_reserves),
         ),
     )
 
@@ -2074,6 +2282,7 @@ def admin_booking_edit_get(
             fp=fp,
             booking_master_on_ids=master_ids,
             visit_stock_kit_initial=_visit_stock_kit_initial_for_form(db, fp),
+            line_service_kits_prefill=_line_service_kits_prefill_for_form(db, fp),
         ),
     )
 
@@ -2190,6 +2399,14 @@ async def admin_booking_edit_post(
         if not err and (fp.get("visit_kit_mode") or "") == "ORDER" and parse_bool(fp.get("visit_order_use_masters")):
             if not visit_order_master_ids:
                 err = "Выберите хотя бы одного мастера для заказа комплекта."
+        if not err:
+            kit_err = _validate_visit_stock_kit_for_reserve(db, fp)
+            if kit_err:
+                err = kit_err
+        if not err:
+            line_kit_err = _validate_line_service_kits_for_reserve(db, fp)
+            if line_kit_err:
+                err = line_kit_err
 
     if not err and kind_raw == BookingKind.PRODUCT_SALE.value:
         pk = str(fp.get("product_kind") or "").strip()
@@ -2250,6 +2467,7 @@ async def admin_booking_edit_post(
                 fp=fp,
                 booking_master_on_ids=on_ids,
                 visit_stock_kit_initial=_visit_stock_kit_initial_for_form(db, fp),
+            line_service_kits_prefill=_line_service_kits_prefill_for_form(db, fp),
             ),
             status_code=400,
         )
@@ -2328,6 +2546,7 @@ async def admin_booking_edit_post(
                 fp=fp,
                 booking_master_on_ids=on_ids,
                 visit_stock_kit_initial=_visit_stock_kit_initial_for_form(db, fp),
+            line_service_kits_prefill=_line_service_kits_prefill_for_form(db, fp),
             ),
             status_code=400,
         )

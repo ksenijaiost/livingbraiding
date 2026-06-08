@@ -185,8 +185,6 @@
             <div id="lbBookingServiceLines" style="margin-top:10px; display:flex; flex-direction:column; gap:10px;"></div>
           </div>
 
-          <div id="lbBookingSharedKitHost" style="margin-top:12px;"></div>
-
           <div id="lbBookingAllMastersBlock" class="card" style="margin-top: 12px; background:#f8fafc;">
             <div style="font-weight: 600; margin-bottom: 8px;">Мастера на все услуги *</div>
             {% if not masters %}
@@ -255,8 +253,8 @@
               Нужна коррекция
             </label>
             <label style="display:block; margin-bottom: 0;">
-              <input type="checkbox" name="visit_own_need_extra_blanks" {% if fp.get('visit_own_need_extra_blanks') %}checked{% endif %} />
-              Нужны доп. заготовки
+              <input type="checkbox" name="corr_wash" {% if fp.get('corr_wash') %}checked{% endif %} />
+              Стирка
             </label>
           </div>
 
@@ -322,7 +320,6 @@
           </div>
 
           <div style="margin-top: 10px;">
-            <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_wash" {% if fp.get('corr_wash') %}checked{% endif %} /> Стирка</label>
             <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_steam" {% if fp.get('corr_steam') %}checked{% endif %} /> Отпаривание</label>
             <label style="display:block; margin-bottom: 0;"><input type="checkbox" name="corr_circle" {% if fp.get('corr_circle') %}checked{% endif %} /> Одевание на круг</label>
           </div>
@@ -613,6 +610,7 @@
     {{ {'category_id': (fp.get('service_category_id') or 0)|int, 'subcategory_id': (fp.get('service_subcategory_id') or 0)|int, 'service_id': (fp.get('service_id') or 0)|int } | tojson }}
   </script>
   <script type="application/json" id="lb-booking-initial-kit-json">{{ visit_stock_kit_initial | default(none) | tojson }}</script>
+  <script type="application/json" id="lb-booking-line-kits-json">{{ line_service_kits_prefill | default({}) | tojson }}</script>
 
   <script>
     (function () {
@@ -681,6 +679,218 @@
       }
 
       var servicesFlat = flattenServices().filter(function (x) { return x.id > 0; });
+      var visitKitTplHtml = '';
+      var visitKitCorrectionTplHtml = '';
+      (function cacheVisitKitTpl() {
+        var el = document.getElementById('visit_kit_card');
+        if (el) {
+          visitKitTplHtml = el.innerHTML;
+          el.parentNode.removeChild(el);
+        }
+        var corr = document.getElementById('visit_correction_block');
+        if (corr) {
+          visitKitCorrectionTplHtml = corr.outerHTML;
+          corr.parentNode.removeChild(corr);
+        }
+      })();
+      var lineKitsPrefill = (function () {
+        var el = document.getElementById('lb-booking-line-kits-json');
+        if (!el) return {};
+        try {
+          var v = JSON.parse(el.textContent || '{}');
+          return v && typeof v === 'object' ? v : {};
+        } catch (e) {
+          return {};
+        }
+      })();
+      function lineKitPrefill(idx, field, def) {
+        var row = lineKitsPrefill[String(idx)] || lineKitsPrefill[idx] || {};
+        var v = row[field];
+        if (v == null || String(v).trim() === '') return def || '';
+        return String(v);
+      }
+      function lineKitChecked(idx, field) {
+        var v = String(lineKitPrefill(idx, field, '')).toLowerCase();
+        return v === '1' || v === 'on' || v === 'true' || v === 'yes';
+      }
+      function bookingKitSuggestUrl(q) {
+        var params = new URLSearchParams();
+        params.set('q', q || '');
+        var cidEl = document.getElementById('existing_client_id') || document.getElementById('client_id');
+        var cid = cidEl && cidEl.value ? String(cidEl.value).trim() : '';
+        if (cid && /^\d+$/.test(cid)) params.set('client_id', cid);
+        return '/master/kits/suggest?' + params.toString();
+      }
+      function bookingKitSuggestLine(k) {
+        if (!k) return '';
+        var free = toInt(k.pieces_available);
+        var rc = toInt(k.reserved_for_selected_client);
+        var sku = k.sku || ('#' + k.id);
+        var title = k.title || '';
+        var part = 'остаток свободно ' + free;
+        if (rc > 0) part += ', резерв клиента: ' + rc + ' шт.';
+        var line = sku + ' — ' + title + ' (' + part + ')';
+        if (k.missing_sale_price) line = '⚠️ ' + line;
+        return line;
+      }
+      function setLineSelectedKit(idx, kit) {
+        var hid = document.getElementById('line_' + idx + '_stock_kit_id');
+        if (hid) hid.value = String(kit.id);
+        var box = document.getElementById('line_' + idx + '_selected_kit_box');
+        var line = document.getElementById('line_' + idx + '_selected_kit_line');
+        if (box) box.style.display = 'block';
+        if (line) line.innerHTML = 'Выбрано: <strong>' + esc(bookingKitSuggestLine(kit)) + '</strong>';
+        var ul = document.querySelector('[data-line-kit-suggest="' + idx + '"]');
+        if (ul) ul.innerHTML = '';
+      }
+      async function lineKitSuggest(q, idx, onPick) {
+        var res = await fetch(bookingKitSuggestUrl(q || ''));
+        if (!res.ok) return;
+        var data = {};
+        try { data = await res.json(); } catch (e) { data = {}; }
+        var ul = document.querySelector('[data-line-kit-suggest="' + idx + '"]');
+        if (!ul) return;
+        ul.innerHTML = '';
+        (data.kits || []).forEach(function (k) {
+          var li = document.createElement('li');
+          li.style.marginBottom = '8px';
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'secondary';
+          b.textContent = bookingKitSuggestLine(k);
+          b.addEventListener('click', function () { onPick(k); });
+          li.appendChild(b);
+          ul.appendChild(li);
+        });
+      }
+      function syncExtraLineKitMode(idx, rootEl) {
+        if (!rootEl) return;
+        var m = (rootEl.querySelector('input[name="line_' + idx + '_kit_mode"]:checked') || {}).value || 'IN_STOCK';
+        var stock = rootEl.querySelector('[data-line-kit-stock="' + idx + '"]');
+        var own = rootEl.querySelector('[data-line-kit-own="' + idx + '"]');
+        var order = rootEl.querySelector('[data-line-kit-order="' + idx + '"]');
+        if (stock) stock.style.display = (m === 'IN_STOCK') ? 'block' : 'none';
+        if (own) own.style.display = (m === 'OWN') ? 'block' : 'none';
+        if (order) order.style.display = (m === 'ORDER') ? 'block' : 'none';
+        syncExtraLineKitOwnCorrection(idx, rootEl);
+      }
+      function syncExtraLineKitOwnCorrection(idx, rootEl) {
+        if (!rootEl) return;
+        var m = (rootEl.querySelector('input[name="line_' + idx + '_kit_mode"]:checked') || {}).value || 'IN_STOCK';
+        var needCorr = !!((rootEl.querySelector('input[name="line_' + idx + '_own_need_correction"]') || {}).checked);
+        var panel = rootEl.querySelector('[data-line-own-correction="' + idx + '"]');
+        if (panel) panel.style.display = (m === 'OWN' && needCorr) ? 'block' : 'none';
+      }
+      function syncExtraLineKitEntire(idx, rootEl) {
+        if (!rootEl) return;
+        var cb = rootEl.querySelector('input[name="line_' + idx + '_stock_use_entire"]');
+        var inp = rootEl.querySelector('input[name="line_' + idx + '_stock_kit_pieces"]');
+        if (!cb || !inp) return;
+        inp.disabled = !!cb.checked;
+        if (cb.checked) inp.value = '';
+      }
+      function bindExtraLineKitControls(idx, rootEl) {
+        if (!rootEl || rootEl.getAttribute('data-line-kit-bound') === '1') return;
+        rootEl.setAttribute('data-line-kit-bound', '1');
+        rootEl.querySelectorAll('input[name="line_' + idx + '_kit_mode"]').forEach(function (r) {
+          r.addEventListener('change', function () { syncExtraLineKitMode(idx, rootEl); });
+        });
+        var ownCorrCb = rootEl.querySelector('input[name="line_' + idx + '_own_need_correction"]');
+        if (ownCorrCb) ownCorrCb.addEventListener('change', function () { syncExtraLineKitOwnCorrection(idx, rootEl); });
+        var entCb = rootEl.querySelector('input[name="line_' + idx + '_stock_use_entire"]');
+        if (entCb) entCb.addEventListener('change', function () { syncExtraLineKitEntire(idx, rootEl); });
+        syncExtraLineKitMode(idx, rootEl);
+        syncExtraLineKitEntire(idx, rootEl);
+        var searchInp = rootEl.querySelector('[data-line-kit-search="' + idx + '"]');
+        var findBtn = rootEl.querySelector('[data-line-kit-find="' + idx + '"]');
+        var suggestTimer = null;
+        if (searchInp) {
+          searchInp.addEventListener('input', function () {
+            clearTimeout(suggestTimer);
+            suggestTimer = setTimeout(function () {
+              lineKitSuggest(String(searchInp.value || '').trim(), idx, function (k) { setLineSelectedKit(idx, k); });
+            }, 350);
+          });
+        }
+        if (findBtn) {
+          findBtn.addEventListener('click', function () {
+            var q = searchInp ? String(searchInp.value || '').trim() : '';
+            lineKitSuggest(q, idx, function (k) { setLineSelectedKit(idx, k); });
+          });
+        }
+        var initKit = lineKitsPrefill[String(idx)] || lineKitsPrefill[idx] || null;
+        if (initKit && initKit._kit_initial && initKit._kit_initial.id) {
+          setLineSelectedKit(idx, initKit._kit_initial);
+        }
+      }
+      function bindLineKitEditor(idx, rootEl) {
+        if (!rootEl) return;
+        if (idx === 0) {
+          if (typeof window.lbBookingBindVisitKitControls === 'function') window.lbBookingBindVisitKitControls();
+          if (typeof window.lbBookingSyncVisitKitMode === 'function') window.lbBookingSyncVisitKitMode();
+          return;
+        }
+        var kitRoot = rootEl.querySelector('[data-line-kit-root="' + idx + '"]');
+        if (kitRoot) bindExtraLineKitControls(idx, kitRoot);
+      }
+      function lineKitEditorHtml(idx, svc) {
+        if (!svc || !svc.requires_kit_block) return '';
+        var commentBlock =
+          '<div style="margin-top:10px;"><label>Комментарий к комплекту</label>' +
+          '<textarea rows="2" maxlength="600" data-line-kit-note="1" style="width:100%; box-sizing:border-box;" placeholder="Примечание по комплекту"></textarea></div>';
+        if (idx === 0) {
+          if (!visitKitTplHtml) return commentBlock;
+          var h0 = '<div class="card" style="margin-top:8px; background:#f8fafc;" data-line-kit-root="0">' + visitKitTplHtml;
+          if (visitKitCorrectionTplHtml) h0 += visitKitCorrectionTplHtml;
+          h0 += commentBlock + '</div>';
+          return h0;
+        }
+        var mode = (lineKitPrefill(idx, 'kit_mode', 'IN_STOCK') || 'IN_STOCK').toUpperCase();
+        var hasKit = !!lineKitPrefill(idx, 'stock_kit_id', '');
+        return '<div class="card" style="margin-top:8px; background:#f8fafc;" data-line-kit-root="' + idx + '">' +
+          '<div style="font-weight:600; margin-bottom:6px;">Комплект</div>' +
+          '<div style="display:flex; gap:12px; flex-wrap:wrap;">' +
+            '<label><input type="radio" name="line_' + idx + '_kit_mode" value="IN_STOCK"' + (mode === 'IN_STOCK' ? ' checked' : '') + ' /> Из наличия</label>' +
+            '<label><input type="radio" name="line_' + idx + '_kit_mode" value="OWN"' + (mode === 'OWN' ? ' checked' : '') + ' /> Свой</label>' +
+            '<label><input type="radio" name="line_' + idx + '_kit_mode" value="ORDER"' + (mode === 'ORDER' ? ' checked' : '') + ' /> Заказ</label>' +
+          '</div>' +
+          '<div data-line-kit-stock="' + idx + '" style="margin-top:10px; display:' + (mode === 'IN_STOCK' ? 'block' : 'none') + ';">' +
+            '<input type="hidden" name="line_' + idx + '_stock_kit_id" id="line_' + idx + '_stock_kit_id" value="' + esc(lineKitPrefill(idx, 'stock_kit_id', '')) + '" />' +
+            '<input type="hidden" name="line_' + idx + '_stock_breakdown_json" value="' + esc(lineKitPrefill(idx, 'stock_breakdown_json', '')) + '" />' +
+            '<label>Комплект из наличия</label>' +
+            '<div class="row" style="align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:6px;">' +
+              '<div style="flex:1; min-width:160px;"><input type="search" id="line_' + idx + '_kit_search_q" data-line-kit-search="' + idx + '" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" /></div>' +
+              '<div><button type="button" class="secondary" data-line-kit-find="' + idx + '">Найти</button></div>' +
+            '</div>' +
+            '<ul id="line_' + idx + '_kit_suggest_list" data-line-kit-suggest="' + idx + '" style="list-style:none; padding-left:0; margin:10px 0 0; max-height:220px; overflow:auto;"></ul>' +
+            '<div id="line_' + idx + '_selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;' + (hasKit ? '' : 'display:none;') + '">' +
+              '<p id="line_' + idx + '_selected_kit_line" style="margin:0;"></p>' +
+              '<div style="margin-top:10px;"><label style="display:flex; align-items:flex-start; gap:8px; font-weight:normal;">' +
+                '<input type="checkbox" name="line_' + idx + '_stock_use_entire"' + (lineKitChecked(idx, 'stock_use_entire') ? ' checked' : '') + ' />' +
+                '<span>Весь свободный остаток (все доступные заготовки)</span></label></div>' +
+              '<div class="row" style="margin-top:10px;"><div><label>Или заготовок зарезервировать</label>' +
+                '<input type="number" name="line_' + idx + '_stock_kit_pieces" min="0" step="1" value="' + esc(lineKitPrefill(idx, 'stock_kit_pieces', '')) + '" /></div></div>' +
+            '</div>' +
+          '</div>' +
+          '<div data-line-kit-own="' + idx + '" style="margin-top:10px; display:' + (mode === 'OWN' ? 'block' : 'none') + ';">' +
+            '<label style="display:block; margin-bottom:6px;"><input type="checkbox" name="line_' + idx + '_own_need_correction"' + (lineKitChecked(idx, 'own_need_correction') ? ' checked' : '') + ' /> Нужна коррекция</label>' +
+            '<label style="display:block; margin-bottom:0;"><input type="checkbox" name="line_' + idx + '_corr_wash"' + (lineKitChecked(idx, 'corr_wash') ? ' checked' : '') + ' /> Стирка</label>' +
+            '<div data-line-own-correction="' + idx + '" style="margin-top:10px; display:' + ((mode === 'OWN' && lineKitChecked(idx, 'own_need_correction')) ? 'block' : 'none') + '; padding:8px; border:1px solid #e5e7eb; border-radius:8px; background:#fff;">' +
+              '<div class="row"><div><label>Стрижка (1шт)</label><input type="number" name="line_' + idx + '_corr_trim_qty" min="0" step="1" value="' + esc(lineKitPrefill(idx, 'corr_trim_qty', '0')) + '" /></div>' +
+              '<div><label>Почасовая коррекция, ч</label><input type="number" name="line_' + idx + '_corr_hourly_hours" min="0" step="0.25" value="' + esc(lineKitPrefill(idx, 'corr_hourly_hours', '')) + '" /></div></div>' +
+              '<div class="row" style="margin-top:6px;"><div style="flex:1;"><label>Описание комплекта</label><input type="text" name="line_' + idx + '_corr_kit_description" maxlength="500" value="' + esc(lineKitPrefill(idx, 'corr_kit_description', '')) + '" /></div>' +
+              '<div><label>Заготовок в комплекте</label><input type="number" name="line_' + idx + '_corr_kit_blanks_count" min="0" step="1" value="' + esc(lineKitPrefill(idx, 'corr_kit_blanks_count', '')) + '" /></div></div>' +
+            '</div>' +
+          '</div>' +
+          '<div data-line-kit-order="' + idx + '" style="margin-top:10px; display:' + (mode === 'ORDER' ? 'block' : 'none') + ';">' +
+            '<div class="row"><div><label>Количество заготовок</label>' +
+              '<input type="number" name="line_' + idx + '_order_blanks_qty" min="0" step="1" value="' + esc(lineKitPrefill(idx, 'order_blanks_qty', '')) + '" /></div>' +
+              '<div><label>Описание (вид, материал и пр.)</label>' +
+              '<input name="line_' + idx + '_order_blanks_desc" maxlength="400" value="' + esc(lineKitPrefill(idx, 'order_blanks_desc', '')) + '" /></div></div>' +
+          '</div>' +
+          commentBlock +
+        '</div>';
+      }
       var categoriesById = {};
       var subcategoriesById = {};
       for (var sf = 0; sf < servicesFlat.length; sf++) {
@@ -806,6 +1016,9 @@
       function serviceEditorHtml(svc, idx) {
         if (!svc) return '';
         var h = '';
+        if (svc.requires_kit_block) {
+          h += lineKitEditorHtml(idx, svc);
+        }
         if (svc.requires_tail_block) {
           h += '<div class="card" style="margin-top:8px; background:#f8fafc;">' +
             '<div style="font-weight:600; margin-bottom:6px;">Хвост/резинка</div>' +
@@ -860,6 +1073,7 @@
           var editor = serviceEditorHtml(svc, idx);
           editorHost.innerHTML = editor;
           editorHost.style.display = editor ? '' : 'none';
+          bindLineKitEditor(idx, editorHost);
         }
         if (typeof window.lbBookingUpdateKitVisibility === 'function') {
           window.lbBookingUpdateKitVisibility();
@@ -1337,18 +1551,16 @@
       });
 
       initPrefillLines();
-      (function moveVisitKitCardToSharedHost() {
-        var host = document.getElementById('lbBookingSharedKitHost');
-        var kit = document.getElementById('visit_kit_card');
-        if (host && kit && kit.parentElement !== host) host.appendChild(kit);
-      })();
       renderAllServiceFlags();
       setModeUi();
       window.lbBookingRefreshMasters = refreshAvailableMasters;
       window.lbBookingSyncHiddenLines = syncBookingHiddenLines;
 
       if (bookingForm) {
-        bookingForm.addEventListener('submit', function (e) {
+        bookingForm.addEventListener('submit', function () {
+          if (typeof window.lbBookingEnableKitFieldsForSubmit === 'function') {
+            window.lbBookingEnableKitFieldsForSubmit();
+          }
           syncBookingHiddenLines();
         }, true);
         bookingForm.addEventListener('submit', function (e) {
