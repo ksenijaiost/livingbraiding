@@ -717,6 +717,7 @@
       var line0DurM = document.getElementById('lbBookingLine0DurM');
       var hidIds = document.getElementById('planned_service_ids');
       var hidLines = document.getElementById('booking_service_lines_json');
+      var initialLinesJson = hidLines ? String(hidLines.value || '') : '';
       var bookingForm = document.querySelector('form[method="post"]');
 
       function modeValue() {
@@ -1013,6 +1014,12 @@
       function readLineMasters(lineIdx) {
         return uniqIds(Array.from(document.querySelectorAll('input[data-line-master="' + lineIdx + '"]:checked')).map(function (x) { return x.value; }));
       }
+      function getInitialLineSpec(idx) {
+        var arr = parseJsonArray(initialLinesJson);
+        if (idx < 0 || idx >= arr.length) return null;
+        var item = arr[idx];
+        return (item && typeof item === 'object') ? item : null;
+      }
       function lineRowEl(idx) {
         if (idx === 0) return null;
         var row = state.extraLines.find(function (x) { return x.idx === idx; });
@@ -1020,17 +1027,39 @@
         return document.querySelector('[data-service-line-idx="' + idx + '"]');
       }
       function lineTimeValue(idx) {
-        if (idx === 0) return String((plannedTime && plannedTime.value) || '').trim();
+        if (idx === 0) {
+          var t0 = String((plannedTime && plannedTime.value) || '').trim();
+          if (t0) return t0;
+          var pref0 = getInitialLineSpec(0);
+          return pref0 ? String(pref0.planned_time || '').trim() : '';
+        }
         var row = lineRowEl(idx);
-        if (!row) return '';
+        if (!row) {
+          var prefRow = getInitialLineSpec(idx);
+          return prefRow ? String(prefRow.planned_time || '').trim() : '';
+        }
         var tEl = row.querySelector('[data-line-time]');
-        return String((tEl && tEl.value) || '').trim();
+        var t = String((tEl && tEl.value) || '').trim();
+        if (t) return t;
+        var pref = getInitialLineSpec(idx);
+        return pref ? String(pref.planned_time || '').trim() : '';
       }
       function lineServiceId(idx) {
-        if (idx === 0) return toInt(serviceSel && serviceSel.value);
+        if (idx === 0) {
+          var sid0 = toInt(serviceSel && serviceSel.value);
+          if (sid0 > 0) return sid0;
+          var pref0 = getInitialLineSpec(0);
+          return pref0 ? toInt(pref0.service_id) : 0;
+        }
         var row = lineRowEl(idx);
-        if (!row) return 0;
-        return toInt((row.querySelector('[data-line-service]') || {}).value || 0);
+        if (!row) {
+          var prefRow = getInitialLineSpec(idx);
+          return prefRow ? toInt(prefRow.service_id) : 0;
+        }
+        var sid = toInt((row.querySelector('[data-line-service]') || {}).value || 0);
+        if (sid > 0) return sid;
+        var pref = getInitialLineSpec(idx);
+        return pref ? toInt(pref.service_id) : 0;
       }
       function allLineIndices() {
         var merged = [0];
@@ -1048,7 +1077,14 @@
             merged.push(idx);
           }
         });
-        return merged;
+        var initial = parseJsonArray(initialLinesJson);
+        for (var ii = 1; ii < initial.length; ii++) {
+          if (!seen[ii]) {
+            seen[ii] = true;
+            merged.push(ii);
+          }
+        }
+        return merged.sort(function (a, b) { return a - b; });
       }
       function buildLinesForSubmit() {
         var out = [];
@@ -1059,13 +1095,19 @@
           var idx = idxs[i];
           var sid = lineServiceId(idx);
           if (sid <= 0) continue;
+          var pref = getInitialLineSpec(idx);
           var mids = per ? readLineMasters(idx) : allMasterIds;
+          if ((!mids || !mids.length) && pref && Array.isArray(pref.master_ids)) {
+            mids = uniqIds(pref.master_ids);
+          }
+          var dur = lineDurationOverrideValue(idx);
+          if (dur == null || dur <= 0) dur = pref ? toInt(pref.duration_minutes) : 0;
           out.push({
             service_id: sid,
             planned_time: lineTimeValue(idx),
             master_ids: mids,
             comment: lineCommentValue(idx),
-            duration_minutes: lineDurationOverrideValue(idx) || 0,
+            duration_minutes: dur > 0 ? dur : 0,
           });
         }
         return out;
@@ -1300,7 +1342,6 @@
       });
 
       initPrefillLines();
-      syncBookingHiddenLines();
       (function moveAdvancedVisitBlocksToLine0() {
         var host = document.getElementById('lbBookingLine0AdvancedBlocks');
         var kit = document.getElementById('visit_kit_card');
@@ -1309,6 +1350,7 @@
       renderAllServiceFlags();
       setModeUi();
       window.lbBookingRefreshMasters = refreshAvailableMasters;
+      window.lbBookingSyncHiddenLines = syncBookingHiddenLines;
 
       if (bookingForm) {
         bookingForm.addEventListener('submit', function (e) {
@@ -1322,6 +1364,15 @@
             e.preventDefault();
             alert('Добавьте хотя бы одну услугу для брони.');
             return;
+          }
+          var initialCount = parseJsonArray(initialLinesJson).length;
+          if (editingBookingId > 0 && initialCount > 0 && lines.length < initialCount) {
+            var dropMsg =
+              'В этой брони было ' + initialCount + ' услуг, сейчас сохранится ' + lines.length + '.\n' +;
+            if (!window.confirm(dropMsg)) {
+              e.preventDefault();
+              return;
+            }
           }
           var per = modeValue() === 'per_service';
           if (per) {
