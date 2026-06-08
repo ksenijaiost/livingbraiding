@@ -847,13 +847,27 @@ function initAdminBookingForm() {
     });
   }
 
-  function updateVisitKitVisibility() {
+  function serviceNeedsKitBlock(serviceId) {
+    var sid = parseInt(String(serviceId || "0"), 10) || 0;
+    if (sid <= 0) return false;
+    var meta = serviceMetaById[sid];
+    return !!(meta && meta.requiresKit);
+  }
+
+  function anyBookingLineNeedsKit() {
     var svcSel = byId("service_id");
+    if (svcSel && serviceNeedsKitBlock(svcSel.value)) return true;
+    var extraSels = document.querySelectorAll("[data-service-line-idx] [data-line-service]");
+    for (var i = 0; i < extraSels.length; i++) {
+      if (serviceNeedsKitBlock(extraSels[i].value)) return true;
+    }
+    return false;
+  }
+
+  function updateVisitKitVisibility() {
     var kitCard = byId("visit_kit_card");
-    if (!svcSel || !kitCard) return;
-    var svcId = parseInt(svcSel.value || "0", 10) || 0;
-    var meta = serviceMetaById[svcId];
-    var needsKit = meta && meta.requiresKit;
+    if (!kitCard) return;
+    var needsKit = anyBookingLineNeedsKit();
     kitCard.style.display = needsKit ? "block" : "none";
     if (needsKit) {
       setBookingVisitKitControlsDisabled(false);
@@ -1064,6 +1078,12 @@ function initAdminBookingForm() {
   }
   if (typeof window.lbBookingRefreshMasters === "function") {
     window.lbBookingRefreshMasters();
+  }
+  window.lbBookingUpdateKitVisibility = updateVisitKitVisibility;
+
+  var initKit = jsonById("lb-booking-initial-kit-json", null);
+  if (initKit && initKit.id) {
+    setSelectedKit("visit_stock_kit_id", "visit_selected_kit_box", "visit_selected_kit_line", initKit);
   }
 }
 
