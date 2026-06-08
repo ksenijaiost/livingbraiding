@@ -1059,6 +1059,9 @@ function initAdminBookingForm() {
   if (initialCatId || initialSubId || initialSvcId) {
     setServiceSelections(initialCatId, initialSubId, initialSvcId);
   }
+  if (typeof window.lbBookingSyncHiddenLines === "function") {
+    window.lbBookingSyncHiddenLines();
+  }
   if (typeof window.lbBookingRefreshMasters === "function") {
     window.lbBookingRefreshMasters();
   }

@@ -2142,6 +2142,15 @@ async def admin_booking_edit_post(
             err = svc_err
         else:
             _apply_parsed_visit_lines_to_fp(fp, planned_service_lines)
+            existing_line_count = len(list(b.planned_services or []))
+            if existing_line_count > 1 and len(planned_service_lines) < existing_line_count:
+                _logger.warning(
+                    "booking edit #%s: service line count decreased %s -> %s, service_ids=%s",
+                    booking_id,
+                    existing_line_count,
+                    len(planned_service_lines),
+                    [int(x["service_id"]) for x in planned_service_lines],
+                )
             _logger.info(
                 "booking edit #%s: raw_lines_json_len=%s, parsed %s line(s), service_ids=%s, durations=%s, masters=%s",
                 booking_id,
