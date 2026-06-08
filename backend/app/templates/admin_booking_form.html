@@ -1079,15 +1079,15 @@
       }
       function lineCommentValue(idx) {
         var base = '';
-        var row = null;
+        var rowEl = null;
         if (idx === 0) base = String((line0Comment && line0Comment.value) || '').trim();
         else {
-          row = state.extraLines.find(function (x) { return x.idx === idx; });
-          if (!row || !row.el) return '';
-          var cEl = row.el.querySelector('[data-line-comment]');
+          rowEl = lineRowEl(idx);
+          if (!rowEl) return '';
+          var cEl = rowEl.querySelector('[data-line-comment]');
           base = String((cEl && cEl.value) || '').trim();
         }
-        var root = idx === 0 ? (document.getElementById('lbBookingLine0ServiceEditor') || document) : ((row && row.el) ? row.el : document);
+        var root = idx === 0 ? (document.getElementById('lbBookingLine0ServiceEditor') || document) : (rowEl || document);
         var details = {
           kit: String(((root.querySelector('[data-line-kit-note]') || {}).value) || '').trim(),
           tail: String(((root.querySelector('[data-line-tail-note]') || {}).value) || '').trim(),
@@ -1109,10 +1109,10 @@
         if (idx === 0) return durationOverrideMinutes();
         var row = lineRowEl(idx);
         if (!row) return null;
-        var onEl = row.el.querySelector('[data-line-dur-on]');
+        var onEl = row.querySelector('[data-line-dur-on]');
         if (!onEl || !onEl.checked) return null;
-        var hEl = row.el.querySelector('[data-line-dur-h]');
-        var mEl = row.el.querySelector('[data-line-dur-m]');
+        var hEl = row.querySelector('[data-line-dur-h]');
+        var mEl = row.querySelector('[data-line-dur-m]');
         var h = toInt(hEl ? hEl.value : 0);
         var m = toInt(mEl ? mEl.value : 0);
         if (m > 59) m = 59;
@@ -1156,8 +1156,8 @@
               cb.disabled = true;
             });
             var msgEl = (lid === 0) ? msgLine0 : ((function () {
-              var row = state.extraLines.find(function (x) { return x.idx === lid; });
-              return row && row.el ? row.el.querySelector('[data-line-msg]') : null;
+              var row = lineRowEl(lid);
+              return row ? row.querySelector('[data-line-msg]') : null;
             })());
             if (msgEl) msgEl.textContent = reason || '';
           });
@@ -1190,9 +1190,17 @@
             lineAllow[idx] = await fetchAllowSet(day, t, sid, dur);
           }
         } catch (e) {
-          console.error(e);
-          if (msgAll) msgAll.textContent = 'Не удалось проверить график мастеров.';
-          if (msgLine0) msgLine0.textContent = 'Не удалось проверить график мастеров.';
+          console.error('refreshAvailableMasters failed', e);
+          var errTxt = 'Не удалось проверить график мастеров.';
+          if (e && e.message) errTxt += ' (' + String(e.message) + ')';
+          if (msgAll) msgAll.textContent = errTxt;
+          if (msgLine0) msgLine0.textContent = errTxt;
+          idxs.forEach(function (lid) {
+            if (lid === 0) return;
+            var row = lineRowEl(lid);
+            var msg = row ? row.querySelector('[data-line-msg]') : null;
+            if (msg) msg.textContent = errTxt;
+          });
           return;
         }
 
@@ -1231,8 +1239,8 @@
               if (!ok2 && !keepAssigned2) cb2.checked = false;
             }
             var msg = (lid === 0) ? msgLine0 : ((function () {
-              var row = state.extraLines.find(function (x) { return x.idx === lid; });
-              return row && row.el ? row.el.querySelector('[data-line-msg]') : null;
+              var row = lineRowEl(lid);
+              return row ? row.querySelector('[data-line-msg]') : null;
             })());
             if (msg) msg.textContent = (allow && allow.size === 0) ? 'На это время доступных мастеров нет.' : '';
           }
