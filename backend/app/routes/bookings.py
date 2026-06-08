@@ -442,7 +442,7 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
                     else None
                 )
                 dur = int(ps.duration_minutes or 0)
-                if dur <= 0 and i == 0 and len(sorted_lines) == 1 and details_dur > 0:
+                if dur <= 0 and i == 0 and details_dur > 0:
                     dur = details_dur
                 line_item: dict[str, Any] = {
                     "service_id": sid,
