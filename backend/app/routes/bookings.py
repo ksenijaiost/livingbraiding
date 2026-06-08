@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
@@ -16,6 +17,8 @@ from sqlalchemy import and_, case, delete, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.audit import FieldChange, diff_fields, write_audit_rows
+
+_logger = logging.getLogger("livingbraiding.bookings")
 from app.auth import AuthUser, require_role
 from app.client_validation import format_created_by_label, strip_or_none
 from app.consultation_booking import (
@@ -229,6 +232,48 @@ def _audit_sale_order_masters_label(db: Session, booking_id: int) -> str:
     return "; ".join(parts) if parts else "—"
 
 
+_DETAILS_KIT_DEFAULT_BACKFILL: dict[str, set[str]] = {
+    "visit_kit_mode": {"IN_STOCK"},
+    "visit_extra_blanks_mode": {"IN_STOCK"},
+}
+
+
+def _apply_parsed_visit_lines_to_fp(fp: dict[str, str], line_specs: list[dict[str, Any]]) -> None:
+    """Синхронизируем fp с распарсенными строками услуг (для details_json и скрытых полей)."""
+    if not line_specs:
+        return
+    fp["service_id"] = str(int(line_specs[0]["service_id"]))
+    fp["planned_service_ids"] = json.dumps(
+        [int(x["service_id"]) for x in line_specs],
+        ensure_ascii=False,
+    )
+    line_payload: list[dict[str, Any]] = []
+    for spec in line_specs:
+        dur = _parse_line_duration_minutes(spec.get("duration_minutes"))
+        t0 = spec.get("planned_time")
+        t_s = t0.strftime("%H:%M") if isinstance(t0, time) else str(fp.get("planned_time") or "")
+        item: dict[str, Any] = {
+            "service_id": int(spec["service_id"]),
+            "planned_time": t_s,
+            "master_ids": [int(x) for x in (spec.get("master_ids") or []) if int(x) > 0],
+            "comment": str(spec.get("comment") or ""),
+        }
+        if dur > 0:
+            item["duration_minutes"] = dur
+        line_payload.append(item)
+    fp["booking_service_lines_json"] = json.dumps(line_payload, ensure_ascii=False)
+    if len(line_specs) == 1:
+        dur0 = _parse_line_duration_minutes(line_specs[0].get("duration_minutes"))
+        if dur0 > 0:
+            fp["visit_custom_duration_on"] = "1"
+            fp["visit_custom_duration_h"] = str(dur0 // 60)
+            fp["visit_custom_duration_m"] = str(dur0 % 60)
+        else:
+            fp.pop("visit_custom_duration_on", None)
+            fp.pop("visit_custom_duration_h", None)
+            fp.pop("visit_custom_duration_m", None)
+
+
 def _booking_details_audit_changes(db: Session, before_raw: str | None, after_raw: str | None) -> list[FieldChange]:
     """В аудит пишем изменения по ключам details_json (а не весь JSON)."""
 
@@ -249,6 +294,8 @@ def _booking_details_audit_changes(db: Session, before_raw: str | None, after_ra
         a = before.get(k)
         b = after.get(k)
         if a == b:
+            continue
+        if a is None and b is not None and str(b) in _DETAILS_KIT_DEFAULT_BACKFILL.get(k, set()):
             continue
         if k in ("sale_kit_order_master_ids", "visit_order_master_ids"):
             out.append(
@@ -578,6 +625,8 @@ def _parse_booking_visit_lines_and_masters(
     """Парсим услуги/время/мастеров для брони визита."""
     base_time = str(fp.get("planned_time") or "").strip()
     lines_json_raw = str(fp.get("booking_service_lines_json") or "").strip()
+    if not lines_json_raw and hasattr(form_raw, "get"):
+        lines_json_raw = str(form_raw.get("booking_service_lines_json") or "").strip()
     lines_json: list[dict[str, Any]] = []
     if lines_json_raw:
         try:
@@ -1097,6 +1146,19 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
             d[key] = sv
 
     if kind_raw == BookingKind.VISIT.value:
+        # Длительность из строк услуг (новая форма) → minutes в details_json.
+        lines_raw = str(fp.get("booking_service_lines_json") or "").strip()
+        if lines_raw:
+            try:
+                parsed_lines = json.loads(lines_raw)
+                if isinstance(parsed_lines, list) and len(parsed_lines) == 1 and isinstance(parsed_lines[0], dict):
+                    dur_line = _parse_line_duration_minutes(parsed_lines[0].get("duration_minutes"))
+                    if dur_line > 0:
+                        fp["visit_custom_duration_on"] = "1"
+                        fp["visit_custom_duration_h"] = str(dur_line // 60)
+                        fp["visit_custom_duration_m"] = str(dur_line % 60)
+            except Exception:
+                pass
         # Нормализуем кастомную длительность → minutes в details_json (и сохраняем H/M для UI).
         if parse_bool(fp.get("visit_custom_duration_on")):
             raw_h = str(fp.get("visit_custom_duration_h") or "").strip()
@@ -1560,7 +1622,16 @@ async def admin_booking_new_post(  # noqa: C901
         )
         if svc_err:
             err = svc_err
-        elif (fp.get("visit_kit_mode") or "") == "ORDER" and parse_bool(fp.get("visit_order_use_masters")):
+        else:
+            _apply_parsed_visit_lines_to_fp(fp, planned_service_lines)
+            _logger.info(
+                "booking create: %s service line(s), service_ids=%s, durations=%s, masters=%s",
+                len(planned_service_lines),
+                [int(x["service_id"]) for x in planned_service_lines],
+                [_parse_line_duration_minutes(x.get("duration_minutes")) for x in planned_service_lines],
+                on_ids,
+            )
+        if not err and (fp.get("visit_kit_mode") or "") == "ORDER" and parse_bool(fp.get("visit_order_use_masters")):
             if not visit_order_master_ids:
                 err = "Выберите хотя бы одного мастера для заказа комплекта."
 
@@ -2069,7 +2140,18 @@ async def admin_booking_edit_post(
         )
         if svc_err:
             err = svc_err
-        elif (fp.get("visit_kit_mode") or "") == "ORDER" and parse_bool(fp.get("visit_order_use_masters")):
+        else:
+            _apply_parsed_visit_lines_to_fp(fp, planned_service_lines)
+            _logger.info(
+                "booking edit #%s: raw_lines_json_len=%s, parsed %s line(s), service_ids=%s, durations=%s, masters=%s",
+                booking_id,
+                len(str(fp.get("booking_service_lines_json") or "")),
+                len(planned_service_lines),
+                [int(x["service_id"]) for x in planned_service_lines],
+                [_parse_line_duration_minutes(x.get("duration_minutes")) for x in planned_service_lines],
+                on_ids,
+            )
+        if not err and (fp.get("visit_kit_mode") or "") == "ORDER" and parse_bool(fp.get("visit_order_use_masters")):
             if not visit_order_master_ids:
                 err = "Выберите хотя бы одного мастера для заказа комплекта."
 
@@ -2337,6 +2419,11 @@ async def admin_booking_edit_post(
         ),
     )
     db.commit()
+    _logger.info(
+        "booking edit #%s saved: planned_services=%s",
+        b.id,
+        after_planned_services,
+    )
     return RedirectResponse(url=f"/bookings/{b.id}", status_code=303)
 
 
