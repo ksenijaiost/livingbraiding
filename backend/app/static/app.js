@@ -1059,6 +1059,9 @@ function initAdminBookingForm() {
   if (initialCatId || initialSubId || initialSvcId) {
     setServiceSelections(initialCatId, initialSubId, initialSvcId);
   }
+  if (typeof window.lbBookingRefreshMasters === "function") {
+    window.lbBookingRefreshMasters();
+  }
 }
 
 /** Блокирует повторный POST при двойном клике «Сохранить» (форма остаётся на экране до ответа сервера). */

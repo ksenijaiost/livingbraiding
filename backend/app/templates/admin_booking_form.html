@@ -39,7 +39,9 @@
       </p>
     {% endif %}
 
-    <form method="post" action="{% if is_new %}/bookings/new{% else %}/bookings/{{ booking.id }}/edit{% endif %}" enctype="multipart/form-data">
+    <form method="post" action="{% if is_new %}/bookings/new{% else %}/bookings/{{ booking.id }}/edit{% endif %}" enctype="multipart/form-data"
+      {% if not is_new and booking %}data-booking-id="{{ booking.id }}"{% endif %}
+      data-initial-master-ids="{{ (booking_master_on_ids or [])|join(',') }}">
       <input type="hidden" name="client_id" id="client_id" value="{{ selected_client.id if selected_client else fp.get('client_id','') }}" />
       {% if consultation_id %}
         <input type="hidden" name="consultation_id" value="{{ consultation_id }}" />
@@ -1101,6 +1103,15 @@
         return new Set((data.available_master_ids || []).map(function (x) { return String(x); }));
       }
 
+      var bookingFormEl = document.querySelector('form[data-initial-master-ids]') || bookingForm;
+      var initialMasterIds = new Set(
+        String((bookingFormEl && bookingFormEl.getAttribute('data-initial-master-ids')) || '')
+          .split(',')
+          .map(function (x) { return String(x).trim(); })
+          .filter(function (x) { return !!x; })
+      );
+      var editingBookingId = bookingFormEl ? toInt(bookingFormEl.getAttribute('data-booking-id')) : 0;
+
       async function refreshAvailableMasters() {
         var kindVisit = !!((document.querySelector('input[name="kind"][value="VISIT"]') || {}).checked);
         if (!kindVisit) return;
@@ -1109,12 +1120,10 @@
         function disableAllMasters(reason) {
           Array.from(document.querySelectorAll('input[name="booking_master_on"]')).forEach(function (cb) {
             cb.disabled = true;
-            cb.checked = false;
           });
           idxs.forEach(function (lid) {
             Array.from(document.querySelectorAll('input[data-line-master="' + lid + '"]')).forEach(function (cb) {
               cb.disabled = true;
-              cb.checked = false;
             });
             var msgEl = (lid === 0) ? msgLine0 : ((function () {
               var row = state.extraLines.find(function (x) { return x.idx === lid; });
@@ -1172,9 +1181,10 @@
           if (!intersect) intersect = new Set();
           for (var ci = 0; ci < allCbs.length; ci++) {
             var cb = allCbs[ci];
-            var ok = intersect.has(String(cb.value));
+            var keepAssigned = editingBookingId > 0 && initialMasterIds.has(String(cb.value));
+            var ok = intersect.has(String(cb.value)) || keepAssigned;
             cb.disabled = !ok;
-            if (!ok) cb.checked = false;
+            if (!ok && !keepAssigned) cb.checked = false;
           }
           if (msgAll) msgAll.textContent = intersect.size ? '' : 'На выбранные услуги/время доступных мастеров нет.';
         } else {
@@ -1185,9 +1195,10 @@
             var cbs = Array.from(document.querySelectorAll('input[data-line-master="' + lid + '"]'));
             for (var cc = 0; cc < cbs.length; cc++) {
               var cb2 = cbs[cc];
-              var ok2 = allow ? allow.has(String(cb2.value)) : false;
+              var keepAssigned2 = editingBookingId > 0 && initialMasterIds.has(String(cb2.value));
+              var ok2 = (allow ? allow.has(String(cb2.value)) : false) || keepAssigned2;
               cb2.disabled = !ok2;
-              if (!ok2) cb2.checked = false;
+              if (!ok2 && !keepAssigned2) cb2.checked = false;
             }
             var msg = (lid === 0) ? msgLine0 : ((function () {
               var row = state.extraLines.find(function (x) { return x.idx === lid; });
@@ -1255,7 +1266,7 @@
       })();
       renderAllServiceFlags();
       setModeUi();
-      refreshAvailableMasters();
+      window.lbBookingRefreshMasters = refreshAvailableMasters;
 
       if (bookingForm) {
         bookingForm.addEventListener('submit', function (e) {

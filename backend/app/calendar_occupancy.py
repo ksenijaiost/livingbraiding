@@ -161,9 +161,13 @@ def build_occupancy_for_day(
                 svc = ps.service
                 if svc is None:
                     continue
-                dur = int(svc.estimated_duration_minutes or 0)
-                if use_override_for_single_line:
-                    dur = int(dur_override)
+                line_dur = int(getattr(ps, "duration_minutes", None) or 0)
+                if line_dur > 0:
+                    dur = line_dur
+                else:
+                    dur = int(svc.estimated_duration_minutes or 0)
+                    if use_override_for_single_line:
+                        dur = int(dur_override)
                 if dur <= 0:
                     continue
                 if ps.planned_start_time:
