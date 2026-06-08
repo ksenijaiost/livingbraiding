@@ -22,6 +22,7 @@ from app.db.models import (
     UserRole,
 )
 from app.display_time import get_display_timezone
+from app.planned_service_time import planned_start_local_datetime
 from app.master_schedule import master_unavailable_for_day
 from app.user_roles import select_users_with_role
 
@@ -166,7 +167,11 @@ def build_occupancy_for_day(
                 if dur <= 0:
                     continue
                 if ps.planned_start_time:
-                    start_local = _utc_naive_to_local(ps.planned_start_time, tz)
+                    start_local = planned_start_local_datetime(
+                        ps.planned_start_time,
+                        booking_planned_date=b.planned_date,
+                        tz_name=tz,
+                    ) or _utc_naive_to_local(b.planned_date, tz)
                 else:
                     start_local = _utc_naive_to_local(b.planned_date, tz)
                 start_m = _minutes_on_day(start_local, day)

@@ -54,6 +54,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.display_time import get_display_timezone
+from app.planned_service_time import planned_start_local_datetime
 from app.forms_parse import parse_bool, parse_float, parse_int
 from app.kit_blank_stock_core import (
     blank_stock_qty_map,
@@ -331,7 +332,15 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
                 if sid <= 0:
                     continue
                 service_ids_for_hidden.append(sid)
-                local_start = _utc_naive_to_local(ps.planned_start_time, tz) if ps.planned_start_time else None
+                local_start = (
+                    planned_start_local_datetime(
+                        ps.planned_start_time,
+                        booking_planned_date=b.planned_date,
+                        tz_name=tz,
+                    )
+                    if ps.planned_start_time
+                    else None
+                )
                 line_payload.append(
                     {
                         "service_id": sid,
