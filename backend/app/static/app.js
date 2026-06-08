@@ -832,6 +832,8 @@ function initAdminBookingForm() {
       var opt = document.createElement("option");
       opt.value = String(s.id);
       opt.textContent = s.name;
+      var dm = parseInt(String(s.estimated_duration_minutes || "0"), 10) || 0;
+      if (dm > 0) opt.setAttribute("data-duration-minutes", String(dm));
       svcSel.appendChild(opt);
     });
     updateVisitKitVisibility();

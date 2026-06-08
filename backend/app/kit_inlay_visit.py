@@ -1164,6 +1164,7 @@ def list_master_visit_services_catalog(db: Session) -> list[dict[str, Any]]:
             {
                 "id": int(s.id),
                 "name": s.name,
+                "estimated_duration_minutes": int(s.estimated_duration_minutes or 0),
                 "requires_kit_block": service_requires_kit_block(s),
                 "requires_tail_block": service_requires_tail_block(s),
                 "requires_thermo": service_requires_thermo_flow(s),

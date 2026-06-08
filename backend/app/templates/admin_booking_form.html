@@ -670,6 +670,7 @@
                 requires_kit_block: !!s.requires_kit_block,
                 requires_tail_block: !!s.requires_tail_block,
                 requires_thermo: !!s.requires_thermo,
+                estimated_duration_minutes: toInt(s.estimated_duration_minutes) || 120,
                 questionnaire_count: Array.isArray(s.questionnaire_fields) ? s.questionnaire_fields.length : 0,
               });
             }
@@ -991,7 +992,7 @@
         for (var i = 0; i < arr.length; i++) {
           var s = arr[i];
           var sel = (toInt(selectedId) === s.id) ? ' selected' : '';
-          h += '<option value="' + s.id + '"' + sel + '>' + esc(s.service_name) + '</option>';
+          h += '<option value="' + s.id + '"' + sel + ' data-duration-minutes="' + toInt(s.estimated_duration_minutes) + '">' + esc(s.service_name) + '</option>';
         }
         return h;
       }
@@ -1094,9 +1095,35 @@
         }
         return h;
       }
+      function resolvePrefillDurationMinutes(prefill, idx) {
+        var dm = toInt(prefill && prefill.duration_minutes);
+        if (dm > 0) return dm;
+        var arr = parseJsonArray(initialLinesJson);
+        if (idx >= 0 && idx < arr.length && arr[idx] && typeof arr[idx] === 'object') {
+          dm = toInt(arr[idx].duration_minutes);
+        }
+        return dm > 0 ? dm : 0;
+      }
+      function applyLineDurationPrefill(idx, prefill, row) {
+        var dm = resolvePrefillDurationMinutes(prefill, idx);
+        if (dm <= 0) return;
+        var els = lineDurationEls(idx, row);
+        if (!els.on || !els.h || !els.m) return;
+        els.on.checked = true;
+        if (idx === 0) {
+          var wrap0 = document.getElementById('lbBookingLine0DurInputs');
+          if (wrap0) wrap0.style.display = '';
+        } else if (row) {
+          var wrap = row.querySelector('[data-line-dur-wrap][data-line-idx="' + idx + '"]') || row.querySelector('[data-line-dur-wrap]');
+          if (wrap) wrap.style.display = '';
+        }
+        els.h.value = String(Math.floor(dm / 60));
+        els.m.value = String(dm % 60);
+      }
       function addExtraLine(prefill) {
         if (!linesWrap) return;
         var idx = state.extraLines.length + 1;
+        var preDurMin = resolvePrefillDurationMinutes(prefill, idx);
         var prefillSid = toInt(prefill && prefill.service_id);
         var preMeta = servicesFlat.find(function (x) { return x.id === prefillSid; }) || null;
         var preCategoryId = preMeta ? toInt(preMeta.category_id) : 0;
@@ -1141,12 +1168,12 @@
           '</div>' +
           '<div style="margin-top:8px;">' +
             '<label style="display:flex; gap:8px; align-items:center;">' +
-              '<input type="checkbox" data-line-dur-on="1" ' + ((prefill && prefill.duration_minutes && prefill.duration_minutes > 0) ? 'checked' : '') + ' />' +
+              '<input type="checkbox" data-line-dur-on="1" data-line-idx="' + idx + '" ' + (preDurMin > 0 ? 'checked' : '') + ' />' +
               '<span>Время выполнения услуги</span>' +
             '</label>' +
-            '<div class="row" data-line-dur-wrap="1" style="margin-top:6px; display:' + ((prefill && prefill.duration_minutes && prefill.duration_minutes > 0) ? '' : 'none') + ';">' +
-              '<div><label>Часы</label><input type="number" data-line-dur-h="1" min="0" step="1" value="' + esc(String(Math.floor(((prefill && prefill.duration_minutes) || 0) / 60))) + '" style="max-width:7rem;" /></div>' +
-              '<div><label>Минуты</label><input type="number" data-line-dur-m="1" min="0" max="59" step="1" value="' + esc(String(((prefill && prefill.duration_minutes) || 0) % 60)) + '" style="max-width:7rem;" /></div>' +
+            '<div class="row" data-line-dur-wrap="1" data-line-idx="' + idx + '" style="margin-top:6px; display:' + (preDurMin > 0 ? '' : 'none') + ';">' +
+              '<div><label>Часы</label><input type="number" data-line-dur-h="1" data-line-idx="' + idx + '" min="0" step="1" value="' + esc(String(Math.floor(preDurMin / 60))) + '" style="max-width:7rem;" /></div>' +
+              '<div><label>Минуты</label><input type="number" data-line-dur-m="1" data-line-idx="' + idx + '" min="0" max="59" step="1" value="' + esc(String(preDurMin % 60)) + '" style="max-width:7rem;" /></div>' +
             '</div>' +
           '</div>' +
           '<div style="margin-top:8px;">' +
@@ -1160,7 +1187,6 @@
           '</div>';
         linesWrap.appendChild(box);
         state.extraLines.push({ idx: idx, el: box });
-        syncBookingHiddenLines();
         box.querySelector('[data-line-remove]').addEventListener('click', function () {
           box.remove();
           state.extraLines = state.extraLines.filter(function (x) { return x.el !== box; });
@@ -1192,20 +1218,36 @@
         if (catSel) catSel.addEventListener('change', syncLineSubcategories);
         if (subSel) subSel.addEventListener('change', syncLineServices);
         if (svcSel) svcSel.addEventListener('change', refreshAvailableMasters);
-        if (svcSel) svcSel.addEventListener('change', function () { renderLineServiceFlags(idx); syncBookingHiddenLines(); });
+        if (svcSel) svcSel.addEventListener('change', function () {
+          renderLineServiceFlags(idx);
+          var durOn = box.querySelector('[data-line-dur-on]');
+          if (durOn && durOn.checked) fillLineDefaultDurationIfEmpty(box, idx);
+          syncBookingHiddenLines();
+        });
         box.querySelector('[data-line-time]').addEventListener('change', function () { refreshAvailableMasters(); syncBookingHiddenLines(); });
-        var durOnCb = box.querySelector('[data-line-dur-on]');
+        var durEls = lineDurationEls(idx, box);
+        var durOnCb = durEls.on;
         if (durOnCb) {
           durOnCb.addEventListener('change', function () {
-            var wrap = box.querySelector('[data-line-dur-wrap]');
+            var wrap = box.querySelector('[data-line-dur-wrap][data-line-idx="' + idx + '"]') || box.querySelector('[data-line-dur-wrap]');
             if (wrap) wrap.style.display = durOnCb.checked ? '' : 'none';
+            if (durOnCb.checked) fillLineDefaultDurationIfEmpty(box, idx);
             refreshAvailableMasters();
+            syncBookingHiddenLines();
           });
         }
-        var dhEl = box.querySelector('[data-line-dur-h]');
-        var dmEl = box.querySelector('[data-line-dur-m]');
-        if (dhEl) dhEl.addEventListener('input', refreshAvailableMasters);
-        if (dmEl) dmEl.addEventListener('input', refreshAvailableMasters);
+        function onExtraLineDurInput() {
+          refreshAvailableMasters();
+          syncBookingHiddenLines();
+        }
+        if (durEls.h) {
+          durEls.h.addEventListener('input', onExtraLineDurInput);
+          durEls.h.addEventListener('change', onExtraLineDurInput);
+        }
+        if (durEls.m) {
+          durEls.m.addEventListener('input', onExtraLineDurInput);
+          durEls.m.addEventListener('change', onExtraLineDurInput);
+        }
         box.querySelectorAll('input[data-line-master]').forEach(function (cb) {
           cb.addEventListener('change', refreshAvailableMasters);
         });
@@ -1217,14 +1259,22 @@
         }
         syncLineSubcategories();
         renderLineServiceFlags(idx);
+        applyLineDurationPrefill(idx, prefill, box);
+        syncBookingHiddenLines();
         setModeUi();
       }
 
       function readLineMasters(lineIdx) {
         return uniqIds(Array.from(document.querySelectorAll('input[data-line-master="' + lineIdx + '"]:checked')).map(function (x) { return x.value; }));
       }
+      function getLineSpecSourceJson() {
+        if (hidLines && String(hidLines.value || '').trim()) {
+          return String(hidLines.value || '');
+        }
+        return initialLinesJson;
+      }
       function getInitialLineSpec(idx) {
-        var arr = parseJsonArray(initialLinesJson);
+        var arr = parseJsonArray(getLineSpecSourceJson());
         if (idx < 0 || idx >= arr.length) return null;
         var item = arr[idx];
         return (item && typeof item === 'object') ? item : null;
@@ -1286,13 +1336,6 @@
             merged.push(idx);
           }
         });
-        var initial = parseJsonArray(initialLinesJson);
-        for (var ii = 1; ii < initial.length; ii++) {
-          if (!seen[ii]) {
-            seen[ii] = true;
-            merged.push(ii);
-          }
-        }
         return merged.sort(function (a, b) { return a - b; });
       }
       function buildLinesForSubmit() {
@@ -1310,7 +1353,7 @@
             mids = uniqIds(pref.master_ids);
           }
           var dur = lineDurationOverrideValue(idx);
-          if (dur == null || dur <= 0) dur = pref ? toInt(pref.duration_minutes) : 0;
+          if (dur == null || dur <= 0) dur = 0;
           out.push({
             service_id: sid,
             planned_time: lineTimeValue(idx),
@@ -1348,27 +1391,74 @@
         return normalizeLineComment(base, details);
       }
 
-      function durationOverrideMinutes() {
-        if (!line0DurOn || !line0DurOn.checked) return null;
-        var h = toInt(line0DurH ? line0DurH.value : 0);
-        var m = toInt(line0DurM ? line0DurM.value : 0);
-        if (m > 59) m = 59;
-        var total = h * 60 + m;
-        return total > 0 ? total : null;
+      function lineDurationEls(idx, row) {
+        var scope = row || (idx === 0 ? document : lineRowEl(idx));
+        if (!scope) return { on: null, h: null, m: null };
+        if (idx === 0) {
+          return { on: line0DurOn, h: line0DurH, m: line0DurM };
+        }
+        var sel = '[data-line-idx="' + idx + '"]';
+        return {
+          on: scope.querySelector('[data-line-dur-on]' + sel) || scope.querySelector('[data-line-dur-on]'),
+          h: scope.querySelector('[data-line-dur-h]' + sel) || scope.querySelector('[data-line-dur-h]'),
+          m: scope.querySelector('[data-line-dur-m]' + sel) || scope.querySelector('[data-line-dur-m]')
+        };
       }
-      function lineDurationOverrideValue(idx) {
-        if (idx === 0) return durationOverrideMinutes();
-        var row = lineRowEl(idx);
-        if (!row) return null;
-        var onEl = row.querySelector('[data-line-dur-on]');
+      function readDurationMinutesFromInputs(onEl, hEl, mEl) {
         if (!onEl || !onEl.checked) return null;
-        var hEl = row.querySelector('[data-line-dur-h]');
-        var mEl = row.querySelector('[data-line-dur-m]');
         var h = toInt(hEl ? hEl.value : 0);
         var m = toInt(mEl ? mEl.value : 0);
         if (m > 59) m = 59;
         var total = h * 60 + m;
         return total > 0 ? total : null;
+      }
+      function serviceEstimatedMinutes(serviceId) {
+        var meta = serviceById(toInt(serviceId));
+        var dm = meta ? toInt(meta.estimated_duration_minutes) : 0;
+        return dm > 0 ? dm : 120;
+      }
+      function serviceEstimatedMinutesForLine(idx, row) {
+        var sid = lineServiceId(idx);
+        if (sid > 0) return serviceEstimatedMinutes(sid);
+        var scope = row || (idx === 0 ? null : lineRowEl(idx));
+        if (idx === 0) {
+          var svcSel0 = document.getElementById('service_id');
+          if (svcSel0 && svcSel0.selectedOptions && svcSel0.selectedOptions.length) {
+            var dm0 = toInt(svcSel0.selectedOptions[0].getAttribute('data-duration-minutes'));
+            if (dm0 > 0) return dm0;
+          }
+          return 120;
+        }
+        if (scope) {
+          var svcSel = scope.querySelector('[data-line-service]');
+          if (svcSel && svcSel.selectedOptions && svcSel.selectedOptions.length) {
+            var dm = toInt(svcSel.selectedOptions[0].getAttribute('data-duration-minutes'));
+            if (dm > 0) return dm;
+          }
+        }
+        return 120;
+      }
+      function fillLineDefaultDurationIfEmpty(row, idx) {
+        var els = lineDurationEls(idx, row);
+        if (!els.h || !els.m) return;
+        var curH = toInt(els.h.value);
+        var curM = toInt(els.m.value);
+        if (curM > 59) curM = 59;
+        if (curH * 60 + curM > 0) return;
+        var defMin = serviceEstimatedMinutesForLine(idx, row);
+        els.h.value = String(Math.floor(defMin / 60));
+        els.m.value = String(defMin % 60);
+      }
+      function applyLineDefaultDuration(row, idx) {
+        fillLineDefaultDurationIfEmpty(row, idx);
+      }
+      function durationOverrideMinutes() {
+        var els = lineDurationEls(0);
+        return readDurationMinutesFromInputs(els.on, els.h, els.m);
+      }
+      function lineDurationOverrideValue(idx) {
+        var els = lineDurationEls(idx);
+        return readDurationMinutesFromInputs(els.on, els.h, els.m);
       }
 
       async function fetchAllowSet(day, t, sid, durationMinutes) {
@@ -1510,14 +1600,9 @@
           });
         }
         if (line0Comment) line0Comment.value = String((first && first.comment) || '');
-        if (line0DurOn && first && first.duration_minutes && Number(first.duration_minutes) > 0) {
-          line0DurOn.checked = true;
-          if (line0DurH) line0DurH.value = String(Math.floor(Number(first.duration_minutes) / 60));
-          if (line0DurM) line0DurM.value = String(Number(first.duration_minutes) % 60);
-          var line0DurWrap = document.getElementById('lbBookingLine0DurInputs');
-          if (line0DurWrap) line0DurWrap.style.display = '';
-        }
+        applyLineDurationPrefill(0, first, null);
         for (var i = 1; i < arr.length; i++) addExtraLine(arr[i]);
+        syncBookingHiddenLines();
       }
 
       if (addBtn) addBtn.addEventListener('click', function () { addExtraLine(null); });
@@ -1529,11 +1614,19 @@
         line0DurOn.addEventListener('change', function () {
           var wrap = document.getElementById('lbBookingLine0DurInputs');
           if (wrap) wrap.style.display = line0DurOn.checked ? '' : 'none';
+          if (line0DurOn.checked) updateDurationBlock();
           refreshAvailableMasters();
         });
       }
-      if (line0DurH) line0DurH.addEventListener('input', function () { refreshAvailableMasters(); syncBookingHiddenLines(); });
-      if (line0DurM) line0DurM.addEventListener('input', function () { refreshAvailableMasters(); syncBookingHiddenLines(); });
+      function onLine0DurInput() { refreshAvailableMasters(); syncBookingHiddenLines(); }
+      if (line0DurH) {
+        line0DurH.addEventListener('input', onLine0DurInput);
+        line0DurH.addEventListener('change', onLine0DurInput);
+      }
+      if (line0DurM) {
+        line0DurM.addEventListener('input', onLine0DurInput);
+        line0DurM.addEventListener('change', onLine0DurInput);
+      }
       if (line0DurOn) line0DurOn.addEventListener('change', syncBookingHiddenLines);
       if (serviceSel) serviceSel.addEventListener('change', syncBookingHiddenLines);
       if (plannedTime) plannedTime.addEventListener('change', syncBookingHiddenLines);
@@ -1671,8 +1764,13 @@
 
         if (on && on.checked) {
           show('lbBookingLine0DurInputs');
-          if (h && !String(h.value || '').trim()) h.value = String(dh);
-          if (m && !String(m.value || '').trim()) m.value = String(dmm);
+          var curH = toInt(h ? h.value : 0);
+          var curM = toInt(m ? m.value : 0);
+          if (curM > 59) curM = 59;
+          if (curH * 60 + curM <= 0) {
+            if (h) h.value = String(dh);
+            if (m) m.value = String(dmm);
+          }
         } else {
           hide('lbBookingLine0DurInputs');
         }

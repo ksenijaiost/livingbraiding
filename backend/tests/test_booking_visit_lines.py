@@ -224,6 +224,41 @@ def test_line_service_kits_roundtrip_fp_and_details(memory_db) -> None:
     assert fp2["line_1_order_blanks_qty"] == "5"
 
 
+def test_parse_three_service_lines_with_durations(memory_db) -> None:
+    db = memory_db
+    svc1, svc2, _, _ = _visit_setup(db)
+    svc3 = Service(
+        subcategory_id=svc1.subcategory_id,
+        name="Услуга 3",
+        estimated_duration_minutes=120,
+        is_active=True,
+    )
+    db.add(svc3)
+    db.flush()
+    lines_json = (
+        '[{"service_id": %d, "planned_time": "10:00", "master_ids": [1], "duration_minutes": 90},'
+        '{"service_id": %d, "planned_time": "11:30", "master_ids": [1], "duration_minutes": 30},'
+        '{"service_id": %d, "planned_time": "12:00", "master_ids": [1], "duration_minutes": 240}]'
+    ) % (svc1.id, svc2.id, svc3.id)
+    fp = {
+        "planned_time": "10:00",
+        "booking_service_lines_json": lines_json,
+        "booking_masters_mode": "all",
+    }
+
+    class Form:
+        def getlist(self, name):
+            return ["1"] if name == "booking_master_on" else []
+
+        def get(self, key):
+            return fp.get(key)
+
+    err, ids, _, specs, on_ids = _parse_booking_visit_lines_and_masters(db, Form(), fp)
+    assert err is None
+    assert len(specs) == 3
+    assert specs[2]["duration_minutes"] == 240
+
+
 def test_visit_kit_in_stock_validation(memory_db) -> None:
     db = memory_db
     svc1, svc2, _, _ = _visit_setup(db)
