@@ -32,6 +32,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.display_time import get_display_timezone
+from app.planned_service_time import planned_start_local_datetime
 from app.forms_parse import parse_int
 from app.media_store import get_nonempty_upload, save_upload_image
 from app.kit_inlay_visit import (
@@ -484,7 +485,15 @@ def master_visit_new_get(
                         continue
                     if ps.comment:
                         form_prefill[f"line_{i}_comment"] = str(ps.comment)
-                    local_start = _utc_naive_to_local(ps.planned_start_time, tz) if ps.planned_start_time else None
+                    local_start = (
+                        planned_start_local_datetime(
+                            ps.planned_start_time,
+                            booking_planned_date=b.planned_date,
+                            tz_name=tz,
+                        )
+                        if ps.planned_start_time
+                        else None
+                    )
                     if local_start:
                         form_prefill[f"line_{i}_started_time"] = local_start.strftime("%H:%M")
             elif b.planned_service_id:
@@ -671,7 +680,15 @@ def master_visit_draft_new_get(
                         continue
                     if ps.comment:
                         form_prefill[f"line_{i}_comment"] = str(ps.comment)
-                    local_start = _utc_naive_to_local(ps.planned_start_time, tz) if ps.planned_start_time else None
+                    local_start = (
+                        planned_start_local_datetime(
+                            ps.planned_start_time,
+                            booking_planned_date=b.planned_date,
+                            tz_name=tz,
+                        )
+                        if ps.planned_start_time
+                        else None
+                    )
                     if local_start:
                         form_prefill[f"line_{i}_started_time"] = local_start.strftime("%H:%M")
             elif b.planned_service_id:

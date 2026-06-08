@@ -174,7 +174,7 @@
         <div class="card lb-card-bg-subtle">
           {% for ps in booking.planned_services %}
             {% set svc = ps.service %}
-            {% set local_start = format_naive_utc_datetime(ps.planned_start_time, display_tz, "%H:%M") if ps.planned_start_time else format_naive_utc_datetime(booking.planned_date, display_tz, "%H:%M") %}
+            {% set local_start = format_planned_service_start_local(ps.planned_start_time, booking_planned_date=booking.planned_date, tz_name=display_tz, fmt="%H:%M") if ps.planned_start_time else format_naive_utc_datetime(booking.planned_date, display_tz, "%H:%M") %}
             <div style="{% if not loop.first %}margin-top:10px; padding-top:10px; border-top:1px solid #e5e7eb;{% endif %}">
               <div style="font-weight:600;">
                 {{ loop.index }}.

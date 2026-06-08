@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from app.consultation_booking import booking_status_display
 from app.consultation_types import format_types_display
 from app.display_time import format_naive_utc_datetime, timezone_label
+from app.planned_service_time import format_planned_service_start_local
 from app.ru_labels import (
     format_price_integer_rub,
     ru_master_level,
@@ -43,6 +44,7 @@ templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_ty
 templates.env.globals["ru_user_role"] = ru_user_role
 templates.env.globals["format_price_integer_rub"] = format_price_integer_rub
 templates.env.globals["format_naive_utc_datetime"] = format_naive_utc_datetime
+templates.env.globals["format_planned_service_start_local"] = format_planned_service_start_local
 templates.env.globals["format_types_display"] = format_types_display
 templates.env.globals["timezone_label"] = timezone_label
 templates.env.globals["booking_status_display"] = booking_status_display
