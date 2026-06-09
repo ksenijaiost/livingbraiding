@@ -7,12 +7,12 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_role
-from app.db.models import CatalogProduct, Service, ServiceCategory, ServiceSubcategory, UserRole
+from app.db.models import CatalogProduct, Kit, KitBlankStock, Service, ServiceCategory, ServiceSubcategory, UserRole
 from app.db.session import get_db
 from app.forms_parse import parse_bool, parse_optional_float
 from app.ru_labels import format_price_integer_rub
@@ -20,6 +20,85 @@ from app.webui import templates, ctx as _ctx
 
 
 router = APIRouter()
+
+_BLANK_CATALOG_CATEGORY = "Заказ"
+_BLANK_CATALOG_SUBCATEGORY = "Заготовки поштучно"
+
+
+def _parse_catalog_meta(raw: str | None) -> dict[str, Any]:
+    try:
+        meta = json.loads(raw or "{}")
+        return meta if isinstance(meta, dict) else {}
+    except Exception:
+        return {}
+
+
+def _kit_is_catalog_active(kit: Kit) -> bool:
+    return bool(kit.is_active) and not bool(kit.is_archived)
+
+
+def catalog_blank_kit_key_usage(db: Session, kit_key: str, *, limit: int = 12) -> dict[str, Any]:
+    """Комплекты, в составе или остатках которых встречается kit_key."""
+    kk = str(kit_key or "").strip()
+    if not kk:
+        return {"kit_key": "", "total": 0, "active": 0, "kits": [], "truncated": False}
+
+    from app.kit_blank_stock_core import parse_composition_totals
+
+    matched: dict[int, Kit] = {}
+    stock_kit_ids = {
+        int(x)
+        for x in db.scalars(select(KitBlankStock.kit_id).where(KitBlankStock.kit_key == kk)).all()
+        if int(x) > 0
+    }
+    for kit in db.scalars(select(Kit)).all():
+        if int(kit.id) in stock_kit_ids or kk in parse_composition_totals(kit):
+            matched[int(kit.id)] = kit
+
+    kits_sorted = sorted(
+        matched.values(),
+        key=lambda k: (not _kit_is_catalog_active(k), str(k.sku or ""), int(k.id)),
+    )
+    active_count = sum(1 for k in matched.values() if _kit_is_catalog_active(k))
+    total = len(matched)
+    kits_out: list[dict[str, Any]] = []
+    for kit in kits_sorted[: max(0, int(limit))]:
+        kits_out.append(
+            {
+                "id": int(kit.id),
+                "sku": str(kit.sku or ""),
+                "title": str(kit.title or ""),
+                "is_active": bool(kit.is_active),
+                "is_archived": bool(kit.is_archived),
+                "is_catalog_active": _kit_is_catalog_active(kit),
+            }
+        )
+    return {
+        "kit_key": kk,
+        "total": total,
+        "active": active_count,
+        "kits": kits_out,
+        "truncated": total > len(kits_out),
+    }
+
+
+def _catalog_blank_kit_key_owner_id(db: Session, kit_key: str, *, exclude_id: int | None = None) -> int | None:
+    kk = str(kit_key or "").strip()
+    if not kk:
+        return None
+    rows = db.scalars(
+        select(CatalogProduct).where(
+            CatalogProduct.category_name == _BLANK_CATALOG_CATEGORY,
+            CatalogProduct.subcategory_name == _BLANK_CATALOG_SUBCATEGORY,
+        )
+    ).all()
+    for row in rows:
+        if exclude_id is not None and int(row.id) == int(exclude_id):
+            continue
+        existing = str(_parse_catalog_meta(row.meta_json).get("kit_key") or "").strip()
+        if existing == kk:
+            return int(row.id)
+    return None
 
 
 def _format_product_catalog_price(s: Service) -> str | None:
@@ -208,11 +287,22 @@ async def products_catalog_row_edit(
     meta["is_used_in_kit_form"] = parse_bool(form.get("is_used_in_kit_form"))
     meta["ignore_in_calc"] = parse_bool(form.get("ignore_in_calc"))
     if row.category_name == "Заказ" and row.subcategory_name == "Заготовки поштучно":
-        kk = str(form.get("kit_key") or "").strip()
-        if kk:
-            meta["kit_key"] = kk[:80]
-        else:
-            meta.pop("kit_key", None)
+        new_name = str(form.get("name") or "").strip()
+        kit_key = str(meta.get("kit_key") or "").strip()
+        if not new_name or not kit_key:
+            return _redirect("err", "blank_fields")
+        if new_name != row.name:
+            exists_id = db.scalar(
+                select(CatalogProduct.id).where(
+                    CatalogProduct.category_name == row.category_name,
+                    CatalogProduct.subcategory_name == row.subcategory_name,
+                    CatalogProduct.name == new_name,
+                    CatalogProduct.id != row.id,
+                )
+            )
+            if exists_id:
+                return _redirect("err", "duplicate")
+            row.name = new_name[:200]
     row.is_active = parse_bool(form.get("is_active"))
     row.meta_json = json.dumps(meta, ensure_ascii=False)
     db.commit()
@@ -235,6 +325,13 @@ async def products_catalog_row_new(
 
     if not category or not subcategory_name or not name:
         return _redirect("err", "empty")
+
+    if category == _BLANK_CATALOG_CATEGORY and subcategory_name == _BLANK_CATALOG_SUBCATEGORY:
+        kit_key_new = str(form.get("kit_key") or "").strip()
+        if not kit_key_new:
+            return _redirect("err", "blank_fields")
+        if _catalog_blank_kit_key_owner_id(db, kit_key_new) is not None:
+            return _redirect("err", "duplicate_kit_key")
 
     try:
         price = parse_optional_float(form.get("price"), field_name="price")
@@ -266,10 +363,8 @@ async def products_catalog_row_new(
         "ignore_in_calc": parse_bool(form.get("ignore_in_calc")),
         "is_bu": False,
     }
-    if category == "Заказ" and subcategory_name == "Заготовки поштучно":
-        kk = str(form.get("kit_key") or "").strip()
-        if kk:
-            meta["kit_key"] = kk[:80]
+    if category == _BLANK_CATALOG_CATEGORY and subcategory_name == _BLANK_CATALOG_SUBCATEGORY:
+        meta["kit_key"] = kit_key_new[:80]
     db.add(
         CatalogProduct(
             category_name=category,
@@ -283,6 +378,38 @@ async def products_catalog_row_new(
     )
     db.commit()
     return _redirect("msg", "saved")
+
+
+@router.get("/products-catalog/{row_id}/delete-preview")
+def products_catalog_row_delete_preview(
+    row_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    row = db.get(CatalogProduct, row_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Позиция прайса не найдена")
+    meta = _parse_catalog_meta(row.meta_json)
+    kk = str(meta.get("kit_key") or "").strip()
+    applicable = (
+        row.category_name == _BLANK_CATALOG_CATEGORY
+        and row.subcategory_name == _BLANK_CATALOG_SUBCATEGORY
+        and bool(kk)
+    )
+    if not applicable:
+        return JSONResponse(
+            {
+                "applicable": False,
+                "kit_key": kk,
+                "total": 0,
+                "active": 0,
+                "kits": [],
+                "truncated": False,
+            }
+        )
+    usage = catalog_blank_kit_key_usage(db, kk)
+    usage["applicable"] = True
+    return JSONResponse(usage)
 
 
 @router.post("/products-catalog/{row_id}/delete")

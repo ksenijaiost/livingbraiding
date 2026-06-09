@@ -89,8 +89,12 @@
       <p class="error">Некорректная цена или работа. Ожидается число.</p>
     {% elif err == "empty" %}
       <p class="error">Заполните название нового элемента.</p>
+    {% elif err == "blank_fields" %}
+      <p class="error">Для позиции «Заготовки поштучно» укажите наименование и ключ <code>kit_key</code>.</p>
     {% elif err == "duplicate" %}
       <p class="error">Такой элемент уже есть в этой подкатегории.</p>
+    {% elif err == "duplicate_kit_key" %}
+      <p class="error">Ключ <code>kit_key</code> уже используется другой позицией в «Заготовки поштучно».</p>
     {% elif err == "delete_active" %}
       <p class="error">Удалять можно только неактуальные строки (снимите «Актуально» и сохраните).</p>
     {% elif msg == "deleted" %}
@@ -174,15 +178,14 @@
                 {% for r in g.rows %}
                   <tr>
                     <td class="pcat-name">
-                      <strong>{{ r.name }}</strong>
-                      {% if g.subcategory_name == "Заготовки поштучно" %}
-                        {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
-                          <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
-                            <label style="display:block;">Ключ для JSON / комплекта (<code>kit_key</code>)
-                              <input form="row-edit-{{ r.id }}" name="kit_key" type="text" value="{{ r.kit_key or '' }}" placeholder="например DE_DREAD_LONG" maxlength="80" style="font-family:monospace;width:100%;max-width:100%;box-sizing:border-box;margin-top:4px;" />
-                            </label>
-                          </div>
-                        {% endif %}
+                      {% if g.subcategory_name == "Заготовки поштучно" and current_user.role.value == "ADMIN_SUPER" and r.id %}
+                        <input form="row-edit-{{ r.id }}" name="name" type="text" value="{{ r.name }}" maxlength="200" required style="width:100%;max-width:100%;box-sizing:border-box;" />
+                        <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
+                          Ключ для JSON / комплекта (<code>kit_key</code>):
+                          <code style="font-family:monospace;">{{ r.kit_key or '—' }}</code>
+                        </div>
+                      {% else %}
+                        <strong>{{ r.name }}</strong>
                       {% endif %}
                     </td>
                     {% if show_labels_col %}
@@ -262,15 +265,14 @@
                   {% for r in g.inactive_rows %}
                   <tr style="opacity:0.85;">
                     <td class="pcat-name">
-                      <strong>{{ r.name }}</strong>
-                      {% if g.subcategory_name == "Заготовки поштучно" %}
-                        {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
-                          <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
-                            <label style="display:block;">Ключ для JSON / комплекта (<code>kit_key</code>)
-                              <input form="row-edit-{{ r.id }}" name="kit_key" type="text" value="{{ r.kit_key or '' }}" placeholder="например DE_DREAD_LONG" maxlength="80" style="font-family:monospace;width:100%;max-width:100%;box-sizing:border-box;margin-top:4px;" />
-                            </label>
-                          </div>
-                        {% endif %}
+                      {% if g.subcategory_name == "Заготовки поштучно" and current_user.role.value == "ADMIN_SUPER" and r.id %}
+                        <input form="row-edit-{{ r.id }}" name="name" type="text" value="{{ r.name }}" maxlength="200" required style="width:100%;max-width:100%;box-sizing:border-box;" />
+                        <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
+                          Ключ для JSON / комплекта (<code>kit_key</code>):
+                          <code style="font-family:monospace;">{{ r.kit_key or '—' }}</code>
+                        </div>
+                      {% else %}
+                        <strong>{{ r.name }}</strong>
                       {% endif %}
                     </td>
                     {% if show_labels_col %}
@@ -326,7 +328,15 @@
                             {% endif %}
                             <button type="submit" class="secondary" style="padding:4px 10px;">Сохранить</button>
                           </form>
-                          <form method="post" action="/products-catalog/{{ r.id }}/delete" style="margin:0;" onsubmit="return confirm('Удалить строку ' + {{ r.name|tojson }} + ' из прайса безвозвратно?');">
+                          <form method="post" action="/products-catalog/{{ r.id }}/delete" style="margin:0;"
+                            {% if g.subcategory_name == "Заготовки поштучно" and r.kit_key %}
+                              class="pcat-delete-blank-form"
+                              data-pcat-delete-row-id="{{ r.id }}"
+                              data-pcat-delete-name="{{ r.name }}"
+                            {% else %}
+                              onsubmit="return confirm('Удалить строку ' + {{ r.name|tojson }} + ' из прайса безвозвратно?');"
+                            {% endif %}
+                          >
                             <button type="submit" class="secondary" style="padding:4px 10px;color:#b91c1c;border-color:#fecaca;">Удалить</button>
                           </form>
                         </div>
@@ -350,11 +360,11 @@
                 {% if current_user.role.value == "ADMIN_SUPER" and is_catalog_products_category %}
                   <tr>
                     <td class="pcat-name">
-                      <input form="new-row-{{ loop.index }}" name="name" type="text" placeholder="Новый элемент" style="width:100%;max-width:100%;box-sizing:border-box;" />
+                      <input form="new-row-{{ loop.index }}" name="name" type="text" placeholder="Новый элемент" {% if g.subcategory_name == "Заготовки поштучно" %}required{% endif %} style="width:100%;max-width:100%;box-sizing:border-box;" />
                       {% if g.subcategory_name == "Заготовки поштучно" %}
                         <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
-                          <label style="display:block;">Ключ для JSON / комплекта (<code>kit_key</code>)
-                            <input form="new-row-{{ loop.index }}" name="kit_key" type="text" placeholder="латиница, цифры, _" maxlength="80" style="font-family:monospace;width:100%;max-width:100%;box-sizing:border-box;margin-top:4px;" />
+                          <label style="display:block;">Ключ для JSON / комплекта (<code>kit_key</code>) *
+                            <input form="new-row-{{ loop.index }}" name="kit_key" type="text" placeholder="латиница, цифры, _" maxlength="80" required style="font-family:monospace;width:100%;max-width:100%;box-sizing:border-box;margin-top:4px;" />
                           </label>
                         </div>
                       {% endif %}
@@ -408,5 +418,61 @@
       <p class="muted">Пока нет позиций товаров.</p>
     {% endif %}
   </div>
+
+  <script>
+    (function () {
+      function kitLine(k) {
+        var tag = k.is_catalog_active ? 'активный' : (k.is_archived ? 'архив' : 'неактивный');
+        return (k.sku || '—') + ' — ' + (k.title || '—') + ' (' + tag + ')';
+      }
+      document.querySelectorAll('form.pcat-delete-blank-form').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+          e.preventDefault();
+          var rowId = form.getAttribute('data-pcat-delete-row-id');
+          var name = form.getAttribute('data-pcat-delete-name') || '';
+          if (!rowId) {
+            form.submit();
+            return;
+          }
+          fetch('/products-catalog/' + encodeURIComponent(rowId) + '/delete-preview')
+            .then(function (res) {
+              if (!res.ok) throw new Error('HTTP ' + res.status);
+              return res.json();
+            })
+            .then(function (data) {
+              if (!data.applicable) {
+                if (window.confirm('Удалить строку «' + name + '» из прайса безвозвратно?')) form.submit();
+                return;
+              }
+              if (!data.total) {
+                form.submit();
+                return;
+              }
+              var lines = (data.kits || []).map(kitLine);
+              var more = data.truncated ? '\n… и ещё комплекты' : '';
+              var msg;
+              if (data.active > 0) {
+                msg =
+                  'Ключ ' + data.kit_key + ' используется в комплектах:\n' +
+                  'всего ' + data.total + ', активных (не архив) ' + data.active + '.\n\n' +
+                  lines.join('\n') + more +
+                  '\n\nУдалить строку прайса «' + name + '» всё равно? Состав существующих комплектов в базе не изменится, но автосчёт по этому ключу перестанет работать.';
+              } else {
+                msg =
+                  'Ключ ' + data.kit_key + ' встречается только в неактивных или архивных комплектах (' + data.total + '):\n\n' +
+                  lines.join('\n') + more +
+                  '\n\nУдалить строку прайса «' + name + '»?';
+              }
+              if (window.confirm(msg)) form.submit();
+            })
+            .catch(function () {
+              if (window.confirm('Не удалось проверить использование ключа. Удалить «' + name + '» из прайса?')) {
+                form.submit();
+              }
+            });
+        });
+      });
+    })();
+  </script>
 {% endblock %}
 
