@@ -35,6 +35,7 @@ from app.kit_bulk_import import (
     parse_bulk_kits_json,
 )
 from app.kit_crud import (
+    LEGACY_KIT_CLIENT_PRICE_EXCLUDE_KEYS,
     apply_kit_admin_form,
     calc_kit_stock_price_total_from_composition,
     kit_edit_error_prefill,
@@ -46,6 +47,7 @@ from app.kit_crud import (
     parse_kit_admin_form,
     sync_kit_authors,
     try_fill_kit_admin_blank_types_from_composition,
+    try_fill_kit_admin_cost_total_from_composition,
     try_fill_kit_admin_stock_price_total_from_composition,
     validate_kit_admin_form,
 )
@@ -112,12 +114,65 @@ def _kit_qty_prefill_from_admin_fp(fp: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def _kit_admin_price_map(db: Session) -> dict[str, float]:
+    from app.work_products import _kit_price_map_from_catalog
+    from app.zakaz_blanks import zakaz_blank_def_by_key
+
+    out = dict(_kit_price_map_from_catalog(db))
+    for k, z in zakaz_blank_def_by_key().items():
+        if k not in out and not z.ignore_in_client_calc:
+            out[k] = float(z.price)
+    return out
+
+
+def _kit_admin_work_pay_map(db: Session) -> dict[str, float]:
+    from app.work_products import _kit_work_pay_map_from_catalog
+    from app.zakaz_blanks import zakaz_blank_def_by_key
+
+    out = dict(_kit_work_pay_map_from_catalog(db))
+    for k, z in zakaz_blank_def_by_key().items():
+        if k not in out:
+            out[k] = float(z.work_pay)
+    return out
+
+
+def _client_price_exclude_keys(db: Session) -> list[str]:
+    from app.db.models import CatalogProduct
+
+    keys = set(LEGACY_KIT_CLIENT_PRICE_EXCLUDE_KEYS)
+    rows = list(
+        db.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.category_name == "Заказ",
+                CatalogProduct.subcategory_name == "Заготовки поштучно",
+                CatalogProduct.is_active.is_(True),
+            )
+        ).all()
+    )
+    for r in rows:
+        try:
+            meta = json.loads(r.meta_json or "{}")
+        except Exception:
+            meta = {}
+        if not isinstance(meta, dict):
+            continue
+        k = str(meta.get("kit_key") or "").strip()
+        if not k:
+            continue
+        if bool(meta.get("ignore_in_calc")) or bool(meta.get("is_bu")):
+            keys.add(k)
+    return sorted(keys)
+
+
 def kit_admin_new_table_state_json(
     db: Session,
     *,
     kit_qty_prefill: dict[str, str],
     initial_lines: list[dict[str, Any]] | None = None,
 ) -> str:
+    from app.work_products import _material_prices_per_gram
+
+    kpg, kudpg = _material_prices_per_gram(db)
     return json.dumps(
         {
             "mode": "admin_kit_new",
@@ -129,6 +184,10 @@ def kit_admin_new_table_state_json(
             "initialLines": initial_lines or [],
             "prefill": kit_qty_prefill,
             "excludeFromInventoryPieceCount": sorted(KIT_INVENTORY_PIECE_EXCLUDE_KEYS),
+            "excludeFromClientPriceKeys": _client_price_exclude_keys(db),
+            "kitPriceByKey": _kit_admin_price_map(db),
+            "kitWorkPayByKey": _kit_admin_work_pay_map(db),
+            "materialPricePerGram": {"kanekalon": kpg, "kudri": kudpg},
         },
         ensure_ascii=False,
     )
@@ -385,6 +444,7 @@ async def admin_kit_new_post(
         d = parse_kit_admin_form(form, for_create=True)
         try_fill_kit_admin_blank_types_from_composition(d, composition_totals=d.composition_totals)
         try_fill_kit_admin_stock_price_total_from_composition(db, d, composition_totals=d.composition_totals)
+        try_fill_kit_admin_cost_total_from_composition(db, d)
         validate_kit_admin_form(d, for_create=True)
         if db.scalar(select(Kit.id).where(Kit.sku == d.sku)):
             raise ValueError("Комплект с таким артикулом уже есть")

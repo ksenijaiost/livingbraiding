@@ -22,4 +22,179 @@
       </p>
     </form>
   </div>
+  {% if is_new %}
+  <script>
+  (function () {
+    var BC_LABELS = { NEW: 'Новый', USED: 'Использованные', MIXED: '50 на 50' };
+
+    function kitState() {
+      var el = document.getElementById('kit_table_state');
+      try { return el && el.textContent ? JSON.parse(el.textContent) : {}; } catch (e) { return {}; }
+    }
+    function money2(x) { return Math.round((parseFloat(x) || 0) * 100) / 100; }
+    function readWeightGrams() {
+      var el = document.querySelector('input[name="weight_grams"]');
+      if (!el) return 0;
+      var v = String(el.value || '').replace(',', '.');
+      var n = parseFloat(v);
+      return isNaN(n) ? 0 : Math.max(0, n);
+    }
+    function lineQty(ln) {
+      var qty = 0;
+      for (var mid in (ln.by_staff || {})) qty += parseInt(ln.by_staff[mid], 10) || 0;
+      return qty;
+    }
+    function inferBlanksCondition(lines) {
+      var hasNew = false;
+      var hasUsed = false;
+      lines.forEach(function (ln) {
+        if (ln.is_used) hasUsed = true;
+        else hasNew = true;
+      });
+      if (hasNew && hasUsed) return 'MIXED';
+      if (hasUsed) return 'USED';
+      return 'NEW';
+    }
+    function calcStockPrice(lines, st) {
+      var priceMap = st.kitPriceByKey || {};
+      var exMap = {};
+      (st.excludeFromClientPriceKeys || []).forEach(function (x) { exMap[x] = true; });
+      var total = 0;
+      var missing = [];
+      lines.forEach(function (ln) {
+        var key = ln.key || '';
+        var qty = lineQty(ln);
+        if (!key || qty <= 0) return;
+        if (exMap[key]) return;
+        var baseP = parseFloat(priceMap[key]);
+        if (!(baseP > 0)) {
+          missing.push(key);
+          return;
+        }
+        if (ln.is_used) {
+          var pct = parseInt(ln.used_pct, 10) || 100;
+          total += baseP * (pct / 100.0) * qty;
+        } else {
+          total += baseP * qty;
+        }
+      });
+      return { total: money2(total), missing: missing };
+    }
+    function calcCostEstimate(lines, st) {
+      var payMap = st.kitWorkPayByKey || {};
+      var mpg = st.materialPricePerGram || {};
+      var work = 0;
+      lines.forEach(function (ln) {
+        var key = ln.key || '';
+        var qty = lineQty(ln);
+        if (!key || qty <= 0) return;
+        var rate = parseFloat(payMap[key]) || 0;
+        if (rate <= 0) return;
+        if (ln.is_used) {
+          var pct = parseInt(ln.used_pct, 10) || 100;
+          work += rate * (pct / 100.0) * qty;
+        } else {
+          work += rate * qty;
+        }
+      });
+      var wg = readWeightGrams();
+      var mat = wg > 0 ? wg * (parseFloat(mpg.kanekalon) || 0) : 0;
+      return money2(work + mat);
+    }
+    function setAutoField(input, value) {
+      if (!input) return;
+      input.value = value > 0 ? String(value) : '';
+      input.setAttribute('data-kit-auto', '1');
+    }
+    function fieldIsAuto(input) {
+      if (!input) return true;
+      var v = String(input.value || '').trim();
+      return !v || input.getAttribute('data-kit-auto') === '1';
+    }
+    function wireManualOverride(input) {
+      if (!input) return;
+      input.addEventListener('input', function () {
+        input.removeAttribute('data-kit-auto');
+      });
+    }
+
+    window.kitAdminSyncDerivedFields = function () {
+      var lines = (typeof window.kitCompositionCollectLines === 'function')
+        ? window.kitCompositionCollectLines() : [];
+      var st = kitState();
+
+      var bc = inferBlanksCondition(lines);
+      var bcDisp = document.getElementById('kit_blanks_condition_display');
+      var bcHid = document.getElementById('kit_blanks_condition_hidden');
+      if (bcDisp) bcDisp.textContent = BC_LABELS[bc] || bc;
+      if (bcHid) bcHid.value = bc;
+
+      var stockInp = document.getElementById('kit_stock_price_total');
+      var stockHint = document.getElementById('kit_stock_price_hint');
+      var stock = calcStockPrice(lines, st);
+      if (fieldIsAuto(stockInp)) {
+        if (stock.missing.length) {
+          setAutoField(stockInp, '');
+          if (stockHint) {
+            stockHint.textContent = 'Не удалось рассчитать: нет цен для ключей ' + stock.missing.join(', ') + '.';
+          }
+        } else if (stock.total > 0) {
+          setAutoField(stockInp, stock.total);
+          if (stockHint) {
+            stockHint.innerHTML = 'Рассчитано по прайсу: <strong>' + money2(stock.total) + ' ₽</strong> — можно изменить вручную.';
+          }
+        } else {
+          setAutoField(stockInp, '');
+          if (stockHint) {
+            stockHint.textContent = 'Рассчитывается по прайсу заготовок из состава; можно изменить вручную.';
+          }
+        }
+      } else if (stockHint && stock.total > 0) {
+        stockHint.innerHTML = 'По прайсу сейчас: <strong>' + money2(stock.total) + ' ₽</strong> (в поле — своё значение).';
+      }
+
+      var costInp = document.getElementById('kit_cost_total');
+      var costHint = document.getElementById('kit_cost_hint');
+      var costEst = calcCostEstimate(lines, st);
+      if (fieldIsAuto(costInp)) {
+        if (costEst > 0) {
+          setAutoField(costInp, costEst);
+          if (costHint) {
+            costHint.innerHTML = 'Примерно: <strong>' + money2(costEst) + ' ₽</strong> (работа по видам'
+              + (readWeightGrams() > 0 ? ' + канекалон по весу' : '')
+              + ') — можно изменить вручную.';
+          }
+        } else {
+          setAutoField(costInp, '');
+          if (costHint) {
+            costHint.textContent = 'Примерный расчёт: работа по видам заготовок (для б/у — указанный % от цены работы) + вес × цена канекалона за грамм из настроек. Можно изменить вручную.';
+          }
+        }
+      } else if (costHint && costEst > 0) {
+        costHint.innerHTML = 'Примерно по составу: <strong>' + money2(costEst) + ' ₽</strong> (в поле — своё значение).';
+      }
+    };
+
+    window.kitCompositionOnChange = function () {
+      window.kitAdminSyncDerivedFields();
+    };
+
+    wireManualOverride(document.getElementById('kit_stock_price_total'));
+    wireManualOverride(document.getElementById('kit_cost_total'));
+    var weightEl = document.querySelector('input[name="weight_grams"]');
+    if (weightEl) {
+      weightEl.addEventListener('input', window.kitAdminSyncDerivedFields);
+      weightEl.addEventListener('change', window.kitAdminSyncDerivedFields);
+    }
+    function scheduleSync() {
+      if (typeof window.kitAdminSyncDerivedFields === 'function') window.kitAdminSyncDerivedFields();
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', scheduleSync);
+    } else {
+      scheduleSync();
+    }
+  })();
+  </script>
+  {% endif %}
 {% endblock %}
