@@ -78,14 +78,14 @@ def _parse_optional_price(raw: object) -> float | None:
     return float(t.replace(",", "."))
 
 
-def _parse_percent_0_100(raw: object | None) -> float:
+def _parse_autocalc_percent(raw: object | None, *, max_pct: float = 10_000.0) -> float:
     if raw is None:
         raise ValueError("pct missing")
     t = str(raw).strip()
     if not t:
         raise ValueError("pct empty")
     v = float(t.replace(",", "."))
-    if v < 0 or v > 100:
+    if v < 0 or v > float(max_pct):
         raise ValueError("pct range")
     return v
 
@@ -442,13 +442,13 @@ async def catalog_price_autocalc_apply(
             status_code=400,
         )
     try:
-        pct = _parse_percent_0_100(percent_raw)
+        pct = _parse_autocalc_percent(percent_raw)
     except ValueError:
         return _render_price_autocalc_page(
             request,
             current_user=current_user,
             db=db,
-            error="Процент: число от 0 до 100.",
+            error="Процент: неотрицательное число (можно больше 100 для повышения цены).",
             fp=fp,
             status_code=400,
         )

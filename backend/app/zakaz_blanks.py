@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+_BLANK_CATALOG_CATEGORY = "Заказ"
+_BLANK_CATALOG_SUBCATEGORY = "Заготовки поштучно"
 
 
 @dataclass(frozen=True)
@@ -58,13 +66,59 @@ def kit_form_blank_defs(section: str) -> list[ZakazBlankDef]:
     return [row for row in _BLANKS if row.include_in_kit_form and not row.is_bu and row.section == section]
 
 
-def kit_composition_catalog_items() -> list[dict[str, str]]:
-    """Список {key, label, section} для выпадающего списка состава комплекта."""
-    out: list[dict[str, str]] = []
+def section_from_kit_key(kit_key: str) -> str | None:
+    """D.E. / S.E. для фильтра состава комплекта: по префиксу ключа DE_ / SE_."""
+    k = (kit_key or "").strip().upper()
+    if k.startswith("SE_"):
+        return "SE"
+    if k.startswith("DE_"):
+        return "DE"
+    return None
+
+
+def kit_composition_catalog_items(db: Session | None = None) -> list[dict[str, str]]:
+    """Список {key, label, section} для выпадающего списка состава комплекта.
+
+  База — встроенный справочник; активные строки прайса «Заготовки поштучно» с kit_key
+  дополняют и переопределяют подписи. section для каталога — из префикса ключа.
+    """
+    by_key: dict[str, dict[str, str]] = {}
     for row in _BLANKS:
         if not row.include_in_kit_form or row.is_bu or not row.key:
             continue
-        out.append({"key": row.key, "label": row.display_name, "section": row.section})
+        by_key[row.key] = {"key": row.key, "label": row.display_name, "section": row.section}
+
+    if db is not None:
+        from sqlalchemy import select
+
+        from app.db.models import CatalogProduct
+
+        catalog_rows = db.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.category_name == _BLANK_CATALOG_CATEGORY,
+                CatalogProduct.subcategory_name == _BLANK_CATALOG_SUBCATEGORY,
+                CatalogProduct.is_active.is_(True),
+            )
+        ).all()
+        for cat_row in catalog_rows:
+            try:
+                meta = json.loads(cat_row.meta_json or "{}")
+            except Exception:
+                meta = {}
+            if not isinstance(meta, dict):
+                meta = {}
+            kk = str(meta.get("kit_key") or "").strip()
+            sec = section_from_kit_key(kk)
+            if not kk or not sec:
+                continue
+            by_key[kk] = {
+                "key": kk,
+                "label": (str(cat_row.name or "").strip() or kk),
+                "section": sec,
+            }
+
+    out = list(by_key.values())
+    out.sort(key=lambda x: (x["section"], str(x["label"]).lower(), x["key"]))
     return out
 
 
