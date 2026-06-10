@@ -87,22 +87,32 @@
   <input name="{{ field_prefix }}color_text" maxlength="200" placeholder="Цвет материала с пачки и/или словесное описание" value="{{ fp.get('color_text', '') }}" />
 </div>
 
+{% set bc = (fp.get('blanks_condition') or 'NEW')|upper %}
 <p style="margin:12px 0 6px;"><strong>Состояние заготовок в комплекте</strong> <span class="muted">*</span></p>
-<div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center;">
-  {% set bc = (fp.get('blanks_condition') or 'NEW')|upper %}
-  <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
-    <input type="radio" name="{{ field_prefix }}blanks_condition" value="NEW" {% if bc == 'NEW' %}checked{% endif %} />
-    <span>Новый</span>
-  </label>
-  <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
-    <input type="radio" name="{{ field_prefix }}blanks_condition" value="USED" {% if bc == 'USED' %}checked{% endif %} />
-    <span>Использованные</span>
-  </label>
-  <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
-    <input type="radio" name="{{ field_prefix }}blanks_condition" value="MIXED" {% if bc == 'MIXED' %}checked{% endif %} />
-    <span>50 на 50</span>
-  </label>
-</div>
+{% if is_new %}
+  <div id="kit_blanks_condition_display" style="font-size:15px;font-weight:600;margin-bottom:4px;">
+    {% if bc == 'USED' %}Использованные{% elif bc == 'MIXED' %}50 на 50{% else %}Новый{% endif %}
+  </div>
+  <input type="hidden" name="{{ field_prefix }}blanks_condition" id="kit_blanks_condition_hidden" value="{{ bc }}" />
+  <div class="muted" style="font-size:12px;margin-bottom:8px;">
+    Определяется автоматически по видам заготовок в таблице состава (галочка «б/у»): все без б/у — новый, все с б/у — использованные, смешанно — 50 на 50.
+  </div>
+{% else %}
+  <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center;">
+    <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
+      <input type="radio" name="{{ field_prefix }}blanks_condition" value="NEW" {% if bc == 'NEW' %}checked{% endif %} />
+      <span>Новый</span>
+    </label>
+    <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
+      <input type="radio" name="{{ field_prefix }}blanks_condition" value="USED" {% if bc == 'USED' %}checked{% endif %} />
+      <span>Использованные</span>
+    </label>
+    <label style="display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
+      <input type="radio" name="{{ field_prefix }}blanks_condition" value="MIXED" {% if bc == 'MIXED' %}checked{% endif %} />
+      <span>50 на 50</span>
+    </label>
+  </div>
+{% endif %}
 
 <div style="margin-top:8px;">
   <label>Описание комплекта</label>
@@ -152,8 +162,14 @@
 <div class="row" style="margin-top:12px;">
   <div>
     <label>Цена комплекта на складе (всего), ₽ <span class="muted">*</span></label>
-    <input name="{{ field_prefix }}stock_price_total" type="text" inputmode="decimal" placeholder="например, 3500 или пусто — по прайсу заготовок" value="{{ fp.get('stock_price_total', '') }}" />
-    <div class="muted" style="font-size:12px;margin-top:4px;">Если оставить пустым и задан состав комплекта — подставится сумма по каталогу «Заказ» → «Заготовки поштучно» (при наличии цен по всем ключам).</div>
+    <input name="{{ field_prefix }}stock_price_total" id="kit_stock_price_total" type="text" inputmode="decimal" placeholder="{% if is_new %}рассчитается по составу{% else %}например, 3500 или пусто — по прайсу заготовок{% endif %}" value="{{ fp.get('stock_price_total', '') }}" />
+    {% if is_new %}
+      <div id="kit_stock_price_hint" class="muted" style="font-size:12px;margin-top:4px;">
+        Рассчитывается по прайсу заготовок из состава; можно изменить вручную.
+      </div>
+    {% else %}
+      <div class="muted" style="font-size:12px;margin-top:4px;">Если оставить пустым и задан состав комплекта — подставится сумма по каталогу «Заказ» → «Заготовки поштучно» (при наличии цен по всем ключам).</div>
+    {% endif %}
     {% if kit and kit.stock_price_snapshot_text %}
       <details style="margin-top:6px;">
         <summary class="muted" style="cursor:pointer;">Рассчитано по составу</summary>
@@ -186,7 +202,12 @@
 
 <div style="margin-top:8px;">
   <label>Себестоимость (всего), ₽ <span class="muted">*</span> <span class="muted">(затраты + ЗП авторов за весь комплект)</span></label>
-  <input name="{{ field_prefix }}cost_total" type="text" inputmode="decimal" required placeholder="например, 2800" value="{{ fp.get('cost_total', '') }}" />
+  <input name="{{ field_prefix }}cost_total" id="kit_cost_total" type="text" inputmode="decimal" {% if not is_new %}required{% endif %} placeholder="{% if is_new %}примерный расчёт по составу{% else %}например, 2800{% endif %}" value="{{ fp.get('cost_total', '') }}" />
+  {% if is_new %}
+    <div id="kit_cost_hint" class="muted" style="font-size:12px;margin-top:4px;">
+      Примерный расчёт: работа по видам заготовок (для б/у — указанный % от цены работы) + вес × цена канекалона за грамм из настроек. Можно изменить вручную.
+    </div>
+  {% endif %}
   {% if kit and kit.cost_snapshot_text %}
     <details style="margin-top:6px;">
       <summary class="muted" style="cursor:pointer;">Показать состав себестоимости</summary>

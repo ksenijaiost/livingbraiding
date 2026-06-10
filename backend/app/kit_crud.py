@@ -304,6 +304,18 @@ def try_fill_kit_admin_stock_price_total_from_composition(
     cur = d.stock_price_total
     if cur is not None and float(cur) > 0:
         return
+    if d.composition_lines:
+        from app.kit_composition_lines import client_price_for_lines
+
+        total, missing = client_price_for_lines(db, d.composition_lines, extra_costs_amount=0.0)
+        if missing:
+            raise ValueError(
+                "Цена на складе не указана; автоподстановка по прайсу невозможна — нет цен для ключей: "
+                + ", ".join(missing)
+            )
+        if total > 0:
+            d.stock_price_total = float(total)
+        return
     totals = {str(k): int(v) for k, v in (composition_totals or {}).items() if int(v) > 0}
     if not totals:
         return
@@ -318,6 +330,53 @@ def try_fill_kit_admin_stock_price_total_from_composition(
     if price is None or float(price) <= 0:
         return
     d.stock_price_total = float(price)
+
+
+def estimate_kit_admin_cost_total(
+    db: Session,
+    lines: list[Any],
+    *,
+    weight_grams: float | None = None,
+) -> float:
+    """Примерная себестоимость: работа по видам (+ % для б/у) + вес × цена канекалона."""
+    from app.kit_composition_lines import BlankCondition, filter_nonempty, _work_pay_for_key
+    from app.work_products import _material_prices_per_gram
+
+    total = 0.0
+    for ln in filter_nonempty(lines):
+        q = ln.total_qty()
+        if q <= 0:
+            continue
+        rate = _work_pay_for_key(db, ln.key)
+        if rate <= 0:
+            continue
+        if ln.condition == BlankCondition.USED:
+            pct = max(1, min(100, int(ln.used_price_pct or 100)))
+            total += rate * (float(pct) / 100.0) * float(q)
+        else:
+            total += rate * float(q)
+    wg = float(weight_grams or 0.0)
+    if wg > 0:
+        kpg, _kudpg = _material_prices_per_gram(db)
+        total += wg * float(kpg)
+    return float(total)
+
+
+def try_fill_kit_admin_cost_total_from_composition(
+    db: Session,
+    d: KitAdminFormData,
+) -> None:
+    """Если себестоимость не введена — подставить примерный расчёт по составу и весу."""
+    cur = d.cost_total
+    if cur is not None and float(cur) > 0:
+        return
+    if not d.composition_lines:
+        return
+    est = estimate_kit_admin_cost_total(
+        db, d.composition_lines, weight_grams=d.weight_grams
+    )
+    if est > 0:
+        d.cost_total = float(est)
 
 
 def _g_discount_percent_from_form_field(form: Any, name: str, default: int = 0) -> int:
