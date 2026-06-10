@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_role
+from app.zakaz_blanks import section_from_kit_key
 from app.db.models import CatalogProduct, Kit, KitBlankStock, Service, ServiceCategory, ServiceSubcategory, UserRole
 from app.db.session import get_db
 from app.forms_parse import parse_bool, parse_optional_float
@@ -330,6 +331,8 @@ async def products_catalog_row_new(
         kit_key_new = str(form.get("kit_key") or "").strip()
         if not kit_key_new:
             return _redirect("err", "blank_fields")
+        if section_from_kit_key(kit_key_new) is None:
+            return _redirect("err", "bad_kit_key_prefix")
         if _catalog_blank_kit_key_owner_id(db, kit_key_new) is not None:
             return _redirect("err", "duplicate_kit_key")
 

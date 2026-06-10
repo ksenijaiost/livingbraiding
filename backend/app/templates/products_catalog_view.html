@@ -95,6 +95,8 @@
       <p class="error">Такой элемент уже есть в этой подкатегории.</p>
     {% elif err == "duplicate_kit_key" %}
       <p class="error">Ключ <code>kit_key</code> уже используется другой позицией в «Заготовки поштучно».</p>
+    {% elif err == "bad_kit_key_prefix" %}
+      <p class="error">Ключ <code>kit_key</code> должен начинаться с <code>DE_</code> или <code>SE_</code> (тип заготовки для состава комплекта).</p>
     {% elif err == "delete_active" %}
       <p class="error">Удалять можно только неактуальные строки (снимите «Актуально» и сохраните).</p>
     {% elif msg == "deleted" %}
@@ -364,7 +366,7 @@
                       {% if g.subcategory_name == "Заготовки поштучно" %}
                         <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
                           <label style="display:block;">Ключ для JSON / комплекта (<code>kit_key</code>) *
-                            <input form="new-row-{{ loop.index }}" name="kit_key" type="text" placeholder="латиница, цифры, _" maxlength="80" required style="font-family:monospace;width:100%;max-width:100%;box-sizing:border-box;margin-top:4px;" />
+                            <input form="new-row-{{ loop.index }}" name="kit_key" type="text" placeholder="DE_… или SE_…" maxlength="80" required style="font-family:monospace;width:100%;max-width:100%;box-sizing:border-box;margin-top:4px;" />
                           </label>
                         </div>
                       {% endif %}

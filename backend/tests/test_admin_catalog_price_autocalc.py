@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.admin_service_catalog import (
     _autocalc_apply_for_services,
+    _parse_autocalc_percent,
     _resolve_autocalc_service_ids,
 )
 from app.db import models as _orm_models  # noqa: F401
@@ -97,6 +98,11 @@ def test_resolve_scope_subcategory_and_services(memory_db):
             subcategory_id=None,
             service_ids=[seeded["hidden_id"]],
         )
+
+
+def test_parse_autocalc_percent_allows_above_100() -> None:
+    assert _parse_autocalc_percent("120") == 120.0
+    assert _parse_autocalc_percent("50") == 50.0
 
 
 def test_apply_autocalc_rounding_and_null_skip(memory_db):

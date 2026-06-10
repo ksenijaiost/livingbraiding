@@ -290,7 +290,7 @@ def _kit_table_state_json(
             "masters": [{"id": u.id, "name": u.display_name} for u in masters],
             "seItems": [{"key": k, "label": lbl} for k, lbl in _kit_se_items()],
             "deItems": [{"key": k, "label": lbl} for k, lbl in _kit_de_items()],
-            "blankCatalog": kit_composition_catalog_items(),
+            "blankCatalog": kit_composition_catalog_items(db),
             "initialLines": [],
             "prefill": kit_qty_prefill,
             "kitWorkPayByKey": _kit_work_pay_map_from_catalog(db),

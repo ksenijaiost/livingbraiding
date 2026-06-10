@@ -3,7 +3,7 @@
   <div class="card lb-card-max-920">
     <p><a href="/admin/catalog">← Управление прайсом</a></p>
     <h2 class="lb-mt-0">Авторасчёт прайса услуг</h2>
-    <p class="muted">Расчёт меняет поля «от» и «до» у выбранного уровня. Пустые значения источника (NULL) пропускаются и не перезаписываются.</p>
+    <p class="muted">Расчёт меняет поля «от» и «до» у выбранного уровня. Пустые значения источника (NULL) пропускаются и не перезаписываются. Процент можно больше 100 (например 120 — повышение на 20%).</p>
 
     {% if error %}
       <div class="error lb-mb-12">{{ error }}</div>
@@ -49,7 +49,7 @@
 
       <div class="lb-mb-16">
         <div class="lb-strong-head lb-mb-6">3) Процент</div>
-        <input name="percent" type="number" min="0" max="100" step="0.01" value="{{ fp.percent }}" required />
+        <input name="percent" type="number" min="0" step="0.01" value="{{ fp.percent }}" required />
       </div>
 
       <div class="lb-mb-12">

@@ -113,6 +113,7 @@ def _kit_qty_prefill_from_admin_fp(fp: dict[str, Any]) -> dict[str, str]:
 
 
 def kit_admin_new_table_state_json(
+    db: Session,
     *,
     kit_qty_prefill: dict[str, str],
     initial_lines: list[dict[str, Any]] | None = None,
@@ -124,7 +125,7 @@ def kit_admin_new_table_state_json(
             "masters": [{"id": 0, "name": "Количество в комплекте"}],
             "seItems": [{"key": k, "label": lbl} for k, lbl in _kit_se_items()],
             "deItems": [{"key": k, "label": lbl} for k, lbl in _kit_de_items()],
-            "blankCatalog": kit_composition_catalog_items(),
+            "blankCatalog": kit_composition_catalog_items(db),
             "initialLines": initial_lines or [],
             "prefill": kit_qty_prefill,
             "excludeFromInventoryPieceCount": sorted(KIT_INVENTORY_PIECE_EXCLUDE_KEYS),
@@ -367,7 +368,7 @@ def admin_kit_new_get(
             computed_stock_price_total=None,
             computed_stock_price_missing_keys=[],
             blank_stock_rows=[],
-            kit_table_state_json=kit_admin_new_table_state_json(kit_qty_prefill={}),
+            kit_table_state_json=kit_admin_new_table_state_json(db, kit_qty_prefill={}),
         ),
     )
 
@@ -421,7 +422,8 @@ async def admin_kit_new_post(
                 computed_stock_price_missing_keys=[],
                 blank_stock_rows=[],
                 kit_table_state_json=kit_admin_new_table_state_json(
-                    kit_qty_prefill=_kit_qty_prefill_from_admin_fp(fp_err)
+                    db,
+                    kit_qty_prefill=_kit_qty_prefill_from_admin_fp(fp_err),
                 ),
             ),
             status_code=400,

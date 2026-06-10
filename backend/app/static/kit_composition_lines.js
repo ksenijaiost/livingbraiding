@@ -24,14 +24,19 @@
     return [state.currentUserId || 0];
   }
 
+  function typeFilterSelector(state, kind) {
+    if (kind === 'se') {
+      return state.seTypeSelector || 'input[name="kit_type_se"], input[name="blank_type_se"], input[name="corr_kit_type_se"]';
+    }
+    return state.deTypeSelector || 'input[name="kit_type_de"], input[name="blank_type_de"], input[name="corr_kit_type_de"]';
+  }
+
   function filteredCatalog(state) {
     var cat = state.blankCatalog || [];
     var showSe = true;
     var showDe = true;
-    var seSel = state.seTypeSelector || 'input[name="kit_type_se"], input[name="blank_type_se"]';
-    var deSel = state.deTypeSelector || 'input[name="kit_type_de"], input[name="blank_type_de"]';
-    var seEl = document.querySelector(seSel);
-    var deEl = document.querySelector(deSel);
+    var seEl = document.querySelector(typeFilterSelector(state, 'se'));
+    var deEl = document.querySelector(typeFilterSelector(state, 'de'));
     if (seEl) showSe = !!seEl.checked;
     if (deEl) showDe = !!deEl.checked;
     return cat.filter(function (it) {
@@ -268,7 +273,7 @@
     }
 
     function wireTypeFilters() {
-      var sel = (state.seTypeSelector || 'input[name="kit_type_se"]') + ', ' + (state.deTypeSelector || 'input[name="kit_type_de"]');
+      var sel = typeFilterSelector(state, 'se') + ', ' + typeFilterSelector(state, 'de');
       document.querySelectorAll(sel).forEach(function (el) {
         el.removeEventListener('change', el._kclTypeHandler);
         el._kclTypeHandler = function () {
