@@ -1061,6 +1061,7 @@ class WorkKind(str, enum.Enum):
     MIX = "MIX"
     RUBBER = "RUBBER"
     KIT_CORRECTION = "KIT_CORRECTION"
+    OTHER = "OTHER"
     HAIR_EXT_PREP = "HAIR_EXT_PREP"
 
 

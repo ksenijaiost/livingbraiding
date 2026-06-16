@@ -2869,6 +2869,7 @@ def _work_activity_label(w: WorkForInventory) -> str:
         WorkKind.MIX: "смешка",
         WorkKind.RUBBER: "хвосты/резинки",
         WorkKind.KIT_CORRECTION: "коррекция комплекта",
+        WorkKind.OTHER: "другое",
         WorkKind.HAIR_EXT_PREP: "подготовка к наращиванию",
     }
     kind_l = kind_map.get(w.kind, w.kind.value)

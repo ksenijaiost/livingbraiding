@@ -120,10 +120,22 @@
         <div>
           <label>Тип</label>
           <div style="margin-top: 6px;">
-            {% for t in rubber_types %}
+            {% for t in rubber_families %}
               <label style="display:block; margin-bottom: 6px;">
-                <input type="radio" name="rubber_type" value="{{ t.value }}" {% if fp.rubber_type == t.value %}checked{% endif %} />
+                <input type="radio" name="rubber_family" value="{{ t.value }}" {% if fp.rubber_family == t.value %}checked{% endif %} />
                 {{ t.label }}
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div id="rubber_size_block" style="margin-top: 10px; display:none;">
+          <label>Размер</label>
+          <div style="margin-top: 6px;">
+            {% for s in rubber_sizes %}
+              <label style="display:block; margin-bottom: 6px;">
+                <input type="radio" name="rubber_size" value="{{ s.value }}" {% if fp.rubber_size == s.value %}checked{% endif %} />
+                {{ s.label }}
               </label>
             {% endfor %}
           </div>
@@ -376,13 +388,27 @@
       rb.style.display = (kind.value === 'RUBBER') ? 'block' : 'none';
       if (kind.value === 'RUBBER') syncRubberTypeFields();
     }
+    function resolveRubberType() {
+      var famEl = document.querySelector('input[name="rubber_family"]:checked');
+      var fam = famEl ? famEl.value : '';
+      if (fam === 'TAIL_CRAB' || fam === 'TAIL_NET' || fam === 'TAIL_BUN') {
+        var szEl = document.querySelector('input[name="rubber_size"]:checked');
+        var sz = szEl ? szEl.value : '';
+        if (!sz) return '';
+        return fam + '_' + sz;
+      }
+      return fam;
+    }
     function syncRubberTypeFields() {
-      var sel = document.querySelector('input[name="rubber_type"]:checked');
+      var famEl = document.querySelector('input[name="rubber_family"]:checked');
+      var fam = famEl ? famEl.value : '';
+      var sizeBlock = document.getElementById('rubber_size_block');
       var a = document.getElementById('rubber_attach_qty_block');
       var b = document.getElementById('rubber_braids_qty_block');
-      if (!sel || !a || !b) return;
-      a.style.display = (sel.value === 'TAIL_ELASTIC') ? 'block' : 'none';
-      b.style.display = (sel.value === 'BRAIDS_ELASTIC') ? 'block' : 'none';
+      var needsSize = fam === 'TAIL_CRAB' || fam === 'TAIL_NET' || fam === 'TAIL_BUN';
+      if (sizeBlock) sizeBlock.style.display = needsSize ? 'block' : 'none';
+      if (a) a.style.display = (fam === 'TAIL_ELASTIC') ? 'block' : 'none';
+      if (b) b.style.display = (fam === 'BRAIDS_ELASTIC') ? 'block' : 'none';
     }
     function syncCorrectionBlock() {
       var kind = document.querySelector('select[name="kind"]');
@@ -580,8 +606,7 @@
       }
 
       if (k === 'RUBBER') {
-        var t = document.querySelector('input[name="rubber_type"]:checked');
-        var typeVal = t ? t.value : '';
+        var typeVal = resolveRubberType();
         var map = (meta && meta.rubber) ? meta.rubber : {};
         var nameByType = {
           TAIL_ELASTIC: 'Хвост на резинке (1 крепление)',
@@ -668,6 +693,21 @@
         return;
       }
 
+      if (k === 'OTHER') {
+        var gramsOther = kan + kud;
+        var mixSrcOther = (document.querySelector('input[name="mix_source"]:checked') || {}).value || 'NO_MIX';
+        var payOther = 0;
+        if (gramsOther > 0 && mixSrcOther === 'SELF_MIXED') {
+          var mcOther = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || 'STANDARD';
+          var rmOther = (meta && meta.mixRates) ? meta.mixRates : {};
+          payOther = gramsOther * (parseFloat(rmOther[mcOther]) || 0);
+        }
+        var uidOther = st.currentUserId || 0;
+        setPayLines(payOther > 0 ? [('ЗП «' + nameByUserId(st, uidOther) + '»: ' + money2(payOther) + ' ₽')] : []);
+        setCost('Себестоимость (итого): ' + money2(mat) + ' ₽ (материал + доп. расходы)');
+        return;
+      }
+
       // Default / unsupported kind
       setPayLines([]);
       setCost('Себестоимость (итого): ' + money2(mat) + ' ₽ (материал + доп. расходы)');
@@ -692,8 +732,7 @@
 
       var line = '';
       if (kind.value === 'RUBBER') {
-        var t = document.querySelector('input[name="rubber_type"]:checked');
-        var typeVal = t ? t.value : '';
+        var typeVal = resolveRubberType();
         var map = (meta && meta.rubber) ? meta.rubber : {};
         var nameByType = {
           TAIL_ELASTIC: 'Хвост на резинке (1 крепление)',
@@ -916,7 +955,7 @@
     });
     var kindSel = document.querySelector('select[name="kind"]');
     if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); syncCorrectionBlock(); syncMixUI(); syncPriceHint(); syncWorkPreview(); });
-    document.querySelectorAll('input[name="rubber_type"]').forEach(function(el){
+    document.querySelectorAll('input[name="rubber_family"], input[name="rubber_size"]').forEach(function(el){
       el.addEventListener('change', function () { syncRubberTypeFields(); syncPriceHint(); syncWorkPreview(); });
     });
     var corrWash = document.getElementById('corr_wash');

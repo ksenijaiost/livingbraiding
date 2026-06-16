@@ -95,6 +95,8 @@ _WORK_NEW_FP_KEYS = frozenset({
     "mix_source",
     "mix_complexity",
     "rubber_type",
+    "rubber_family",
+    "rubber_size",
     "rubber_attach_qty",
     "rubber_braids_qty",
     "corr_trim_qty",
@@ -371,6 +373,68 @@ def _rubber_type_items() -> list[tuple[str, str]]:
     ]
 
 
+def _rubber_family_items() -> list[tuple[str, str]]:
+    return [
+        ("TAIL_ELASTIC", "Хвост на резинке"),
+        ("TAIL_CRAB", "Хвост на крабе"),
+        ("TAIL_NET", "Хвост на сетке"),
+        ("TAIL_BUN", "Хвост на бублике"),
+        ("BRAIDS_ELASTIC", "Косы на резинке"),
+    ]
+
+
+def _rubber_size_items() -> list[tuple[str, str]]:
+    return [
+        ("MINI", "mini"),
+        ("STANDARD", "standard"),
+        ("MAX", "max"),
+    ]
+
+
+_RUBBER_SIZED_FAMILIES = frozenset({"TAIL_CRAB", "TAIL_NET", "TAIL_BUN"})
+_VALID_RUBBER_TYPES = frozenset(k for k, _ in _rubber_type_items())
+
+
+def _rubber_family_size_from_type(rubber_type: str) -> tuple[str, str]:
+    rt = (rubber_type or "").strip()
+    if rt in ("TAIL_ELASTIC", "BRAIDS_ELASTIC"):
+        return rt, ""
+    for prefix in ("TAIL_CRAB", "TAIL_NET", "TAIL_BUN"):
+        if rt.startswith(prefix + "_"):
+            return prefix, rt[len(prefix) + 1 :]
+    return "", ""
+
+
+def _enrich_fp_rubber(fp: dict[str, Any]) -> None:
+    if (fp.get("rubber_family") or "").strip():
+        return
+    rt = (fp.get("rubber_type") or "").strip()
+    if not rt:
+        return
+    fam, size = _rubber_family_size_from_type(rt)
+    if fam:
+        fp["rubber_family"] = fam
+    if size:
+        fp["rubber_size"] = size
+
+
+def _resolve_rubber_type_from_form(form: Any) -> str:
+    family = (_g_str(form, "rubber_family", "") or "").strip()
+    if family:
+        if family in _RUBBER_SIZED_FAMILIES:
+            size = (_g_str(form, "rubber_size", "") or "").strip().upper()
+            if size not in {k for k, _ in _rubber_size_items()}:
+                raise ValueError("Для выбранного типа укажите размер: mini, standard или max.")
+            return f"{family}_{size}"
+        if family in ("TAIL_ELASTIC", "BRAIDS_ELASTIC"):
+            return family
+        raise ValueError("Для «Хвосты/резинки» выберите тип.")
+    rubber_type = (_g_str(form, "rubber_type", "") or "").strip()
+    if rubber_type in _VALID_RUBBER_TYPES:
+        return rubber_type
+    raise ValueError("Для «Хвосты/резинки» выберите тип.")
+
+
 def _rubber_service_name(rubber_type: str) -> str:
     return {
         "TAIL_ELASTIC": "Хвост на резинке (1 крепление)",
@@ -480,6 +544,7 @@ def _kind_label(k: WorkKind) -> str:
         WorkKind.MIX: "Смешка",
         WorkKind.RUBBER: "Хвосты/резинки",
         WorkKind.KIT_CORRECTION: "Коррекция комплекта",
+        WorkKind.OTHER: "Другое",
         WorkKind.HAIR_EXT_PREP: "Подготовка к наращиванию волос (заглушка)",
     }[k]
 
@@ -781,6 +846,7 @@ def work_new_get(
         v = request.query_params.get(key)
         if v is not None and str(v).strip() != "":
             fp[key] = str(v).strip()
+    _enrich_fp_rubber(fp)
     masters = _list_masters_for_work_form(db)
     work_price_meta = {
         "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
@@ -805,6 +871,8 @@ def work_new_get(
             kit_se_items=_kit_se_items(),
             kit_de_items=_kit_de_items(),
             rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+            rubber_families=[{"value": v, "label": l} for v, l in _rubber_family_items()],
+            rubber_sizes=[{"value": v, "label": l} for v, l in _rubber_size_items()],
             work_price_meta_json=json.dumps(work_price_meta, ensure_ascii=False),
         ),
     )
@@ -993,8 +1061,8 @@ async def work_new_post(
                 }
             alloc = _alloc_equal_shares_for_masters(db, kit_staff_ids)
         elif kind == WorkKind.RUBBER:
-            rubber_type = (_g_str(form, "rubber_type", "") or "").strip()
-            if rubber_type not in {k for k, _ in _rubber_type_items()}:
+            rubber_type = _resolve_rubber_type_from_form(form)
+            if rubber_type not in _VALID_RUBBER_TYPES:
                 raise ValueError("Для «Хвосты/резинки» выберите тип.")
 
             if rubber_type == "TAIL_ELASTIC":
@@ -1012,6 +1080,8 @@ async def work_new_post(
                 "type": rubber_type,
                 "qty": rubber_qty,
             }
+            alloc = [(current_user.id, 1.0)]
+        elif kind == WorkKind.OTHER:
             alloc = [(current_user.id, 1.0)]
         elif kind == WorkKind.KIT_CORRECTION:
             corr_trim_qty = int(_g_float(form, "corr_trim_qty", 0))
@@ -1408,6 +1478,7 @@ async def work_new_post(
             db.commit()
         return RedirectResponse(url=f"/sales/work/{work.id}?msg=created", status_code=303)
     except ValueError as exc:
+        _enrich_fp_rubber(fp)
         masters = _list_masters_for_work_form(db)
         work_price_meta = {
             "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
@@ -1436,6 +1507,8 @@ async def work_new_post(
                 kit_se_items=_kit_se_items(),
                 kit_de_items=_kit_de_items(),
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+            rubber_families=[{"value": v, "label": l} for v, l in _rubber_family_items()],
+            rubber_sizes=[{"value": v, "label": l} for v, l in _rubber_size_items()],
                 work_price_meta_json=json.dumps(work_price_meta, ensure_ascii=False),
             ),
             status_code=400,

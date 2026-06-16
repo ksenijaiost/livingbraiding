@@ -187,6 +187,15 @@ def compute_work_financials(
         )
         staff_master_profit[current_user_id] = max(0.0, float(grams_total) * rate)
 
+    elif kind == WorkKind.OTHER:
+        if (
+            mix_source == MixSource.SELF_MIXED
+            and grams_total > 0
+            and mix_complexity is not None
+        ):
+            rate = float(mix_complexity_rate_map(db).get(mix_complexity, 0.0))
+            staff_master_profit[current_user_id] = max(0.0, float(grams_total) * rate)
+
     master_total = float(sum(staff_master_profit.values()))
     studio_share = _studio_share_snapshot(db)
     if kind not in (WorkKind.RUBBER, WorkKind.KIT_CORRECTION):
