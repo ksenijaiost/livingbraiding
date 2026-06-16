@@ -157,8 +157,8 @@ def ensure_prod_seed_data(db: Session) -> None:
         if not row:
             db.add(MaterialPriceCurrent(material_type=mt, price_per_gram=default_per_gram))
 
-    # Service catalogs + catalog_products price lists (idempotent)
-    _ensure_vsy_golova_catalog_and_kits(db, include_demo_kits=False)
+    # Service catalogs (idempotent). Прайс «Товары» (catalog_products) не трогаем — суммы задаются в UI.
+    _ensure_vsy_golova_catalog_and_kits(db, include_demo_kits=False, sync_catalog_products=False)
 
     # Expense catalog (idempotent)
     ensure_studio_expense_catalog(db)
@@ -622,8 +622,11 @@ def _upsert_catalog_product(
         )
         return
     row.is_active = True
-    row.price = price
-    row.meta_json = meta_json
+    if price is not None:
+        row.price = price
+    # Не затирать вручную введённые master_pay/fixed_expense при пустом meta (prod-restart / сид).
+    if meta:
+        row.meta_json = meta_json
     row.sort_order = sort_order
 
 
@@ -790,7 +793,12 @@ def _ensure_prodazha_materiala_products_catalog(db: Session) -> None:
             )
             so += 1
 
-def _ensure_vsy_golova_catalog_and_kits(db: Session, *, include_demo_kits: bool) -> None:
+def _ensure_vsy_golova_catalog_and_kits(
+    db: Session,
+    *,
+    include_demo_kits: bool,
+    sync_catalog_products: bool = True,
+) -> None:
     """Каталоги из JSON + анкета вплетения + (опционально) демо-комплекты."""
     ensure_vsy_golova_catalog(db)
     ensure_zakaz_catalog(db)
@@ -803,8 +811,9 @@ def _ensure_vsy_golova_catalog_and_kits(db: Session, *, include_demo_kits: bool)
 
     _ensure_visit_questionnaire_layout(db)
 
-    _ensure_zakaz_products_catalog(db)
-    _ensure_prodazha_materiala_products_catalog(db)
+    if sync_catalog_products:
+        _ensure_zakaz_products_catalog(db)
+        _ensure_prodazha_materiala_products_catalog(db)
 
     if (not include_demo_kits) or db.scalar(select(Kit).limit(1)):
         return
