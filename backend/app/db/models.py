@@ -866,6 +866,25 @@ class MasterScheduleDay(Base):
     )
 
 
+class MasterTimeBlock(Base):
+    """Ручная занятость мастера (работы и пр.) на интервал внутри рабочего дня."""
+
+    __tablename__ = "master_time_blocks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    block_date: Mapped[date] = mapped_column(Date, nullable=False)
+    time_from: Mapped[time] = mapped_column(Time, nullable=False)
+    time_to: Mapped[time] = mapped_column(Time, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    master: Mapped["User"] = relationship(foreign_keys=[master_id])
+    created_by_user: Mapped["User | None"] = relationship(foreign_keys=[created_by_user_id])
+
+
 class MasterScheduleAuditLog(Base):
     """Audit changes for master schedule days (поля old/new)."""
 

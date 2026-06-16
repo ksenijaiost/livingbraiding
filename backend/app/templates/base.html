@@ -170,6 +170,16 @@
               </div>
             </details>
 
+            {% if current_user.role.value == "MASTER" %}
+              <details class="nav-dd">
+                <summary>График</summary>
+                <div class="dd">
+                  <a href="/master/schedule">Редактировать график</a>
+                  <a href="/master/schedule?block=1">Занять время</a>
+                </div>
+              </details>
+            {% endif %}
+
             {% if current_user.role.value == "ADMIN_SUPER" %}
               <details class="nav-dd">
                 <summary>Управление</summary>
@@ -246,6 +256,14 @@
           <summary><strong>Склад</strong></summary>
           <a class="md-link" href="/kits" onclick="window.lbToggleMobileNav(false)">Комплекты</a>
         </details>
+
+        {% if current_user.role.value == "MASTER" %}
+          <details>
+            <summary><strong>График</strong></summary>
+            <a class="md-link" href="/master/schedule" onclick="window.lbToggleMobileNav(false)">Редактировать график</a>
+            <a class="md-link" href="/master/schedule?block=1" onclick="window.lbToggleMobileNav(false)">Занять время</a>
+          </details>
+        {% endif %}
 
         {% if current_user.role.value == "ADMIN_SUPER" %}
           <details>
