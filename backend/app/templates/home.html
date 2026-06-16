@@ -33,11 +33,17 @@
           </div>
           <div>
             <div class="muted" style="font-size: 12px;">Записи в системе</div>
-            <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 10px 16px;">
-              <span>пользователей: <strong>{{ techspec_home.counts.users_active }}</strong></span>
+            <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13px;">
+              <span>польз.: <strong>{{ techspec_home.counts.users_active }}</strong></span>
               <span>клиентов: <strong>{{ techspec_home.counts.clients }}</strong></span>
               <span>визитов: <strong>{{ techspec_home.counts.visits }}</strong></span>
               <span>броней: <strong>{{ techspec_home.counts.bookings }}</strong></span>
+              <span>консульт.: <strong>{{ techspec_home.counts.consultations }}</strong></span>
+              <span>комплектов: <strong>{{ techspec_home.counts.kits }}</strong> <span class="muted">(акт. {{ techspec_home.counts.kits_active }})</span></span>
+              <span>работ: <strong>{{ techspec_home.counts.works }}</strong></span>
+              <span>продаж: <strong>{{ techspec_home.counts.product_sales }}</strong></span>
+              <span>поз. прайса товаров: <strong>{{ techspec_home.counts.catalog_products }}</strong> <span class="muted">(акт. {{ techspec_home.counts.catalog_products_active }})</span></span>
+              <span>услуг: <strong>{{ techspec_home.counts.services }}</strong> <span class="muted">(акт. {{ techspec_home.counts.services_active }})</span></span>
             </div>
           </div>
           <div class="muted" style="font-size: 12px;">
