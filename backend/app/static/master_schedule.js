@@ -1,7 +1,15 @@
 (function () {
+  'use strict';
   var cfgEl = document.getElementById('lb-ms-config');
-  if (!cfgEl) return;
-  var cfg = JSON.parse(cfgEl.textContent || '{}');
+  var cfg = {};
+  if (cfgEl) {
+    try {
+      cfg = JSON.parse(cfgEl.textContent || '{}');
+    } catch (e) {
+      console.error('master_schedule: bad config JSON', e);
+      cfg = {};
+    }
+  }
   var isAdmin = !!cfg.isAdmin;
   var masterId = Number(cfg.masterId || 0);
   var todayIso = String(cfg.todayIso || '');
@@ -203,6 +211,22 @@
     }
     if (dateEl && dateEl.value) await loadBlocksForDay(dateEl.value);
   };
+
+  function bindBlockModalActions() {
+    document.querySelectorAll('[data-lb-ms-action]').forEach(function (btn) {
+      var action = btn.getAttribute('data-lb-ms-action') || '';
+      if (action === 'open-block') {
+        btn.addEventListener('click', function () { window.lbMsOpenBlockModal(); });
+      } else if (action === 'open-block-from-day') {
+        btn.addEventListener('click', function () { window.lbMsOpenBlockFromDay(); });
+      } else if (action === 'close-block') {
+        btn.addEventListener('click', function () { window.lbMsCloseBlockModal(); });
+      } else if (action === 'save-block') {
+        btn.addEventListener('click', function () { window.lbMsSaveBlock(); });
+      }
+    });
+  }
+  bindBlockModalActions();
 
   document.addEventListener('click', function (e) {
     var bd = document.getElementById('lbMsDayBackdrop');
@@ -603,7 +627,17 @@
     var ym = ymFromDate(dt);
     var monthLabel = document.getElementById('lbMsMonthLabel');
     if (monthLabel) monthLabel.textContent = '';
-    await loadMonth(ym);
+    var openBlockFromUrl = false;
+    try {
+      var params = new URLSearchParams(window.location.search || '');
+      openBlockFromUrl = params.get('block') === '1' || params.get('block') === 'true';
+    } catch (e) {}
+    try {
+      await loadMonth(ym);
+    } catch (e) {
+      console.error(e);
+      setBanner('Ошибка загрузки');
+    }
     var sel = document.getElementById('lbMsMasterSelect');
     if (sel) {
       sel.addEventListener('change', async function () {
@@ -615,15 +649,11 @@
     syncOddEvenBlock();
     syncBulkAllDay();
     syncBulkBreak();
-
-    try {
-      var params = new URLSearchParams(window.location.search || '');
-      if (params.get('block') === '1' || params.get('block') === 'true') {
-        window.lbMsOpenBlockModal();
-        if (window.history && window.history.replaceState) {
-          window.history.replaceState({}, '', window.location.pathname);
-        }
+    if (openBlockFromUrl) {
+      window.lbMsOpenBlockModal();
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState({}, '', window.location.pathname);
       }
-    } catch (e) {}
+    }
   })();
 })();

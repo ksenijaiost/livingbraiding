@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+  <script type="application/json" id="lb-ms-config">{{ {"isAdmin": is_admin_super, "masterId": master_id, "todayIso": today_iso, "defaultTimeFrom": ("%02d:00" % hour_from), "defaultTimeTo": ("%02d:00" % hour_to)} | tojson }}</script>
   <div class="card">
     <h2 style="margin-top:0;">График мастеров</h2>
 
@@ -14,7 +15,7 @@
           </select>
         </div>
         <div style="flex:0 0 auto; display:flex; gap:8px;">
-          <button type="button" class="secondary" onclick="window.lbMsOpenBlockModal()">Занять время</button>
+          <button type="button" class="secondary" data-lb-ms-action="open-block">Занять время</button>
           <button type="button" class="secondary" onclick="window.lbMsOpenBulk()">Настроить</button>
         </div>
       </div>
@@ -22,7 +23,7 @@
       <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; justify-content:space-between;">
         <div class="muted" id="lbMsBanner" style="font-size:12px;">Загрузка…</div>
         <div style="display:flex; gap:8px;">
-          <button type="button" class="secondary" onclick="window.lbMsOpenBlockModal()">Занять время</button>
+          <button type="button" class="secondary" data-lb-ms-action="open-block">Занять время</button>
           <button type="button" class="secondary" onclick="window.lbMsOpenBulk()">Настроить</button>
         </div>
       </div>
@@ -116,7 +117,7 @@
         </div>
 
         <div style="display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap;">
-          <button type="button" class="secondary" onclick="window.lbMsOpenBlockFromDay()">Занять время</button>
+          <button type="button" class="secondary" data-lb-ms-action="open-block-from-day">Занять время</button>
           <button type="button" class="secondary" onclick="window.lbMsSaveDay()">Сохранить</button>
         </div>
       </div>
@@ -132,7 +133,7 @@
           <div class="muted" style="font-size:12px;">Занятость</div>
           <h3 style="margin:0;">Занять время</h3>
         </div>
-        <button type="button" class="secondary" onclick="window.lbMsCloseBlockModal()">Закрыть</button>
+        <button type="button" class="secondary" data-lb-ms-action="close-block">Закрыть</button>
       </div>
 
       <div style="margin-top:12px; display:flex; flex-direction:column; gap:12px;">
@@ -159,7 +160,7 @@
           <div id="lbMsBlockList"></div>
         </div>
         <div style="display:flex; justify-content:flex-end;">
-          <button type="button" class="secondary" onclick="window.lbMsSaveBlock()">Сохранить</button>
+          <button type="button" class="secondary" data-lb-ms-action="save-block">Сохранить</button>
         </div>
       </div>
     </div>
@@ -292,7 +293,6 @@
     </div>
   </div>
 
-  <script type="application/json" id="lb-ms-config">{{ {"isAdmin": is_admin_super, "masterId": master_id, "todayIso": today_iso, "defaultTimeFrom": ("%02d:00" % hour_from), "defaultTimeTo": ("%02d:00" % hour_to)} | tojson }}</script>
-  <script src="/static/master_schedule.js"></script>
+  <script src="/static/master_schedule.js?v=81"></script>
 {% endblock %}
 
