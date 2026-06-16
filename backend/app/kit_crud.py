@@ -187,7 +187,11 @@ def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
             pieces_total = max(0, pieces_initial)
             pieces_available = pieces_total
     else:
-        pieces_total = _g_int(form, "pieces_total", 0)
+        if composition_lines:
+            composition_totals = lines_to_legacy_totals(composition_lines)
+            pieces_total = inventory_piece_count(composition_lines)
+        else:
+            pieces_total = _g_int(form, "pieces_total", 0)
         pieces_available = _g_int(form, "pieces_available", 0)
 
     return KitAdminFormData(
@@ -602,6 +606,55 @@ def kit_to_form_prefill(kit: Kit) -> dict[str, Any]:
             )
         ],
     }
+
+
+def kit_composition_initial_lines(kit: Kit) -> list[dict[str, Any]]:
+    """
+    Prefill для динамической таблицы состава (kit_composition_lines.js): list[{key, condition, used_price_pct, by_staff}].
+    """
+    from app.kit_composition_lines import filter_nonempty, lines_from_json
+
+    raw = getattr(kit, "composition_json", None)
+    lines = lines_from_json(str(raw)) if raw else []
+    out: list[dict[str, Any]] = []
+    for ln in filter_nonempty(lines):
+        out.append(
+            {
+                "key": ln.key,
+                "condition": ln.condition.value,
+                "used_price_pct": int(ln.used_price_pct or 100),
+                "by_staff": {str(int(uid)): int(q) for uid, q in (ln.by_staff or {}).items()},
+            }
+        )
+    return out
+
+
+def kit_composition_display_rows(db: Session, kit: Kit) -> list[dict[str, Any]]:
+    """Строки для read-only отображения состава на карточке комплекта."""
+    from app.kit_composition_lines import BlankCondition, filter_nonempty, lines_from_json
+    from app.kit_blank_stock_core import load_catalog_kit_maps
+
+    raw = getattr(kit, "composition_json", None)
+    lines = lines_from_json(str(raw)) if raw else []
+    _price_map, meta_by_key, label_by_key = load_catalog_kit_maps(db)
+
+    rows: list[dict[str, Any]] = []
+    for ln in filter_nonempty(lines):
+        qty = int(ln.total_qty())
+        if qty <= 0:
+            continue
+        rows.append(
+            {
+                "key": ln.key,
+                "label": label_by_key.get(ln.key)
+                or (meta_by_key.get(ln.key) or {}).get("name")
+                or ln.key,
+                "qty": qty,
+                "condition": ln.condition.value,
+                "used_price_pct": (int(ln.used_price_pct or 100) if ln.condition == BlankCondition.USED else None),
+            }
+        )
+    return rows
 
 
 def apply_kit_admin_form(kit: Kit, d: KitAdminFormData) -> None:

@@ -26,15 +26,32 @@
 {% if is_new %}
   {% include "partials/kit_admin_composition_table.html" %}
 {% else %}
+  {% if kit_table_state_json %}
+    {% include "partials/kit_admin_composition_table.html" %}
+  {% endif %}
   <div class="row" style="margin-top:12px;">
     <div>
       <label>Всего заготовок (изначально) <span class="muted">*</span></label>
-      <input name="{{ field_prefix }}pieces_total" type="number" min="1" required value="{{ fp.get('pieces_total', kit.pieces_total) }}" />
+      <input name="{{ field_prefix }}pieces_total" type="number" min="1" required value="{{ fp.get('pieces_total', kit.pieces_total) }}" {% if kit_table_state_json %}readonly{% endif %} />
+      {% if kit_table_state_json %}
+        <div class="muted" style="font-size:12px;margin-top:4px;">Поле пересчитывается автоматически из состава.</div>
+      {% endif %}
     </div>
     <div>
       <label>Остаток на складе <span class="muted">*</span></label>
       <input name="{{ field_prefix }}pieces_available" type="number" min="0" required value="{{ fp.get('pieces_available', kit.pieces_available) }}" />
     </div>
+  </div>
+{% endif %}
+
+{% if kit_table_state_json %}
+  <div style="margin-top:10px;">
+    <label style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <span class="muted" style="font-size:13px;">% цены для всех строк «б/у»</span>
+      <input id="kit_used_pct_global" type="number" min="1" max="100" step="1" placeholder="например, 50" style="width:6rem;" />
+      <button id="kit_used_pct_apply_btn" type="button" class="secondary" style="padding:4px 10px;">Применить</button>
+    </label>
+    <div class="muted" style="font-size:12px;margin-top:4px;">Заполняет % по всем строкам состава с галочкой «б/у». Можно потом поправить в отдельных строках.</div>
   </div>
 {% endif %}
 
@@ -89,7 +106,7 @@
 
 {% set bc = (fp.get('blanks_condition') or 'NEW')|upper %}
 <p style="margin:12px 0 6px;"><strong>Состояние заготовок в комплекте</strong> <span class="muted">*</span></p>
-{% if is_new %}
+{% if kit_table_state_json %}
   <div id="kit_blanks_condition_display" style="font-size:15px;font-weight:600;margin-bottom:4px;">
     {% if bc == 'USED' %}Использованные{% elif bc == 'MIXED' %}50 на 50{% else %}Новый{% endif %}
   </div>
