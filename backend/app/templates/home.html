@@ -33,11 +33,17 @@
           </div>
           <div>
             <div class="muted" style="font-size: 12px;">Записи в системе</div>
-            <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 10px 16px;">
-              <span>пользователей: <strong>{{ techspec_home.counts.users_active }}</strong></span>
+            <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13px;">
+              <span>польз.: <strong>{{ techspec_home.counts.users_active }}</strong></span>
               <span>клиентов: <strong>{{ techspec_home.counts.clients }}</strong></span>
               <span>визитов: <strong>{{ techspec_home.counts.visits }}</strong></span>
               <span>броней: <strong>{{ techspec_home.counts.bookings }}</strong></span>
+              <span>консульт.: <strong>{{ techspec_home.counts.consultations }}</strong></span>
+              <span>комплектов: <strong>{{ techspec_home.counts.kits }}</strong> <span class="muted">(акт. {{ techspec_home.counts.kits_active }})</span></span>
+              <span>работ: <strong>{{ techspec_home.counts.works }}</strong></span>
+              <span>продаж: <strong>{{ techspec_home.counts.product_sales }}</strong></span>
+              <span>поз. прайса товаров: <strong>{{ techspec_home.counts.catalog_products }}</strong> <span class="muted">(акт. {{ techspec_home.counts.catalog_products_active }})</span></span>
+              <span>услуг: <strong>{{ techspec_home.counts.services }}</strong> <span class="muted">(акт. {{ techspec_home.counts.services_active }})</span></span>
             </div>
           </div>
           <div class="muted" style="font-size: 12px;">
@@ -324,6 +330,7 @@
             var pxHour = 48;
             var gridH = (hourTo - hourFrom) * pxHour;
             var segs = occ.segments || [];
+            var blockSegs = occ.block_segments || [];
             var schedule = occ.schedule || {};
             var h = '';
             h += '<div class=\"card lb-day-occ\" style=\"background:#f8fafc; margin: 10px 0;\">';
@@ -366,6 +373,17 @@
                 var op = (seg.status === 'DONE') ? '0.55' : '1';
                 h += '<a href=\"' + esc(seg.url || '#') + '\" title=\"Бронь #' + esc(seg.booking_id) + '\" style=\"position:absolute; left:2px; right:2px; top:' + topPct + '%; height:' + hPct + '%; background:' + bg + '; opacity:' + op + '; color:#fff; font-size:11px; text-decoration:none; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:' + (si + 1) + '; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.92);\">' + esc(seg.booking_id) + '</a>';
               }
+              for (var bi = 0; bi < blockSegs.length; bi++) {
+                var blk = blockSegs[bi] || {};
+                if (Number(blk.master_id) !== Number(m.id)) continue;
+                var bTop = ((Number(blk.start_minutes) - hourFrom * 60) / spanMin) * 100;
+                var bH = ((Number(blk.end_minutes) - Number(blk.start_minutes)) / spanMin) * 100;
+                if (bH <= 0) continue;
+                var bBg = blk.color || '#cccac0';
+                var bTitle = blk.comment ? esc(blk.comment) : 'Занято';
+                var bLabel = blk.comment ? esc(blk.comment) : 'Занято';
+                h += '<div title=\"' + bTitle + '\" style=\"position:absolute; left:2px; right:2px; top:' + bTop + '%; height:' + bH + '%; background:' + bBg + '; color:#374151; font-size:11px; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:' + (segs.length + bi + 2) + '; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.08);\">' + bLabel + '</div>';
+              }
               h += '</div></div>';
             }
             h += '</div>';
@@ -373,6 +391,7 @@
             h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#9E88C0; vertical-align:middle; margin-right:4px;\"></span> Подтверждена</span>';
             h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#7F7679; vertical-align:middle; margin-right:4px;\"></span> Ждёт подтверждения</span>';
             h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#cbd5e1; vertical-align:middle; margin-right:4px;\"></span> Нерабочее время</span>';
+            h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#cccac0; vertical-align:middle; margin-right:4px; border:1px solid #b8b6ad\"></span> Занято (работы)</span>';
             h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#f3f4f6; vertical-align:middle; margin-right:4px; border:1px solid #e5e7eb\"></span> Выходной</span>';
             h += '<span><span style=\"display:inline-block; width:12px; height:12px; background:#e5e7eb; vertical-align:middle; margin-right:4px; border:1px solid #d1d5db\"></span> Нет данных</span>';
             h += '</div></div>';

@@ -137,6 +137,39 @@
         {% if _bc == 'USED' %}Использованные{% elif _bc == 'MIXED' %}50 на 50{% else %}Новый{% endif %}
       </dd>
 
+      {% if composition_rows %}
+        <dt class="muted">Состав по видам</dt>
+        <dd style="margin:0;">
+          <div style="overflow-x:auto;">
+            <table style="width:100%;max-width:720px;border-collapse:collapse;font-size:13px;">
+              <thead>
+                <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
+                  <th style="padding:6px 8px;">Вид</th>
+                  <th style="padding:6px 8px;">Ключ</th>
+                  <th style="padding:6px 8px;">Кол-во</th>
+                  <th style="padding:6px 8px;">Сост.</th>
+                  <th style="padding:6px 8px;">% б/у</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in composition_rows %}
+                  <tr style="border-bottom:1px solid #e5e7eb;">
+                    <td style="padding:8px;">{{ row.label }}</td>
+                    <td style="padding:8px;font-family:monospace;">{{ row.key }}</td>
+                    <td style="padding:8px;">{{ row.qty }}</td>
+                    <td style="padding:8px;">{% if (row.condition or '') == 'USED' %}б/у{% else %}нов{% endif %}</td>
+                    <td style="padding:8px;">{% if row.used_price_pct is not none %}{{ row.used_price_pct }}{% else %}—{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="muted" style="font-size:12px;margin-top:6px;">
+            «% б/у» влияет на расчёт цены комплекта по составу. «Скидка (всего), %» ниже — отдельная скидка при продаже всего комплекта со склада.
+          </div>
+        </dd>
+      {% endif %}
+
       <dt class="muted">Описание</dt>
       <dd style="margin:0; white-space:pre-wrap;">{{ kit.description or '—' }}</dd>
 

@@ -199,6 +199,13 @@ def is_master_available_for_interval(
         if _interval_overlaps(service_range, break_range):
             return False
 
+    from app.master_time_blocks import master_interval_overlaps_time_block
+
+    if master_interval_overlaps_time_block(
+        db, master_id=master_id, d=d, start_m=start_m, end_m=end_m
+    ):
+        return False
+
     return True
 
 

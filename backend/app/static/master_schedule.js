@@ -90,11 +90,133 @@
     document.body.style.overflow = '';
   };
 
+  window.lbMsCloseBlockModal = function () {
+    var bd = document.getElementById('lbMsBlockBackdrop');
+    var md = document.getElementById('lbMsBlockModal');
+    if (bd) bd.style.display = 'none';
+    if (md) md.style.display = 'none';
+    document.body.style.overflow = '';
+  };
+
+  async function loadBlocksForDay(isoDay) {
+    var listWrap = document.getElementById('lbMsBlockListWrap');
+    var listEl = document.getElementById('lbMsBlockList');
+    if (!listWrap || !listEl || !isoDay) return;
+    try {
+      var url = isAdmin
+        ? ('/api/master-schedule/blocks?d=' + encodeURIComponent(isoDay) + scheduleQuerySep() + 'user_id=' + encodeURIComponent(masterId))
+        : ('/api/master-schedule/blocks?d=' + encodeURIComponent(isoDay));
+      var res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var data = await res.json();
+      var blocks = data.blocks || [];
+      if (!blocks.length) {
+        listWrap.style.display = 'none';
+        listEl.innerHTML = '';
+        return;
+      }
+      listWrap.style.display = '';
+      var h = '';
+      for (var i = 0; i < blocks.length; i++) {
+        var b = blocks[i] || {};
+        var label = esc(b.time_from) + '–' + esc(b.time_to);
+        if (b.comment) label += ': ' + esc(b.comment);
+        h += '<div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; margin-bottom:6px; font-size:13px;">';
+        h += '<span>' + label + '</span>';
+        h += '<button type="button" class="secondary" data-block-id="' + esc(String(b.id)) + '" onclick="window.lbMsDeleteBlock(' + Number(b.id) + ')">Удалить</button>';
+        h += '</div>';
+      }
+      listEl.innerHTML = h;
+    } catch (e) {
+      console.error(e);
+      listWrap.style.display = 'none';
+      listEl.innerHTML = '';
+    }
+  }
+
+  window.lbMsOpenBlockModal = function (isoDay) {
+    var bd = document.getElementById('lbMsBlockBackdrop');
+    var md = document.getElementById('lbMsBlockModal');
+    var dateEl = document.getElementById('lbMsBlockDate');
+    var commentEl = document.getElementById('lbMsBlockComment');
+    if (!bd || !md || !dateEl) return;
+    dateEl.value = isoDay || todayIso;
+    if (commentEl) commentEl.value = '';
+    bd.style.display = 'block';
+    md.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    loadBlocksForDay(dateEl.value);
+  };
+
+  window.lbMsOpenBlockFromDay = function () {
+    var dayTitle = document.getElementById('lbMsDayTitle');
+    var isoDay = dayTitle ? (dayTitle.textContent || '') : '';
+    window.lbMsCloseDayModal();
+    window.lbMsOpenBlockModal(isoDay);
+  };
+
+  window.lbMsSaveBlock = async function () {
+    var dateEl = document.getElementById('lbMsBlockDate');
+    var timeFrom = document.getElementById('lbMsBlockTimeFrom');
+    var timeTo = document.getElementById('lbMsBlockTimeTo');
+    var commentEl = document.getElementById('lbMsBlockComment');
+    if (!dateEl || !timeFrom || !timeTo) return;
+    if (!dateEl.value) {
+      alert('Укажите дату');
+      return;
+    }
+    if (!timeFrom.value || !timeTo.value) {
+      alert('Укажите время');
+      return;
+    }
+    var fd = new FormData();
+    fd.append('d', dateEl.value);
+    fd.append('time_from', timeFrom.value);
+    fd.append('time_to', timeTo.value);
+    if (commentEl && commentEl.value) fd.append('comment', commentEl.value);
+    if (isAdmin) fd.append('user_id', String(masterId));
+    var res = await fetch('/api/master-schedule/blocks', { method: 'POST', body: fd });
+    if (!res.ok) {
+      var msg = 'HTTP ' + res.status;
+      try {
+        var err = await res.json();
+        if (err && err.detail) msg = String(err.detail);
+      } catch (e2) {}
+      alert('Ошибка: ' + msg);
+      return;
+    }
+    if (commentEl) commentEl.value = '';
+    await loadBlocksForDay(dateEl.value);
+  };
+
+  window.lbMsDeleteBlock = async function (blockId) {
+    if (!blockId) return;
+    if (!confirm('Удалить блок занятости?')) return;
+    var dateEl = document.getElementById('lbMsBlockDate');
+    var url = isAdmin
+      ? ('/api/master-schedule/blocks/' + encodeURIComponent(blockId) + '?user_id=' + encodeURIComponent(masterId))
+      : ('/api/master-schedule/blocks/' + encodeURIComponent(blockId));
+    var res = await fetch(url, { method: 'DELETE' });
+    if (!res.ok) {
+      alert('Ошибка удаления: HTTP ' + res.status);
+      return;
+    }
+    if (dateEl && dateEl.value) await loadBlocksForDay(dateEl.value);
+  };
+
   document.addEventListener('click', function (e) {
     var bd = document.getElementById('lbMsDayBackdrop');
     if (bd && e.target === bd) window.lbMsCloseDayModal();
     var bbd = document.getElementById('lbMsBulkBackdrop');
     if (bbd && e.target === bbd) window.lbMsCloseBulkModal();
+    var blbd = document.getElementById('lbMsBlockBackdrop');
+    if (blbd && e.target === blbd) window.lbMsCloseBlockModal();
+  });
+  document.addEventListener('change', function (e) {
+    if (evTargetId(e) === 'lbMsBlockDate') {
+      var dateEl = document.getElementById('lbMsBlockDate');
+      if (dateEl && dateEl.value) loadBlocksForDay(dateEl.value);
+    }
   });
   document.addEventListener('keydown', function (e) {
     if (!e || e.key !== 'Escape') return;
@@ -102,6 +224,8 @@
     if (md && md.style.display === 'block') window.lbMsCloseDayModal();
     var bm = document.getElementById('lbMsBulkModal');
     if (bm && bm.style.display === 'block') window.lbMsCloseBulkModal();
+    var blm = document.getElementById('lbMsBlockModal');
+    if (blm && blm.style.display === 'block') window.lbMsCloseBlockModal();
   });
 
   function setBanner(text) {
@@ -491,5 +615,15 @@
     syncOddEvenBlock();
     syncBulkAllDay();
     syncBulkBreak();
+
+    try {
+      var params = new URLSearchParams(window.location.search || '');
+      if (params.get('block') === '1' || params.get('block') === 'true') {
+        window.lbMsOpenBlockModal();
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+      }
+    } catch (e) {}
   })();
 })();

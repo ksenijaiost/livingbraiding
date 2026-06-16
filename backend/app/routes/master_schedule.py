@@ -21,6 +21,13 @@ from app.master_schedule import (
     schedule_filled_until,
     save_master_schedule_day,
 )
+from app.master_time_blocks import (
+    TimeBlockValidationError,
+    create_time_block,
+    delete_time_block,
+    list_time_blocks_for_day,
+    time_block_to_dict,
+)
 from app.webui import templates, ctx as _ctx
 
 
@@ -360,6 +367,74 @@ async def api_save_master_schedule_bulk(
             changed_by_user_id=current_user.id,
         )
 
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+def _resolve_master_id_for_schedule_api(
+    current_user: AuthUser, user_id: int | None
+) -> int:
+    master_id = current_user.id if current_user.role == UserRole.MASTER else int(user_id or 0)
+    if master_id <= 0:
+        raise HTTPException(status_code=400, detail="user_id required")
+    return master_id
+
+
+@router.get("/api/master-schedule/blocks")
+def api_list_master_time_blocks(
+    d: str,
+    user_id: int | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    day = parse_date_iso(d, field_name="d")
+    master_id = _resolve_master_id_for_schedule_api(current_user, user_id)
+    blocks = list_time_blocks_for_day(db, master_id=master_id, block_date=day)
+    return JSONResponse({"date": day.isoformat(), "blocks": [time_block_to_dict(b) for b in blocks]})
+
+
+@router.post("/api/master-schedule/blocks")
+async def api_create_master_time_block(
+    d: str = Form(...),
+    user_id: int | None = Form(None),
+    time_from: str = Form(...),
+    time_to: str = Form(...),
+    comment: str | None = Form(None),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    day = parse_date_iso(d, field_name="d")
+    master_id = _resolve_master_id_for_schedule_api(current_user, user_id)
+    tf = _parse_hhmm(time_from)
+    tt = _parse_hhmm(time_to)
+    if tf is None or tt is None:
+        raise HTTPException(status_code=400, detail="bad time")
+    try:
+        block = create_time_block(
+            db,
+            master_id=master_id,
+            block_date=day,
+            time_from=tf,
+            time_to=tt,
+            comment=comment,
+            created_by_user_id=current_user.id,
+        )
+        db.commit()
+    except TimeBlockValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return JSONResponse({"ok": True, "block": time_block_to_dict(block)})
+
+
+@router.delete("/api/master-schedule/blocks/{block_id}")
+def api_delete_master_time_block(
+    block_id: int,
+    user_id: int | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    master_id = _resolve_master_id_for_schedule_api(current_user, user_id)
+    if not delete_time_block(db, block_id=block_id, master_id=master_id):
+        raise HTTPException(status_code=404, detail="not found")
     db.commit()
     return JSONResponse({"ok": True})
 

@@ -192,8 +192,10 @@ def lines_to_json(lines: list[CompositionLine]) -> str | None:
             row["qty"] = int(by_staff[0])
         else:
             row["by_staff"] = {str(uid): int(q) for uid, q in by_staff.items()}
-        if ln.condition == BlankCondition.USED and ln.used_price_pct_explicit:
-            row["used_price_pct"] = int(ln.used_price_pct)
+        if ln.condition == BlankCondition.USED and (
+            ln.used_price_pct_explicit or int(ln.used_price_pct or 100) != 100
+        ):
+            row["used_price_pct"] = int(ln.used_price_pct or 100)
         items.append(row)
     return json.dumps(items, ensure_ascii=False) if items else None
 

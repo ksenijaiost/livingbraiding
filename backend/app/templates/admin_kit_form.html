@@ -10,7 +10,7 @@
 
     <form method="post" action="{{ form_action }}" enctype="multipart/form-data">
       {% set field_prefix = "" %}
-      {% if is_new %}
+      {% if kit_table_state_json %}
         <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
       {% endif %}
       {% set blank_stock_rows = blank_stock_rows|default([]) %}
@@ -22,7 +22,7 @@
       </p>
     </form>
   </div>
-  {% if is_new %}
+  {% if kit_table_state_json %}
   <script>
   (function () {
     var BC_LABELS = { NEW: 'Новый', USED: 'Использованные', MIXED: '50 на 50' };
@@ -179,6 +179,48 @@
       window.kitAdminSyncDerivedFields();
     };
 
+    function syncGlobalUsedPctField() {
+      var inp = document.getElementById('kit_used_pct_global');
+      if (!inp) return;
+      var lines = (typeof window.kitCompositionCollectLines === 'function')
+        ? window.kitCompositionCollectLines() : [];
+      var pcts = {};
+      var usedCount = 0;
+      lines.forEach(function (ln) {
+        if (!ln || !ln.is_used) return;
+        usedCount += 1;
+        var pct = parseInt(ln.used_pct, 10) || 100;
+        pcts[String(pct)] = true;
+      });
+      var keys = Object.keys(pcts);
+      if (usedCount > 0 && keys.length === 1) {
+        inp.value = keys[0];
+      }
+    }
+
+    function applyGlobalUsedPct() {
+      var inp = document.getElementById('kit_used_pct_global');
+      var btn = document.getElementById('kit_used_pct_apply_btn');
+      if (!inp || !btn) return;
+      btn.addEventListener('click', function () {
+        var pct = parseInt(inp.value, 10);
+        if (isNaN(pct) || pct < 1 || pct > 100) {
+          window.alert('Укажите % от 1 до 100.');
+          return;
+        }
+        document.querySelectorAll('tr.kcl-row').forEach(function (row) {
+          var used = row.querySelector('.kcl-used');
+          var pctEl = row.querySelector('.kcl-pct');
+          if (!used || !pctEl) return;
+          if (!used.checked) return;
+          pctEl.value = String(pct);
+          pctEl.dispatchEvent(new Event('input', { bubbles: true }));
+          pctEl.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        if (typeof window.kitAdminSyncDerivedFields === 'function') window.kitAdminSyncDerivedFields();
+      });
+    }
+
     wireManualOverride(document.getElementById('kit_stock_price_total'));
     wireManualOverride(document.getElementById('kit_cost_total'));
     var weightEl = document.querySelector('input[name="weight_grams"]');
@@ -186,8 +228,10 @@
       weightEl.addEventListener('input', window.kitAdminSyncDerivedFields);
       weightEl.addEventListener('change', window.kitAdminSyncDerivedFields);
     }
+    applyGlobalUsedPct();
     function scheduleSync() {
       if (typeof window.kitAdminSyncDerivedFields === 'function') window.kitAdminSyncDerivedFields();
+      syncGlobalUsedPctField();
     }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', scheduleSync);

@@ -40,6 +40,8 @@ from app.kit_crud import (
     calc_kit_stock_price_total_from_composition,
     kit_edit_error_prefill,
     kit_new_error_prefill,
+    kit_composition_initial_lines,
+    kit_composition_display_rows,
     kit_to_form_prefill,
     list_masters_for_kit_author_pick,
     max_kit_discount_percent_allowed,
@@ -600,6 +602,7 @@ def admin_kit_detail(
             request,
             current_user=current_user,
             kit=kit,
+            composition_rows=kit_composition_display_rows(db, kit),
             composition_blank_stock_warning=composition_blank_stock_warning,
             computed_stock_price_total=computed_price,
             computed_stock_price_missing_keys=computed_missing,
@@ -641,6 +644,11 @@ def admin_kit_edit_get(
             computed_stock_price_total=computed_price,
             computed_stock_price_missing_keys=computed_missing,
             blank_stock_rows=blank_stock_edit_rows_for_kit(db, kit),
+            kit_table_state_json=kit_admin_new_table_state_json(
+                db,
+                kit_qty_prefill={},
+                initial_lines=kit_composition_initial_lines(kit),
+            ),
         ),
     )
 
@@ -743,6 +751,7 @@ async def admin_kit_edit_post(
             blanks_condition=kit.blanks_condition,
             pieces_total=kit.pieces_total,
             pieces_available=kit.pieces_available,
+            composition_json=getattr(kit, "composition_json", None),
             stock_price_total=kit.stock_price_total,
             cost_total=kit.cost_total,
             discount_percent=kit.discount_percent,
@@ -752,14 +761,17 @@ async def admin_kit_edit_post(
         )
         d = parse_kit_admin_form(form, for_create=False)
         comp_tot = parse_composition_totals(kit)
-        try_fill_kit_admin_blank_types_from_composition(d, composition_totals=comp_tot)
-        try_fill_kit_admin_stock_price_total_from_composition(db, d, composition_totals=comp_tot)
+        effective_totals = d.composition_totals or comp_tot
+        try_fill_kit_admin_blank_types_from_composition(d, composition_totals=effective_totals)
+        try_fill_kit_admin_stock_price_total_from_composition(db, d, composition_totals=effective_totals)
         validate_kit_admin_form(d, for_create=False)
         if d.sku != kit.sku:
             oid = db.scalar(select(Kit.id).where(Kit.sku == d.sku, Kit.id != kit.id))
             if oid:
                 raise ValueError("Комплект с таким артикулом уже есть")
         apply_kit_admin_form(kit, d)
+        if d.composition_lines:
+            kit.composition_json = lines_to_json(d.composition_lines)
         try:
             if parse_bool(form.get("clear_photo_1")):
                 delete_media_by_url(getattr(kit, "photo_1", None))
@@ -796,6 +808,7 @@ async def admin_kit_edit_post(
             blanks_condition=kit.blanks_condition,
             pieces_total=kit.pieces_total,
             pieces_available=kit.pieces_available,
+            composition_json=getattr(kit, "composition_json", None),
             stock_price_total=kit.stock_price_total,
             cost_total=kit.cost_total,
             discount_percent=kit.discount_percent,
@@ -817,6 +830,7 @@ async def admin_kit_edit_post(
                 "blanks_condition",
                 "pieces_total",
                 "pieces_available",
+                "composition_json",
                 "stock_price_total",
                 "cost_total",
                 "discount_percent",

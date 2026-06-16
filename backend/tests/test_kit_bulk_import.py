@@ -137,7 +137,7 @@ def test_import_blanks_condition_inferred_from_composition(memory_db: Session) -
     assert k.blanks_condition == KitBlanksCondition.MIXED
     comp = __import__("json").loads(k.composition_json or "[]")
     used_line = next(x for x in comp if x.get("condition") == "USED")
-    assert "used_price_pct" not in used_line
+    assert used_line.get("used_price_pct") == 40
 
 
 def test_import_used_global_discount_applies(memory_db: Session) -> None:
@@ -153,6 +153,9 @@ def test_import_used_global_discount_applies(memory_db: Session) -> None:
     k = db.get(Kit, int(r["kit_id"]))
     assert k is not None
     assert k.blanks_condition == KitBlanksCondition.USED
+    comp = __import__("json").loads(k.composition_json or "[]")
+    used_line = next(x for x in comp if x.get("condition") == "USED")
+    assert used_line.get("used_price_pct") == 55
 
 
 def test_import_composition_defaults_blank_stock_and_pieces(memory_db: Session) -> None:

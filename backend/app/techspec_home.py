@@ -9,7 +9,18 @@ from sqlalchemy import func, select
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import Session
 
-from app.db.models import Booking, Client, User, Visit
+from app.db.models import (
+    Booking,
+    CatalogProduct,
+    Client,
+    Consultation,
+    Kit,
+    ProductSale,
+    Service,
+    User,
+    Visit,
+    WorkForInventory,
+)
 from app.display_time import get_display_timezone
 from app.media_store import media_backup_stats
 from app.settings import get_settings
@@ -46,6 +57,47 @@ def collect_techspec_home_stats(db: Session) -> dict[str, Any]:
         db.scalar(select(func.count()).select_from(Visit).where(Visit.is_cancelled.is_(False))) or 0
     )
     bookings_total = int(db.scalar(select(func.count()).select_from(Booking)) or 0)
+    consultations_total = int(db.scalar(select(func.count()).select_from(Consultation)) or 0)
+    kits_total = int(db.scalar(select(func.count()).select_from(Kit)) or 0)
+    kits_active = int(
+        db.scalar(
+            select(func.count()).select_from(Kit).where(
+                Kit.is_active.is_(True),
+                Kit.is_archived.is_(False),
+            )
+        )
+        or 0
+    )
+    works_total = int(
+        db.scalar(
+            select(func.count()).select_from(WorkForInventory).where(
+                WorkForInventory.is_voided.is_(False)
+            )
+        )
+        or 0
+    )
+    product_sales_total = int(
+        db.scalar(
+            select(func.count()).select_from(ProductSale).where(ProductSale.is_voided.is_(False))
+        )
+        or 0
+    )
+    catalog_products_total = int(db.scalar(select(func.count()).select_from(CatalogProduct)) or 0)
+    catalog_products_active = int(
+        db.scalar(
+            select(func.count()).select_from(CatalogProduct).where(
+                CatalogProduct.is_active.is_(True)
+            )
+        )
+        or 0
+    )
+    services_total = int(db.scalar(select(func.count()).select_from(Service)) or 0)
+    services_active = int(
+        db.scalar(
+            select(func.count()).select_from(Service).where(Service.is_active.is_(True))
+        )
+        or 0
+    )
 
     py = sys.version_info
     settings = get_settings()
@@ -61,5 +113,14 @@ def collect_techspec_home_stats(db: Session) -> dict[str, Any]:
             "clients": clients_total,
             "visits": visits_total,
             "bookings": bookings_total,
+            "consultations": consultations_total,
+            "kits": kits_total,
+            "kits_active": kits_active,
+            "works": works_total,
+            "product_sales": product_sales_total,
+            "catalog_products": catalog_products_total,
+            "catalog_products_active": catalog_products_active,
+            "services": services_total,
+            "services_active": services_active,
         },
     }

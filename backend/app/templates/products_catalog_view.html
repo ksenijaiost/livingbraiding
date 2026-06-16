@@ -76,6 +76,47 @@
       align-items: center;
       gap: 6px;
     }
+    @media (max-width: 820px) {
+      .products-catalog-wrap table {
+        table-layout: auto;
+        min-width: 34rem;
+      }
+      .products-catalog-wrap th,
+      .products-catalog-wrap td {
+        overflow-wrap: normal;
+        word-break: normal;
+      }
+      .products-catalog-wrap th.pcat-name,
+      .products-catalog-wrap td.pcat-name {
+        min-width: 9.5rem;
+      }
+      .products-catalog-wrap th.pcat-num,
+      .products-catalog-wrap td.pcat-num {
+        width: 4.5rem;
+        max-width: 4.5rem;
+      }
+      .products-catalog-wrap th.pcat-active,
+      .products-catalog-wrap td.pcat-active {
+        width: 4.25rem;
+        max-width: 4.25rem;
+      }
+      .products-catalog-wrap th.pcat-actions,
+      .products-catalog-wrap td.pcat-actions {
+        width: 5.5rem;
+        max-width: 5.5rem;
+      }
+      .products-catalog-wrap th.pcat-labels,
+      .products-catalog-wrap td.pcat-labels {
+        width: 3.5rem;
+      }
+      .products-catalog-wrap .pcat-num input {
+        max-width: 4rem;
+      }
+      .products-catalog-wrap .pcat-actions button {
+        padding: 4px 6px !important;
+        font-size: 12px;
+      }
+    }
   </style>
   <div class="card products-catalog-wrap">
     <h2 style="margin-top: 0;">Прайс · Товары</h2>
@@ -165,12 +206,12 @@
             <table>
               <thead>
                 <tr>
-                  <th class="pcat-name">Наименование</th>
-                  {% if show_labels_col %}<th class="pcat-labels">Метки</th>{% endif %}
-                  <th class="pcat-num">Цена</th>
-                  {% if show_work %}<th class="pcat-num">Работа</th>{% endif %}
-                  {% if show_expense_col %}<th class="pcat-num">Расход</th>{% endif %}
-                  <th class="pcat-active">Актуально</th>
+                  <th class="pcat-name"><span class="lb-th-full">Наименование</span><span class="lb-th-short" title="Наименование">Назв.</span></th>
+                  {% if show_labels_col %}<th class="pcat-labels"><span class="lb-th-full">Метки</span><span class="lb-th-short" title="Метки">М.</span></th>{% endif %}
+                  <th class="pcat-num"><span class="lb-th-full">Цена</span><span class="lb-th-short" title="Цена">₽</span></th>
+                  {% if show_work %}<th class="pcat-num"><span class="lb-th-full">Работа</span><span class="lb-th-short" title="Работа">Раб.</span></th>{% endif %}
+                  {% if show_expense_col %}<th class="pcat-num"><span class="lb-th-full">Расход</span><span class="lb-th-short" title="Расход">Расх.</span></th>{% endif %}
+                  <th class="pcat-active"><span class="lb-th-full">Актуально</span><span class="lb-th-short" title="Актуально">Акт.</span></th>
                   {% if current_user.role.value == "ADMIN_SUPER" %}
                     <th class="pcat-actions"></th>
                   {% endif %}
@@ -183,7 +224,8 @@
                       {% if g.subcategory_name == "Заготовки поштучно" and current_user.role.value == "ADMIN_SUPER" and r.id %}
                         <input form="row-edit-{{ r.id }}" name="name" type="text" value="{{ r.name }}" maxlength="200" required style="width:100%;max-width:100%;box-sizing:border-box;" />
                         <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
-                          Ключ для JSON / комплекта (<code>kit_key</code>):
+                          <span class="lb-th-full">Ключ для JSON / комплекта (<code>kit_key</code>):</span>
+                          <span class="lb-th-short" title="Ключ kit_key для JSON и комплекта">ключ:</span>
                           <code style="font-family:monospace;">{{ r.kit_key or '—' }}</code>
                         </div>
                       {% else %}
@@ -270,7 +312,8 @@
                       {% if g.subcategory_name == "Заготовки поштучно" and current_user.role.value == "ADMIN_SUPER" and r.id %}
                         <input form="row-edit-{{ r.id }}" name="name" type="text" value="{{ r.name }}" maxlength="200" required style="width:100%;max-width:100%;box-sizing:border-box;" />
                         <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
-                          Ключ для JSON / комплекта (<code>kit_key</code>):
+                          <span class="lb-th-full">Ключ для JSON / комплекта (<code>kit_key</code>):</span>
+                          <span class="lb-th-short" title="Ключ kit_key для JSON и комплекта">ключ:</span>
                           <code style="font-family:monospace;">{{ r.kit_key or '—' }}</code>
                         </div>
                       {% else %}
@@ -365,7 +408,9 @@
                       <input form="new-row-{{ loop.index }}" name="name" type="text" placeholder="Новый элемент" {% if g.subcategory_name == "Заготовки поштучно" %}required{% endif %} style="width:100%;max-width:100%;box-sizing:border-box;" />
                       {% if g.subcategory_name == "Заготовки поштучно" %}
                         <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
-                          <label style="display:block;">Ключ для JSON / комплекта (<code>kit_key</code>) *
+                          <label style="display:block;">
+                            <span class="lb-th-full">Ключ для JSON / комплекта (<code>kit_key</code>) *</span>
+                            <span class="lb-th-short" title="Ключ kit_key для JSON и комплекта">ключ *</span>
                             <input form="new-row-{{ loop.index }}" name="kit_key" type="text" placeholder="DE_… или SE_…" maxlength="80" required style="font-family:monospace;width:100%;max-width:100%;box-sizing:border-box;margin-top:4px;" />
                           </label>
                         </div>

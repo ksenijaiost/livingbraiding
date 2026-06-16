@@ -24,6 +24,7 @@ from app.db.models import (
 from app.display_time import get_display_timezone
 from app.planned_service_time import planned_start_local_datetime
 from app.master_schedule import master_unavailable_for_day
+from app.master_time_blocks import COLOR_TIME_BLOCK, list_time_blocks_for_masters_on_day
 from app.user_roles import select_users_with_role
 
 COLOR_OCCUPANCY_ACTIVE = "#9E88C0"
@@ -56,6 +57,27 @@ class OccupancySegment:
             "status": self.status,
             "color": self.color,
             "url": self.url,
+        }
+
+
+@dataclass(frozen=True)
+class BlockOccupancySegment:
+    block_id: int
+    master_id: int
+    start_minutes: int
+    end_minutes: int
+    comment: str
+    color: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "block",
+            "block_id": self.block_id,
+            "master_id": self.master_id,
+            "start_minutes": self.start_minutes,
+            "end_minutes": self.end_minutes,
+            "comment": self.comment,
+            "color": self.color,
         }
 
 
@@ -224,6 +246,24 @@ def build_occupancy_for_day(
             )
 
     masters = list_calendar_masters(db)
+    master_ids = [int(m["id"]) for m in masters]
+    block_segments: list[BlockOccupancySegment] = []
+    for block in list_time_blocks_for_masters_on_day(db, master_ids=master_ids, block_date=day):
+        bs = int(block.time_from.hour) * 60 + int(block.time_from.minute)
+        be = int(block.time_to.hour) * 60 + int(block.time_to.minute)
+        if be <= grid_start or bs >= grid_end:
+            continue
+        block_segments.append(
+            BlockOccupancySegment(
+                block_id=int(block.id),
+                master_id=int(block.master_id),
+                start_minutes=max(bs, grid_start),
+                end_minutes=min(be, grid_end),
+                comment=(block.comment or "").strip(),
+                color=COLOR_TIME_BLOCK,
+            )
+        )
+
     schedule: dict[str, Any] = {}
     for m in masters:
         mid = int(m["id"])
@@ -247,5 +287,6 @@ def build_occupancy_for_day(
         "hour_to": hour_to,
         "masters": masters,
         "segments": [s.to_dict() for s in segments],
+        "block_segments": [s.to_dict() for s in block_segments],
         "schedule": schedule,
     }
