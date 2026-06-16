@@ -14,6 +14,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
+from starlette.datastructures import UploadFile
 
 from app.db.models import CatalogProduct, Kit, KitBlankStock, KitBlanksCondition, KitReserve
 from app.kit_crud import kit_key_excluded_from_client_price
