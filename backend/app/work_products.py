@@ -99,6 +99,7 @@ _WORK_NEW_FP_KEYS = frozenset({
     "rubber_size",
     "rubber_attach_qty",
     "rubber_braids_qty",
+    "other_product_id",
     "corr_trim_qty",
     "corr_hourly_hours",
     "corr_kit_description",
@@ -481,6 +482,66 @@ def _rubber_pricing_from_catalog(db: Session, rubber_type: str) -> tuple[float, 
     return mp, sp, fx, is_per_unit, (str(unit_label) if unit_label else None)
 
 
+def _other_pricing_from_catalog(db: Session, catalog_product_id: int) -> tuple[float, float, float, bool, str | None]:
+    """
+    Возвращает: (master_pay, studio_pay, fixed_expense, is_per_unit, unit_label).
+    Берём из прайса товаров (catalog_products): категория «Заказ» → подкатегория «Другое».
+    """
+    pid = int(catalog_product_id or 0)
+    if pid <= 0:
+        raise ValueError("Для «Другое» выберите товар.")
+    row = db.get(CatalogProduct, pid)
+    if not row or not row.is_active or row.category_name != "Заказ" or row.subcategory_name != "Другое":
+        raise ValueError("Товар для «Другое» не найден в прайсе «Заказ → Другое».")
+    try:
+        meta = json.loads(row.meta_json or "{}")
+    except Exception:
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    mp = float(meta.get("master_pay") or 0.0)
+    sp = float(meta.get("studio_pay") or 0.0)
+    fx = float(meta.get("fixed_expense") or 0.0)
+    is_per_unit = bool(meta.get("is_per_unit") or False)
+    unit_label = meta.get("unit_label") or None
+    return mp, sp, fx, is_per_unit, (str(unit_label) if unit_label else None)
+
+
+def _other_items_for_work_form(db: Session) -> list[dict[str, Any]]:
+    rows = list(
+        db.scalars(
+            select(CatalogProduct)
+            .where(
+                CatalogProduct.category_name == "Заказ",
+                CatalogProduct.subcategory_name == "Другое",
+                CatalogProduct.is_active.is_(True),
+            )
+            .order_by(CatalogProduct.sort_order.asc(), CatalogProduct.name.asc(), CatalogProduct.id.asc())
+        ).all()
+    )
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        try:
+            meta = json.loads(r.meta_json or "{}")
+        except Exception:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        out.append(
+            {
+                "id": int(r.id),
+                "name": str(r.name or ""),
+                "price": float(r.price) if r.price is not None else None,
+                "master_pay": float(meta.get("master_pay")) if meta.get("master_pay") is not None else None,
+                "studio_pay": float(meta.get("studio_pay")) if meta.get("studio_pay") is not None else None,
+                "fixed_expense": float(meta.get("fixed_expense")) if meta.get("fixed_expense") is not None else None,
+                "is_per_unit": bool(meta.get("is_per_unit") or False),
+                "unit_label": (str(meta.get("unit_label")) if meta.get("unit_label") else None),
+            }
+        )
+    return out
+
+
 def _zakaz_subcategory_services_map(
     db: Session, subcategory_name: str
 ) -> dict[str, dict[str, float | bool | None]]:
@@ -847,9 +908,11 @@ def work_new_get(
         if v is not None and str(v).strip() != "":
             fp[key] = str(v).strip()
     _enrich_fp_rubber(fp)
+    other_items = _other_items_for_work_form(db)
     masters = _list_masters_for_work_form(db)
     work_price_meta = {
         "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
+        "other": {str(x["id"]): x for x in other_items},
         "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
         "customOrderBonus": _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0),
         "mixRates": mix_rates_meta_json_dict(db),
@@ -873,6 +936,7 @@ def work_new_get(
             rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
             rubber_families=[{"value": v, "label": l} for v, l in _rubber_family_items()],
             rubber_sizes=[{"value": v, "label": l} for v, l in _rubber_size_items()],
+            other_items=other_items,
             work_price_meta_json=json.dumps(work_price_meta, ensure_ascii=False),
         ),
     )
@@ -973,6 +1037,8 @@ async def work_new_post(
         kit_staff_ids: list[int] = []
         rubber_type = ""
         rubber_qty = 1
+        other_product_id = 0
+        other_qty = 1
         corr_trim_qty = 0
         corr_hourly_hours = 0.0
         corr_wash = False
@@ -1082,6 +1148,14 @@ async def work_new_post(
             }
             alloc = [(current_user.id, 1.0)]
         elif kind == WorkKind.OTHER:
+            other_raw = (_g_str(form, "other_product_id", "") or "").strip()
+            try:
+                other_product_id = parse_int(other_raw, min=1, field_name="other_product_id")
+            except ValueError:
+                raise ValueError("Для «Другое» выберите товар из прайса.")
+            # validate presence in catalog; also gives correct error message
+            _other_pricing_from_catalog(db, other_product_id)
+            details["other"] = {"catalog_product_id": int(other_product_id)}
             alloc = [(current_user.id, 1.0)]
         elif kind == WorkKind.KIT_CORRECTION:
             corr_trim_qty = int(_g_float(form, "corr_trim_qty", 0))
@@ -1200,6 +1274,8 @@ async def work_new_post(
             grams_total=grams_total,
             rubber_type=rubber_type,
             rubber_qty=rubber_qty,
+            other_catalog_product_id=int(other_product_id or 0),
+            other_qty=int(other_qty or 1),
             corr_trim_qty=corr_trim_qty,
             corr_hourly_hours=float(corr_hourly_hours),
             corr_hourly_avg=False,
@@ -1226,6 +1302,8 @@ async def work_new_post(
                 grams_total=0.0,
                 rubber_type="",
                 rubber_qty=0,
+                other_catalog_product_id=0,
+                other_qty=1,
                 corr_trim_qty=int(bd.get("trim_qty") or 0),
                 corr_hourly_hours=float(bd.get("hourly_hours") or 0.0),
                 corr_hourly_avg=False,
@@ -1479,9 +1557,11 @@ async def work_new_post(
         return RedirectResponse(url=f"/sales/work/{work.id}?msg=created", status_code=303)
     except ValueError as exc:
         _enrich_fp_rubber(fp)
+        other_items = _other_items_for_work_form(db)
         masters = _list_masters_for_work_form(db)
         work_price_meta = {
             "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
+            "other": {str(x["id"]): x for x in other_items},
             "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
             "customOrderBonus": _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0),
             "mixRates": mix_rates_meta_json_dict(db),
@@ -1509,6 +1589,7 @@ async def work_new_post(
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
             rubber_families=[{"value": v, "label": l} for v, l in _rubber_family_items()],
             rubber_sizes=[{"value": v, "label": l} for v, l in _rubber_size_items()],
+                other_items=other_items,
                 work_price_meta_json=json.dumps(work_price_meta, ensure_ascii=False),
             ),
             status_code=400,

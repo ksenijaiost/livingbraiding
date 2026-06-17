@@ -64,6 +64,9 @@ def compute_work_financials(
     # rubber
     rubber_type: str,
     rubber_qty: int,
+    # other (catalog)
+    other_catalog_product_id: int = 0,
+    other_qty: int = 1,
     # correction
     corr_trim_qty: int,
     corr_hourly_hours: float,
@@ -77,6 +80,7 @@ def compute_work_financials(
     from app.work_products import (  # noqa: WPS433
         _kit_work_pay_for_item,
         _rubber_pricing_from_catalog,
+        _other_pricing_from_catalog,
         _studio_share_snapshot,
         _wr_float,
         _zakaz_subcategory_services_map,
@@ -188,13 +192,24 @@ def compute_work_financials(
         staff_master_profit[current_user_id] = max(0.0, float(grams_total) * rate)
 
     elif kind == WorkKind.OTHER:
+        mp, sp, fx, is_per_unit, _ul = _other_pricing_from_catalog(db, other_catalog_product_id)
+        units = int(other_qty) if is_per_unit else 1
+        bonus = 1.0
+        if scope == WorkScope.CUSTOM_ORDER:
+            bonus = max(0.0, _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0))
+            if bonus <= 0:
+                bonus = 1.0
+        staff_master_profit[current_user_id] = float(mp) * float(units) * bonus
+        studio_total = float(sp) * float(units) * bonus
+        extra_costs_amount = float(fx) * float(units)
+
         if (
             mix_source == MixSource.SELF_MIXED
             and grams_total > 0
             and mix_complexity is not None
         ):
             rate = float(mix_complexity_rate_map(db).get(mix_complexity, 0.0))
-            staff_master_profit[current_user_id] = max(0.0, float(grams_total) * rate)
+            staff_master_profit[current_user_id] += max(0.0, float(grams_total) * rate)
 
     master_total = float(sum(staff_master_profit.values()))
     studio_share = _studio_share_snapshot(db)
