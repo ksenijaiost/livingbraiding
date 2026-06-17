@@ -560,8 +560,14 @@ def _parse_stock_kit_lines_from_form(
     g: Callable[[str, str], str],
     g_int: Callable[[str, int], int],
     g_bool: Callable[[str], bool],
+    *,
+    lines_json_field: str = "stock_kit_lines_json",
+    legacy_kit_id_field: str = "stock_kit_id",
+    legacy_use_entire_field: str = "stock_use_entire",
+    legacy_blanks_field: str = "stock_blanks_used",
+    legacy_breakdown_field: str = "stock_breakdown_json",
 ) -> list[StockKitLineInput]:
-    raw = (g("stock_kit_lines_json", "") or "").strip()
+    raw = (g(lines_json_field, "") or "").strip()
     lines: list[StockKitLineInput] = []
     if raw:
         try:
@@ -596,14 +602,29 @@ def _parse_stock_kit_lines_from_form(
             )
         if lines:
             return lines
-    sid = g_int("stock_kit_id", 0)
+    sid = g_int(legacy_kit_id_field, 0)
     if sid > 0:
         return [
             StockKitLineInput(
                 kit_id=sid,
-                use_entire=g_bool("stock_use_entire"),
-                blanks_used=g_int("stock_blanks_used", 0),
-                usage_by_key=_parse_stock_breakdown_json(g, "stock_breakdown_json"),
+                use_entire=g_bool(legacy_use_entire_field),
+                blanks_used=g_int(legacy_blanks_field, 0),
+                usage_by_key=_parse_stock_breakdown_json(g, legacy_breakdown_field),
+            )
+        ]
+    return []
+
+
+def _own_extra_stock_lines_from_input(inp: "KitInlayFormInput") -> list[StockKitLineInput]:
+    if inp.own_extra_stock_kit_lines:
+        return inp.own_extra_stock_kit_lines
+    if inp.own_extra_stock_kit_id:
+        return [
+            StockKitLineInput(
+                kit_id=inp.own_extra_stock_kit_id,
+                use_entire=inp.own_extra_stock_use_entire,
+                blanks_used=inp.own_extra_stock_blanks_used,
+                usage_by_key=inp.own_extra_stock_usage_by_key,
             )
         ]
     return []
@@ -694,7 +715,20 @@ def parse_kit_inlay_form(
 
     stock_kit_lines = _parse_stock_kit_lines_from_form(form, g, g_int, g_bool)
     stock_id = stock_kit_lines[0].kit_id if stock_kit_lines else 0
-    extra_stock_id = g_int("own_extra_stock_kit_id", 0)
+    own_extra_stock_kit_lines = _parse_stock_kit_lines_from_form(
+        form,
+        g,
+        g_int,
+        g_bool,
+        lines_json_field="own_extra_stock_kit_lines_json",
+        legacy_kit_id_field="own_extra_stock_kit_id",
+        legacy_use_entire_field="own_extra_stock_use_entire",
+        legacy_blanks_field="own_extra_stock_blanks_used",
+        legacy_breakdown_field="own_extra_stock_breakdown_json",
+    )
+    extra_stock_id = (
+        own_extra_stock_kit_lines[0].kit_id if own_extra_stock_kit_lines else g_int("own_extra_stock_kit_id", 0)
+    )
 
     ct = VisitClientType.SELF if g_bool("client_is_self") else VisitClientType.RETURNING
     disc_pct = _parse_visit_client_discount_percent(g)
@@ -753,9 +787,18 @@ def parse_kit_inlay_form(
         own_correction=g_bool("own_correction"),
         own_extra_blanks=g_bool("own_extra_blanks"),
         own_extra_stock_kit_id=extra_stock_id if extra_stock_id else None,
-        own_extra_stock_use_entire=g_bool("own_extra_stock_use_entire"),
-        own_extra_stock_blanks_used=g_int("own_extra_stock_blanks_used", 0),
-        own_extra_stock_usage_by_key=_parse_stock_breakdown_json(g, "own_extra_stock_breakdown_json"),
+        own_extra_stock_kit_lines=own_extra_stock_kit_lines,
+        own_extra_stock_use_entire=(
+            own_extra_stock_kit_lines[0].use_entire if own_extra_stock_kit_lines else g_bool("own_extra_stock_use_entire")
+        ),
+        own_extra_stock_blanks_used=(
+            own_extra_stock_kit_lines[0].blanks_used if own_extra_stock_kit_lines else g_int("own_extra_stock_blanks_used", 0)
+        ),
+        own_extra_stock_usage_by_key=(
+            own_extra_stock_kit_lines[0].usage_by_key
+            if own_extra_stock_kit_lines
+            else _parse_stock_breakdown_json(g, "own_extra_stock_breakdown_json")
+        ),
         own_corr_trim_qty=g_int("own_corr_trim_qty", 0),
         own_corr_hourly_hours=max(0.0, g_float("own_corr_hourly_hours", 0)),
         own_corr_kit_description=g("own_corr_kit_description", ""),
@@ -827,6 +870,7 @@ class KitInlayFormInput:
     addon_sales_description: str
     thermo_parsed: ThermoFormParsed
     stock_kit_lines: list[StockKitLineInput] = field(default_factory=list)
+    own_extra_stock_kit_lines: list[StockKitLineInput] = field(default_factory=list)
 
 
 def _answers_labels_display_from_specs(
@@ -908,24 +952,31 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
             )
         extra: KitOwnExtra | None = None
         if inp.own_extra_blanks:
-            if not inp.own_extra_stock_kit_id:
+            extra_lines = _own_extra_stock_lines_from_input(inp)
+            if not extra_lines:
                 raise ValueError("Выберите комплект для доп. заготовок")
-            ek = _validate_stock_selection(
-                db,
-                kit_id=inp.own_extra_stock_kit_id,
-                use_entire=inp.own_extra_stock_use_entire,
-                blanks_used=inp.own_extra_stock_blanks_used,
-                client_id=inp.existing_client_id,
-                usage_by_key=inp.own_extra_stock_usage_by_key,
-            )
+            from_stocks_extra: list[KitFromStock] = []
+            for line in extra_lines:
+                ek = _validate_stock_selection(
+                    db,
+                    kit_id=line.kit_id,
+                    use_entire=line.use_entire,
+                    blanks_used=line.blanks_used,
+                    client_id=inp.existing_client_id,
+                    usage_by_key=line.usage_by_key,
+                )
+                from_stocks_extra.append(
+                    KitFromStock(
+                        sku=ek.sku,
+                        blanks_used=0 if line.use_entire else line.blanks_used,
+                        use_entire_kit=line.use_entire,
+                        usage_by_key=line.usage_by_key,
+                    )
+                )
             extra = KitOwnExtra(
                 source="STOCK",
-                from_stock=KitFromStock(
-                    sku=ek.sku,
-                    blanks_used=0 if inp.own_extra_stock_use_entire else inp.own_extra_stock_blanks_used,
-                    use_entire_kit=inp.own_extra_stock_use_entire,
-                    usage_by_key=inp.own_extra_stock_usage_by_key,
-                ),
+                from_stock=from_stocks_extra[0],
+                from_stocks=from_stocks_extra,
                 new_kit=None,
             )
         return KitBlock(
@@ -1221,6 +1272,38 @@ def kit_reserved_for_visit_label(kit: Kit) -> str | None:
     return "; ".join(bits)
 
 
+def _per_key_condition_meta(kit: Kit) -> dict[str, dict[str, Any]]:
+    """Состояние и % б/у по ключу заготовки (для таблицы списания в визите/брони)."""
+    from collections import defaultdict
+
+    from app.kit_composition_lines import BlankCondition, lines_from_json
+
+    by_key: dict[str, list[Any]] = defaultdict(list)
+    for ln in lines_from_json(kit.composition_json):
+        if ln.key:
+            by_key[str(ln.key)].append(ln)
+    fallback = str(getattr(kit, "blanks_condition", None) or "NEW").upper()
+    out: dict[str, dict[str, Any]] = {}
+    for kk, lns in by_key.items():
+        conds = {ln.condition for ln in lns}
+        if BlankCondition.USED in conds and BlankCondition.NEW in conds:
+            cond = "MIXED"
+        elif BlankCondition.USED in conds:
+            cond = "USED"
+        else:
+            cond = "NEW"
+        pct: int | None = None
+        used_lns = [ln for ln in lns if ln.condition == BlankCondition.USED]
+        if used_lns:
+            pcts = [int(ln.used_price_pct or 100) for ln in used_lns]
+            if len(set(pcts)) == 1:
+                pct = pcts[0]
+        out[kk] = {"condition": cond, "used_price_pct": pct}
+    if not out and fallback in ("NEW", "USED", "MIXED"):
+        out["*"] = {"condition": fallback, "used_price_pct": None}
+    return out
+
+
 def kit_suggest_dict_for_kit(db: Session, k: Kit, *, for_client_id: int | None) -> dict[str, Any]:
     """Одна строка подсказки «из наличия» (как в suggest_kits_for_stock)."""
     cid = int(for_client_id) if for_client_id is not None and int(for_client_id) > 0 else None
@@ -1260,9 +1343,11 @@ def kit_suggest_dict_for_kit(db: Session, k: Kit, *, for_client_id: int | None) 
     sm = blank_stock_qty_map(db, int(k.id))
     price_map, _meta, label_by_key = load_catalog_kit_maps(db)
     max_by = max_take_by_key_for_client(db, kit=k, client_id=cid, stock_map=sm)
+    cond_meta = _per_key_condition_meta(k)
     hints: list[dict[str, Any]] = []
     for kk in sorted(sm.keys()):
         p = price_map.get(kk)
+        cm = cond_meta.get(kk) or cond_meta.get("*") or {}
         hints.append(
             {
                 "key": kk,
@@ -1271,6 +1356,8 @@ def kit_suggest_dict_for_kit(db: Session, k: Kit, *, for_client_id: int | None) 
                 "price_per_piece": float(p) if p is not None else None,
                 "label": label_by_key.get(kk, kk),
                 "composition_qty": int(comp.get(kk, 0)),
+                "condition": str(cm.get("condition") or "NEW"),
+                "used_price_pct": cm.get("used_price_pct"),
             }
         )
     out["per_key"] = hints

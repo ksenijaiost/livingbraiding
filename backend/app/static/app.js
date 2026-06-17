@@ -861,6 +861,9 @@ function initAdminBookingForm() {
     qa("[data-line-kit-root] input, [data-line-kit-root] select, [data-line-kit-root] textarea, [data-line-kit-root] button").forEach(function (el) {
       el.disabled = false;
     });
+    syncBookingStockKitLinesHidden();
+    syncBookingExtraStockKitLinesHidden();
+    syncBookingSaleStockKitLinesHidden();
   }
 
   function serviceNeedsKitBlock(serviceId) {
@@ -1002,39 +1005,153 @@ function initAdminBookingForm() {
     });
   }
 
+  function bookingKitPickOpts(onChange) {
+    return {
+      suggestUrl: function (q) { return bookingKitSuggestUrl(q); },
+      stockLineFn: bookingKitSuggestLine,
+      onChange: onChange || function () {},
+    };
+  }
+
+  function initBookingStockKitWrap(wrapEl, opts) {
+    if (!wrapEl || !window.LbKitStockPick) return;
+    if (wrapEl.getAttribute("data-lb-init") === "1") return;
+    wrapEl.setAttribute("data-lb-init", "1");
+    LbKitStockPick.initStockKitWrap(wrapEl, Object.assign({}, bookingKitPickOpts(), opts || {}));
+  }
+
+  function syncBookingStockKitLinesHidden() {
+    if (!window.LbKitStockPick) return;
+    var wrap = byId("visit_stock_kit_rows_wrap");
+    var hid = byId("visit_stock_kit_lines_json");
+    if (!wrap || !hid) return;
+    var lines = LbKitStockPick.collectStockKitLines(wrap);
+    hid.value = JSON.stringify(lines);
+    var legacy = byId("visit_stock_kit_id");
+    if (legacy && lines.length) legacy.value = String(lines[0].kit_id || "");
+  }
+
+  function parseBookingKitLinesFromHidden(hidId, legacyKidId) {
+    var lines = [];
+    var rawEl = byId(hidId);
+    var raw = rawEl ? String(rawEl.value || "").trim() : "";
+    if (raw) {
+      try {
+        var arr = JSON.parse(raw);
+        if (Array.isArray(arr)) lines = arr;
+      } catch (e) {
+        lines = [];
+      }
+    }
+    if (!lines.length) {
+      var kidEl = byId(legacyKidId);
+      var kid = kidEl ? String(kidEl.value || "").trim() : "";
+      if (/^\d+$/.test(kid)) lines = [{ kit_id: parseInt(kid, 10) }];
+    }
+    return lines;
+  }
+
+  function syncBookingExtraStockKitLinesHidden() {
+    if (!window.LbKitStockPick) return;
+    var wrap = byId("visit_extra_stock_kit_rows_wrap");
+    var hid = byId("visit_extra_stock_kit_lines_json");
+    if (!wrap || !hid) return;
+    var lines = LbKitStockPick.collectStockKitLines(wrap);
+    hid.value = JSON.stringify(lines);
+    var legacy = byId("visit_extra_stock_kit_id");
+    if (legacy && lines.length) legacy.value = String(lines[0].kit_id || "");
+  }
+
+  function syncBookingSaleStockKitLinesHidden() {
+    if (!window.LbKitStockPick) return;
+    var wrap = byId("sale_stock_kit_rows_wrap");
+    var hid = byId("sale_stock_kit_lines_json");
+    if (!wrap || !hid) return;
+    var lines = LbKitStockPick.collectStockKitLines(wrap);
+    hid.value = JSON.stringify(lines);
+    var legacy = byId("sale_stock_kit_id");
+    if (legacy && lines.length) legacy.value = String(lines[0].kit_id || "");
+  }
+
+  function initBookingExtraSaleStockKitWraps() {
+    var extraWrap = byId("visit_extra_stock_kit_rows_wrap");
+    if (extraWrap && extraWrap.getAttribute("data-lb-init") !== "1") {
+      initBookingStockKitWrap(extraWrap, {
+        initialLines: parseBookingKitLinesFromHidden("visit_extra_stock_kit_lines_json", "visit_extra_stock_kit_id"),
+        onChange: syncBookingExtraStockKitLinesHidden,
+      });
+      var extraAdd = byId("visit_extra_add_stock_kit_row");
+      if (extraAdd && extraAdd.dataset.lbKitAddBound !== "1") {
+        extraAdd.dataset.lbKitAddBound = "1";
+        extraAdd.addEventListener("click", function () {
+          if (window.LbKitStockPick) {
+            LbKitStockPick.addStockKitRow(extraWrap, Object.assign({}, bookingKitPickOpts(syncBookingExtraStockKitLinesHidden), {
+              onPick: syncBookingExtraStockKitLinesHidden,
+            }));
+          }
+        });
+      }
+    }
+    var saleWrap = byId("sale_stock_kit_rows_wrap");
+    if (saleWrap && saleWrap.getAttribute("data-lb-init") !== "1") {
+      initBookingStockKitWrap(saleWrap, {
+        initialLines: parseBookingKitLinesFromHidden("sale_stock_kit_lines_json", "sale_stock_kit_id"),
+        onChange: syncBookingSaleStockKitLinesHidden,
+      });
+      var saleAdd = byId("sale_add_stock_kit_row");
+      if (saleAdd && saleAdd.dataset.lbKitAddBound !== "1") {
+        saleAdd.dataset.lbKitAddBound = "1";
+        saleAdd.addEventListener("click", function () {
+          if (window.LbKitStockPick) {
+            LbKitStockPick.addStockKitRow(saleWrap, Object.assign({}, bookingKitPickOpts(syncBookingSaleStockKitLinesHidden), {
+              onPick: syncBookingSaleStockKitLinesHidden,
+            }));
+          }
+        });
+      }
+    }
+  }
+
   function bindVisitKitControls() {
     qa('input[name="visit_kit_mode"]').forEach(function (r) {
       if (r.dataset.lbKitModeBound === "1") return;
       r.dataset.lbKitModeBound = "1";
       r.addEventListener("change", syncVisitKitMode);
     });
-    bindKitSuggest("visit_kit_search_q", "visit_kit_suggest_list", function (k) {
-      setSelectedKit("visit_stock_kit_id", "visit_selected_kit_box", "visit_selected_kit_line", k);
-      var ul = byId("visit_kit_suggest_list");
-      if (ul) ul.innerHTML = "";
-    });
-    [
-      ["visit_kit_stock_find_btn", "visit_kit_search_q", "visit_kit_suggest_list", "visit_stock_kit_id", "visit_selected_kit_box", "visit_selected_kit_line"]
-    ].forEach(function (row) {
-      var btn = byId(row[0]);
-      if (!btn || btn.dataset.lbKitFindBound === "1") return;
-      btn.dataset.lbKitFindBound = "1";
-      btn.addEventListener("click", function () {
-        var inp = byId(row[1]);
-        var q = inp ? String(inp.value || "").trim() : "";
-        kitSuggest(q, row[2], function (k) {
-          setSelectedKit(row[3], row[4], row[5], k);
-          var ul = byId(row[2]);
-          if (ul) ul.innerHTML = "";
-        });
+    var stockWrap = byId("visit_stock_kit_rows_wrap");
+    if (stockWrap) {
+      var initKit = null;
+      try {
+        initKit = jsonById("lb-booking-initial-kit-json", null);
+      } catch (e) {
+        initKit = null;
+      }
+      initBookingStockKitWrap(stockWrap, {
+        initialLines: initKit && initKit.id ? [{ kit_id: initKit.id, _kit_initial: initKit }] : parseBookingKitLinesFromHidden("visit_stock_kit_lines_json", "visit_stock_kit_id"),
+        onChange: syncBookingStockKitLinesHidden,
+        onPick: function (k) {
+          var legacy = byId("visit_stock_kit_id");
+          if (legacy) legacy.value = String(k.id || "");
+          syncBookingStockKitLinesHidden();
+        },
       });
-    });
-    ["visit_stock_use_entire"].forEach(function (name) {
-      var cb = document.querySelector('input[name="' + name + '"]');
-      if (!cb || cb.dataset.lbKitEntireBound === "1") return;
-      cb.dataset.lbKitEntireBound = "1";
-      cb.addEventListener("change", syncBookingEntireKitPieceInputs);
-    });
+      var addBtn = byId("visit_add_stock_kit_row");
+      if (addBtn && addBtn.dataset.lbKitAddBound !== "1") {
+        addBtn.dataset.lbKitAddBound = "1";
+        addBtn.addEventListener("click", function () {
+          if (window.LbKitStockPick) {
+            LbKitStockPick.addStockKitRow(stockWrap, Object.assign({}, bookingKitPickOpts(), {
+              onPick: function (k) {
+                var legacy = byId("visit_stock_kit_id");
+                if (legacy) legacy.value = String(k.id || "");
+                syncBookingStockKitLinesHidden();
+              },
+            }));
+          }
+        });
+      }
+    }
+    initBookingExtraSaleStockKitWraps();
     var visitOrderUseMasters = document.querySelector('input[name="visit_order_use_masters"]');
     if (visitOrderUseMasters && visitOrderUseMasters.dataset.lbKitOrderMastersBound !== "1") {
       visitOrderUseMasters.dataset.lbKitOrderMastersBound = "1";
@@ -1053,7 +1170,6 @@ function initAdminBookingForm() {
     syncVisitKitMode();
     syncOwnKitExtras();
     syncVisitOrderMasters();
-    syncBookingEntireKitPieceInputs();
   }
 
   // --- Bind listeners ---
@@ -1080,40 +1196,6 @@ function initAdminBookingForm() {
   qa('input[name="sale_kit_mode"]').forEach(function (r) { r.addEventListener("change", syncSaleKitMode); });
   qa('input[name="sale_rubber_mode"]').forEach(function (r) { r.addEventListener("change", syncSaleRubberMode); });
   qa('input[name="sale_rubber_type"]').forEach(function (r) { r.addEventListener("change", syncSaleRubberTypeFields); });
-
-  bindKitSuggest("visit_extra_kit_search_q", "visit_extra_kit_suggest_list", function (k) {
-    setSelectedKit("visit_extra_stock_kit_id", "visit_extra_selected_kit_box", "visit_extra_selected_kit_line", k);
-    var ul = byId("visit_extra_kit_suggest_list");
-    if (ul) ul.innerHTML = "";
-  });
-  bindKitSuggest("sale_kit_search_q", "sale_kit_suggest_list", function (k) {
-    setSelectedKit("sale_stock_kit_id", "sale_selected_kit_box", "sale_selected_kit_line", k);
-    var ul = byId("sale_kit_suggest_list");
-    if (ul) ul.innerHTML = "";
-  });
-
-  [
-    ["visit_extra_kit_stock_find_btn", "visit_extra_kit_search_q", "visit_extra_kit_suggest_list", "visit_extra_stock_kit_id", "visit_extra_selected_kit_box", "visit_extra_selected_kit_line"],
-    ["sale_kit_stock_find_btn", "sale_kit_search_q", "sale_kit_suggest_list", "sale_stock_kit_id", "sale_selected_kit_box", "sale_selected_kit_line"]
-  ].forEach(function (row) {
-    var btn = byId(row[0]);
-    if (!btn || btn.dataset.lbKitFindBound === "1") return;
-    btn.dataset.lbKitFindBound = "1";
-    btn.addEventListener("click", function () {
-      var inp = byId(row[1]);
-      var q = inp ? String(inp.value || "").trim() : "";
-      kitSuggest(q, row[2], function (k) {
-        setSelectedKit(row[3], row[4], row[5], k);
-        var ul = byId(row[2]);
-        if (ul) ul.innerHTML = "";
-      });
-    });
-  });
-  ["visit_extra_stock_use_entire", "sale_stock_use_entire"].forEach(function (name) {
-    var cb = document.querySelector('input[name="' + name + '"]');
-    if (cb) cb.addEventListener("change", syncBookingEntireKitPieceInputs);
-  });
-  syncBookingEntireKitPieceInputs();
 
   // --- init ---
   bindVisitKitControls();

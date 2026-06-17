@@ -128,6 +128,8 @@
                     <button type="button" class="secondary psk-change-btn" style="flex-shrink:0;">Изменить</button>
                   </div>
                 </div>
+                <input type="hidden" class="psk-breakdown-hidden vsk-breakdown lb-kit-breakdown-hidden" value="{% if line.breakdown %}{{ line.breakdown | tojson }}{% endif %}" />
+                <div data-lb-kit-pick-after-selected="1">
                 {% set km = line.mode or 'PIECES' %}
                 <div class="row" style="margin-top: 10px; align-items:flex-end;">
                   <div>
@@ -141,6 +143,7 @@
                     <label>Количество заготовок *</label>
                     <input type="number" class="psk-pieces" min="1" step="1" value="{% if line.pieces and line.mode != 'ALL' %}{{ line.pieces }}{% endif %}" />
                   </div>
+                </div>
                 </div>
               </div>
               {% endfor %}
@@ -276,25 +279,35 @@
         let label = (k.sku && k.title) ? (k.sku + ' — ' + k.title) : (k.label || k.name || ('ID ' + k.id));
         if (k.missing_sale_price) label = '⚠️ ' + label;
         b.textContent = label;
-        b.onclick = function () { onPick(k.id, label); };
+        b.onclick = function () { onPick(k, label); };
         li.appendChild(b);
         ul.appendChild(li);
       }
     }
-    function saleSelectKitForRow(row, id, label) {
+    function saleSelectKitForRow(row, k, label) {
+      const id = k && k.id != null ? k.id : k;
       const kidEl = row.querySelector('.psk-kit-id');
       const lineEl = row.querySelector('.psk-selected-line');
       const box = row.querySelector('.psk-selected-box');
       const qEl = row.querySelector('.psk-search-q');
       const ul = row.querySelector('.psk-suggest-list');
       if (kidEl) kidEl.value = String(id);
-      if (lineEl) lineEl.innerHTML = 'Выбрано: <strong>' + escapeHtml(label || ('ID ' + id)) + '</strong>';
+      const lab = label || (k && k.sku && k.title ? (k.sku + ' — ' + k.title) : ('ID ' + id));
+      if (lineEl) lineEl.innerHTML = 'Выбрано: <strong>' + escapeHtml(lab) + '</strong>';
       if (box) box.style.display = 'block';
       if (ul) ul.innerHTML = '';
       if (qEl) { qEl.value = ''; qEl.disabled = true; }
       const findBtn = row.querySelector('.psk-find-btn');
       if (findBtn) findBtn.disabled = true;
-      row.setAttribute('data-psk-label', label || '');
+      row.setAttribute('data-psk-label', lab);
+      row._pskKitData = typeof k === 'object' ? k : null;
+      if (window.LbKitStockPick && row._pskKitData) {
+        var bdRaw = (row.querySelector('.psk-breakdown-hidden') || {}).value || '';
+        var initBd = null;
+        if (bdRaw.trim()) { try { initBd = JSON.parse(bdRaw); } catch (e) { initBd = null; } }
+        LbKitStockPick.renderBreakdownTable(row, row._pskKitData, initBd);
+      }
+      saleSyncRowModeUi(row);
     }
     function saleClearKitRow(row) {
       const kidEl = row.querySelector('.psk-kit-id');
@@ -310,6 +323,11 @@
       const findBtn = row.querySelector('.psk-find-btn');
       if (findBtn) findBtn.disabled = false;
       row.setAttribute('data-psk-label', '');
+      row._pskKitData = null;
+      var tbody = row.querySelector('.lb-kit-breakdown-wrap tbody');
+      if (tbody) tbody.innerHTML = '';
+      var bdHid = row.querySelector('.psk-breakdown-hidden');
+      if (bdHid) bdHid.value = '';
     }
     async function saleKitSuggestForRow(row) {
       const qEl = row.querySelector('.psk-search-q');
@@ -317,7 +335,7 @@
       const q = qEl ? qEl.value.trim() : '';
       const kits = await saleFetchKitSuggest(q);
       const ul = row.querySelector('.psk-suggest-list');
-      saleRenderKitSuggestList(ul, kits, function (id, label) { saleSelectKitForRow(row, id, label); });
+      saleRenderKitSuggestList(ul, kits, function (k, label) { saleSelectKitForRow(row, k, label); });
     }
     function saleScheduleKitSuggestForRow(row) {
       let t = saleKitRowTimers.get(row);
@@ -327,10 +345,28 @@
     }
     function saleSyncRowModeUi(row) {
       const mode = (row.querySelector('.psk-mode') || {}).value || 'PIECES';
+      const entire = mode === 'ALL';
       const pb = row.querySelector('.psk-pieces-block');
       const inp = row.querySelector('.psk-pieces');
-      if (pb) pb.style.display = (mode === 'PIECES') ? 'block' : 'none';
-      if (inp && mode === 'ALL') inp.value = '';
+      const kit = row._pskKitData;
+      const keyed = window.LbKitStockPick && kit && LbKitStockPick.hasKeyedBreakdown(kit);
+      const wrap = row.querySelector('.lb-kit-breakdown-wrap');
+      if (keyed && wrap) {
+        wrap.style.display = entire ? 'none' : 'block';
+        if (pb) pb.style.display = 'none';
+      } else if (pb) {
+        pb.style.display = entire ? 'none' : 'block';
+        if (wrap) wrap.style.display = 'none';
+      }
+      if (inp) {
+        inp.disabled = entire;
+        if (entire) inp.value = '';
+      }
+      row.querySelectorAll('.lb-kit-bd-take').forEach(function (el) {
+        el.disabled = entire;
+        if (entire) el.value = '';
+      });
+      if (window.LbKitStockPick) LbKitStockPick.syncRowBreakdownHidden(row);
     }
     function saleRenumberKitRows() {
       document.querySelectorAll('#sale_kit_rows_wrap .sale-kit-row').forEach(function (row, i) {
@@ -375,6 +411,11 @@
       const bu = row.querySelector('.psk-pieces');
       if (bu) bu.value = '';
       row.setAttribute('data-psk-label', '');
+      row._pskKitData = null;
+      var bdHid = row.querySelector('.psk-breakdown-hidden');
+      if (bdHid) bdHid.value = '';
+      var tbody = row.querySelector('.lb-kit-breakdown-wrap tbody');
+      if (tbody) tbody.innerHTML = '';
       let rm = row.querySelector('.psk-remove-row');
       if (!rm) {
         rm = document.createElement('button');
@@ -389,23 +430,21 @@
       saleBindKitRow(row);
       saleRenumberKitRows();
     }
+    async function saleHydrateKitRow(row) {
+      const kidEl = row.querySelector('.psk-kit-id');
+      const id = parseInt((kidEl && kidEl.value) || '0', 10) || 0;
+      if (id <= 0) return;
+      const lab = row.getAttribute('data-psk-label') || '';
+      const kits = await saleFetchKitSuggest(String(id));
+      const k = (kits || []).find(function (x) { return parseInt(String(x.id || 0), 10) === id; });
+      if (k) saleSelectKitForRow(row, k, lab || undefined);
+      else saleSyncRowModeUi(row);
+    }
     const saleAddKitBtn = document.getElementById('sale_add_kit_row');
     if (saleAddKitBtn) saleAddKitBtn.addEventListener('click', saleAddKitRow);
     document.querySelectorAll('#sale_kit_rows_wrap .sale-kit-row').forEach(function (row) {
       saleBindKitRow(row);
-      const kidEl = row.querySelector('.psk-kit-id');
-      const id = kidEl && (kidEl.value || '').trim();
-      const lab = row.getAttribute('data-psk-label') || '';
-      if (id && lab) {
-        const lineEl = row.querySelector('.psk-selected-line');
-        const box = row.querySelector('.psk-selected-box');
-        if (lineEl) lineEl.innerHTML = 'Выбрано: <strong>' + escapeHtml(lab) + '</strong>';
-        if (box) box.style.display = 'block';
-        const qEl = row.querySelector('.psk-search-q');
-        if (qEl) qEl.disabled = true;
-        const findBtn = row.querySelector('.psk-find-btn');
-        if (findBtn) findBtn.disabled = true;
-      }
+      saleHydrateKitRow(row);
     });
     saleRenumberKitRows();
 
@@ -431,9 +470,14 @@
         const kid = parseInt((row.querySelector('.psk-kit-id') || {}).value || '0', 10) || 0;
         if (kid <= 0) return;
         const mode = (row.querySelector('.psk-mode') || {}).value || 'PIECES';
+        const bd = window.LbKitStockPick ? LbKitStockPick.readBreakdown(row) : null;
         let pieces = parseInt((row.querySelector('.psk-pieces') || {}).value || '0', 10) || 0;
+        if (bd) {
+          pieces = 0;
+          Object.keys(bd).forEach(function (k) { pieces += parseInt(String(bd[k] || 0), 10) || 0; });
+        }
         if (mode === 'ALL') pieces = 0;
-        lines.push({ kit_id: kid, mode: mode, pieces: pieces, breakdown: null });
+        lines.push({ kit_id: kid, mode: mode, pieces: pieces, breakdown: bd });
       });
       return lines;
     }
