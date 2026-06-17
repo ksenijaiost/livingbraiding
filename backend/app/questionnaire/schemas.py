@@ -52,12 +52,39 @@ class KitOwnExtra(BaseModel):
 
     source: Literal["STOCK", "NEW"]
     from_stock: KitFromStock | None = None
+    from_stocks: list[KitFromStock] = Field(default_factory=list)
     new_kit: KitNew | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_single_stock(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if data.get("source") != "STOCK":
+            return data
+        if data.get("from_stocks"):
+            return data
+        fs = data.get("from_stock")
+        if fs is not None:
+            return {**data, "from_stocks": [fs]}
+        return data
+
+    @field_validator("from_stocks", mode="before")
+    @classmethod
+    def _from_stocks_none_to_empty(cls, v: Any) -> Any:
+        if v is None:
+            return []
+        return v
 
     @model_validator(mode="after")
     def _validate_source(self):
-        if self.source == "STOCK" and self.from_stock is None:
-            raise ValueError("Для source=STOCK нужен from_stock")
+        if self.source == "STOCK":
+            stocks = [x for x in (self.from_stocks or []) if x is not None]
+            if not stocks and self.from_stock is not None:
+                stocks = [self.from_stock]
+            if not stocks:
+                raise ValueError("Для source=STOCK нужен from_stock или непустой from_stocks")
+            return self.model_copy(update={"from_stocks": stocks, "from_stock": stocks[0]})
         if self.source == "NEW" and self.new_kit is None:
             raise ValueError("Для source=NEW нужен new_kit")
         return self

@@ -8,12 +8,24 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_role
 from app.zakaz_blanks import section_from_kit_key
-from app.db.models import CatalogProduct, Kit, KitBlankStock, Service, ServiceCategory, ServiceSubcategory, UserRole
+from app.db.models import (
+    CatalogProduct,
+    Kit,
+    KitBlankStock,
+    ProductSale,
+    ProductSaleKind,
+    Service,
+    ServiceCategory,
+    ServiceSubcategory,
+    UserRole,
+    WorkForInventory,
+    WorkKind,
+)
 from app.db.session import get_db
 from app.forms_parse import parse_bool, parse_optional_float
 from app.ru_labels import format_price_integer_rub
@@ -80,6 +92,220 @@ def catalog_blank_kit_key_usage(db: Session, kit_key: str, *, limit: int = 12) -
         "active": active_count,
         "kits": kits_out,
         "truncated": total > len(kits_out),
+    }
+
+
+def _rubber_types_for_catalog_name(name: str) -> list[str]:
+    from app.work_products import _rubber_service_name, _rubber_type_items
+
+    nn = str(name or "").strip()
+    return [rt for rt, _ in _rubber_type_items() if _rubber_service_name(rt) == nn]
+
+
+def _work_usage_by_details_needle(
+    db: Session,
+    *,
+    kind: WorkKind,
+    needle: str,
+    limit: int = 12,
+) -> tuple[int, list[int]]:
+    if not needle:
+        return 0, []
+    base = and_(
+        WorkForInventory.kind == kind,
+        WorkForInventory.details_json.is_not(None),
+        WorkForInventory.details_json.like(f"%{needle}%"),
+    )
+    total = int(db.scalar(select(func.count(WorkForInventory.id)).where(base)) or 0)
+    if not total:
+        return 0, []
+    work_ids = [
+        int(x)
+        for (x,) in db.execute(
+            select(WorkForInventory.id).where(base).order_by(WorkForInventory.id.desc()).limit(max(0, int(limit)))
+        ).all()
+    ]
+    return total, work_ids
+
+
+def catalog_product_other_works_usage(db: Session, product_id: int, *, limit: int = 12) -> dict[str, Any]:
+    needle = f"\"catalog_product_id\": {int(product_id)}"
+    total, work_ids = _work_usage_by_details_needle(
+        db, kind=WorkKind.OTHER, needle=needle, limit=limit
+    )
+    return {"kind": "other_works", "total": total, "work_ids": work_ids, "truncated": total > len(work_ids)}
+
+
+def catalog_product_rubber_works_usage(db: Session, catalog_name: str, *, limit: int = 12) -> dict[str, Any]:
+    rubber_types = _rubber_types_for_catalog_name(catalog_name)
+    if not rubber_types:
+        return {"kind": "rubber_works", "total": 0, "work_ids": [], "rubber_types": [], "truncated": False}
+
+    matched_ids: set[int] = set()
+    for rt in rubber_types:
+        needle = f"\"type\": \"{rt}\""
+        total, work_ids = _work_usage_by_details_needle(
+            db, kind=WorkKind.RUBBER, needle=needle, limit=limit
+        )
+        if total:
+            matched_ids.update(work_ids)
+            if len(matched_ids) >= limit:
+                break
+
+    work_ids_out = sorted(matched_ids, reverse=True)[: max(0, int(limit))]
+    total = int(
+        db.scalar(
+            select(func.count(WorkForInventory.id)).where(
+                WorkForInventory.kind == WorkKind.RUBBER,
+                WorkForInventory.details_json.is_not(None),
+                or_(*[WorkForInventory.details_json.like(f"%\"type\": \"{rt}\"%") for rt in rubber_types]),
+            )
+        )
+        or 0
+    )
+    return {
+        "kind": "rubber_works",
+        "total": total,
+        "work_ids": work_ids_out,
+        "rubber_types": rubber_types,
+        "truncated": total > len(work_ids_out),
+    }
+
+
+def catalog_product_correction_works_usage(db: Session, catalog_name: str, *, limit: int = 12) -> dict[str, Any]:
+    from app.work_products_compute import (
+        CORR_SVC_CIRCLE,
+        CORR_SVC_HOURLY,
+        CORR_SVC_STEAM,
+        CORR_SVC_TRIM,
+        CORR_SVC_WASH_WITH,
+        CORR_SVC_WASH_WITHOUT,
+    )
+
+    name = str(catalog_name or "").strip()
+    extra: list[Any] = []
+    if name == CORR_SVC_TRIM:
+        extra = [
+            WorkForInventory.details_json.like('%"trim_qty":%'),
+            not_(WorkForInventory.details_json.like('%"trim_qty": 0%')),
+            not_(WorkForInventory.details_json.like('%"trim_qty":0%')),
+        ]
+    elif name == CORR_SVC_HOURLY:
+        extra = [
+            WorkForInventory.details_json.like('%"hourly_hours":%'),
+            not_(WorkForInventory.details_json.like('%"hourly_hours": 0.0%')),
+            not_(WorkForInventory.details_json.like('%"hourly_hours": 0%')),
+            not_(WorkForInventory.details_json.like('%"hourly_hours":0%')),
+        ]
+    elif name in (CORR_SVC_WASH_WITH, CORR_SVC_WASH_WITHOUT):
+        extra = [WorkForInventory.details_json.like('%"wash": true%')]
+    elif name == CORR_SVC_CIRCLE:
+        extra = [WorkForInventory.details_json.like('%"circle": true%')]
+    elif name == CORR_SVC_STEAM:
+        extra = [WorkForInventory.details_json.like('%"steam": true%')]
+    else:
+        return {"kind": "correction_works", "total": 0, "work_ids": [], "truncated": False}
+
+    base = and_(
+        WorkForInventory.kind == WorkKind.KIT_CORRECTION,
+        WorkForInventory.details_json.is_not(None),
+        *extra,
+    )
+    total = int(db.scalar(select(func.count(WorkForInventory.id)).where(base)) or 0)
+    work_ids: list[int] = []
+    if total:
+        work_ids = [
+            int(x)
+            for (x,) in db.execute(
+                select(WorkForInventory.id).where(base).order_by(WorkForInventory.id.desc()).limit(max(0, int(limit)))
+            ).all()
+        ]
+    return {"kind": "correction_works", "total": total, "work_ids": work_ids, "truncated": total > len(work_ids)}
+
+
+def catalog_product_material_sales_usage(db: Session, row: CatalogProduct, *, limit: int = 12) -> dict[str, Any]:
+    if row.category_name != "Продажа материала":
+        return {"kind": "material_sales", "total": 0, "sale_ids": [], "truncated": False}
+
+    svc = db.scalar(
+        select(Service)
+        .join(ServiceSubcategory, Service.subcategory_id == ServiceSubcategory.id)
+        .join(ServiceCategory, ServiceSubcategory.category_id == ServiceCategory.id)
+        .where(
+            ServiceCategory.name == "Продажа материала",
+            ServiceSubcategory.name == row.subcategory_name,
+            Service.name == row.name,
+        )
+        .limit(1)
+    )
+    if svc is None:
+        return {"kind": "material_sales", "total": 0, "sale_ids": [], "truncated": False}
+
+    base = and_(
+        ProductSale.kind == ProductSaleKind.MATERIAL,
+        ProductSale.material_service_id == int(svc.id),
+        ProductSale.is_voided.is_(False),
+    )
+    total = int(db.scalar(select(func.count(ProductSale.id)).where(base)) or 0)
+    sale_ids: list[int] = []
+    if total:
+        sale_ids = [
+            int(x)
+            for (x,) in db.execute(
+                select(ProductSale.id).where(base).order_by(ProductSale.id.desc()).limit(max(0, int(limit)))
+            ).all()
+        ]
+    return {"kind": "material_sales", "total": total, "sale_ids": sale_ids, "truncated": total > len(sale_ids)}
+
+
+def catalog_product_delete_usage(db: Session, row: CatalogProduct, *, limit: int = 12) -> dict[str, Any]:
+    """Все известные ссылки на строку прайса перед удалением."""
+    meta = _parse_catalog_meta(row.meta_json)
+    kk = str(meta.get("kit_key") or "").strip()
+    checks: list[dict[str, Any]] = []
+
+    if kk:
+        kit_usage = catalog_blank_kit_key_usage(db, kk, limit=limit)
+        kit_usage["kind"] = "kit_key"
+        checks.append(kit_usage)
+
+    checks.append(catalog_product_other_works_usage(db, int(row.id), limit=limit))
+
+    if row.category_name == "Заказ" and row.subcategory_name == "Хвосты/резинки":
+        checks.append(catalog_product_rubber_works_usage(db, row.name, limit=limit))
+
+    if row.category_name == "Заказ" and row.subcategory_name == "Коррекция комплекта":
+        checks.append(catalog_product_correction_works_usage(db, row.name, limit=limit))
+
+    if row.category_name == "Продажа материала":
+        checks.append(catalog_product_material_sales_usage(db, row, limit=limit))
+
+    work_kinds = frozenset({"other_works", "rubber_works", "correction_works"})
+    work_ids: list[int] = []
+    for chk in checks:
+        if chk.get("kind") not in work_kinds:
+            continue
+        for wid in chk.get("work_ids") or []:
+            wi = int(wid)
+            if wi not in work_ids:
+                work_ids.append(wi)
+            if len(work_ids) >= limit:
+                break
+        if len(work_ids) >= limit:
+            break
+
+    works_total = sum(int(c.get("total") or 0) for c in checks if c.get("kind") in work_kinds)
+
+    return {
+        "applicable": True,
+        "usage_kind": "multi",
+        "row_id": int(row.id),
+        "row_name": str(row.name or ""),
+        "kit_key": kk,
+        "checks": checks,
+        "has_usage": any(int(c.get("total") or 0) > 0 for c in checks),
+        "works_total": works_total,
+        "work_ids": work_ids,
     }
 
 
@@ -190,6 +416,9 @@ def products_catalog_view(
                 bucket = groups_active if row.is_active else groups_inactive
                 bucket[row.subcategory_name].append(_catalog_row_ns(row))
             sub_names = sorted(set(groups_active.keys()) | set(groups_inactive.keys()))
+            if selected == "Заказ" and "Другое" not in sub_names:
+                sub_names.append("Другое")
+                sub_names = sorted(sub_names)
             grouped_rows = [
                 SimpleNamespace(
                     subcategory_name=sub_name,
@@ -287,11 +516,8 @@ async def products_catalog_row_edit(
     meta["fixed_expense"] = fixed_expense
     meta["is_used_in_kit_form"] = parse_bool(form.get("is_used_in_kit_form"))
     meta["ignore_in_calc"] = parse_bool(form.get("ignore_in_calc"))
-    if row.category_name == "Заказ" and row.subcategory_name == "Заготовки поштучно":
-        new_name = str(form.get("name") or "").strip()
-        kit_key = str(meta.get("kit_key") or "").strip()
-        if not new_name or not kit_key:
-            return _redirect("err", "blank_fields")
+    new_name = str(form.get("name") or "").strip()
+    if new_name:
         if new_name != row.name:
             exists_id = db.scalar(
                 select(CatalogProduct.id).where(
@@ -304,6 +530,14 @@ async def products_catalog_row_edit(
             if exists_id:
                 return _redirect("err", "duplicate")
             row.name = new_name[:200]
+    elif row.category_name == "Заказ" and row.subcategory_name == "Заготовки поштучно":
+        # Для заготовок name обязателен (kit_key используется в составе/JSON).
+        return _redirect("err", "blank_fields")
+
+    if row.category_name == "Заказ" and row.subcategory_name == "Заготовки поштучно":
+        kit_key = str(meta.get("kit_key") or "").strip()
+        if not kit_key:
+            return _redirect("err", "blank_fields")
     row.is_active = parse_bool(form.get("is_active"))
     row.meta_json = json.dumps(meta, ensure_ascii=False)
     db.commit()
@@ -392,27 +626,7 @@ def products_catalog_row_delete_preview(
     row = db.get(CatalogProduct, row_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Позиция прайса не найдена")
-    meta = _parse_catalog_meta(row.meta_json)
-    kk = str(meta.get("kit_key") or "").strip()
-    applicable = (
-        row.category_name == _BLANK_CATALOG_CATEGORY
-        and row.subcategory_name == _BLANK_CATALOG_SUBCATEGORY
-        and bool(kk)
-    )
-    if not applicable:
-        return JSONResponse(
-            {
-                "applicable": False,
-                "kit_key": kk,
-                "total": 0,
-                "active": 0,
-                "kits": [],
-                "truncated": False,
-            }
-        )
-    usage = catalog_blank_kit_key_usage(db, kk)
-    usage["applicable"] = True
-    return JSONResponse(usage)
+    return JSONResponse(catalog_product_delete_usage(db, row))
 
 
 @router.post("/products-catalog/{row_id}/delete")

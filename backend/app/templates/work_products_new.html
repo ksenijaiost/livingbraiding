@@ -153,6 +153,19 @@
         </div>
       </div>
 
+      <div id="other_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
+        <h3 style="margin-top:0;">Другое</h3>
+        <div>
+          <label>Товар из прайса «Заказ → Другое»</label>
+          <select name="other_product_id" id="other_product_id" style="width:100%;max-width:520px;">
+            <option value="" {% if not fp.other_product_id %}selected{% endif %}>— выберите —</option>
+            {% for it in other_items %}
+              <option value="{{ it.id }}" {% if fp.other_product_id == (it.id|string) %}selected{% endif %}>{{ it.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
       <div id="correction_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
         <h3 style="margin-top:0;">Коррекция комплекта</h3>
         <p class="muted" style="margin-top:-6px;">Поля необязательны. Если выбрана стирка — «одевание на круг» недоступно. Позиция стирки в прайсе: «с коррекцией» при стрижке и/или почасовой работе; иначе «без коррекции».</p>
@@ -387,6 +400,12 @@
       if (!kind || !rb) return;
       rb.style.display = (kind.value === 'RUBBER') ? 'block' : 'none';
       if (kind.value === 'RUBBER') syncRubberTypeFields();
+    }
+    function syncOtherBlock() {
+      var kind = document.querySelector('select[name="kind"]');
+      var ob = document.getElementById('other_block');
+      if (!kind || !ob) return;
+      ob.style.display = (kind.value === 'OTHER') ? 'block' : 'none';
     }
     function resolveRubberType() {
       var famEl = document.querySelector('input[name="rubber_family"]:checked');
@@ -681,6 +700,24 @@
         return;
       }
 
+      if (k === 'OTHER') {
+        var selOther = document.getElementById('other_product_id');
+        var otherId = selOther ? String(selOther.value || '') : '';
+        var mapOther = (meta && meta.other) ? meta.other : {};
+        var rowOther = otherId ? (mapOther[otherId] || null) : null;
+        var uidO = st.currentUserId || 0;
+        var payO = 0;
+        var fxO = 0;
+        if (rowOther) {
+          if (rowOther.master_pay != null) payO = parseFloat(rowOther.master_pay) || 0;
+          if (rowOther.fixed_expense != null) fxO = parseFloat(rowOther.fixed_expense) || 0;
+        }
+        if (getScopeValue() === 'CUSTOM_ORDER') payO = payO * bonus;
+        setPayLines(payO > 0 ? [('ЗП «' + nameByUserId(st, uidO) + '»: ' + money2(payO) + ' ₽')] : []);
+        setCost('Себестоимость (итого): ' + money2(mat + fxO) + ' ₽ (материал + доп. расходы)');
+        return;
+      }
+
       if (k === 'MIX') {
         var gramsTotal = kan + kud;
         var mc = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || 'STANDARD';
@@ -755,6 +792,17 @@
           var hi = row.client_to != null ? Math.round(row.client_to * units * bonus) : null;
           var r = fmtRange(lo, hi);
           if (r) line = 'По прайсу: ' + r + ' ₽';
+        }
+      } else if (kind.value === 'OTHER') {
+        var selOther2 = document.getElementById('other_product_id');
+        var otherId2 = selOther2 ? String(selOther2.value || '') : '';
+        var mapOther2 = (meta && meta.other) ? meta.other : {};
+        var rowOther2 = otherId2 ? (mapOther2[otherId2] || null) : null;
+        if (rowOther2) {
+          var loO = rowOther2.client_from != null ? Math.round(rowOther2.client_from * bonus) : null;
+          var hiO = rowOther2.client_to != null ? Math.round(rowOther2.client_to * bonus) : null;
+          var rO = fmtRange(loO, hiO);
+          if (rO) line = 'По прайсу: ' + rO + ' ₽';
         }
       } else if (kind.value === 'KIT_CORRECTION') {
         var mapc = (meta && meta.correction) ? meta.correction : {};
@@ -954,10 +1002,12 @@
       });
     });
     var kindSel = document.querySelector('select[name="kind"]');
-    if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); syncCorrectionBlock(); syncMixUI(); syncPriceHint(); syncWorkPreview(); });
+    if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); syncOtherBlock(); syncCorrectionBlock(); syncMixUI(); syncPriceHint(); syncWorkPreview(); });
     document.querySelectorAll('input[name="rubber_family"], input[name="rubber_size"]').forEach(function(el){
       el.addEventListener('change', function () { syncRubberTypeFields(); syncPriceHint(); syncWorkPreview(); });
     });
+    var otherSel = document.getElementById('other_product_id');
+    if (otherSel) otherSel.addEventListener('change', function () { syncPriceHint(); syncWorkPreview(); });
     var corrWash = document.getElementById('corr_wash');
     if (corrWash) corrWash.addEventListener('change', function () { syncCorrectionRules(); syncPriceHint(); syncWorkPreview(); });
     var corrCircle = document.getElementById('corr_circle');
@@ -1047,6 +1097,7 @@
       syncClientBlock();
       syncKitBlock();
       syncRubberBlock();
+      syncOtherBlock();
       syncCorrectionBlock();
       syncCorrAddKitButton();
       syncKitStockBlock();

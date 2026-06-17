@@ -215,36 +215,15 @@
           </div>
 
           <div id="visit_kit_stock_block" style="margin-top: 12px; display:none;">
+            <input type="hidden" name="visit_stock_kit_lines_json" id="visit_stock_kit_lines_json" value="{{ fp.get('visit_stock_kit_lines_json','') }}" />
             <input type="hidden" name="visit_stock_kit_id" id="visit_stock_kit_id" value="{{ fp.get('visit_stock_kit_id','') }}" />
             <input type="hidden" name="visit_stock_breakdown_json" id="visit_stock_breakdown_json" value="{{ fp.get('visit_stock_breakdown_json','') }}" />
-            <label>Комплект из наличия</label>
-            <div class="row" style="align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:6px;">
-              <div style="flex:1; min-width:160px;">
-                <input type="search" id="visit_kit_search_q" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" value="" />
-              </div>
-              <div>
-                <button type="button" class="secondary" id="visit_kit_stock_find_btn">Найти</button>
-              </div>
-            </div>
-            <ul id="visit_kit_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0; max-height:220px; overflow:auto;"></ul>
-            <div id="visit_selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not fp.get('visit_stock_kit_id') %}display:none;{% endif %}">
-              <p id="visit_selected_kit_line" style="margin:0;"></p>
-              <div style="margin-top: 10px;">
-                <label style="display:flex; align-items:flex-start; gap:8px; font-weight:normal;">
-                  <input type="checkbox" name="visit_stock_use_entire" {% if fp.get('visit_stock_use_entire') in ('1', 'on', 'true', 'yes') %}checked{% endif %} />
-                  <span>Весь свободный остаток (все доступные заготовки)</span>
-                </label>
-              </div>
-              <div class="row" style="margin-top: 10px;">
-                <div>
-                  <label>Или заготовок зарезервировать</label>
-                  <input type="number" name="visit_stock_kit_pieces" id="visit_stock_kit_pieces" min="0" step="1" value="{{ fp.get('visit_stock_kit_pieces','') }}" />
-                </div>
-              </div>
-              <p class="muted" style="margin: 8px 0 0; font-size: 12px;">
-                При сохранении брони комплект будет зарезервирован автоматически (под клиента). Пустой поиск + «Найти» — список как в визите (в т.ч. только под резерв клиента).
-              </p>
-            </div>
+            <label>Комплекты из наличия</label>
+            <p class="muted" style="margin:4px 0 8px; font-size:12px;">Можно выбрать несколько комплектов. Если не отмечен «весь комплект», укажите количество по видам заготовок.</p>
+            <div id="visit_stock_kit_rows_wrap" data-lb-booking-stock-wrap="1"></div>
+            <p style="margin-top:10px;">
+              <button type="button" class="secondary" id="visit_add_stock_kit_row">+ Ещё комплект из наличия</button>
+            </p>
           </div>
 
           <div id="visit_kit_own_block" style="margin-top: 12px; display:none;">
@@ -334,36 +313,18 @@
           </div>
 
           <div id="visit_extra_stock_block" style="margin-top: 12px; display:none;">
+            <input type="hidden" name="visit_extra_stock_kit_lines_json" id="visit_extra_stock_kit_lines_json" value="{{ fp.get('visit_extra_stock_kit_lines_json','') }}" />
             <input type="hidden" name="visit_extra_stock_kit_id" id="visit_extra_stock_kit_id" value="{{ fp.get('visit_extra_stock_kit_id','') }}" />
             <input type="hidden" name="visit_extra_stock_breakdown_json" id="visit_extra_stock_breakdown_json" value="{{ fp.get('visit_extra_stock_breakdown_json','') }}" />
             <label>Из наличия</label>
-            <div class="row" style="align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:6px;">
-              <div style="flex:1; min-width:160px;">
-                <input type="search" id="visit_extra_kit_search_q" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" value="" />
-              </div>
-              <div>
-                <button type="button" class="secondary" id="visit_extra_kit_stock_find_btn">Найти</button>
-              </div>
-            </div>
-            <ul id="visit_extra_kit_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0; max-height:220px; overflow:auto;"></ul>
-            <div id="visit_extra_selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not fp.get('visit_extra_stock_kit_id') %}display:none;{% endif %}">
-              <p id="visit_extra_selected_kit_line" style="margin:0;"></p>
-              <div style="margin-top: 10px;">
-                <label style="display:flex; align-items:flex-start; gap:8px; font-weight:normal;">
-                  <input type="checkbox" name="visit_extra_stock_use_entire" {% if fp.get('visit_extra_stock_use_entire') in ('1', 'on', 'true', 'yes') %}checked{% endif %} />
-                  <span>Весь свободный остаток (все доступные заготовки)</span>
-                </label>
-              </div>
-              <div class="row" style="margin-top: 10px;">
-                <div>
-                  <label>Или заготовок зарезервировать</label>
-                  <input type="number" name="visit_extra_stock_kit_pieces" id="visit_extra_stock_kit_pieces" min="0" step="1" value="{{ fp.get('visit_extra_stock_kit_pieces','') }}" />
-                </div>
-              </div>
-              <p class="muted" style="margin: 8px 0 0; font-size: 12px;">
-                При сохранении брони комплект будет зарезервирован автоматически (под клиента).
-              </p>
-            </div>
+            <p class="muted" style="margin:4px 0 8px; font-size:12px;">Можно выбрать несколько комплектов. Если не отмечен «весь комплект», укажите количество по видам заготовок.</p>
+            <div id="visit_extra_stock_kit_rows_wrap" data-lb-booking-extra-wrap="1"></div>
+            <p style="margin-top:10px;">
+              <button type="button" class="secondary" id="visit_extra_add_stock_kit_row">+ Ещё комплект из наличия</button>
+            </p>
+            <p class="muted" style="margin: 8px 0 0; font-size: 12px;">
+              При сохранении брони комплект будет зарезервирован автоматически (под клиента).
+            </p>
           </div>
 
           <div id="visit_extra_order_block" style="margin-top: 12px; display:none;">
@@ -404,36 +365,18 @@
             </div>
 
             <div id="sale_kit_stock_block" style="margin-top: 12px; display:none;">
+              <input type="hidden" name="sale_stock_kit_lines_json" id="sale_stock_kit_lines_json" value="{{ fp.get('sale_stock_kit_lines_json','') }}" />
               <input type="hidden" name="sale_stock_kit_id" id="sale_stock_kit_id" value="{{ fp.get('sale_stock_kit_id','') }}" />
               <input type="hidden" name="sale_stock_breakdown_json" id="sale_stock_breakdown_json" value="{{ fp.get('sale_stock_breakdown_json','') }}" />
-              <label>Комплект из наличия</label>
-              <div class="row" style="align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:6px;">
-                <div style="flex:1; min-width:160px;">
-                  <input type="search" id="sale_kit_search_q" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" value="" />
-                </div>
-                <div>
-                  <button type="button" class="secondary" id="sale_kit_stock_find_btn">Найти</button>
-                </div>
-              </div>
-              <ul id="sale_kit_suggest_list" style="list-style:none; padding-left:0; margin:10px 0 0; max-height:220px; overflow:auto;"></ul>
-              <div id="sale_selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;{% if not fp.get('sale_stock_kit_id') %}display:none;{% endif %}">
-                <p id="sale_selected_kit_line" style="margin:0;"></p>
-                <div style="margin-top: 10px;">
-                  <label style="display:flex; align-items:flex-start; gap:8px; font-weight:normal;">
-                    <input type="checkbox" name="sale_stock_use_entire" {% if fp.get('sale_stock_use_entire') in ('1', 'on', 'true', 'yes') %}checked{% endif %} />
-                    <span>Весь свободный остаток (все доступные заготовки)</span>
-                  </label>
-                </div>
-                <div class="row" style="margin-top: 10px;">
-                  <div>
-                    <label>Или заготовок зарезервировать</label>
-                    <input type="number" name="sale_stock_kit_pieces" id="sale_stock_kit_pieces" min="0" step="1" value="{{ fp.get('sale_stock_kit_pieces','') }}" />
-                  </div>
-                </div>
-                <p class="muted" style="margin: 8px 0 0; font-size: 12px;">
-                  При сохранении брони комплект будет зарезервирован автоматически (под клиента).
-                </p>
-              </div>
+              <label>Комплекты из наличия</label>
+              <p class="muted" style="margin:4px 0 8px; font-size:12px;">Можно выбрать несколько комплектов. Если не отмечен «весь комплект», укажите количество по видам заготовок.</p>
+              <div id="sale_stock_kit_rows_wrap" data-lb-booking-sale-wrap="1"></div>
+              <p style="margin-top:10px;">
+                <button type="button" class="secondary" id="sale_add_stock_kit_row">+ Ещё комплект из наличия</button>
+              </p>
+              <p class="muted" style="margin: 8px 0 0; font-size: 12px;">
+                При сохранении брони комплект будет зарезервирован автоматически (под клиента).
+              </p>
             </div>
 
             <div id="sale_kit_order_block" style="margin-top: 12px; display:none;">
@@ -790,6 +733,50 @@
         inp.disabled = !!cb.checked;
         if (cb.checked) inp.value = '';
       }
+      function bookingLineKitPickOpts() {
+        return {
+          suggestUrl: function (q) { return bookingKitSuggestUrl(q); },
+          stockLineFn: bookingKitSuggestLine,
+        };
+      }
+      function parseBookingLineKitLinesJson(idx, field) {
+        var el = document.querySelector('input[name="line_' + idx + '_' + field + '"]');
+        if (!el || !String(el.value || '').trim()) return [];
+        try {
+          var arr = JSON.parse(el.value);
+          return Array.isArray(arr) ? arr : [];
+        } catch (e) {
+          return [];
+        }
+      }
+      function initBookingLineStockKitEditors(idx, rootEl) {
+        if (!rootEl || !window.LbKitStockPick) return;
+        var stockWrap = rootEl.querySelector('[data-line-stock-kit-wrap="' + idx + '"]');
+        if (stockWrap && stockWrap.getAttribute('data-lb-init') !== '1') {
+          stockWrap.setAttribute('data-lb-init', '1');
+          var lines = parseBookingLineKitLinesJson(idx, 'stock_kit_lines_json');
+          if (!lines.length && lineKitPrefill(idx, 'stock_kit_id', '')) {
+            lines = [{ kit_id: parseInt(lineKitPrefill(idx, 'stock_kit_id', '0'), 10) || 0 }];
+          }
+          var initKit = lineKitsPrefill[String(idx)] || lineKitsPrefill[idx] || null;
+          if (initKit && initKit._kit_initial && !lines.length) {
+            lines = [{ kit_id: initKit._kit_initial.id, _kit_initial: initKit._kit_initial }];
+          }
+          window.LbKitStockPick.initStockKitWrap(stockWrap, Object.assign({}, bookingLineKitPickOpts(), {
+            initialLines: lines,
+            onPick: function (k) {
+              var hid = document.getElementById('line_' + idx + '_stock_kit_id');
+              if (hid) hid.value = String(k.id || '');
+              var linesHid = document.querySelector('input[name="line_' + idx + '_stock_kit_lines_json"]');
+              if (linesHid) linesHid.value = JSON.stringify(window.LbKitStockPick.collectStockKitLines(stockWrap));
+            },
+          }));
+          var addBtn = rootEl.querySelector('[data-line-add-stock-kit="' + idx + '"]');
+          if (addBtn) addBtn.addEventListener('click', function () {
+            window.LbKitStockPick.addStockKitRow(stockWrap, bookingLineKitPickOpts());
+          });
+        }
+      }
       function bindExtraLineKitControls(idx, rootEl) {
         if (!rootEl || rootEl.getAttribute('data-line-kit-bound') === '1') return;
         rootEl.setAttribute('data-line-kit-bound', '1');
@@ -798,27 +785,8 @@
         });
         var ownCorrCb = rootEl.querySelector('input[name="line_' + idx + '_own_need_correction"]');
         if (ownCorrCb) ownCorrCb.addEventListener('change', function () { syncExtraLineKitOwnCorrection(idx, rootEl); });
-        var entCb = rootEl.querySelector('input[name="line_' + idx + '_stock_use_entire"]');
-        if (entCb) entCb.addEventListener('change', function () { syncExtraLineKitEntire(idx, rootEl); });
         syncExtraLineKitMode(idx, rootEl);
-        syncExtraLineKitEntire(idx, rootEl);
-        var searchInp = rootEl.querySelector('[data-line-kit-search="' + idx + '"]');
-        var findBtn = rootEl.querySelector('[data-line-kit-find="' + idx + '"]');
-        var suggestTimer = null;
-        if (searchInp) {
-          searchInp.addEventListener('input', function () {
-            clearTimeout(suggestTimer);
-            suggestTimer = setTimeout(function () {
-              lineKitSuggest(String(searchInp.value || '').trim(), idx, function (k) { setLineSelectedKit(idx, k); });
-            }, 350);
-          });
-        }
-        if (findBtn) {
-          findBtn.addEventListener('click', function () {
-            var q = searchInp ? String(searchInp.value || '').trim() : '';
-            lineKitSuggest(q, idx, function (k) { setLineSelectedKit(idx, k); });
-          });
-        }
+        initBookingLineStockKitEditors(idx, rootEl);
         var initKit = lineKitsPrefill[String(idx)] || lineKitsPrefill[idx] || null;
         if (initKit && initKit._kit_initial && initKit._kit_initial.id) {
           setLineSelectedKit(idx, initKit._kit_initial);
@@ -829,6 +797,10 @@
         if (idx === 0) {
           if (typeof window.lbBookingBindVisitKitControls === 'function') window.lbBookingBindVisitKitControls();
           if (typeof window.lbBookingSyncVisitKitMode === 'function') window.lbBookingSyncVisitKitMode();
+          var stockWrap0 = rootEl.querySelector('[data-line-stock-kit-wrap="0"]') || document.getElementById('visit_stock_kit_rows_wrap');
+          if (stockWrap0 && window.LbKitStockPick && stockWrap0.getAttribute('data-lb-init') !== '1') {
+            initBookingLineStockKitEditors(0, rootEl.querySelector('[data-line-kit-root="0"]') || rootEl);
+          }
           return;
         }
         var kitRoot = rootEl.querySelector('[data-line-kit-root="' + idx + '"]');
@@ -858,20 +830,9 @@
           '<div data-line-kit-stock="' + idx + '" style="margin-top:10px; display:' + (mode === 'IN_STOCK' ? 'block' : 'none') + ';">' +
             '<input type="hidden" name="line_' + idx + '_stock_kit_id" id="line_' + idx + '_stock_kit_id" value="' + esc(lineKitPrefill(idx, 'stock_kit_id', '')) + '" />' +
             '<input type="hidden" name="line_' + idx + '_stock_breakdown_json" value="' + esc(lineKitPrefill(idx, 'stock_breakdown_json', '')) + '" />' +
-            '<label>Комплект из наличия</label>' +
-            '<div class="row" style="align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:6px;">' +
-              '<div style="flex:1; min-width:160px;"><input type="search" id="line_' + idx + '_kit_search_q" data-line-kit-search="' + idx + '" autocomplete="off" placeholder="Артикул или название — ввод или «Найти»" /></div>' +
-              '<div><button type="button" class="secondary" data-line-kit-find="' + idx + '">Найти</button></div>' +
-            '</div>' +
-            '<ul id="line_' + idx + '_kit_suggest_list" data-line-kit-suggest="' + idx + '" style="list-style:none; padding-left:0; margin:10px 0 0; max-height:220px; overflow:auto;"></ul>' +
-            '<div id="line_' + idx + '_selected_kit_box" class="card" style="margin-top:10px;background:#f8fafc;' + (hasKit ? '' : 'display:none;') + '">' +
-              '<p id="line_' + idx + '_selected_kit_line" style="margin:0;"></p>' +
-              '<div style="margin-top:10px;"><label style="display:flex; align-items:flex-start; gap:8px; font-weight:normal;">' +
-                '<input type="checkbox" name="line_' + idx + '_stock_use_entire"' + (lineKitChecked(idx, 'stock_use_entire') ? ' checked' : '') + ' />' +
-                '<span>Весь свободный остаток (все доступные заготовки)</span></label></div>' +
-              '<div class="row" style="margin-top:10px;"><div><label>Или заготовок зарезервировать</label>' +
-                '<input type="number" name="line_' + idx + '_stock_kit_pieces" min="0" step="1" value="' + esc(lineKitPrefill(idx, 'stock_kit_pieces', '')) + '" /></div></div>' +
-            '</div>' +
+            '<input type="hidden" name="line_' + idx + '_stock_kit_lines_json" value="' + esc(lineKitPrefill(idx, 'stock_kit_lines_json', '')) + '" />' +
+            '<div data-line-stock-kit-wrap="' + idx + '"></div>' +
+            '<p style="margin-top:8px;"><button type="button" class="secondary" data-line-add-stock-kit="' + idx + '">+ Ещё комплект из наличия</button></p>' +
           '</div>' +
           '<div data-line-kit-own="' + idx + '" style="margin-top:10px; display:' + (mode === 'OWN' ? 'block' : 'none') + ';">' +
             '<label style="display:block; margin-bottom:6px;"><input type="checkbox" name="line_' + idx + '_own_need_correction"' + (lineKitChecked(idx, 'own_need_correction') ? ' checked' : '') + ' /> Нужна коррекция</label>' +
@@ -2015,6 +1976,27 @@
           var segs = occ.segments || [];
           var blockSegs = occ.block_segments || [];
           var schedule = occ.schedule || {};
+          var occColors = occ.colors || {};
+          var cConfirmed = occColors.confirmed || '#69d186';
+          var cPending = occColors.pending || '#f7d368';
+          var cDayOff = occColors.day_off || '#fc8580';
+          var cUnavailable = occColors.unavailable || '#cfcfcf';
+          var cNoData = occColors.no_data || '#ffffff';
+          var cBlock = occColors.block || '#cfcfcf';
+          function occupancySegTitle(seg) {
+            var parts = ['Бронь #' + String(seg.booking_id || '')];
+            if (seg.client_name) parts.push(String(seg.client_name));
+            if (seg.service_label) parts.push(String(seg.service_label));
+            return parts.join(' · ');
+          }
+          function occupancySegBody(seg) {
+            var html = '<div style="line-height:1.25;">';
+            html += '<div style="font-weight:600;">#' + esc(seg.booking_id) + '</div>';
+            if (seg.client_name) html += '<div>' + esc(seg.client_name) + '</div>';
+            if (seg.service_label) html += '<div style="font-size:10px;">' + esc(seg.service_label) + '</div>';
+            html += '</div>';
+            return html;
+          }
           if (!masters.length) {
             body.innerHTML = '<div class="muted">Нет активных мастеров.</div>';
             return;
@@ -2037,7 +2019,8 @@
             h += '<div style="font-size:12px; font-weight:600; text-align:center; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + esc(m.name || '') + '</div>';
             var sc = schedule[String(m.id)] || {};
             var colState = sc.column_state || 'working';
-            var colBg = (colState === 'day_off') ? '#f3f4f6' : (colState === 'no_data' ? '#e5e7eb' : '#fff');
+            var colBg = cNoData;
+            if (colState === 'day_off') colBg = cDayOff;
             h += '<div style="position:relative; height:' + gridH + 'px; border-left:1px solid #e2e8f0; background:' + colBg + ';">';
             if (colState === 'working') {
               var un = sc.unavailable || [];
@@ -2048,7 +2031,7 @@
                 var topPct = ((startMin - hourFrom * 60) / spanMin) * 100;
                 var hPct = ((endMin - startMin) / spanMin) * 100;
                 if (hPct <= 0) continue;
-                h += '<div style="position:absolute; left:2px; right:2px; top:' + topPct + '%; height:' + hPct + '%; background:#cbd5e1; opacity:0.55; z-index:0; pointer-events:none; border-radius:3px;"></div>';
+                h += '<div style="position:absolute; left:2px; right:2px; top:' + topPct + '%; height:' + hPct + '%; background:' + cUnavailable + '; z-index:0; pointer-events:none; border-radius:3px;"></div>';
               }
             }
             for (var si = 0; si < segs.length; si++) {
@@ -2057,8 +2040,9 @@
               var topPct2 = ((Number(seg.start_minutes) - hourFrom * 60) / spanMin) * 100;
               var hPct2 = ((Number(seg.end_minutes) - Number(seg.start_minutes)) / spanMin) * 100;
               if (hPct2 <= 0) continue;
-              var bg = seg.color || '#9E88C0';
-              h += '<div title="Бронь #' + esc(seg.booking_id) + '" style="position:absolute; left:2px; right:2px; top:' + topPct2 + '%; height:' + hPct2 + '%; background:' + bg + '; color:#fff; font-size:11px; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:' + (si + 2) + '; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.92);">' + esc(seg.booking_id) + '</div>';
+              var bg = seg.color || (seg.status === 'PENDING_CONFIRMATION' ? cPending : cConfirmed);
+              var op = (seg.status === 'DONE') ? '0.55' : '1';
+              h += '<a href="' + esc(seg.url || '#') + '" title="' + esc(occupancySegTitle(seg)) + '" style="position:absolute; left:2px; right:2px; top:' + topPct2 + '%; height:' + hPct2 + '%; background:' + bg + '; opacity:' + op + '; color:#1f2937; font-size:11px; text-decoration:none; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:' + (si + 2) + '; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.08);">' + occupancySegBody(seg) + '</a>';
             }
             for (var bi = 0; bi < blockSegs.length; bi++) {
               var blk = blockSegs[bi] || {};
@@ -2066,7 +2050,7 @@
               var bTop = ((Number(blk.start_minutes) - hourFrom * 60) / spanMin) * 100;
               var bH = ((Number(blk.end_minutes) - Number(blk.start_minutes)) / spanMin) * 100;
               if (bH <= 0) continue;
-              var bBg = blk.color || '#cccac0';
+              var bBg = blk.color || cBlock;
               var bTitle = blk.comment ? esc(blk.comment) : 'Занято';
               var bLabel = blk.comment ? esc(blk.comment) : 'Занято';
               h += '<div title="' + bTitle + '" style="position:absolute; left:2px; right:2px; top:' + bTop + '%; height:' + bH + '%; background:' + bBg + '; color:#374151; font-size:11px; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:' + (segs.length + bi + 3) + '; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.08);">' + bLabel + '</div>';

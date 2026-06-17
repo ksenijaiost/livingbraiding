@@ -1048,7 +1048,7 @@ def _booking_work_new_query_params(db: Session, b: Booking, details: dict[str, A
 
 # Поля комплекта/коррекции брони визита — только для услуг с блоком комплекта (иначе из скрытой формы уезжали дефолты).
 _LINE_SERVICE_KIT_FP_RE = re.compile(
-    r"^line_(\d+)_(kit_mode|stock_kit_id|stock_kit_pieces|stock_use_entire|stock_breakdown_json|"
+    r"^line_(\d+)_(kit_mode|stock_kit_id|stock_kit_pieces|stock_use_entire|stock_breakdown_json|stock_kit_lines_json|"
     r"order_blanks_qty|order_blanks_desc|own_need_correction|corr_wash|corr_trim_qty|corr_hourly_hours|"
     r"corr_kit_description|corr_kit_blanks_count)$"
 )
@@ -1142,6 +1142,16 @@ def _validate_visit_stock_kit_for_reserve(db: Session, fp: dict[str, str]) -> st
     svc = db.get(Service, sid)
     if svc is None or not service_requires_kit_block(svc):
         return None
+    raw_lines = str(fp.get("visit_stock_kit_lines_json") or "").strip()
+    if raw_lines:
+        try:
+            arr = json.loads(raw_lines)
+            if isinstance(arr, list) and any(
+                isinstance(x, dict) and int(x.get("kit_id") or 0) > 0 for x in arr
+            ):
+                return None
+        except Exception:
+            pass
     kid = str(fp.get("visit_stock_kit_id") or "").strip()
     if not kid.isdigit():
         return "Выберите комплект из наличия для первой услуги."
@@ -1155,6 +1165,16 @@ def _validate_line_service_kits_for_reserve(db: Session, fp: dict[str, str]) -> 
     for idx, kit_data in sorted(line_kits.items(), key=lambda x: int(x[0])):
         if str(kit_data.get("kit_mode") or "").strip().upper() != "IN_STOCK":
             continue
+        raw_lines = str(kit_data.get("stock_kit_lines_json") or "").strip()
+        if raw_lines:
+            try:
+                arr = json.loads(raw_lines)
+                if isinstance(arr, list) and any(
+                    isinstance(x, dict) and int(x.get("kit_id") or 0) > 0 for x in arr
+                ):
+                    continue
+            except Exception:
+                pass
         kid = str(kit_data.get("stock_kit_id") or "").strip()
         if not kid.isdigit():
             return f"Выберите комплект из наличия для услуги {int(idx) + 1}."
@@ -1217,12 +1237,14 @@ _BOOKING_VISIT_KIT_DETAIL_KEYS: frozenset[str] = frozenset(
         "visit_kit_mode",
         "visit_stock_kit_id",
         "visit_stock_kit_pieces",
+        "visit_stock_kit_lines_json",
         "visit_stock_breakdown_json",
         "visit_stock_use_entire",
         "visit_own_need_correction",
         "visit_own_need_extra_blanks",
         "visit_extra_blanks_mode",
         "visit_extra_stock_kit_id",
+        "visit_extra_stock_kit_lines_json",
         "visit_extra_stock_kit_pieces",
         "visit_extra_stock_breakdown_json",
         "visit_extra_stock_use_entire",
@@ -1268,6 +1290,7 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
             "visit_kit_mode",
             "visit_stock_kit_id",
             "visit_stock_kit_pieces",
+            "visit_stock_kit_lines_json",
             "visit_stock_breakdown_json",
             "visit_stock_use_entire",
             "visit_own_need_correction",
@@ -1301,6 +1324,7 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
             keys = keys + (
                 "sale_kit_mode",
                 "sale_stock_kit_id",
+                "sale_stock_kit_lines_json",
                 "sale_stock_kit_pieces",
                 "sale_stock_breakdown_json",
                 "sale_stock_use_entire",
@@ -1611,12 +1635,87 @@ def _apply_booking_auto_reserves(
             changes=diff_fields(before, kit, ("pieces_available",)),
         )
 
+    def _reserve_stock_lines(
+        src_fp: dict[str, str],
+        *,
+        pieces_field: str,
+        use_entire_field: str,
+        breakdown_field: str,
+    ) -> None:
+        from app.kit_inlay_visit import _parse_stock_kit_lines_from_form
+
+        class _A:
+            def get(self, name: str, default: Any = None) -> Any:
+                return src_fp.get(name, default)
+
+            def getlist(self, name: str) -> list[Any]:
+                v = src_fp.get(name)
+                return [v] if v is not None else []
+
+        def g(name: str, default: str = "") -> str:
+            if name == "stock_kit_lines_json":
+                return str(
+                    src_fp.get("visit_stock_kit_lines_json") or src_fp.get("stock_kit_lines_json") or default
+                )
+            if name == "stock_kit_id":
+                return str(src_fp.get("visit_stock_kit_id") or src_fp.get("stock_kit_id") or default)
+            if name == "stock_use_entire":
+                return str(src_fp.get("visit_stock_use_entire") or src_fp.get("stock_use_entire") or default)
+            if name == "stock_blanks_used":
+                return str(
+                    src_fp.get("visit_stock_kit_pieces") or src_fp.get("stock_kit_pieces") or default
+                )
+            if name == "stock_breakdown_json":
+                return str(
+                    src_fp.get("visit_stock_breakdown_json") or src_fp.get("stock_breakdown_json") or default
+                )
+            return str(src_fp.get(name, default) or "")
+
+        def g_int(name: str, default: int = 0) -> int:
+            raw = g(name, "").strip()
+            if not raw:
+                return default
+            try:
+                return int(parse_float(raw, field_name=name))
+            except ValueError:
+                return default
+
+        def g_bool(name: str) -> bool:
+            return parse_bool(src_fp.get(name))
+
+        try:
+            lines = _parse_stock_kit_lines_from_form(_A(), g, g_int, g_bool)
+        except ValueError:
+            lines = []
+        if not lines and str(src_fp.get("visit_stock_kit_id") or src_fp.get("stock_kit_id") or "").strip():
+            _reserve_kit(
+                src_fp.get("visit_stock_kit_id") or src_fp.get("stock_kit_id"),
+                pieces_field,
+                use_entire_field=use_entire_field,
+                breakdown_json_field=breakdown_field,
+                reserve_fp=src_fp,
+            )
+            return
+        for line in lines:
+            line_fp = {
+                pieces_field: str(line.blanks_used),
+                use_entire_field: "1" if line.use_entire else "",
+                breakdown_field: json.dumps(line.usage_by_key, ensure_ascii=False) if line.usage_by_key else "",
+            }
+            _reserve_kit(
+                str(line.kit_id),
+                pieces_field,
+                use_entire_field=use_entire_field,
+                breakdown_json_field=breakdown_field,
+                reserve_fp=line_fp,
+            )
+
     if _visit_kit_mode_is_in_stock(fp):
-        _reserve_kit(
-            fp.get("visit_stock_kit_id"),
-            "visit_stock_kit_pieces",
+        _reserve_stock_lines(
+            fp,
+            pieces_field="visit_stock_kit_pieces",
             use_entire_field="visit_stock_use_entire",
-            breakdown_json_field="visit_stock_breakdown_json",
+            breakdown_field="visit_stock_breakdown_json",
         )
     line_kits = _strip_line_service_kits_without_kit_service(
         db, fp, _collect_line_service_kits_from_fp(fp)
@@ -1624,35 +1723,46 @@ def _apply_booking_auto_reserves(
     for _idx, kit_data in line_kits.items():
         if str(kit_data.get("kit_mode") or "").strip().upper() != "IN_STOCK":
             continue
-        stock_id = str(kit_data.get("stock_kit_id") or "").strip()
-        if not stock_id:
-            continue
-        line_fp = {
-            "visit_stock_kit_pieces": str(kit_data.get("stock_kit_pieces") or ""),
-            "visit_stock_use_entire": str(kit_data.get("stock_use_entire") or ""),
-            "visit_stock_breakdown_json": str(kit_data.get("stock_breakdown_json") or ""),
-        }
-        _reserve_kit(
-            stock_id,
-            "visit_stock_kit_pieces",
+        line_src = dict(kit_data)
+        line_src["visit_stock_kit_id"] = line_src.get("stock_kit_id")
+        line_src["visit_stock_kit_pieces"] = line_src.get("stock_kit_pieces")
+        line_src["visit_stock_use_entire"] = line_src.get("stock_use_entire")
+        line_src["visit_stock_breakdown_json"] = line_src.get("stock_breakdown_json")
+        line_src["visit_stock_kit_lines_json"] = line_src.get("stock_kit_lines_json")
+        _reserve_stock_lines(
+            line_src,
+            pieces_field="visit_stock_kit_pieces",
             use_entire_field="visit_stock_use_entire",
-            breakdown_json_field="visit_stock_breakdown_json",
-            reserve_fp=line_fp,
+            breakdown_field="visit_stock_breakdown_json",
         )
     if (fp.get("visit_kit_mode") or "") == "OWN" and (fp.get("visit_own_need_extra_blanks") or ""):
         if (fp.get("visit_extra_blanks_mode") or "") == "IN_STOCK":
-            _reserve_kit(
-                fp.get("visit_extra_stock_kit_id"),
-                "visit_extra_stock_kit_pieces",
+            extra_src = {
+                "visit_stock_kit_lines_json": fp.get("visit_extra_stock_kit_lines_json"),
+                "visit_stock_kit_id": fp.get("visit_extra_stock_kit_id"),
+                "visit_stock_kit_pieces": fp.get("visit_extra_stock_kit_pieces"),
+                "visit_stock_use_entire": fp.get("visit_extra_stock_use_entire"),
+                "visit_stock_breakdown_json": fp.get("visit_extra_stock_breakdown_json"),
+            }
+            _reserve_stock_lines(
+                extra_src,
+                pieces_field="visit_extra_stock_kit_pieces",
                 use_entire_field="visit_extra_stock_use_entire",
-                breakdown_json_field="visit_extra_stock_breakdown_json",
+                breakdown_field="visit_extra_stock_breakdown_json",
             )
     if (fp.get("product_kind") or "") == "KIT" and (fp.get("sale_kit_mode") or "") == "IN_STOCK":
-        _reserve_kit(
-            fp.get("sale_stock_kit_id"),
-            "sale_stock_kit_pieces",
+        sale_src = {
+            "visit_stock_kit_lines_json": fp.get("sale_stock_kit_lines_json"),
+            "visit_stock_kit_id": fp.get("sale_stock_kit_id"),
+            "visit_stock_kit_pieces": fp.get("sale_stock_kit_pieces"),
+            "visit_stock_use_entire": fp.get("sale_stock_use_entire"),
+            "visit_stock_breakdown_json": fp.get("sale_stock_breakdown_json"),
+        }
+        _reserve_stock_lines(
+            sale_src,
+            pieces_field="sale_stock_kit_pieces",
             use_entire_field="sale_stock_use_entire",
-            breakdown_json_field="sale_stock_breakdown_json",
+            breakdown_field="sale_stock_breakdown_json",
         )
 
 
@@ -1697,6 +1807,7 @@ def admin_booking_new_get(
         "visit_own_need_extra_blanks",
         "visit_extra_blanks_mode",
         "visit_extra_stock_kit_id",
+        "visit_extra_stock_kit_lines_json",
         "visit_extra_stock_kit_pieces",
         "visit_extra_stock_breakdown_json",
         "visit_extra_stock_use_entire",

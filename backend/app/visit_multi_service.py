@@ -111,6 +111,7 @@ class VisitServiceLineInput:
     own_correction: bool = False
     own_extra_blanks: bool = False
     own_extra_stock_kit_id: int | None = None
+    own_extra_stock_kit_lines: list[StockKitLineInput] = field(default_factory=list)
     own_extra_stock_use_entire: bool = False
     own_extra_stock_blanks_used: int = 0
     own_extra_stock_usage_by_key: dict[str, int] | None = None
@@ -232,6 +233,7 @@ def _line_kit_inlay_adapter(line: VisitServiceLineInput, header: VisitHeaderInpu
         own_correction=line.own_correction,
         own_extra_blanks=line.own_extra_blanks,
         own_extra_stock_kit_id=line.own_extra_stock_kit_id,
+        own_extra_stock_kit_lines=line.own_extra_stock_kit_lines,
         own_extra_stock_use_entire=line.own_extra_stock_use_entire,
         own_extra_stock_blanks_used=line.own_extra_stock_blanks_used,
         own_extra_stock_usage_by_key=line.own_extra_stock_usage_by_key,
@@ -302,18 +304,33 @@ def compute_visit_service_line(
                 usages.append((sk.kit_id, n, usage_cost, bd))
                 kit_cost_total += usage_cost
                 kit_studio_fund += usage_sf
-        if kind == "OWN" and line.own_extra_blanks and line.own_extra_stock_kit_id:
-            n, cost, sf, bd = stock_fn(
-                db,
-                kit_id=line.own_extra_stock_kit_id,
-                use_entire=line.own_extra_stock_use_entire,
-                blanks_used=line.own_extra_stock_blanks_used,
-                client_id=header.existing_client_id,
-                usage_by_key=line.own_extra_stock_usage_by_key,
+        if kind == "OWN" and line.own_extra_blanks:
+            extra_lines = line.own_extra_stock_kit_lines or (
+                [
+                    StockKitLineInput(
+                        kit_id=line.own_extra_stock_kit_id,
+                        use_entire=line.own_extra_stock_use_entire,
+                        blanks_used=line.own_extra_stock_blanks_used,
+                        usage_by_key=line.own_extra_stock_usage_by_key,
+                    )
+                ]
+                if line.own_extra_stock_kit_id
+                else []
             )
-            usages.append((line.own_extra_stock_kit_id, n, cost, bd))
-            kit_cost_total += cost
-            kit_studio_fund += sf
+            for sk in extra_lines:
+                if not sk.kit_id:
+                    continue
+                n, cost, sf, bd = stock_fn(
+                    db,
+                    kit_id=sk.kit_id,
+                    use_entire=sk.use_entire,
+                    blanks_used=sk.blanks_used,
+                    client_id=header.existing_client_id,
+                    usage_by_key=sk.usage_by_key,
+                )
+                usages.append((sk.kit_id, n, cost, bd))
+                kit_cost_total += cost
+                kit_studio_fund += sf
         _build_kit_block_from_input(kinp, db)
 
     addons = max(0.0, float(line.addon_sales_amount or 0.0))
@@ -646,6 +663,7 @@ def kit_inlay_to_multi(inp: KitInlayFormInput, *, booking_id: int | None = None)
         own_correction=inp.own_correction,
         own_extra_blanks=inp.own_extra_blanks,
         own_extra_stock_kit_id=inp.own_extra_stock_kit_id,
+        own_extra_stock_kit_lines=inp.own_extra_stock_kit_lines,
         own_extra_stock_use_entire=inp.own_extra_stock_use_entire,
         own_extra_stock_blanks_used=inp.own_extra_stock_blanks_used,
         own_extra_stock_usage_by_key=inp.own_extra_stock_usage_by_key,
@@ -795,6 +813,23 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
         except (ValueError, IndexError):
             started_at = None
 
+    own_extra_stock_kit_lines = _parse_stock_kit_lines_from_form(
+        _LineFormAdapter(form, prefix),
+        g,
+        lambda n, d=0: int(parse_float(g(n, "").strip() or "0", field_name=n)) if g(n, "").strip() else d,
+        g_bool,
+        lines_json_field="own_extra_stock_kit_lines_json",
+        legacy_kit_id_field="own_extra_stock_kit_id",
+        legacy_use_entire_field="own_extra_stock_use_entire",
+        legacy_blanks_field="own_extra_stock_blanks_used",
+        legacy_breakdown_field="own_extra_stock_breakdown_json",
+    )
+    own_extra_kit_id = (
+        own_extra_stock_kit_lines[0].kit_id
+        if own_extra_stock_kit_lines
+        else (int(g("own_extra_stock_kit_id", "0") or "0") or None)
+    )
+
     return VisitServiceLineInput(
         service_id=int(parse_float(g("service_id", "0") or "0", field_name="service_id")),
         amount_from_client=g_float("amount_from_client", 0),
@@ -811,10 +846,23 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
         own_origin=g("own_origin") or None,
         own_correction=g_bool("own_correction"),
         own_extra_blanks=g_bool("own_extra_blanks"),
-        own_extra_stock_kit_id=int(g("own_extra_stock_kit_id", "0") or "0") or None,
-        own_extra_stock_use_entire=g_bool("own_extra_stock_use_entire"),
-        own_extra_stock_blanks_used=int(g("own_extra_stock_blanks_used", "0") or "0"),
-        own_extra_stock_usage_by_key=_parse_stock_breakdown_json(g, "own_extra_stock_breakdown_json"),
+        own_extra_stock_kit_id=own_extra_kit_id,
+        own_extra_stock_kit_lines=own_extra_stock_kit_lines,
+        own_extra_stock_use_entire=(
+            own_extra_stock_kit_lines[0].use_entire
+            if own_extra_stock_kit_lines
+            else g_bool("own_extra_stock_use_entire")
+        ),
+        own_extra_stock_blanks_used=(
+            own_extra_stock_kit_lines[0].blanks_used
+            if own_extra_stock_kit_lines
+            else int(g("own_extra_stock_blanks_used", "0") or "0")
+        ),
+        own_extra_stock_usage_by_key=(
+            own_extra_stock_kit_lines[0].usage_by_key
+            if own_extra_stock_kit_lines
+            else _parse_stock_breakdown_json(g, "own_extra_stock_breakdown_json")
+        ),
         own_corr_trim_qty=int(g("own_corr_trim_qty", "0") or "0"),
         own_corr_hourly_hours=max(0.0, g_float("own_corr_hourly_hours", 0)),
         own_corr_kit_description=g("own_corr_kit_description", ""),
