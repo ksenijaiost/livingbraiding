@@ -68,6 +68,8 @@ def test_occupancy_color_for_status() -> None:
     assert occupancy_color_for_status(BookingStatus.ACTIVE) == COLOR_OCCUPANCY_ACTIVE
     assert occupancy_color_for_status(BookingStatus.PENDING_CONFIRMATION) == COLOR_OCCUPANCY_PENDING
     assert occupancy_color_for_status(BookingStatus.DONE) == COLOR_OCCUPANCY_ACTIVE
+    assert COLOR_OCCUPANCY_ACTIVE == "#69d186"
+    assert COLOR_OCCUPANCY_PENDING == "#f7d368"
 
 
 def test_parse_estimated_duration() -> None:
@@ -133,6 +135,8 @@ def test_build_occupancy_segments_moscow(memory_db) -> None:
     assert seg["start_minutes"] == 10 * 60
     assert seg["end_minutes"] == 12 * 60
     assert seg["color"] == COLOR_OCCUPANCY_ACTIVE
+    assert seg["client_name"] == "Клиент"
+    assert seg["service_label"] == "Cat → Sub → Услуга"
 
 
 def test_build_occupancy_uses_planned_service_duration_override(memory_db) -> None:

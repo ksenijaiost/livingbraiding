@@ -25,10 +25,14 @@ from app.display_time import get_display_timezone
 from app.planned_service_time import planned_start_local_datetime
 from app.master_schedule import master_unavailable_for_day
 from app.master_time_blocks import COLOR_TIME_BLOCK, list_time_blocks_for_masters_on_day
+from app.ui_service_display import booking_service_labels_from_booking, format_service_catalog_path
 from app.user_roles import select_users_with_role
 
-COLOR_OCCUPANCY_ACTIVE = "#9E88C0"
-COLOR_OCCUPANCY_PENDING = "#7F7679"
+COLOR_OCCUPANCY_ACTIVE = "#69d186"
+COLOR_OCCUPANCY_PENDING = "#f7d368"
+COLOR_OCCUPANCY_DAY_OFF = "#fc8580"
+COLOR_OCCUPANCY_UNAVAILABLE = "#cfcfcf"
+COLOR_OCCUPANCY_NO_DATA = "#ffffff"
 
 
 def occupancy_color_for_status(status: BookingStatus | str) -> str:
@@ -47,6 +51,8 @@ class OccupancySegment:
     status: str
     color: str
     url: str
+    client_name: str
+    service_label: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +63,8 @@ class OccupancySegment:
             "status": self.status,
             "color": self.color,
             "url": self.url,
+            "client_name": self.client_name,
+            "service_label": self.service_label,
         }
 
 
@@ -106,8 +114,25 @@ def list_calendar_masters(db: Session) -> list[dict[str, Any]]:
     return [{"id": int(u.id), "name": u.display_name or u.username} for u in rows]
 
 
+def _booking_client_name(booking: Booking) -> str:
+    client = getattr(booking, "client", None)
+    if client is None:
+        return "—"
+    name = (client.name or "").strip() or "—"
+    if not getattr(client, "is_confirmed", True):
+        return f"{name} (черновик)"
+    return name
+
+
+def _segment_service_label(booking: Booking, svc: Service | None) -> str:
+    if svc is not None:
+        return format_service_catalog_path(svc)
+    return booking_service_labels_from_booking(booking)
+
+
 def _booking_load_options():
     return (
+        selectinload(Booking.client),
         selectinload(Booking.masters),
         selectinload(Booking.planned_service)
         .selectinload(Service.subcategory)
@@ -159,6 +184,7 @@ def build_occupancy_for_day(
         status_s = status.value if status else BookingStatus.ACTIVE.value
         url = f"/bookings/{int(b.id)}"
         booking_master_ids = [int(m.master_id) for m in (b.masters or []) if m.master_id]
+        client_name = _booking_client_name(b)
 
         # Fix 43: длительность может быть переопределена прямо в брони
         # (visit_custom_duration_minutes в details_json). Если задана — используем её.
@@ -217,6 +243,8 @@ def build_occupancy_for_day(
                             status=status_s,
                             color=color,
                             url=url,
+                            client_name=client_name,
+                            service_label=_segment_service_label(b, svc),
                         )
                     )
             continue
@@ -242,6 +270,8 @@ def build_occupancy_for_day(
                     status=status_s,
                     color=color,
                     url=url,
+                    client_name=client_name,
+                    service_label=_segment_service_label(b, svc),
                 )
             )
 
@@ -289,4 +319,12 @@ def build_occupancy_for_day(
         "segments": [s.to_dict() for s in segments],
         "block_segments": [s.to_dict() for s in block_segments],
         "schedule": schedule,
+        "colors": {
+            "confirmed": COLOR_OCCUPANCY_ACTIVE,
+            "pending": COLOR_OCCUPANCY_PENDING,
+            "day_off": COLOR_OCCUPANCY_DAY_OFF,
+            "unavailable": COLOR_OCCUPANCY_UNAVAILABLE,
+            "no_data": COLOR_OCCUPANCY_NO_DATA,
+            "block": COLOR_TIME_BLOCK,
+        },
     }

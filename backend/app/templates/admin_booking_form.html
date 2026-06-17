@@ -2015,6 +2015,27 @@
           var segs = occ.segments || [];
           var blockSegs = occ.block_segments || [];
           var schedule = occ.schedule || {};
+          var occColors = occ.colors || {};
+          var cConfirmed = occColors.confirmed || '#69d186';
+          var cPending = occColors.pending || '#f7d368';
+          var cDayOff = occColors.day_off || '#fc8580';
+          var cUnavailable = occColors.unavailable || '#cfcfcf';
+          var cNoData = occColors.no_data || '#ffffff';
+          var cBlock = occColors.block || '#cfcfcf';
+          function occupancySegTitle(seg) {
+            var parts = ['Бронь #' + String(seg.booking_id || '')];
+            if (seg.client_name) parts.push(String(seg.client_name));
+            if (seg.service_label) parts.push(String(seg.service_label));
+            return parts.join(' · ');
+          }
+          function occupancySegBody(seg) {
+            var html = '<div style="line-height:1.25;">';
+            html += '<div style="font-weight:600;">#' + esc(seg.booking_id) + '</div>';
+            if (seg.client_name) html += '<div>' + esc(seg.client_name) + '</div>';
+            if (seg.service_label) html += '<div style="font-size:10px;">' + esc(seg.service_label) + '</div>';
+            html += '</div>';
+            return html;
+          }
           if (!masters.length) {
             body.innerHTML = '<div class="muted">Нет активных мастеров.</div>';
             return;
@@ -2037,7 +2058,8 @@
             h += '<div style="font-size:12px; font-weight:600; text-align:center; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + esc(m.name || '') + '</div>';
             var sc = schedule[String(m.id)] || {};
             var colState = sc.column_state || 'working';
-            var colBg = (colState === 'day_off') ? '#f3f4f6' : (colState === 'no_data' ? '#e5e7eb' : '#fff');
+            var colBg = cNoData;
+            if (colState === 'day_off') colBg = cDayOff;
             h += '<div style="position:relative; height:' + gridH + 'px; border-left:1px solid #e2e8f0; background:' + colBg + ';">';
             if (colState === 'working') {
               var un = sc.unavailable || [];
@@ -2048,7 +2070,7 @@
                 var topPct = ((startMin - hourFrom * 60) / spanMin) * 100;
                 var hPct = ((endMin - startMin) / spanMin) * 100;
                 if (hPct <= 0) continue;
-                h += '<div style="position:absolute; left:2px; right:2px; top:' + topPct + '%; height:' + hPct + '%; background:#cbd5e1; opacity:0.55; z-index:0; pointer-events:none; border-radius:3px;"></div>';
+                h += '<div style="position:absolute; left:2px; right:2px; top:' + topPct + '%; height:' + hPct + '%; background:' + cUnavailable + '; z-index:0; pointer-events:none; border-radius:3px;"></div>';
               }
             }
             for (var si = 0; si < segs.length; si++) {
@@ -2057,8 +2079,9 @@
               var topPct2 = ((Number(seg.start_minutes) - hourFrom * 60) / spanMin) * 100;
               var hPct2 = ((Number(seg.end_minutes) - Number(seg.start_minutes)) / spanMin) * 100;
               if (hPct2 <= 0) continue;
-              var bg = seg.color || '#9E88C0';
-              h += '<div title="Бронь #' + esc(seg.booking_id) + '" style="position:absolute; left:2px; right:2px; top:' + topPct2 + '%; height:' + hPct2 + '%; background:' + bg + '; color:#fff; font-size:11px; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:' + (si + 2) + '; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.92);">' + esc(seg.booking_id) + '</div>';
+              var bg = seg.color || (seg.status === 'PENDING_CONFIRMATION' ? cPending : cConfirmed);
+              var op = (seg.status === 'DONE') ? '0.55' : '1';
+              h += '<a href="' + esc(seg.url || '#') + '" title="' + esc(occupancySegTitle(seg)) + '" style="position:absolute; left:2px; right:2px; top:' + topPct2 + '%; height:' + hPct2 + '%; background:' + bg + '; opacity:' + op + '; color:#1f2937; font-size:11px; text-decoration:none; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:' + (si + 2) + '; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.08);">' + occupancySegBody(seg) + '</a>';
             }
             for (var bi = 0; bi < blockSegs.length; bi++) {
               var blk = blockSegs[bi] || {};
@@ -2066,7 +2089,7 @@
               var bTop = ((Number(blk.start_minutes) - hourFrom * 60) / spanMin) * 100;
               var bH = ((Number(blk.end_minutes) - Number(blk.start_minutes)) / spanMin) * 100;
               if (bH <= 0) continue;
-              var bBg = blk.color || '#cccac0';
+              var bBg = blk.color || cBlock;
               var bTitle = blk.comment ? esc(blk.comment) : 'Занято';
               var bLabel = blk.comment ? esc(blk.comment) : 'Занято';
               h += '<div title="' + bTitle + '" style="position:absolute; left:2px; right:2px; top:' + bTop + '%; height:' + bH + '%; background:' + bBg + '; color:#374151; font-size:11px; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:' + (segs.length + bi + 3) + '; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.08);">' + bLabel + '</div>';

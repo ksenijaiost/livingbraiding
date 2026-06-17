@@ -17,7 +17,7 @@ from app.master_schedule import (
     resolve_day_interval,
 )
 
-COLOR_TIME_BLOCK = "#cccac0"
+COLOR_TIME_BLOCK = "#cfcfcf"
 
 
 class TimeBlockValidationError(ValueError):
