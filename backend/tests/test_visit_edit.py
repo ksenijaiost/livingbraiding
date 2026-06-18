@@ -16,6 +16,7 @@ from app.db.models import (
     MixSource,
     PayrollFundEntryKind,
     PayrollFundLedger,
+    PayrollFundSide,
     PayrollFundSourceKind,
     PayrollPeriod,
     Service,
@@ -31,6 +32,7 @@ from app.db.models import (
     VisitMastersScope,
     VisitService,
 )
+from app.payroll_fund import sum_visit_ledger_by_visit_id
 from app.setting_keys import EDIT_WINDOW_DAYS
 from app.time_utils import utcnow_naive
 from app.visit_edit_policy import visit_edit_policy, user_participates_in_visit
@@ -274,3 +276,75 @@ def test_update_comment_only_no_storno(memory_db):
     )
     after_storno = sum(1 for r in after if r.entry_kind == PayrollFundEntryKind.STORNO)
     assert after_storno == before_storno
+
+
+def test_visit_ledger_net_reflects_amount_edit_for_calendar(memory_db):
+    """Календарь на главной суммирует нетто по журналу — после правки суммы визита."""
+    db = memory_db
+    master_a, _master_b, _admin, svc_ids = _seed_users_and_services(db)
+    client = db.scalar(select(Client).limit(1))
+    visit = _make_visit(db, master_a, client.id, svc_ids[0], amount=1000.0)
+    vs = db.scalar(select(VisitService).where(VisitService.visit_id == visit.id))
+    assert vs is not None
+
+    before_master = sum_visit_ledger_by_visit_id(
+        db,
+        side=PayrollFundSide.MASTER,
+        visit_ids=[visit.id],
+        user_id=master_a.id,
+    )[visit.id]
+    before_studio = sum_visit_ledger_by_visit_id(
+        db,
+        side=PayrollFundSide.STUDIO,
+        visit_ids=[visit.id],
+        user_id=None,
+    )[visit.id]
+
+    header = VisitHeaderInput(
+        client_mode="existing",
+        existing_client_id=client.id,
+        draft_name="",
+        draft_phone="",
+        draft_telegram="",
+        draft_vk="",
+        draft_instagram="",
+        draft_other_contact="",
+        client_type=VisitClientType.RETURNING,
+        performed_date=visit.performed_date.date(),
+        duration_minutes=visit.duration_minutes,
+        masters_scope=VisitMastersScope.VISIT,
+        same_master_shares_all_services=False,
+        visit_master_allocations=[(master_a.id, 100)],
+    )
+    line = VisitServiceLineInput(
+        service_id=svc_ids[0],
+        amount_from_client=2000.0,
+        client_discount_percent=0,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_source=MixSource.NO_MIX,
+        mix_complexity=None,
+        mix_bonus_master_id=None,
+        amortization_level=None,
+        kit_kind="STOCK",
+        visit_service_id=vs.id,
+    )
+    update_visit_with_services(db, visit.id, master_a.id, MultiServiceVisitInput(header=header, lines=[line]))
+
+    after_master = sum_visit_ledger_by_visit_id(
+        db,
+        side=PayrollFundSide.MASTER,
+        visit_ids=[visit.id],
+        user_id=master_a.id,
+    )[visit.id]
+    after_studio = sum_visit_ledger_by_visit_id(
+        db,
+        side=PayrollFundSide.STUDIO,
+        visit_ids=[visit.id],
+        user_id=None,
+    )[visit.id]
+
+    assert after_master != before_master
+    assert after_studio != before_studio
+    assert after_master > before_master
+    assert after_studio > before_studio

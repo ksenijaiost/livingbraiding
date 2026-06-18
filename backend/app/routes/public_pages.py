@@ -40,6 +40,7 @@ from app.payroll_fund import (
     employee_fund_balance,
     employee_payout_total_net,
     studio_fund_balance,
+    sum_ledger_amounts_by_source,
     sum_visit_ledger_by_visit_id,
 )
 from app.master_schedule import schedule_filled_until
@@ -120,6 +121,7 @@ def home(
         works_by_day: dict[date, int] = defaultdict(int)
         drafts_by_day: dict[date, int] = defaultdict(int)
         payroll_sum_by_day: dict[date, float] = defaultdict(float)
+        studio_payroll_sum_by_day: dict[date, float] = defaultdict(float)
 
         v_stmt = (
             select(Visit.id, Visit.performed_date)
@@ -203,58 +205,111 @@ def home(
             drafts_by_day[d0] = int(cnt)
 
         if visit_ids:
-            visit_pay_by_id = sum_visit_ledger_by_visit_id(
-                db,
-                side=PayrollFundSide.MASTER,
-                visit_ids=visit_ids,
-                user_id=current_user.id,
-            )
-            for vid, dt0 in visit_rows:
-                if isinstance(dt0, datetime):
-                    payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(
-                        visit_pay_by_id.get(int(vid), 0.0)
-                    )
+            if current_user.role == UserRole.MASTER:
+                visit_pay_by_id = sum_visit_ledger_by_visit_id(
+                    db,
+                    side=PayrollFundSide.MASTER,
+                    visit_ids=visit_ids,
+                    user_id=current_user.id,
+                )
+                for vid, dt0 in visit_rows:
+                    if isinstance(dt0, datetime):
+                        payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(
+                            visit_pay_by_id.get(int(vid), 0.0)
+                        )
+
+            if show_studio:
+                visit_studio_by_id = sum_visit_ledger_by_visit_id(
+                    db,
+                    side=PayrollFundSide.STUDIO,
+                    visit_ids=visit_ids,
+                    user_id=None,
+                )
+                for vid, dt0 in visit_rows:
+                    if isinstance(dt0, datetime):
+                        studio_payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(
+                            visit_studio_by_id.get(int(vid), 0.0)
+                        )
 
         if work_ids:
-            w_pay = list(
-                db.execute(
-                    select(
-                        WorkForInventory.id,
-                        func.coalesce(WorkForInventory.performed_date, WorkForInventory.created_at),
-                        func.coalesce(func.sum(PayrollFundLedger.amount), 0.0),
-                    )
-                    .join(PayrollFundLedger, PayrollFundLedger.source_id == WorkForInventory.id)
-                    .where(
-                        PayrollFundLedger.side == PayrollFundSide.MASTER,
-                        PayrollFundLedger.user_id == current_user.id,
-                        PayrollFundLedger.source_kind == PayrollFundSourceKind.WORK,
-                        WorkForInventory.id.in_(work_ids),
-                    )
-                    .group_by(WorkForInventory.id, func.coalesce(WorkForInventory.performed_date, WorkForInventory.created_at))
-                ).all()
-            )
-            for _, dt0, amt in w_pay:
-                if isinstance(dt0, datetime):
-                    payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(amt or 0.0)
+            if current_user.role == UserRole.MASTER:
+                work_master_by_id = sum_ledger_amounts_by_source(
+                    db,
+                    side=PayrollFundSide.MASTER,
+                    source_kind=PayrollFundSourceKind.WORK,
+                    source_ids=work_ids,
+                    user_id=current_user.id,
+                )
+                for wid, perf_dt, created_dt in work_rows:
+                    dt0 = perf_dt if isinstance(perf_dt, datetime) else created_dt
+                    if isinstance(dt0, datetime):
+                        payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(
+                            work_master_by_id.get(int(wid), 0.0)
+                        )
 
-        s_pay = list(
+            if show_studio:
+                work_studio_by_id = sum_ledger_amounts_by_source(
+                    db,
+                    side=PayrollFundSide.STUDIO,
+                    source_kind=PayrollFundSourceKind.WORK,
+                    source_ids=work_ids,
+                    user_id=None,
+                )
+                for wid, perf_dt, created_dt in work_rows:
+                    dt0 = perf_dt if isinstance(perf_dt, datetime) else created_dt
+                    if isinstance(dt0, datetime):
+                        studio_payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(
+                            work_studio_by_id.get(int(wid), 0.0)
+                        )
+
+        sale_master_by_day: dict[date, float] = defaultdict(float)
+        sale_studio_by_day: dict[date, float] = defaultdict(float)
+        s_rows = list(
             db.execute(
-                select(ProductSale.id, ProductSale.performed_date, func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
-                .join(PayrollFundLedger, PayrollFundLedger.source_id == ProductSale.id)
-                .where(
-                    PayrollFundLedger.side == PayrollFundSide.MASTER,
-                    PayrollFundLedger.user_id == current_user.id,
-                    PayrollFundLedger.source_kind == PayrollFundSourceKind.PRODUCT_SALE,
+                select(
+                    ProductSale.id,
+                    ProductSale.performed_date,
+                ).where(
                     ProductSale.performed_date >= month_start_utc,
                     ProductSale.performed_date < month_end_utc,
                     ProductSale.is_voided.is_(False),
                 )
-                .group_by(ProductSale.id, ProductSale.performed_date)
             ).all()
         )
-        for _, dt0, amt in s_pay:
-            if isinstance(dt0, datetime):
-                payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(amt or 0.0)
+        sale_ids = [int(sid) for sid, _ in s_rows if sid is not None]
+        if sale_ids:
+            if current_user.role == UserRole.MASTER:
+                sale_master_ledger = sum_ledger_amounts_by_source(
+                    db,
+                    side=PayrollFundSide.MASTER,
+                    source_kind=PayrollFundSourceKind.PRODUCT_SALE,
+                    source_ids=sale_ids,
+                    user_id=current_user.id,
+                )
+                for sid, dt0 in s_rows:
+                    if isinstance(dt0, datetime):
+                        sale_master_by_day[_utc_naive_to_local_date(dt0)] += float(
+                            sale_master_ledger.get(int(sid), 0.0)
+                        )
+
+            if show_studio:
+                sale_studio_ledger = sum_ledger_amounts_by_source(
+                    db,
+                    side=PayrollFundSide.STUDIO,
+                    source_kind=PayrollFundSourceKind.PRODUCT_SALE,
+                    source_ids=sale_ids,
+                    user_id=None,
+                )
+                for sid, dt0 in s_rows:
+                    if isinstance(dt0, datetime):
+                        sale_studio_by_day[_utc_naive_to_local_date(dt0)] += float(
+                            sale_studio_ledger.get(int(sid), 0.0)
+                        )
+
+        for day_key, amt in sale_master_by_day.items():
+            payroll_sum_by_day[day_key] += amt
+        for day_key, amt in sale_studio_by_day.items():
+            studio_payroll_sum_by_day[day_key] += amt
 
         other_stmt = (
             select(PayrollFundLedger.created_at, PayrollFundLedger.amount)
@@ -273,9 +328,10 @@ def home(
                 ),
             )
         )
-        for dt0, amt in db.execute(other_stmt).all():
-            if isinstance(dt0, datetime):
-                payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(amt or 0.0)
+        if current_user.role == UserRole.MASTER:
+            for dt0, amt in db.execute(other_stmt).all():
+                if isinstance(dt0, datetime):
+                    payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(amt or 0.0)
 
         period_ctx: dict[str, Any] | None = None
         if show_studio:
@@ -322,6 +378,7 @@ def home(
                         "works": int(works_by_day.get(d0, 0)),
                         "draft_count": int(drafts_by_day.get(d0, 0)),
                         "payroll_sum": float(payroll_sum_by_day.get(d0, 0.0)),
+                        "studio_payroll_sum": float(studio_payroll_sum_by_day.get(d0, 0.0)),
                         "is_today": (d0 == now_local.date()),
                     }
                 )
@@ -339,6 +396,7 @@ def home(
             "prev_ym": f"{prev_month.year:04d}-{prev_month.month:02d}",
             "next_ym": f"{next_month.year:04d}-{next_month.month:02d}",
             "weeks": weeks,
+            "show_studio_payroll": show_studio,
         }
 
         if current_user.role == UserRole.MASTER:
