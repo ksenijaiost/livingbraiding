@@ -284,6 +284,10 @@ def _master_visit_step1_template_response(
     draft_readonly: bool = False,
     lock_banner: dict[str, str] | None = None,
     draft_saved: bool = False,
+    is_edit: bool = False,
+    edit_visit_id: int | None = None,
+    cancel_url: str | None = None,
+    visit_photos: list[str] | None = None,
 ):
     performed = (form_prefill.get("performed_date") or "").strip() or (default_date or date.today().isoformat())
     salon_cut_pct = get_salon_cut_pct(db, current_user.id)
@@ -350,6 +354,10 @@ def _master_visit_step1_template_response(
             draft_readonly=draft_readonly,
             lock_banner=lock_banner,
             draft_saved=draft_saved,
+            is_edit=is_edit,
+            edit_visit_id=edit_visit_id,
+            cancel_url=cancel_url,
+            visit_photos=visit_photos or [],
         ),
         status_code=status_code,
     )

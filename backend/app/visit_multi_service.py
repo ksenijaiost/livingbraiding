@@ -53,8 +53,16 @@ from app.kit_inlay_visit import (
     service_requires_kit_block,
 )
 from app.mix_rates import mix_complexity_rate_for
-from app.payroll_fund import post_visit_accruals
+from app.payroll_fund import (
+    PayrollFundSourceKind,
+    post_visit_accruals,
+    post_visit_service_accruals,
+    replace_visit_service_accruals,
+    storno_source_accruals,
+)
+from app.time_utils import utcnow_naive
 from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
+from app.visit_stock import visit_service_revert_stock
 from app.questionnaire.answer_validate import extract_questionnaire_raw_from_form
 from app.thermo_visit import parse_thermo_from_form, persist_new_thermo_template_if_needed
 from app.user_roles import user_has_role
@@ -130,6 +138,7 @@ class VisitServiceLineInput:
     started_at: datetime | None = None
     comment: str | None = None
     sort_order: int = 0
+    visit_service_id: int | None = None
 
 
 @dataclass
@@ -830,6 +839,11 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
         else (int(g("own_extra_stock_kit_id", "0") or "0") or None)
     )
 
+    vs_id_raw = g("visit_service_id", "").strip()
+    visit_service_id: int | None = None
+    if vs_id_raw.isdigit() and int(vs_id_raw) > 0:
+        visit_service_id = int(vs_id_raw)
+
     return VisitServiceLineInput(
         service_id=int(parse_float(g("service_id", "0") or "0", field_name="service_id")),
         amount_from_client=g_float("amount_from_client", 0),
@@ -878,6 +892,7 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
         started_at=started_at,
         comment=g("comment", "") or None,
         sort_order=idx,
+        visit_service_id=visit_service_id,
     )
 
 
@@ -1001,6 +1016,342 @@ def parse_multi_service_visit_form(
 
     lines = [_parse_line_from_form(form, i) for i in indices]
     return MultiServiceVisitInput(header=header, lines=lines)
+
+
+def _master_rows_for_line(
+    visit: Visit,
+    idx: int,
+    line: VisitServiceLineInput,
+    line_master_rows: dict[int, list[tuple[int, float]]],
+) -> list[tuple[int, float]]:
+    if visit.masters_scope == VisitMastersScope.PER_SERVICE:
+        return line_master_rows.get(idx, [])
+    return []
+
+
+def _visit_service_financial_signature(
+    db: Session,
+    vs: VisitService,
+    visit: Visit,
+) -> tuple:
+    if visit.masters_scope == VisitMastersScope.PER_SERVICE:
+        masters = tuple(
+            (int(m.master_id), int(m.percent or 0))
+            for m in db.scalars(
+                select(VisitServiceMaster)
+                .where(VisitServiceMaster.visit_service_id == vs.id)
+                .order_by(VisitServiceMaster.master_id.asc())
+            ).all()
+        )
+    else:
+        masters = tuple(
+            (int(m.master_id), int(m.percent or 0))
+            for m in db.scalars(
+                select(VisitMaster).where(VisitMaster.visit_id == visit.id).order_by(VisitMaster.master_id.asc())
+            ).all()
+        )
+    return (
+        int(vs.service_id or 0),
+        round(float(vs.amount_from_client or 0), 2),
+        round(float(vs.salon_profit or 0), 2),
+        round(float(vs.studio_fund_amount or 0), 2),
+        round(float(vs.masters_pool or 0), 2),
+        int(vs.mix_bonus_master_id or 0),
+        round(float(vs.mix_bonus_amount or 0), 2),
+        masters,
+    )
+
+
+def _apply_computed_to_visit_service(vs: VisitService, computed: VisitServiceLineComputed, line: VisitServiceLineInput) -> None:
+    vs.amount_from_client = computed.amount_from_client
+    vs.client_discount_percent = computed.client_discount_percent
+    vs.kanekalon_grams = computed.kanekalon_grams
+    vs.kudri_grams = computed.kudri_grams
+    vs.mix_source = computed.mix_source
+    vs.mix_complexity = computed.mix_complexity
+    vs.mix_cost_amount = computed.mix_cost_amount
+    vs.mix_bonus_master_id = computed.mix_bonus_master_id
+    vs.mix_bonus_amount = computed.mix_bonus_amount
+    vs.kanekalon_price_per_gram_at_time = computed.kanekalon_price_per_gram_at_time
+    vs.kudri_price_per_gram_at_time = computed.kudri_price_per_gram_at_time
+    vs.materials_cost_total = computed.materials_cost_total
+    vs.addons_total = computed.addons_total
+    vs.addons_details_json = computed.addons_details_json
+    vs.amortization_level = computed.amortization_level
+    vs.amortization_amount = computed.amortization_amount
+    vs.studio_fund_amount = computed.studio_fund_amount
+    vs.cost_total = computed.cost_total
+    vs.profit_before_split = computed.profit_before_split
+    vs.salon_cut_pct_at_time = computed.salon_cut_pct_at_time
+    vs.salon_profit = computed.salon_profit
+    vs.masters_pool = computed.masters_pool
+    vs.kit_paid_separately = computed.kit_paid_separately
+    vs.started_at = line.started_at
+    vs.comment = (line.comment or "").strip() or None
+
+
+def _persist_kit_usages_for_service(
+    db: Session,
+    visit: Visit,
+    vs: VisitService,
+    computed: VisitServiceLineComputed,
+) -> None:
+    for kid, pieces, camount, bd in computed.kit_usages:
+        uj = json.dumps(bd, ensure_ascii=False) if bd else None
+        db.add(
+            VisitKitUsage(
+                visit_id=visit.id,
+                visit_service_id=vs.id,
+                kit_id=kid,
+                pieces_used=pieces,
+                cost_amount=camount,
+                note=None,
+                usage_breakdown_json=uj,
+            )
+        )
+
+
+def _persist_service_masters(
+    db: Session,
+    vs: VisitService,
+    master_rows: list[tuple[int, float]],
+) -> None:
+    for mid, pct in master_rows:
+        db.add(VisitServiceMaster(visit_service_id=vs.id, master_id=mid, percent=pct))
+
+
+def _insert_visit_service_from_line(
+    db: Session,
+    visit: Visit,
+    client: Client,
+    inp: MultiServiceVisitInput,
+    idx: int,
+    line: VisitServiceLineInput,
+    line_master_rows: dict[int, list[tuple[int, float]]],
+    *,
+    editor_user_id: int,
+    performed_dt: datetime,
+) -> VisitService:
+    if inp.header.client_type != VisitClientType.SELF and line.amount_from_client <= 0:
+        raise ValueError("Укажите сумму, взятую с клиента.")
+    computed = compute_visit_service_line(
+        db,
+        line,
+        inp.header,
+        default_mix_bonus_master_id=editor_user_id,
+    )
+    kinp = _line_kit_inlay_adapter(line, inp.header)
+    payload = build_payload_from_input(kinp, db)
+    service = db.scalar(
+        select(Service)
+        .options(selectinload(Service.subcategory).selectinload(ServiceSubcategory.category))
+        .where(Service.id == line.service_id, Service.is_active.is_(True))
+    )
+    assert service and service.subcategory and service.subcategory.category
+
+    vs = VisitService(
+        visit_id=visit.id,
+        service_id=service.id,
+        details_json=json.dumps(payload.model_dump(mode="json"), ensure_ascii=False),
+        category_name=service.subcategory.category.name,
+        subcategory_name=service.subcategory.name,
+        service_name=service.name,
+        sort_order=line.sort_order if line.sort_order else idx,
+        amount_from_client=0,
+        client_discount_percent=0,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_cost_amount=0,
+        mix_bonus_amount=0,
+        materials_cost_total=0,
+        addons_total=0,
+        cost_total=0,
+        profit_before_split=0,
+        salon_cut_pct_at_time=computed.salon_cut_pct_at_time,
+        salon_profit=0,
+        masters_pool=0,
+        kit_paid_separately=False,
+    )
+    db.add(vs)
+    db.flush()
+    _apply_computed_to_visit_service(vs, computed, line)
+    vs.details_json = json.dumps(payload.model_dump(mode="json"), ensure_ascii=False)
+
+    master_rows = _master_rows_for_line(visit, idx, line, line_master_rows)
+    if master_rows:
+        _persist_service_masters(db, vs, master_rows)
+    _persist_kit_usages_for_service(db, visit, vs, computed)
+
+    if payload.thermo is not None:
+        persist_new_thermo_template_if_needed(
+            db,
+            client_id=client.id,
+            details=payload.thermo,
+            label_suffix=f"Термо {performed_dt.date().isoformat()}",
+        )
+    return vs
+
+
+def _cancel_visit_service_line(
+    db: Session,
+    visit: Visit,
+    vs: VisitService,
+    *,
+    editor_user_id: int,
+) -> None:
+    ok, err = visit_service_revert_stock(db, vs.id)
+    if not ok:
+        raise ValueError(err or "Не удалось откатить склад по услуге.")
+    storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, vs.id, editor_user_id)
+    vs.is_cancelled = True
+    vs.cancelled_at = utcnow_naive()
+    vs.cancelled_by_user_id = editor_user_id
+
+
+def update_visit_with_services(
+    db: Session,
+    visit_id: int,
+    editor_user_id: int,
+    inp: MultiServiceVisitInput,
+) -> Visit:
+    if not inp.lines:
+        raise ValueError("Добавьте хотя бы одну услугу.")
+
+    visit = db.scalar(
+        select(Visit)
+        .options(
+            selectinload(Visit.services),
+            selectinload(Visit.kit_usages),
+            selectinload(Visit.masters),
+        )
+        .where(Visit.id == visit_id)
+    )
+    if not visit:
+        raise ValueError("Визит не найден.")
+    if visit.is_cancelled:
+        raise ValueError("Визит отменён — редактирование невозможно.")
+
+    visit_master_rows, line_master_rows = _validate_lines_masters(db, inp)
+    client = _resolve_client(db, inp.header, created_by_label=None)
+    performed_dt = datetime.combine(inp.header.performed_date, datetime.min.time())
+    if visit.performed_date != performed_dt:
+        ensure_event_date_in_open_payroll_period(db, performed_dt)
+
+    active_before = {
+        vs.id: vs
+        for vs in (visit.services or [])
+        if not vs.is_cancelled
+    }
+    sig_before = {vs_id: _visit_service_financial_signature(db, vs, visit) for vs_id, vs in active_before.items()}
+
+    visit.performed_date = performed_dt
+    visit.duration_minutes = max(0, inp.header.duration_minutes)
+    visit.client_id = client.id
+    visit.client_type = inp.header.client_type
+    visit.client_age_group = client.age_group
+    visit.masters_scope = inp.header.masters_scope
+    visit.same_master_shares_all_services = inp.header.same_master_shares_all_services
+    if inp.header.booking_id is not None:
+        visit.booking_id = inp.header.booking_id
+    visit.updated_at = utcnow_naive()
+    visit.updated_by_user_id = editor_user_id
+
+    for vm in list(visit.masters or []):
+        db.delete(vm)
+    db.flush()
+    if visit_master_rows:
+        for mid, pct in visit_master_rows:
+            db.add(VisitMaster(visit_id=visit.id, master_id=mid, percent=pct))
+        db.flush()
+
+    kept_ids: set[int] = set()
+    for idx, line in enumerate(inp.lines):
+        if line.visit_service_id and line.visit_service_id in active_before:
+            vs = active_before[line.visit_service_id]
+            kept_ids.add(vs.id)
+            ok, err = visit_service_revert_stock(db, vs.id)
+            if not ok:
+                raise ValueError(err or "Не удалось откатить склад.")
+            for vsm in db.scalars(
+                select(VisitServiceMaster).where(VisitServiceMaster.visit_service_id == vs.id)
+            ).all():
+                db.delete(vsm)
+
+            computed = compute_visit_service_line(
+                db,
+                line,
+                inp.header,
+                default_mix_bonus_master_id=editor_user_id,
+            )
+            kinp = _line_kit_inlay_adapter(line, inp.header)
+            payload = build_payload_from_input(kinp, db)
+            service = db.scalar(
+                select(Service)
+                .options(selectinload(Service.subcategory).selectinload(ServiceSubcategory.category))
+                .where(Service.id == line.service_id, Service.is_active.is_(True))
+            )
+            if not service or not service.subcategory or not service.subcategory.category:
+                raise ValueError("Услуга не найдена")
+            vs.service_id = service.id
+            vs.category_name = service.subcategory.category.name
+            vs.subcategory_name = service.subcategory.name
+            vs.service_name = service.name
+            vs.sort_order = line.sort_order if line.sort_order else idx
+            vs.details_json = json.dumps(payload.model_dump(mode="json"), ensure_ascii=False)
+            _apply_computed_to_visit_service(vs, computed, line)
+
+            master_rows = _master_rows_for_line(visit, idx, line, line_master_rows)
+            if master_rows:
+                _persist_service_masters(db, vs, master_rows)
+            _persist_kit_usages_for_service(db, visit, vs, computed)
+
+            if payload.thermo is not None:
+                persist_new_thermo_template_if_needed(
+                    db,
+                    client_id=client.id,
+                    details=payload.thermo,
+                    label_suffix=f"Термо {performed_dt.date().isoformat()}",
+                )
+        else:
+            vs = _insert_visit_service_from_line(
+                db,
+                visit,
+                client,
+                inp,
+                idx,
+                line,
+                line_master_rows,
+                editor_user_id=editor_user_id,
+                performed_dt=performed_dt,
+            )
+            kept_ids.add(vs.id)
+            db.flush()
+            post_visit_service_accruals(db, vs, visit, editor_user_id)
+
+    for vs_id, vs in active_before.items():
+        if vs_id not in kept_ids:
+            _cancel_visit_service_line(db, visit, vs, editor_user_id=editor_user_id)
+
+    db.flush()
+    visit = db.scalar(
+        select(Visit).options(selectinload(Visit.services)).where(Visit.id == visit.id)
+    )
+    assert visit is not None
+    recalc_visit_totals(visit)
+
+    for vs in (visit.services or []):
+        if vs.is_cancelled:
+            continue
+        new_sig = _visit_service_financial_signature(db, vs, visit)
+        old_sig = sig_before.get(vs.id)
+        if old_sig is not None and new_sig != old_sig:
+            replace_visit_service_accruals(db, vs, visit, editor_user_id)
+        elif old_sig is None and vs.id not in sig_before:
+            pass  # already posted for new lines
+
+    db.commit()
+    db.refresh(visit)
+    return visit
 
 
 def read_visit_master_form_state_multi(form: Any) -> tuple[dict[str, str], list[int], dict[int, str]]:
