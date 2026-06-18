@@ -348,3 +348,89 @@ def test_visit_ledger_net_reflects_amount_edit_for_calendar(memory_db):
     assert after_studio != before_studio
     assert after_master > before_master
     assert after_studio > before_studio
+
+
+class _FakeForm:
+    def __init__(self, data: dict):
+        self._data = data
+
+    def keys(self):
+        return self._data.keys()
+
+    def get(self, key):
+        val = self._data.get(key)
+        if isinstance(val, list):
+            return val[0] if val else None
+        return val
+
+    def getlist(self, key):
+        val = self._data.get(key)
+        if val is None:
+            return []
+        return val if isinstance(val, list) else [val]
+
+
+def test_parse_line_kit_kind_uses_last_radio_value(memory_db):
+    from app.visit_multi_service import _parse_line_from_form
+
+    form = _FakeForm(
+        {
+            "line_1_service_id": "1",
+            "line_1_kit_kind": ["STOCK", "OWN"],
+            "line_1_mix_source": ["NO_MIX", "NO_MIX"],
+            "line_1_amortization_level": ["MIN"],
+            "line_1_amount_from_client": "5000",
+        }
+    )
+    line = _parse_line_from_form(form, 1)
+    assert line.kit_kind == "OWN"
+    assert line.amount_from_client == 5000.0
+
+
+def test_own_kit_line_without_stock_succeeds(memory_db):
+    from app.db.models import AmortizationLevel, MixSource, ServiceSubcategory
+    from app.visit_multi_service import VisitHeaderInput, VisitServiceLineInput, compute_visit_service_line
+
+    db = memory_db
+    master_a, _master_b, _admin, svc_ids = _seed_users_and_services(db)
+    svc = db.get(Service, svc_ids[0])
+    sub = db.get(ServiceSubcategory, svc.subcategory_id)
+    sub.show_kit_section = True
+    db.commit()
+
+    client = db.scalar(select(Client).limit(1))
+    header = VisitHeaderInput(
+        client_mode="existing",
+        existing_client_id=client.id,
+        draft_name="",
+        draft_phone="",
+        draft_telegram="",
+        draft_vk="",
+        draft_instagram="",
+        draft_other_contact="",
+        client_type=VisitClientType.RETURNING,
+        performed_date=datetime.utcnow().date(),
+        duration_minutes=60,
+        masters_scope=VisitMastersScope.VISIT,
+        same_master_shares_all_services=False,
+        visit_master_allocations=[(master_a.id, 100)],
+    )
+    line = VisitServiceLineInput(
+        service_id=svc_ids[0],
+        amount_from_client=5000.0,
+        client_discount_percent=0,
+        kanekalon_grams=100.0,
+        kudri_grams=0.0,
+        mix_source=MixSource.NO_MIX,
+        mix_complexity=None,
+        mix_bonus_master_id=None,
+        amortization_level=AmortizationLevel.MIN,
+        kit_kind="OWN",
+        stock_kit_lines=[],
+        own_origin="STUDIO",
+        own_correction=False,
+        own_extra_blanks=False,
+    )
+    computed = compute_visit_service_line(db, line, header, default_mix_bonus_master_id=master_a.id, apply_kit_stock=False)
+    assert computed.amount_from_client == 5000.0
+    assert computed.amortization_amount > 0
