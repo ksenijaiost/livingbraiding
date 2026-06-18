@@ -178,10 +178,8 @@
             <div style="{% if not loop.first %}margin-top:10px; padding-top:10px; border-top:1px solid #e5e7eb;{% endif %}">
               <div style="font-weight:600;">
                 {{ loop.index }}.
-                {% if svc and svc.subcategory %}
-                  {{ svc.subcategory.name }} — {{ svc.name }}
-                {% elif svc %}
-                  {{ svc.name }}
+                {% if svc %}
+                  {{ format_service_catalog_path(svc) }}
                 {% else %}
                   <span class="muted">Услуга #{{ ps.service_id }}</span>
                 {% endif %}
@@ -224,7 +222,7 @@
         </div>
       {% elif booking.planned_service %}
         <p style="margin:6px 0;">
-          {{ booking.planned_service.subcategory.name }} — {{ booking.planned_service.name }}
+          {{ format_service_catalog_path(booking.planned_service) }}
         </p>
       {% else %}
         <p class="muted" style="margin:6px 0;">—</p>

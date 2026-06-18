@@ -856,6 +856,20 @@ function initAdminBookingForm() {
     });
   }
 
+  function syncBookingAllLineStockKitLinesHidden() {
+    if (!window.LbKitStockPick) return;
+    qa("[data-line-stock-kit-wrap]").forEach(function (wrap) {
+      var idx = wrap.getAttribute("data-line-stock-kit-wrap");
+      if (idx === null || idx === "") return;
+      var hid = document.querySelector('input[name="line_' + idx + '_stock_kit_lines_json"]');
+      if (!hid) return;
+      var lines = LbKitStockPick.collectStockKitLines(wrap);
+      hid.value = JSON.stringify(lines);
+      var legacy = document.getElementById("line_" + idx + "_stock_kit_id");
+      if (legacy && lines.length) legacy.value = String(lines[0].kit_id || "");
+    });
+  }
+
   function enableKitFieldsForSubmit() {
     setBookingVisitKitControlsDisabled(false);
     qa("[data-line-kit-root] input, [data-line-kit-root] select, [data-line-kit-root] textarea, [data-line-kit-root] button").forEach(function (el) {
@@ -864,6 +878,7 @@ function initAdminBookingForm() {
     syncBookingStockKitLinesHidden();
     syncBookingExtraStockKitLinesHidden();
     syncBookingSaleStockKitLinesHidden();
+    syncBookingAllLineStockKitLinesHidden();
   }
 
   function serviceNeedsKitBlock(serviceId) {

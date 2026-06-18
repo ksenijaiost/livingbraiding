@@ -64,3 +64,61 @@ def booking_service_labels_from_booking(booking) -> str:
             return "; ".join(paths)
     svc = getattr(booking, "planned_service", None)
     return format_service_catalog_path(svc)
+
+
+def booking_list_detail_parts(
+    booking,
+    *,
+    linked_work=None,
+    linked_visit=None,
+    linked_sale=None,
+    product_kind_label_fn=None,
+) -> list[str]:
+    """Краткие строки для колонки «Детали» в списке броней."""
+    from app.db.models import BookingKind, ProductSaleKind, WorkKind, WorkScope
+
+    parts: list[str] = []
+
+    if linked_work is not None:
+        scope = "в наличие" if linked_work.scope == WorkScope.IN_STOCK else "на заказ"
+        kind_map = {
+            WorkKind.KIT: "комплект/заготовки",
+            WorkKind.MIX: "смешка",
+            WorkKind.RUBBER: "хвосты/резинки",
+            WorkKind.KIT_CORRECTION: "коррекция комплекта",
+            WorkKind.OTHER: "другое",
+            WorkKind.HAIR_EXT_PREP: "подготовка к наращиванию",
+        }
+        kind_l = kind_map.get(linked_work.kind, linked_work.kind.value)
+        parts.append(f"Работа: {kind_l} ({scope})")
+
+    kind = getattr(booking, "kind", None)
+    if kind == BookingKind.VISIT:
+        visit_path = ""
+        if linked_visit is not None:
+            services = sorted(getattr(linked_visit, "services", None) or [], key=lambda s: int(s.id or 0))
+            if services:
+                visit_path = format_visit_service_catalog_path(services[0])
+            else:
+                visit_path = "Визит"
+        else:
+            visit_path = booking_service_labels_from_booking(booking)
+        if visit_path:
+            parts.append(visit_path)
+    elif kind == BookingKind.PRODUCT_SALE:
+        if linked_sale is not None:
+            sk = linked_sale.kind
+            sale_map = {
+                ProductSaleKind.KIT: "комплект",
+                ProductSaleKind.RUBBER: "хвост/резинка",
+                ProductSaleKind.MATERIAL: "материал",
+                ProductSaleKind.OTHER: "другое",
+            }
+            parts.append(f"Продажа: {sale_map.get(sk, sk.value)}")
+        else:
+            pk = (getattr(booking, "planned_product_kind", None) or "").strip()
+            if pk and product_kind_label_fn is not None:
+                label = product_kind_label_fn(pk)
+                if label and label != "—":
+                    parts.append(f"Продажа: {label}")
+    return parts

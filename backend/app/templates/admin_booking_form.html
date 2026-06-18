@@ -1604,9 +1604,12 @@
         cb.addEventListener('change', refreshAvailableMasters);
       });
 
-      initPrefillLines();
-      renderAllServiceFlags();
-      setModeUi();
+      function bootBookingServiceLines() {
+        initPrefillLines();
+        renderAllServiceFlags();
+        setModeUi();
+      }
+      document.addEventListener('DOMContentLoaded', bootBookingServiceLines);
       window.lbBookingRefreshMasters = refreshAvailableMasters;
       window.lbBookingSyncHiddenLines = syncBookingHiddenLines;
 
