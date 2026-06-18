@@ -101,8 +101,84 @@
         .lb-cal-stat .lb-cal-lbl-icon { display: none; }
         .lb-th-short { display: none; }
       }
-      .lb-cal-stat { white-space: nowrap; }
+      .lb-cal-stat { line-height: 1.25; }
+      .lb-cal-stat--inline { white-space: nowrap; }
       .lb-cal-stat .lb-cal-lbl-icon { margin-right: 1px; }
+      .lb-cal-money-short { display: none; }
+      .lb-home-cal-scroll {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin-top: 10px;
+      }
+      .lb-home-cal-table {
+        table-layout: fixed;
+        width: 100%;
+        min-width: 0;
+      }
+      .lb-home-cal-table th {
+        font-size: 12px;
+        font-weight: 600;
+        padding: 6px 4px;
+        text-align: center;
+      }
+      .lb-home-cal-table td.lb-cal-day {
+        overflow: hidden;
+        vertical-align: top;
+        padding: 8px 6px;
+        cursor: pointer;
+      }
+      .lb-cal-day--out { opacity: 0.45; }
+      .lb-cal-day--today { border-bottom: 2px solid #111827; }
+      .lb-cal-day-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 4px;
+      }
+      .lb-cal-day-num { font-weight: 700; }
+      .lb-cal-draft { font-size: 12px; line-height: 1; flex-shrink: 0; }
+      .lb-cal-activity {
+        margin-top: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 12px;
+      }
+      .lb-cal-money {
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      @media (max-width: 600px) {
+        .lb-home-cal-table th,
+        .lb-home-cal-table td.lb-cal-day {
+          padding: 4px 2px;
+        }
+        .lb-home-cal-table th {
+          font-size: 11px;
+        }
+        .lb-cal-day-num {
+          font-size: 13px;
+        }
+        .lb-cal-activity {
+          flex-direction: row;
+          flex-wrap: wrap;
+          gap: 2px 5px;
+          margin-top: 4px;
+          font-size: 10px;
+        }
+        .lb-cal-stat--inline {
+          font-size: 10px;
+        }
+        .lb-cal-money {
+          font-size: 10px;
+          line-height: 1.2;
+          flex: 1 1 100%;
+          min-width: 0;
+        }
+        .lb-cal-money-full { display: none; }
+        .lb-cal-money-short { display: inline; }
+      }
       .error { background: #fee2e2; border: 1px solid #fecaca; color: #991b1b; padding: 10px 12px; border-radius: 8px; }
       .ok { background: #f0fdf4; border: 1px solid #86efac; color: #166534; padding: 10px 12px; border-radius: 8px; }
     </style>
