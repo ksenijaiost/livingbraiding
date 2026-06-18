@@ -176,9 +176,15 @@
                           </div>
                         {% endif %}
                         {% if d.payroll_sum and (d.payroll_sum|abs > 0.001) %}
-                          <div class="lb-cal-stat" title="ЗП">
+                          <div class="lb-cal-stat" title="ЗП мастера (нетто по журналу)">
                             <span class="lb-cal-lbl-full">ЗП: </span><span class="lb-cal-lbl-icon" aria-hidden="true">💰 </span>
                             <strong>{% if d.payroll_sum > 0 %}+{% endif %}{{ "%.2f"|format(d.payroll_sum) }} ₽</strong>
+                          </div>
+                        {% endif %}
+                        {% if calendar_ctx.show_studio_payroll and d.studio_payroll_sum and (d.studio_payroll_sum|abs > 0.001) %}
+                          <div class="lb-cal-stat" title="Фонд студии (нетто по журналу за день)">
+                            <span class="lb-cal-lbl-full">Фонд: </span><span class="lb-cal-lbl-icon" aria-hidden="true">🏦 </span>
+                            <strong>{% if d.studio_payroll_sum > 0 %}+{% endif %}{{ "%.2f"|format(d.studio_payroll_sum) }} ₽</strong>
                           </div>
                         {% endif %}
                       </div>

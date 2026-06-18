@@ -2,8 +2,8 @@
 {% block content %}
   {% set fp = form_prefill %}
   <div class="card" {% if draft_readonly %}style="pointer-events: none; opacity: 0.92;"{% endif %}>
-    <h2 style="margin-top: 0;">{% if is_draft %}{% if draft_id %}Черновик визита #{{ draft_id }}{% else %}Новый черновик визита{% endif %}{% else %}Новый визит{% endif %}</h2>
-    <p class="muted">Клиент, работа, услуга, материал и анкета по услуге на одной странице. Блок «Комплект» показывается, если это включено для услуги в каталоге.{% if is_draft %} Склад и финальный визит — только при «Сохранить визит».{% endif %}</p>
+    <h2 style="margin-top: 0;">{% if is_edit %}Редактирование визита #{{ edit_visit_id }}{% elif is_draft %}{% if draft_id %}Черновик визита #{{ draft_id }}{% else %}Новый черновик визита{% endif %}{% else %}Новый визит{% endif %}</h2>
+    <p class="muted">Клиент, работа, услуга, материал и анкета по услуге на одной странице. Блок «Комплект» показывается, если это включено для услуги в каталоге.{% if is_draft %} Склад и финальный визит — только при «Сохранить визит».{% elif is_edit %} При сохранении склад и проводки ЗП пересчитываются при изменении комплектов или финансов.{% endif %}</p>
     {% if lock_banner %}
       <div style="margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid #fca5a5; background: #fef2f2; color: #b91c1c; pointer-events: auto;">
         <strong>Только просмотр.</strong> Сейчас редактирует: {{ lock_banner.display_name }} ({{ lock_banner.role }}).
@@ -33,9 +33,12 @@
       </div>
     {% endif %}
     <form method="post"
-      action="{% if is_draft %}{% if draft_id %}/master/visit/draft/{{ draft_id }}{% else %}/master/visit/draft{% endif %}{% else %}/master/visit/new{% endif %}"
+      action="{% if is_edit %}/visits/{{ edit_visit_id }}/edit{% elif is_draft %}{% if draft_id %}/master/visit/draft/{{ draft_id }}{% else %}/master/visit/draft{% endif %}{% else %}/master/visit/new{% endif %}"
       id="visit-form" enctype="multipart/form-data">
       <input type="hidden" name="booking_id" value="{{ fp.get('booking_id', '') }}" />
+      {% if is_edit and fp.get('visit_service_id') %}
+        <input type="hidden" name="visit_service_id" value="{{ fp.get('visit_service_id', '') }}" />
+      {% endif %}
       <h3>Клиент</h3>
       <div style="margin-bottom: 10px;">
         <label style="margin-right: 16px;">
@@ -132,7 +135,18 @@
       </div>
 
       <h3>Фото (до 3)</h3>
-      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.</p>
+      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.{% if is_edit %} Загрузите новый файл, чтобы заменить существующее.{% endif %}</p>
+      {% if is_edit and visit_photos %}
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+          {% for p in visit_photos %}
+            {% if p %}
+              <a href="{{ p }}" class="lb-lightbox" title="Текущее фото">
+                <img src="{{ p }}" alt="Фото" style="max-width:120px; max-height:120px; border-radius:8px; border:1px solid #e5e7eb;" />
+              </a>
+            {% endif %}
+          {% endfor %}
+        </div>
+      {% endif %}
       <div class="row">
         <div>
           <label>Фото 1</label>
@@ -621,10 +635,13 @@
               <button type="submit" class="secondary" form="visit-draft-unlock-form">Снять блокировку</button>
             {% endif %}
           {% endif %}
+        {% elif is_edit %}
+          <button type="submit">Сохранить изменения</button>
+          <a href="{{ cancel_url or ('/visits/' ~ edit_visit_id) }}"><button type="button" class="secondary">Отмена</button></a>
         {% else %}
           <button type="submit">Сохранить визит</button>
+          <a href="/"><button type="button" class="secondary">Отмена</button></a>
         {% endif %}
-        <a href="/"><button type="button" class="secondary">Отмена</button></a>
       </p>
     </form>
     {% if is_draft and draft_id and not draft_readonly %}
@@ -2422,6 +2439,7 @@
           '<div><label>Услуга *</label><select name="line_' + idx + '_service_id" id="line_' + idx + '_service_id" style="width:100%; box-sizing:border-box;"></select></div>' +
           '<div></div>' +
         '</div>' +
+        (prefill.visit_service_id ? '<input type="hidden" name="line_' + idx + '_visit_service_id" value="' + escAttr(prefill.visit_service_id) + '" />' : '') +
         '<div data-extra-line-service-flags="1" class="muted" style="margin-top:8px; font-size:12px; display:none;"></div>' +
         '<div class="row" style="margin-top:8px;">' +
           '<div><label>Время начала выполнения услуги</label><input type="time" name="line_' + idx + '_started_time" step="60" value="' + escAttr(prefill.started_time || '') + '" /></div>' +
@@ -2548,6 +2566,7 @@
         const idx = indices[i];
         addExtraServiceLine(idx, {
           service_id: fpAll['line_' + idx + '_service_id'] || '',
+          visit_service_id: fpAll['line_' + idx + '_visit_service_id'] || '',
           amount_from_client: fpAll['line_' + idx + '_amount_from_client'] || '',
           started_time: fpAll['line_' + idx + '_started_time'] || '',
           client_discount_percent: fpAll['line_' + idx + '_client_discount_percent'] || '0',

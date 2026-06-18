@@ -232,18 +232,12 @@ def storno_source_accruals(
         )
 
 
-def post_visit_service_accruals(
+def _append_visit_service_accruals(
     db: Session,
     visit_service: VisitService,
     visit: Visit,
     created_by_user_id: int | None,
 ) -> None:
-    """Начисления ЗП по одной строке услуги (VISIT_SERVICE)."""
-    if visit.is_cancelled or visit_service.is_cancelled:
-        return
-    if _has_accruals_for_source(db, PayrollFundSourceKind.VISIT_SERVICE, visit_service.id):
-        return
-
     studio_amt = money_q2(
         float(visit_service.salon_profit or 0) + float(visit_service.studio_fund_amount or 0)
     )
@@ -262,6 +256,69 @@ def post_visit_service_accruals(
     append_visit_service_master_pool_and_mix_bonus_ledgers(
         db, visit_service, visit, created_by_user_id
     )
+
+
+def replace_visit_service_accruals(
+    db: Session,
+    visit_service: VisitService,
+    visit: Visit,
+    created_by_user_id: int | None,
+) -> None:
+    """Сторно проводок строки услуги и повторное начисление по актуальным суммам."""
+    storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, visit_service.id, created_by_user_id)
+    if visit.is_cancelled or visit_service.is_cancelled:
+        return
+    _append_visit_service_accruals(db, visit_service, visit, created_by_user_id)
+
+
+def replace_visit_accruals(
+    db: Session,
+    visit: Visit,
+    created_by_user_id: int | None,
+) -> None:
+    """Сторно проводок визита (legacy) и повторное начисление."""
+    storno_source_accruals(db, PayrollFundSourceKind.VISIT, visit.id, created_by_user_id)
+    if visit.is_cancelled:
+        return
+    services = list(
+        db.scalars(
+            select(VisitService)
+            .where(VisitService.visit_id == visit.id, VisitService.is_cancelled.is_(False))
+            .order_by(VisitService.sort_order.asc(), VisitService.id.asc())
+        ).all()
+    )
+    if services:
+        for vs in services:
+            replace_visit_service_accruals(db, vs, visit, created_by_user_id)
+        return
+    append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
+    studio_amt = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
+    if studio_amt > 0:
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.STUDIO,
+            user_id=None,
+            amount=studio_amt,
+            source_kind=PayrollFundSourceKind.VISIT,
+            source_id=visit.id,
+            created_by_user_id=created_by_user_id,
+        )
+
+
+def post_visit_service_accruals(
+    db: Session,
+    visit_service: VisitService,
+    visit: Visit,
+    created_by_user_id: int | None,
+) -> None:
+    """Начисления ЗП по одной строке услуги (VISIT_SERVICE)."""
+    if visit.is_cancelled or visit_service.is_cancelled:
+        return
+    if _has_accruals_for_source(db, PayrollFundSourceKind.VISIT_SERVICE, visit_service.id):
+        return
+
+    _append_visit_service_accruals(db, visit_service, visit, created_by_user_id)
 
 
 def append_visit_service_master_pool_and_mix_bonus_ledgers(

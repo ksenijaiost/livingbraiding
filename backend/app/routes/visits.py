@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -14,7 +15,6 @@ from app.time_utils import utcnow_naive
 from app.db.session import get_db
 from app.db.models import (
     Client,
-    Kit,
     User,
     UserRole,
     Visit,
@@ -33,10 +33,24 @@ from app.ui_visit_display import (
     ru_mix_source,
     visit_services_catalog_line,
 )
-from app.visit_multi_service import recalc_visit_totals
-from app.visit_edit_policy import is_in_closed_payroll_period, visit_client_change_policy
+from app.visit_multi_service import (
+    form_uses_multi_service_lines,
+    kit_inlay_to_multi,
+    parse_multi_service_visit_form,
+    recalc_visit_totals,
+    update_visit_with_services,
+)
+from app.visit_edit_policy import is_in_closed_payroll_period, visit_edit_policy
+from app.visit_form_prefill import visit_to_form_prefill
+from app.visit_stock import visit_cancel_revert_stock, visit_service_revert_stock
 from app.audit import diff_fields, write_audit_rows
-from app.kit_blank_stock_core import parse_usage_breakdown_json, return_stock_to_kit
+from app.kit_inlay_visit import (
+    collect_questionnaire_prefill_from_form,
+    parse_kit_inlay_form,
+)
+from app.media_store import get_nonempty_upload, save_upload_image
+from app.routes.master_visit import _master_visit_step1_template_response, _visit_master_state_from_prefill
+from app.thermo_visit import collect_thermo_prefill_from_form
 from app.webui import templates, ctx as _ctx
 
 
@@ -188,7 +202,7 @@ def admin_visit_detail(
     duration_h = visit.duration_minutes // 60
     duration_m = visit.duration_minutes % 60
 
-    v_policy = visit_client_change_policy(visit, current_user, db)
+    v_policy = visit_edit_policy(visit, current_user, db)
     visit_closed_period = is_in_closed_payroll_period(db, visit.created_at)
     visit_super_priv = UserRole.ADMIN_SUPER in current_user.roles or UserRole.TECHSPEC in current_user.roles
 
@@ -211,41 +225,190 @@ def admin_visit_detail(
             duration_m=duration_m,
             client_err=client_err,
             msg=msg,
-            visit_edit_blocked=not v_policy.can_change,
+            visit_edit_blocked=not v_policy.can_edit,
             visit_edit_block_msg=v_policy.message_when_blocked,
-            visit_client_change_confirm_required=v_policy.super_outside_window,
+            visit_client_change_confirm_required=False,
             visit_closed_period=visit_closed_period,
             visit_super_priv=visit_super_priv,
         ),
     )
 
 
-def _visit_cancel_revert_stock(db: Session, visit: Visit) -> tuple[bool, str]:
-    """Revert stock kit usages for a visit. Two-pass: validate then apply."""
-    usages = list(getattr(visit, "kit_usages", []) or [])
-    if not usages:
-        return True, ""
-    kit_rows: list[tuple[Kit, int, dict[str, int] | None]] = []
-    for u in usages:
-        kit = getattr(u, "kit", None) or db.get(Kit, u.kit_id)
-        if not kit:
-            return False, "Не найден комплект для отката списания (kit_id)."
-        pieces = int(u.pieces_used or 0)
-        if pieces <= 0:
-            continue
-        bd = parse_usage_breakdown_json(getattr(u, "usage_breakdown_json", None))
-        new_avail = int(kit.pieces_available + pieces)
-        if int(kit.pieces_total) >= 0 and new_avail > int(kit.pieces_total):
-            return (
-                False,
-                f"Нельзя отменить визит: возврат превысит остаток 'всего' по комплекту {kit.sku}.",
+def _load_visit_for_edit(db: Session, visit_id: int) -> Visit | None:
+    return db.scalar(
+        select(Visit)
+        .options(
+            selectinload(Visit.client),
+            selectinload(Visit.services),
+            selectinload(Visit.kit_usages).selectinload(VisitKitUsage.kit),
+            selectinload(Visit.masters),
+        )
+        .where(Visit.id == visit_id)
+    )
+
+
+@router.get("/visits/{visit_id}/edit", response_class=HTMLResponse)
+def admin_visit_edit_get(
+    visit_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    visit = _load_visit_for_edit(db, visit_id)
+    if not visit:
+        raise HTTPException(status_code=404, detail="Визит не найден")
+    policy = visit_edit_policy(visit, current_user, db)
+    if not policy.can_edit:
+        return _master_visit_step1_template_response(
+            request,
+            current_user=current_user,
+            db=db,
+            form_prefill={},
+            visit_master_on_ids=[],
+            visit_master_pct_str={},
+            error=policy.message_when_blocked or "Редактирование запрещено.",
+            status_code=403,
+            is_edit=True,
+            edit_visit_id=visit_id,
+            cancel_url=f"/visits/{visit_id}",
+        )
+    fp, vm_on_ids, vm_pct_str, _extra = visit_to_form_prefill(db, visit)
+    vm_on_ids, vm_pct_str = _visit_master_state_from_prefill(fp)
+    selected_client = visit.client
+    photos = [p for p in (visit.photo_1, visit.photo_2, visit.photo_3) if p]
+    err = request.query_params.get("err")
+    return _master_visit_step1_template_response(
+        request,
+        current_user=current_user,
+        db=db,
+        form_prefill=fp,
+        visit_master_on_ids=vm_on_ids,
+        visit_master_pct_str=vm_pct_str,
+        selected_client=selected_client,
+        error=err,
+        is_edit=True,
+        edit_visit_id=visit_id,
+        cancel_url=f"/visits/{visit_id}",
+        visit_photos=photos,
+    )
+
+
+def _visit_edit_form_error_response(
+    request: Request,
+    *,
+    current_user: AuthUser,
+    db: Session,
+    visit_id: int,
+    form: Any,
+    error: str,
+):
+    fp = {}
+    for key in form.keys():
+        last = None
+        for v in form.getlist(key):
+            if hasattr(v, "read"):
+                continue
+            last = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+        if last is not None:
+            fp[key] = last
+    fp.update(collect_questionnaire_prefill_from_form(form))
+    fp.update(collect_thermo_prefill_from_form(form))
+    vm_on_ids, vm_pct_str = _visit_master_state_from_prefill(fp)
+    selected_client = None
+    eid = (fp.get("existing_client_id") or "").strip()
+    try:
+        eid_int = parse_int(eid, min=1, field_name="existing_client_id")
+    except ValueError:
+        eid_int = 0
+    if eid_int > 0:
+        selected_client = db.get(Client, eid_int)
+    visit = db.get(Visit, visit_id)
+    photos = []
+    if visit:
+        photos = [p for p in (visit.photo_1, visit.photo_2, visit.photo_3) if p]
+    return _master_visit_step1_template_response(
+        request,
+        current_user=current_user,
+        db=db,
+        form_prefill=fp,
+        visit_master_on_ids=vm_on_ids,
+        visit_master_pct_str=vm_pct_str,
+        selected_client=selected_client,
+        error=error,
+        status_code=400,
+        is_edit=True,
+        edit_visit_id=visit_id,
+        cancel_url=f"/visits/{visit_id}",
+        visit_photos=photos,
+    )
+
+
+@router.post("/visits/{visit_id}/edit")
+async def admin_visit_edit_post(
+    visit_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    visit = _load_visit_for_edit(db, visit_id)
+    if not visit:
+        raise HTTPException(status_code=404, detail="Визит не найден")
+    policy = visit_edit_policy(visit, current_user, db)
+    if not policy.can_edit:
+        raise HTTPException(status_code=403, detail=policy.message_when_blocked or "Недостаточно прав")
+
+    form = await request.form()
+    try:
+        if form_uses_multi_service_lines(form):
+            multi = parse_multi_service_visit_form(form, booking_id=visit.booking_id)
+            update_visit_with_services(db, visit_id, current_user.id, multi)
+        else:
+            kinp = parse_kit_inlay_form(form, single_master_default_id=current_user.id)
+            multi = kit_inlay_to_multi(kinp, booking_id=visit.booking_id)
+            update_visit_with_services(db, visit_id, current_user.id, multi)
+        visit = db.get(Visit, visit_id)
+        assert visit is not None
+        try:
+            p1 = get_nonempty_upload(form, "photo_1")
+            p2 = get_nonempty_upload(form, "photo_2")
+            p3 = get_nonempty_upload(form, "photo_3")
+            if p1 is not None:
+                visit.photo_1 = await save_upload_image(p1)
+            if p2 is not None:
+                visit.photo_2 = await save_upload_image(p2)
+            if p3 is not None:
+                visit.photo_3 = await save_upload_image(p3)
+            if p1 or p2 or p3:
+                db.commit()
+        except ValueError as exc:
+            db.rollback()
+            return _visit_edit_form_error_response(
+                request,
+                current_user=current_user,
+                db=db,
+                visit_id=visit_id,
+                form=form,
+                error=str(exc),
             )
-        kit_rows.append((kit, pieces, bd))
-    for kit, pieces, bd in kit_rows:
-        return_stock_to_kit(db, kit_id=int(kit.id), breakdown=bd, pieces_used=pieces)
-        if kit.pieces_available > 0:
-            kit.is_in_stock = True
-    return True, ""
+    except ValueError as exc:
+        db.rollback()
+        return _visit_edit_form_error_response(
+            request,
+            current_user=current_user,
+            db=db,
+            visit_id=visit_id,
+            form=form,
+            error=str(exc),
+        )
+    return RedirectResponse(url=f"/visits/{visit_id}?msg=updated", status_code=303)
+
+
+def _visit_cancel_revert_stock(db: Session, visit: Visit) -> tuple[bool, str]:
+    return visit_cancel_revert_stock(db, visit)
+
+
+def _visit_service_cancel_revert_stock(db: Session, visit_service_id: int) -> tuple[bool, str]:
+    return visit_service_revert_stock(db, visit_service_id)
 
 
 @router.post("/visits/{visit_id}/cancel")
@@ -294,35 +457,6 @@ async def admin_visit_cancel(
         storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, vs.id, current_user.id)
     db.commit()
     return RedirectResponse(url=f"/visits/{visit_id}?msg=cancelled", status_code=303)
-
-
-def _visit_service_cancel_revert_stock(db: Session, visit_service_id: int) -> tuple[bool, str]:
-    usages = list(
-        db.scalars(select(VisitKitUsage).where(VisitKitUsage.visit_service_id == visit_service_id)).all()
-    )
-    if not usages:
-        return True, ""
-    kit_rows: list[tuple[Kit, int, dict[str, int] | None]] = []
-    for u in usages:
-        kit = db.get(Kit, u.kit_id)
-        if not kit:
-            return False, "Не найден комплект для отката списания (kit_id)."
-        pieces = int(u.pieces_used or 0)
-        if pieces <= 0:
-            continue
-        bd = parse_usage_breakdown_json(getattr(u, "usage_breakdown_json", None))
-        new_avail = int(kit.pieces_available + pieces)
-        if int(kit.pieces_total) >= 0 and new_avail > int(kit.pieces_total):
-            return (
-                False,
-                f"Нельзя отменить услугу: возврат превысит остаток 'всего' по комплекту {kit.sku}.",
-            )
-        kit_rows.append((kit, pieces, bd))
-    for kit, pieces, bd in kit_rows:
-        return_stock_to_kit(db, kit_id=int(kit.id), breakdown=bd, pieces_used=pieces)
-        if kit.pieces_available > 0:
-            kit.is_in_stock = True
-    return True, ""
 
 
 @router.post("/visits/{visit_id}/services/{vs_id}/cancel")
@@ -376,8 +510,8 @@ async def admin_visit_change_client(
     if visit is None:
         raise HTTPException(status_code=404, detail="Визит не найден")
 
-    policy = visit_client_change_policy(visit, current_user, db)
-    if not policy.can_change:
+    policy = visit_edit_policy(visit, current_user, db)
+    if not policy.can_edit:
         raise HTTPException(status_code=403, detail=policy.message_when_blocked or "Недостаточно прав")
 
     form = await request.form()
@@ -385,17 +519,13 @@ async def admin_visit_change_client(
     try:
         new_cid = parse_int(raw, min=1, field_name="new_client_id")
     except ValueError:
-        return RedirectResponse(url=f"/visits/{visit_id}?client_err=bad_id", status_code=303)
-
-    confirm_late = parse_bool(form.get("confirm_late"))
-    if policy.super_outside_window and not confirm_late:
-        return RedirectResponse(url=f"/visits/{visit_id}?client_err=need_confirm", status_code=303)
+        return RedirectResponse(url=f"/visits/{visit_id}/edit?err=bad_client_id", status_code=303)
 
     if new_cid == visit.client_id:
-        return RedirectResponse(url=f"/visits/{visit_id}?client_err=same", status_code=303)
+        return RedirectResponse(url=f"/visits/{visit_id}/edit?err=same_client", status_code=303)
     new_client = db.get(Client, new_cid)
     if new_client is None:
-        return RedirectResponse(url=f"/visits/{visit_id}?client_err=not_found", status_code=303)
+        return RedirectResponse(url=f"/visits/{visit_id}/edit?err=client_not_found", status_code=303)
 
     old_id = visit.client_id
     visit.client_id = new_cid
@@ -412,5 +542,5 @@ async def admin_visit_change_client(
         )
     )
     db.commit()
-    return RedirectResponse(url=f"/visits/{visit_id}", status_code=303)
+    return RedirectResponse(url=f"/visits/{visit_id}?msg=client_changed", status_code=303)
 

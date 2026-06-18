@@ -1,16 +1,16 @@
-"""Правила редактирования визита (окно дней с создания); позже расширение под роли/этап 5."""
+"""Правила редактирования визита (окно дней с создания, роли, участие мастера)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.time_utils import utcnow_naive
 from app.auth import AuthUser
-from app.db.models import PayrollPeriod, Setting, UserRole, Visit
+from app.db.models import PayrollPeriod, Setting, UserRole, Visit, VisitMaster, VisitService, VisitServiceMaster
 from app.setting_keys import EDIT_WINDOW_DAYS
 
 
@@ -71,45 +71,99 @@ def ensure_event_date_in_open_payroll_period(db: Session, event_at: datetime) ->
         .limit(1)
     )
     if open_p is None:
-        # В MVP без периода лучше не блокировать совсем, но по требованиям — ошибка.
         raise ValueError("Нет открытого периода ЗП. Суперадмин должен открыть текущий период.")
 
     if event_at < open_p.date_from:
         raise ValueError("Дата раньше начала текущего открытого периода ЗП, создание невозможно.")
 
 
+def user_participates_in_visit(db: Session, visit_id: int, user_id: int) -> bool:
+    """Мастер участвует в визите: VisitMaster, VisitServiceMaster или mix_bonus."""
+    if db.scalar(
+        select(VisitMaster.id).where(VisitMaster.visit_id == visit_id, VisitMaster.master_id == user_id).limit(1)
+    ):
+        return True
+    if db.scalar(
+        select(VisitServiceMaster.id)
+        .join(VisitService, VisitService.id == VisitServiceMaster.visit_service_id)
+        .where(
+            VisitService.visit_id == visit_id,
+            VisitService.is_cancelled.is_(False),
+            VisitServiceMaster.master_id == user_id,
+        )
+        .limit(1)
+    ):
+        return True
+    visit = db.get(Visit, visit_id)
+    if visit and visit.mix_bonus_master_id == user_id:
+        return True
+    if db.scalar(
+        select(VisitService.id).where(
+            VisitService.visit_id == visit_id,
+            VisitService.is_cancelled.is_(False),
+            VisitService.mix_bonus_master_id == user_id,
+        ).limit(1)
+    ):
+        return True
+    return False
+
+
+@dataclass(frozen=True)
+class VisitEditPolicy:
+    can_edit: bool
+    message_when_blocked: str
+
+
 @dataclass(frozen=True)
 class VisitClientChangePolicy:
-    """can_change: показать форму смены клиента; super_outside_window — нужно подтверждение при POST."""
+    """can_change: показать форму смены клиента; super_outside_window — legacy, всегда False."""
 
     can_change: bool
     message_when_blocked: str
     super_outside_window: bool
 
 
-def visit_client_change_policy(visit: Visit, user: AuthUser, db: Session) -> VisitClientChangePolicy:
+def _edit_window_block_message(days: int) -> str:
+    return (
+        f"Редактирование доступно только в течение {days} дн. с даты создания визита "
+        "(параметр «Окно редактирования» в настройках студии)."
+    )
+
+
+def visit_edit_policy(visit: Visit, user: AuthUser, db: Session) -> VisitEditPolicy:
+    if visit.is_cancelled:
+        return VisitEditPolicy(False, "Визит отменён — редактирование запрещено.")
     if is_in_closed_payroll_period(db, visit.created_at):
-        return VisitClientChangePolicy(
-            can_change=False,
-            message_when_blocked="Визит относится к закрытому периоду ЗП — редактирование и аннулирование запрещено.",
-            super_outside_window=False,
+        return VisitEditPolicy(
+            False,
+            "Визит относится к закрытому периоду ЗП — редактирование и аннулирование запрещено.",
         )
+
+    if UserRole.ADMIN_SUPER in user.roles or UserRole.TECHSPEC in user.roles:
+        return VisitEditPolicy(True, "")
+
     days = edit_window_days(db)
     inside = within_edit_window(visit, days)
 
-    # Техспец и суперадмин по назначенным ролям — полные права смены клиента (как у суперадмина).
-    if UserRole.ADMIN_SUPER in user.roles or UserRole.TECHSPEC in user.roles:
-        return VisitClientChangePolicy(
-            can_change=True,
-            message_when_blocked="",
-            super_outside_window=not inside,
-        )
-    if user.role in (UserRole.ADMIN, UserRole.MASTER):
+    if user.role == UserRole.ADMIN:
         if inside:
-            return VisitClientChangePolicy(True, "", False)
-        msg = (
-            f"Смена клиента доступна только в течение {days} дн. с даты создания визита "
-            "(параметр «Окно редактирования» в настройках студии)."
-        )
-        return VisitClientChangePolicy(False, msg, False)
-    return VisitClientChangePolicy(False, "Недостаточно прав.", False)
+            return VisitEditPolicy(True, "")
+        return VisitEditPolicy(False, _edit_window_block_message(days))
+
+    if user.role == UserRole.MASTER:
+        if not inside:
+            return VisitEditPolicy(False, _edit_window_block_message(days))
+        if not user_participates_in_visit(db, visit.id, user.id):
+            return VisitEditPolicy(False, "Редактировать визит может только мастер, участвующий в этом визите.")
+        return VisitEditPolicy(True, "")
+
+    return VisitEditPolicy(False, "Недостаточно прав.")
+
+
+def visit_client_change_policy(visit: Visit, user: AuthUser, db: Session) -> VisitClientChangePolicy:
+    ep = visit_edit_policy(visit, user, db)
+    return VisitClientChangePolicy(
+        can_change=ep.can_edit,
+        message_when_blocked=ep.message_when_blocked,
+        super_outside_window=False,
+    )

@@ -12,7 +12,7 @@
       </div>
       {% if not visit_edit_blocked and not visit.is_cancelled %}
         <div style="flex-shrink:0;">
-          <a href="#visit-change-client"><button type="button">Изменить</button></a>
+          <a href="/visits/{{ visit.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
         </div>
       {% endif %}
     </div>
@@ -32,6 +32,10 @@
         <div class="error" style="margin:12px 0;">Визит уже отменён.</div>
       {% elif msg == 'cancel_conflict' %}
         <div class="error" style="margin:12px 0;">Нельзя отменить: конфликт при возврате заготовок на склад (проверьте движения по комплекту).</div>
+      {% elif msg == 'updated' %}
+        <div class="ok" style="margin:12px 0;">Визит обновлён.</div>
+      {% elif msg == 'client_changed' %}
+        <div class="ok" style="margin:12px 0;">Клиент визита изменён.</div>
       {% endif %}
     {% endif %}
     {% if request.query_params.get('draft_client') == '1' and visit.client and not visit.client.is_confirmed %}
@@ -43,22 +47,6 @@
       <p class="muted" style="font-size: 12px; margin-top: 8px;">История изменений и аннулирование визита доступны суперадмину или техспецу.</p>
     {% endif %}
 
-    {% if client_err %}
-      <div class="error" style="margin:12px 0;">
-        {% if client_err == 'need_confirm' %}
-          Отметьте подтверждение смены клиента после истечения окна редактирования.
-        {% elif client_err == 'bad_id' %}
-          Укажите клиента и повторите сохранение.
-        {% elif client_err == 'not_found' %}
-          Клиент не найден.
-        {% elif client_err == 'same' %}
-          Выбран тот же клиент.
-        {% else %}
-          Не удалось сохранить изменение клиента.
-        {% endif %}
-      </div>
-    {% endif %}
-
     <h3>Клиент</h3>
     <p>
       <strong><a href="/clients/{{ visit.client_id }}">{{ visit.client.name }}</a></strong>
@@ -66,26 +54,6 @@
     <p class="muted">
       Свой: {% if visit.client_type.value == 'SELF' %}да{% else %}нет{% endif %}
     </p>
-
-    {% if not visit_edit_blocked and not visit.is_cancelled %}
-      <div id="visit-change-client" class="card" style="margin-top: 12px; background: #f8fafc; border: 1px solid #e2e8f0;">
-        <h4 style="margin: 0 0 10px; font-size: 1rem;">Смена клиента у визита</h4>
-        <p class="muted" style="font-size: 13px; margin: 0 0 10px;">Укажите id клиента из карточки (страница клиента, строка «id …»). Действие пишется в историю изменений.</p>
-        <form method="post" action="/visits/{{ visit.id }}/client" style="max-width: 420px;">
-          <label>Новый клиент, id</label>
-          <input name="new_client_id" type="number" min="1" step="1" required placeholder="например, 12" />
-          {% if visit_client_change_confirm_required %}
-            <label style="margin-top:10px; font-weight:normal;">
-              <input type="checkbox" name="confirm_late" value="1" />
-              Подтверждаю смену после истечения окна редактирования (суперадмин / техспец)
-            </label>
-          {% endif %}
-          <div style="margin-top: 12px;">
-            <button type="submit">Сохранить клиента</button>
-          </div>
-        </form>
-      </div>
-    {% endif %}
 
     {% if visit.photo_1 or visit.photo_2 or visit.photo_3 %}
       <h3 style="margin-top: 18px;">Фото</h3>
