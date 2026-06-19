@@ -80,7 +80,7 @@ def _seed_users_and_services(db) -> tuple[User, User, User, list[int]]:
     db.add(sub)
     db.flush()
     svc_ids: list[int] = []
-    for name in ("Услуга A",):
+    for name in ("Услуга A", "Услуга B"):
         s = Service(subcategory_id=sub.id, name=name, is_active=True)
         db.add(s)
         db.flush()
@@ -475,3 +475,73 @@ def test_own_kit_line_without_stock_succeeds(memory_db):
     computed = compute_visit_service_line(db, line, header, default_mix_bonus_master_id=master_a.id, apply_kit_stock=False)
     assert computed.amount_from_client == 5000.0
     assert computed.amortization_amount > 0
+
+
+def test_update_visit_adds_second_service_without_dropping_first(memory_db):
+    db = memory_db
+    master_a, _master_b, _admin, svc_ids = _seed_users_and_services(db)
+    client = db.scalar(select(Client).limit(1))
+    visit = _make_visit(db, master_a, client.id, svc_ids[0], amount=3000.0)
+    vs0 = db.scalar(
+        select(VisitService).where(VisitService.visit_id == visit.id, VisitService.is_cancelled.is_(False))
+    )
+    assert vs0 is not None
+
+    header = VisitHeaderInput(
+        client_mode="existing",
+        existing_client_id=client.id,
+        draft_name="",
+        draft_phone="",
+        draft_telegram="",
+        draft_vk="",
+        draft_instagram="",
+        draft_other_contact="",
+        client_type=VisitClientType.RETURNING,
+        performed_date=visit.performed_date.date() if visit.performed_date else datetime.utcnow().date(),
+        duration_minutes=60,
+        masters_scope=VisitMastersScope.VISIT,
+        same_master_shares_all_services=False,
+        visit_master_allocations=[(master_a.id, 100)],
+    )
+    multi = MultiServiceVisitInput(
+        header=header,
+        lines=[
+            VisitServiceLineInput(
+                service_id=svc_ids[0],
+                amount_from_client=3000.0,
+                client_discount_percent=0,
+                kanekalon_grams=0,
+                kudri_grams=0,
+                mix_source=MixSource.NO_MIX,
+                mix_complexity=None,
+                mix_bonus_master_id=None,
+                amortization_level=None,
+                visit_service_id=vs0.id,
+                kit_kind="STOCK",
+            ),
+            VisitServiceLineInput(
+                service_id=svc_ids[1],
+                amount_from_client=2000.0,
+                client_discount_percent=0,
+                kanekalon_grams=0,
+                kudri_grams=0,
+                mix_source=MixSource.NO_MIX,
+                mix_complexity=None,
+                mix_bonus_master_id=None,
+                amortization_level=None,
+                kit_kind="STOCK",
+            ),
+        ],
+    )
+    update_visit_with_services(db, visit.id, master_a.id, multi)
+
+    active = db.scalars(
+        select(VisitService)
+        .where(VisitService.visit_id == visit.id, VisitService.is_cancelled.is_(False))
+        .order_by(VisitService.sort_order.asc(), VisitService.id.asc())
+    ).all()
+    assert len(active) == 2
+    assert {int(vs.service_id) for vs in active} == {svc_ids[0], svc_ids[1]}
+    assert active[0].id == vs0.id
+    assert float(active[0].amount_from_client or 0) == 3000.0
+    assert float(active[1].amount_from_client or 0) == 2000.0
