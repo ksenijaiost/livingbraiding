@@ -101,3 +101,23 @@ def extract_questionnaire_raw_from_form(form: Any) -> dict[str, str]:
         else:
             out[fk] = str(v).strip() if v is not None else ""
     return out
+
+
+def extract_line_questionnaire_raw_from_form(form: Any, idx: int) -> dict[str, str]:
+    """Собрать line_<idx>_q_<field_key> → {field_key: value}."""
+    from starlette.datastructures import UploadFile
+
+    prefix = f"line_{int(idx)}_q_"
+    out: dict[str, str] = {}
+    for k in form.keys():
+        if not isinstance(k, str) or not k.startswith(prefix):
+            continue
+        fk = k[len(prefix) :]
+        if not fk:
+            continue
+        vs = [v for v in form.getlist(k) if not isinstance(v, UploadFile)]
+        if not vs:
+            continue
+        v = vs[-1]
+        out[fk] = v.decode().strip() if isinstance(v, (bytes, bytearray)) else str(v).strip() if v is not None else ""
+    return out
