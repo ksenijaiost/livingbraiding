@@ -74,3 +74,51 @@ def test_parse_multi_single_line_indices() -> None:
     assert len(multi.lines) == 1
     assert multi.lines[0].service_id == 10
     assert multi.lines[0].amount_from_client == 4000.0
+
+
+def test_second_line_does_not_inherit_line0_visit_service_id() -> None:
+    from app.visit_multi_service import _parse_line_from_form
+
+    form = _form(
+        {
+            "service_id": "5",
+            "visit_service_id": "100",
+            "amount_from_client": "3000",
+            "line_1_service_id": "7",
+            "line_1_amount_from_client": "2000",
+            "line_1_kit_kind": "STOCK",
+            "line_1_kanekalon_grams": "0",
+            "line_1_kudri_grams": "0",
+            "line_1_mix_source": "NO_MIX",
+            "client_mode": "existing",
+            "existing_client_id": "1",
+            "performed_date": "2026-05-24",
+        }
+    )
+    line0 = _parse_line_from_form(form, 0)
+    line1 = _parse_line_from_form(form, 1)
+    assert line0.visit_service_id == 100
+    assert line1.visit_service_id is None
+    assert line1.service_id == 7
+    assert line1.amount_from_client == 2000.0
+
+
+def test_discover_includes_line0_when_only_visit_service_id_hidden() -> None:
+    form = _form(
+        {
+            "visit_service_id": "100",
+            "amount_from_client": "3000",
+            "line_1_service_id": "7",
+            "line_1_amount_from_client": "2000",
+            "line_1_kit_kind": "STOCK",
+            "line_1_mix_source": "NO_MIX",
+            "client_mode": "existing",
+            "existing_client_id": "1",
+            "performed_date": "2026-05-24",
+        }
+    )
+    assert _discover_line_indices(form) == [0, 1]
+    multi = parse_multi_service_visit_form(form, single_master_default_id=1)
+    assert len(multi.lines) == 2
+    assert multi.lines[0].visit_service_id == 100
+    assert multi.lines[1].visit_service_id is None

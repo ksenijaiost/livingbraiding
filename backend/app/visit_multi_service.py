@@ -712,6 +712,17 @@ def kit_inlay_to_multi(inp: KitInlayFormInput, *, booking_id: int | None = None)
     return MultiServiceVisitInput(header=header, lines=[line])
 
 
+def _line0_present_in_form(form: Any) -> bool:
+    """Первая услуга в форме: service_id или скрытый visit_service_id (режим редактирования)."""
+    if _line_service_id_from_form(form, 0) > 0:
+        return True
+    raw = form.get("visit_service_id")
+    if raw is None or isinstance(raw, UploadFile):
+        return False
+    s = raw.decode().strip() if isinstance(raw, (bytes, bytearray)) else str(raw).strip()
+    return bool(s.isdigit() and int(s) > 0)
+
+
 def _discover_line_indices(form: Any) -> list[int]:
     indices: set[int] = set()
     for key in form.keys():
@@ -726,7 +737,7 @@ def _discover_line_indices(form: Any) -> list[int]:
             result.append(0)
         elif idx >= 1 and _line_service_id_from_form(form, idx) > 0:
             result.append(idx)
-    if 0 not in result and _line_service_id_from_form(form, 0) > 0:
+    if 0 not in result and _line0_present_in_form(form):
         result.insert(0, 0)
     if result:
         return sorted(result)
@@ -735,7 +746,7 @@ def _discover_line_indices(form: Any) -> list[int]:
     return []
 
 
-def _prefix_g(form: Any, prefix: str) -> Callable[[str, str], str]:
+def _prefix_g(form: Any, prefix: str, *, allow_unprefixed_fallback: bool = True) -> Callable[[str, str], str]:
     _radio_fields = frozenset({"kit_kind", "mix_source", "mix_complexity", "amortization_level", "own_origin"})
 
     def g(name: str, default: str = "") -> str:
@@ -743,13 +754,13 @@ def _prefix_g(form: Any, prefix: str) -> Callable[[str, str], str]:
         v = None
         if name in _radio_fields and hasattr(form, "getlist"):
             vals = [x for x in form.getlist(full) if x is not None and not isinstance(x, UploadFile)]
-            if not vals and prefix:
+            if not vals and prefix and allow_unprefixed_fallback:
                 vals = [x for x in form.getlist(name) if x is not None and not isinstance(x, UploadFile)]
             if vals:
                 v = vals[-1]
         if v is None:
             v = form.get(full)
-        if v is None and prefix:
+        if v is None and prefix and allow_unprefixed_fallback:
             v = form.get(name)
         if v is None:
             return default
@@ -764,7 +775,7 @@ def _prefix_g(form: Any, prefix: str) -> Callable[[str, str], str]:
 
 def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitServiceLineInput:
     prefix = f"line_{idx}_"
-    g = _prefix_g(form, prefix)
+    g = _prefix_g(form, prefix, allow_unprefixed_fallback=(idx == 0))
     g_int = lambda name, default=0: int(parse_float(g(name, "").strip() or "0", default=default, field_name=name)) if g(name, "").strip() else default
     g_float = lambda name, default=0.0: parse_float(g(name, "").strip() or "0", default=default, field_name=name) if g(name, "").strip() else default
     g_bool = lambda name: parse_bool(g(name, ""))
