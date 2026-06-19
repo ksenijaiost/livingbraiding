@@ -63,7 +63,10 @@ from app.payroll_fund import (
 from app.time_utils import utcnow_naive
 from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
 from app.visit_stock import visit_service_revert_stock
-from app.questionnaire.answer_validate import extract_questionnaire_raw_from_form
+from app.questionnaire.answer_validate import (
+    extract_line_questionnaire_raw_from_form,
+    extract_questionnaire_raw_from_form,
+)
 from app.thermo_visit import parse_thermo_from_form, persist_new_thermo_template_if_needed
 from app.user_roles import user_has_role
 
@@ -806,21 +809,12 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
     mix_bonus_raw = g("mix_bonus_master_id", "").strip()
     mix_bonus_id = int(mix_bonus_raw) if mix_bonus_raw.isdigit() and int(mix_bonus_raw) > 0 else None
 
-    q_raw: dict[str, str] = {}
-    qpre = f"{q_prefix}line_{idx}_" if q_prefix else f"line_{idx}_"
-    for k in form.keys():
-        if not isinstance(k, str):
-            continue
-        if k.startswith("q_") and (not prefix or k.startswith(qpre) or (idx == 0 and not k.startswith("line_"))):
-            key = k[len(qpre) :] if k.startswith(qpre) else k
-            if not key.startswith("q_"):
-                continue
-            vs = [v for v in form.getlist(k) if not isinstance(v, UploadFile)]
-            if vs:
-                v = vs[-1]
-                q_raw[key] = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
-    if not q_raw and idx == 0:
-        q_raw = extract_questionnaire_raw_from_form(form)
+    q_raw = extract_line_questionnaire_raw_from_form(form, idx)
+    if idx == 0:
+        legacy_q = extract_questionnaire_raw_from_form(form)
+        for k, v in legacy_q.items():
+            if k not in q_raw:
+                q_raw[k] = v
 
     started_at: datetime | None = None
     st_raw = g("started_time", "").strip()

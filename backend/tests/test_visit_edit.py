@@ -387,6 +387,47 @@ def test_parse_line_kit_kind_uses_last_radio_value(memory_db):
     assert line.amount_from_client == 5000.0
 
 
+def test_parse_line_questionnaire_from_prefixed_fields():
+    from app.questionnaire.answer_validate import extract_line_questionnaire_raw_from_form
+    from app.visit_multi_service import _parse_line_from_form
+
+    form = _FakeForm(
+        {
+            "line_1_service_id": "1",
+            "line_1_q_bases_count": "38",
+            "line_1_q_blanks_count": "12",
+            "line_1_kit_kind": "STOCK",
+            "line_1_mix_source": "NO_MIX",
+            "line_1_amortization_level": "MIN",
+            "line_1_amount_from_client": "5000",
+        }
+    )
+    assert extract_line_questionnaire_raw_from_form(form, 1) == {
+        "bases_count": "38",
+        "blanks_count": "12",
+    }
+    line = _parse_line_from_form(form, 1)
+    assert line.questionnaire_raw == {"bases_count": "38", "blanks_count": "12"}
+
+
+def test_parse_line0_questionnaire_merges_legacy_q_fields():
+    from app.visit_multi_service import _parse_line_from_form
+
+    form = _FakeForm(
+        {
+            "service_id": "1",
+            "q_bases_count": "40",
+            "q_blanks_count": "15",
+            "kit_kind": "STOCK",
+            "mix_source": "NO_MIX",
+            "amortization_level": "MIN",
+            "amount_from_client": "6000",
+        }
+    )
+    line = _parse_line_from_form(form, 0)
+    assert line.questionnaire_raw == {"bases_count": "40", "blanks_count": "15"}
+
+
 def test_own_kit_line_without_stock_succeeds(memory_db):
     from app.db.models import AmortizationLevel, MixSource, ServiceSubcategory
     from app.visit_multi_service import VisitHeaderInput, VisitServiceLineInput, compute_visit_service_line

@@ -2133,6 +2133,16 @@
               h += '<option value="' + escapeHtml(ov) + '"' + (String(vv) === ov ? ' selected' : '') + '>' + escapeHtml(String(o.label || ov)) + '</option>';
             }
             h += '</select>';
+          } else if (String(f.field_type || '') === 'NUMBER') {
+            let attr = ' step="any" style="width:100%; box-sizing:border-box;" value="' + escapeHtml(vv) + '"';
+            if (f.min_value != null) attr += ' min="' + escapeHtml(String(f.min_value)) + '"';
+            if (f.max_value != null) attr += ' max="' + escapeHtml(String(f.max_value)) + '"';
+            h += '<input type="number" name="' + qn + '"' + attr + ' />';
+          } else if (String(f.field_type || '') === 'TEXTAREA') {
+            h += '<textarea name="' + qn + '" rows="3" style="width:100%; box-sizing:border-box;">' + escapeHtml(vv) + '</textarea>';
+          } else if (String(f.field_type || '') === 'CHECKBOX') {
+            const chk = (vv === 'on' || vv === 'true' || vv === '1') ? ' checked' : '';
+            h += '<label style="display:flex;align-items:center;gap:8px;font-weight:normal;"><input type="checkbox" name="' + qn + '" value="on"' + chk + ' /> ' + escapeHtml(f.placeholder || 'Да') + '</label>';
           } else {
             h += '<input type="text" name="' + qn + '" value="' + escapeHtml(vv) + '" style="width:100%; box-sizing:border-box;" />';
           }
@@ -2299,6 +2309,14 @@
       } catch (e) {
         return [];
       }
+    }
+
+    function reinitAllExtraLineStockKitEditors() {
+      if (!window.LbKitStockPick) return;
+      document.querySelectorAll('[data-extra-line-idx]').forEach(function (row) {
+        var idx = parseInt(row.getAttribute('data-extra-line-idx') || '0', 10) || 0;
+        if (idx > 0) initLineStockKitEditors(idx, row);
+      });
     }
 
     function initLineStockKitEditors(idx, row) {
@@ -2667,39 +2685,47 @@
         const el = document.getElementById(id);
         if (advHost && el && el.parentElement !== advHost) advHost.appendChild(el);
       });
-      const fpAll = {{ fp | tojson }};
-      const indices = [];
-      Object.keys(fpAll || {}).forEach(function (k) {
-        const m = /^line_(\d+)_service_id$/.exec(String(k));
-        if (!m) return;
-        const idx = parseInt(m[1]);
-        const sid = parseInt(fpAll[k] || '0');
-        if (idx >= 1 && sid > 0 && indices.indexOf(idx) < 0) indices.push(idx);
-      });
-      indices.sort(function (a, b) { return a - b; });
-      for (let i = 0; i < indices.length; i++) {
-        const idx = indices[i];
-        addExtraServiceLine(idx, {
-          service_id: fpAll['line_' + idx + '_service_id'] || '',
-          visit_service_id: fpAll['line_' + idx + '_visit_service_id'] || '',
-          amount_from_client: fpAll['line_' + idx + '_amount_from_client'] || '',
-          started_time: fpAll['line_' + idx + '_started_time'] || '',
-          client_discount_percent: fpAll['line_' + idx + '_client_discount_percent'] || '0',
-          amortization_level: fpAll['line_' + idx + '_amortization_level'] || 'MIN',
-          comment: fpAll['line_' + idx + '_comment'] || '',
-          kanekalon_grams: fpAll['line_' + idx + '_kanekalon_grams'] || '0',
-          kudri_grams: fpAll['line_' + idx + '_kudri_grams'] || '0',
+
+      function bootVisitExtraServiceLines() {
+        const fpAll = {{ fp | tojson }};
+        const indices = [];
+        Object.keys(fpAll || {}).forEach(function (k) {
+          const m = /^line_(\d+)_service_id$/.exec(String(k));
+          if (!m) return;
+          const idx = parseInt(m[1]);
+          const sid = parseInt(fpAll[k] || '0');
+          if (idx >= 1 && sid > 0 && indices.indexOf(idx) < 0) indices.push(idx);
         });
+        indices.sort(function (a, b) { return a - b; });
+        for (let i = 0; i < indices.length; i++) {
+          const idx = indices[i];
+          addExtraServiceLine(idx, {
+            service_id: fpAll['line_' + idx + '_service_id'] || '',
+            visit_service_id: fpAll['line_' + idx + '_visit_service_id'] || '',
+            amount_from_client: fpAll['line_' + idx + '_amount_from_client'] || '',
+            started_time: fpAll['line_' + idx + '_started_time'] || '',
+            client_discount_percent: fpAll['line_' + idx + '_client_discount_percent'] || '0',
+            amortization_level: fpAll['line_' + idx + '_amortization_level'] || 'MIN',
+            comment: fpAll['line_' + idx + '_comment'] || '',
+            kanekalon_grams: fpAll['line_' + idx + '_kanekalon_grams'] || '0',
+            kudri_grams: fpAll['line_' + idx + '_kudri_grams'] || '0',
+          });
+        }
+        syncExtraLinesVisibility();
+        syncMastersScopeUi();
+        syncPerServiceMasterPctInputs();
+        reinitAllExtraLineStockKitEditors();
+        syncVisitPreview();
       }
+
       btn.addEventListener('click', function () {
         addExtraServiceLine(nextExtraLineIndex(), {});
       });
-      syncExtraLinesVisibility();
-      syncMastersScopeUi();
+      document.addEventListener('DOMContentLoaded', bootVisitExtraServiceLines);
+
       document.querySelectorAll('input[name="line_0_service_master_on"]').forEach(function (cb) {
         cb.addEventListener('change', syncPerServiceMasterPctInputs);
       });
-      syncPerServiceMasterPctInputs();
     })();
 
     document.querySelectorAll('input[name="masters_scope"]').forEach(function (r) {
