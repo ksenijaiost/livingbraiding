@@ -1,4 +1,9 @@
 {% extends "base.html" %}
+{% macro lb_cal_money(amount) -%}
+  {%- set a = amount|float -%}
+  {%- set abs_a = a|abs -%}
+  <span class="lb-cal-money-full">{%- if a > 0 %}+{% endif -%}{{ "%.2f"|format(a) }} ₽</span><span class="lb-cal-money-short">{%- if a > 0 %}+{% endif -%}{%- if abs_a >= 1000000 -%}{{ "%.1f"|format(a / 1000000)|replace(".", ",") }}м{%- elif abs_a >= 1000 -%}{{ "%.1f"|format(a / 1000)|replace(".", ",") }}к{%- else -%}{{ "%.0f"|format(a) }}{%- endif -%}</span>
+{%- endmacro %}
 {% block content %}
   <div class="card">
     <h2 style="margin-top: 0;">Главная</h2>
@@ -133,8 +138,8 @@
             <a href="/?m={{ calendar_ctx.next_ym }}"><button type="button" class="secondary">→</button></a>
           </div>
         </div>
-        <div style="overflow-x:auto; margin-top: 10px;">
-          <table style="table-layout: fixed; width: 100%;">
+        <div class="lb-home-cal-scroll">
+          <table class="lb-home-cal-table">
             <thead>
               <tr>
                 <th style="width:14.28%;">Пн</th>
@@ -150,44 +155,45 @@
               {% for week in calendar_ctx.weeks %}
                 <tr>
                   {% for d in week %}
-                    <td class="lb-cal-day"
-                        data-day="{{ d.iso }}"
-                        style="vertical-align: top; padding: 8px 10px; cursor:pointer; {% if not d.in_month %}opacity:0.45;{% endif %} {% if d.is_today %}border-bottom:2px solid #111827;{% endif %}">
-                      <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 8px;">
-                        <div style="font-weight:700;" title="{{ d.iso }}">{{ d.date.day }}</div>
+                    <td class="lb-cal-day{% if d.is_today %} lb-cal-day--today{% endif %}{% if not d.in_month %} lb-cal-day--out{% endif %}"
+                        data-day="{{ d.iso }}">
+                      <div class="lb-cal-day-head">
+                        <div class="lb-cal-day-num" title="{{ d.iso }}">{{ d.date.day }}</div>
                         {% if d.draft_count and d.draft_count > 0 %}
-                          <span title="Есть черновик визита" style="font-size:14px;line-height:1;">❗️</span>
+                          <span class="lb-cal-draft" title="Есть черновик визита" aria-hidden="true">❗️</span>
                         {% endif %}
                       </div>
-                      <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px; font-size:12px;">
+                      {% if d.visits or d.bookings or d.works or (d.payroll_sum and (d.payroll_sum|abs > 0.001)) or (calendar_ctx.show_studio_payroll and d.studio_payroll_sum and (d.studio_payroll_sum|abs > 0.001)) %}
+                      <div class="lb-cal-activity">
                         {% if d.visits %}
-                          <div class="lb-cal-stat" title="Визиты">
+                          <div class="lb-cal-stat lb-cal-stat--inline" title="Визиты: {{ d.visits }}">
                             <span class="lb-cal-lbl-full">Визиты: </span><span class="lb-cal-lbl-icon" aria-hidden="true">✂️ </span><strong>{{ d.visits }}</strong>
                           </div>
                         {% endif %}
                         {% if d.bookings %}
-                          <div class="lb-cal-stat" title="Брони">
+                          <div class="lb-cal-stat lb-cal-stat--inline" title="Брони: {{ d.bookings }}">
                             <span class="lb-cal-lbl-full">Брони: </span><span class="lb-cal-lbl-icon" aria-hidden="true">📋 </span><strong>{{ d.bookings }}</strong>
                           </div>
                         {% endif %}
                         {% if d.works %}
-                          <div class="lb-cal-stat" title="Работа">
+                          <div class="lb-cal-stat lb-cal-stat--inline" title="Работа: {{ d.works }}">
                             <span class="lb-cal-lbl-full">Работа: </span><span class="lb-cal-lbl-icon" aria-hidden="true">🔧 </span><strong>{{ d.works }}</strong>
                           </div>
                         {% endif %}
                         {% if d.payroll_sum and (d.payroll_sum|abs > 0.001) %}
-                          <div class="lb-cal-stat" title="ЗП мастера (нетто по журналу)">
+                          <div class="lb-cal-stat lb-cal-money" title="ЗП мастера (нетто по журналу): {% if d.payroll_sum > 0 %}+{% endif %}{{ "%.2f"|format(d.payroll_sum) }} ₽">
                             <span class="lb-cal-lbl-full">ЗП: </span><span class="lb-cal-lbl-icon" aria-hidden="true">💰 </span>
-                            <strong>{% if d.payroll_sum > 0 %}+{% endif %}{{ "%.2f"|format(d.payroll_sum) }} ₽</strong>
+                            <strong>{{ lb_cal_money(d.payroll_sum) }}</strong>
                           </div>
                         {% endif %}
                         {% if calendar_ctx.show_studio_payroll and d.studio_payroll_sum and (d.studio_payroll_sum|abs > 0.001) %}
-                          <div class="lb-cal-stat" title="Фонд студии (нетто по журналу за день)">
+                          <div class="lb-cal-stat lb-cal-money" title="Фонд студии (нетто по журналу за день): {% if d.studio_payroll_sum > 0 %}+{% endif %}{{ "%.2f"|format(d.studio_payroll_sum) }} ₽">
                             <span class="lb-cal-lbl-full">Фонд: </span><span class="lb-cal-lbl-icon" aria-hidden="true">🏦 </span>
-                            <strong>{% if d.studio_payroll_sum > 0 %}+{% endif %}{{ "%.2f"|format(d.studio_payroll_sum) }} ₽</strong>
+                            <strong>{{ lb_cal_money(d.studio_payroll_sum) }}</strong>
                           </div>
                         {% endif %}
                       </div>
+                      {% endif %}
                     </td>
                   {% endfor %}
                 </tr>

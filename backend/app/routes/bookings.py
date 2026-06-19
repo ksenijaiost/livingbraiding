@@ -79,6 +79,7 @@ from app.time_utils import utcnow_naive
 from app.user_roles import select_users_with_any_role, select_users_with_role
 from app.work_products import _rubber_type_items
 from app.master_schedule import is_master_available_for_interval
+from app.ui_service_display import booking_list_detail_parts
 from app.webui import templates, ctx as _ctx
 
 
@@ -2208,11 +2209,12 @@ def admin_booking_detail(
             selectinload(Booking.created_by_user),
             selectinload(Booking.updated_by_user),
             selectinload(Booking.cancelled_by_user),
-            selectinload(Booking.planned_service).selectinload(Service.subcategory),
+            selectinload(Booking.planned_service).selectinload(Service.subcategory).selectinload(ServiceSubcategory.category),
             selectinload(Booking.masters).selectinload(BookingMaster.master),
             selectinload(Booking.planned_services)
             .selectinload(BookingPlannedService.service)
-            .selectinload(Service.subcategory),
+            .selectinload(Service.subcategory)
+            .selectinload(ServiceSubcategory.category),
             selectinload(Booking.planned_services)
             .selectinload(BookingPlannedService.masters)
             .selectinload(BookingPlannedServiceMaster.master),
@@ -2817,7 +2819,20 @@ def admin_bookings(
         if mine_raw not in ("0", "false", "no", "all"):
             bookings_mine_only = True
 
-    stmt = select(Booking).options(selectinload(Booking.client)).limit(1000)
+    stmt = (
+        select(Booking)
+        .options(
+            selectinload(Booking.client),
+            selectinload(Booking.planned_services)
+            .selectinload(BookingPlannedService.service)
+            .selectinload(Service.subcategory)
+            .selectinload(ServiceSubcategory.category),
+            selectinload(Booking.planned_service)
+            .selectinload(Service.subcategory)
+            .selectinload(ServiceSubcategory.category),
+        )
+        .limit(1000)
+    )
     if show_mode != "all":
         stmt = stmt.where(
             Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE))
@@ -2834,6 +2849,34 @@ def admin_bookings(
     else:
         stmt = stmt.order_by(Booking.planned_date.asc(), Booking.id.asc())
     rows = list(db.scalars(stmt).all())
+    booking_ids = [int(b.id) for b in rows]
+    work_by_booking: dict[int, WorkForInventory] = {}
+    visit_by_booking: dict[int, Visit] = {}
+    sale_by_booking: dict[int, ProductSale] = {}
+    if booking_ids:
+        for w in db.scalars(select(WorkForInventory).where(WorkForInventory.booking_id.in_(booking_ids))).all():
+            if w.booking_id is not None:
+                work_by_booking[int(w.booking_id)] = w
+        for v in db.scalars(
+            select(Visit)
+            .where(Visit.booking_id.in_(booking_ids))
+            .options(selectinload(Visit.services))
+        ).all():
+            if v.booking_id is not None:
+                visit_by_booking[int(v.booking_id)] = v
+        for s in db.scalars(select(ProductSale).where(ProductSale.booking_id.in_(booking_ids))).all():
+            if s.booking_id is not None:
+                sale_by_booking[int(s.booking_id)] = s
+    row_details = {
+        int(b.id): booking_list_detail_parts(
+            b,
+            linked_work=work_by_booking.get(int(b.id)),
+            linked_visit=visit_by_booking.get(int(b.id)),
+            linked_sale=sale_by_booking.get(int(b.id)),
+            product_kind_label_fn=_product_kind_label,
+        )
+        for b in rows
+    }
     display_tz = get_display_timezone(db)
     return templates.TemplateResponse(
         "admin_bookings.html",
@@ -2841,6 +2884,7 @@ def admin_bookings(
             request,
             current_user=current_user,
             rows=rows,
+            row_details=row_details,
             show_mode="all" if show_mode == "all" else "active",
             display_tz=display_tz,
             can_manage=can_manage,

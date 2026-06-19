@@ -68,32 +68,43 @@
             <th>Дата</th>
             <th>Клиент</th>
             <th>Тип</th>
+            <th>Детали</th>
             <th>Статус</th>
-            <th></th>
+            {% if can_manage %}
+              <th></th>
+            {% endif %}
           </tr>
         </thead>
         <tbody>
           {% for b in rows %}
             <tr>
               <td><a href="/bookings/{{ b.id }}">#{{ b.id }}</a></td>
-              <td>{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</td>
+              <td class="lb-nowrap"><a href="/bookings/{{ b.id }}">{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</a></td>
               <td><a href="/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
               <td>{{ "Визит" if b.kind.value == "VISIT" else "Продажа" }}</td>
+              <td style="max-width:18rem;">
+                {% set parts = row_details.get(b.id) or [] %}
+                {% if parts %}
+                  {% for p in parts %}
+                    <div style="font-size:12px; line-height:1.35; margin:2px 0;">{{ p }}</div>
+                  {% endfor %}
+                {% else %}
+                  <span class="muted">—</span>
+                {% endif %}
+              </td>
               <td>
                 <strong>{{ booking_status_display(b.status) }}</strong>
               </td>
-              <td class="lb-nowrap">
-                <a href="/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
-                {% if can_manage %}
-                  <a href="/bookings/{{ b.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+              {% if can_manage %}
+                <td class="lb-nowrap">
                   {% if b.status.value in ["ACTIVE", "PENDING_CONFIRMATION"] %}
                     <form method="post" action="/bookings/{{ b.id }}/cancel" style="display:inline; margin:0;" data-lb-confirm="Отменить бронь?" data-lb-prompt-input="reason" data-lb-prompt-text="Причина отмены">
                       <input type="hidden" name="reason" value="" />
                       <button type="submit" class="secondary">Отменить</button>
                     </form>
                   {% endif %}
-                {% endif %}
-              </td>
+                </td>
+              {% endif %}
             </tr>
           {% endfor %}
         </tbody>
@@ -101,4 +112,3 @@
     {% endif %}
   </div>
 {% endblock %}
-

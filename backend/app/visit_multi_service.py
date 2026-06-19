@@ -733,9 +733,19 @@ def _discover_line_indices(form: Any) -> list[int]:
 
 
 def _prefix_g(form: Any, prefix: str) -> Callable[[str, str], str]:
+    _radio_fields = frozenset({"kit_kind", "mix_source", "mix_complexity", "amortization_level", "own_origin"})
+
     def g(name: str, default: str = "") -> str:
         full = f"{prefix}{name}" if prefix else name
-        v = form.get(full)
+        v = None
+        if name in _radio_fields and hasattr(form, "getlist"):
+            vals = [x for x in form.getlist(full) if x is not None and not isinstance(x, UploadFile)]
+            if not vals and prefix:
+                vals = [x for x in form.getlist(name) if x is not None and not isinstance(x, UploadFile)]
+            if vals:
+                v = vals[-1]
+        if v is None:
+            v = form.get(full)
         if v is None and prefix:
             v = form.get(name)
         if v is None:

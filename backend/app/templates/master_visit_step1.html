@@ -1475,79 +1475,206 @@
       if (total <= 0 || price <= 0) return { piecesUsed, cost: 0, warn: 'Нет цены/кол-ва заготовок у комплекта для расчёта себестоимости.', kitParts: '' };
       return { piecesUsed, cost: price * (piecesUsed / total), warn: '', kitParts: '' };
     }
+
+    function visitLineRow(idx) {
+      if (idx === 0) return document.getElementById('visit-form') || document;
+      return document.querySelector('[data-extra-line-idx="' + String(idx) + '"]');
+    }
+
+    function visitLineServiceMeta(idx) {
+      if (idx === 0) return getSelectedService();
+      const sid = parseInt((document.getElementById('line_' + idx + '_service_id') || {}).value || '0', 10) || 0;
+      if (!sid) return null;
+      return serviceMetaById[sid] || getServiceById(sid);
+    }
+
+    function visitLineIndicesForPreview() {
+      const out = [0];
+      document.querySelectorAll('[data-extra-line-idx]').forEach(function (row) {
+        const idx = parseInt(row.getAttribute('data-extra-line-idx') || '0', 10) || 0;
+        if (idx > 0 && out.indexOf(idx) < 0) out.push(idx);
+      });
+      return out.sort(function (a, b) { return a - b; });
+    }
+
+    function lineAmountFromClient(idx) {
+      if (idx === 0) return Math.max(0, numVal('#amount_from_client'));
+      const row = visitLineRow(idx);
+      if (!row) return 0;
+      const el = row.querySelector('input[name="line_' + idx + '_amount_from_client"]');
+      return Math.max(0, parseFloat(String(el && el.value || '0')) || 0);
+    }
+
+    function lineMaterialCost(idx) {
+      let kan = 0;
+      let kud = 0;
+      if (idx === 0) {
+        kan = Math.max(0, numVal('#kanekalon_grams'));
+        kud = Math.max(0, numVal('#kudri_grams'));
+      } else {
+        const row = visitLineRow(idx);
+        if (!row) return 0;
+        const kEl = row.querySelector('input[name="line_' + idx + '_kanekalon_grams"]');
+        const uEl = row.querySelector('input[name="line_' + idx + '_kudri_grams"]');
+        kan = Math.max(0, parseFloat(String(kEl && kEl.value || '0')) || 0);
+        kud = Math.max(0, parseFloat(String(uEl && uEl.value || '0')) || 0);
+      }
+      return kan * (parseFloat(materialPricePerGram.kanekalon) || 0) + kud * (parseFloat(materialPricePerGram.kudri) || 0);
+    }
+
+    function lineAmortCost(idx) {
+      let level = 'MIN';
+      if (idx === 0) {
+        level = (document.querySelector('input[name="amortization_level"]:checked') || {}).value || 'MIN';
+      } else {
+        const row = visitLineRow(idx);
+        const r = row ? row.querySelector('input[name="line_' + idx + '_amortization_level"]:checked') : null;
+        level = (r && r.value) ? r.value : 'MIN';
+      }
+      if (String(level).toUpperCase() === 'NONE') return 0;
+      return parseFloat(amortizationRublesByLevel[level]) || 0;
+    }
+
+    function lineMixCostAndBonus(idx) {
+      let kan = 0;
+      let kud = 0;
+      let mixSource = 'NO_MIX';
+      let mixComp = null;
+      let bonusMasterId = 0;
+      if (idx === 0) {
+        kan = Math.max(0, numVal('#kanekalon_grams'));
+        kud = Math.max(0, numVal('#kudri_grams'));
+        mixSource = (document.querySelector('input[name="mix_source"]:checked') || {}).value || 'NO_MIX';
+        mixComp = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || null;
+      } else {
+        const row = visitLineRow(idx);
+        if (!row) return { mixCost: 0, mixBonus: 0 };
+        const kEl = row.querySelector('input[name="line_' + idx + '_kanekalon_grams"]');
+        const uEl = row.querySelector('input[name="line_' + idx + '_kudri_grams"]');
+        kan = Math.max(0, parseFloat(String(kEl && kEl.value || '0')) || 0);
+        kud = Math.max(0, parseFloat(String(uEl && uEl.value || '0')) || 0);
+        mixSource = (row.querySelector('input[name="line_' + idx + '_mix_source"]:checked') || {}).value || 'NO_MIX';
+        mixComp = (row.querySelector('input[name="line_' + idx + '_mix_complexity"]:checked') || {}).value || null;
+        const bm = row.querySelector('select[name="line_' + idx + '_mix_bonus_master_id"]');
+        bonusMasterId = bm ? (parseInt(String(bm.value || '0'), 10) || 0) : 0;
+      }
+      const gramsTotal = kan + kud;
+      const mixCoef = mixComp ? (parseFloat(mixComplexityRatesPerGram[mixComp]) || 0) : 0;
+      const mixCost = (gramsTotal > 0 && mixSource !== 'NO_MIX' && mixComp && mixCoef) ? (gramsTotal * mixCoef) : 0;
+      let mixBonus = 0;
+      if (mixSource === 'SELF_MIXED' && mixCost > 0) {
+        const target = bonusMasterId > 0 ? bonusMasterId : currentUserId;
+        if (target === currentUserId) mixBonus = mixCost;
+      }
+      return { mixCost: mixCost, mixBonus: mixBonus };
+    }
+
+    function lineKitCostParts(idx, meta) {
+      const out = { kitCost: 0, stockParts: '', extraParts: '', warn: '' };
+      if (!meta || (!meta.requires_kit_block && !meta.requiresKit)) return out;
+      const row = visitLineRow(idx);
+      const kk = idx === 0
+        ? ((document.querySelector('input[name="kit_kind"]:checked') || {}).value || '')
+        : ((row && row.querySelector('input[name="line_' + idx + '_kit_kind"]:checked')) || {}).value || 'STOCK';
+      if (kk === 'STOCK') {
+        const rows = idx === 0
+          ? document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row')
+          : (row ? row.querySelectorAll('[data-line-stock-kit-wrap="' + idx + '"] .visit-stock-kit-row') : []);
+        rows.forEach(function (kitRow) {
+          const kit = kitRow._visitStockKit || kitRow._lbKitData || null;
+          const ueEl = kitRow.querySelector('.lb-kit-use-entire, .vsk-use-entire');
+          const buEl = kitRow.querySelector('.lb-kit-blanks-simple, .vsk-blanks-used');
+          const ue = !!(ueEl && ueEl.checked);
+          const bu = Math.max(0, parseInt(String(buEl && buEl.value || '0'), 10) || 0);
+          const bd = window.LbKitStockPick ? LbKitStockPick.readBreakdown(kitRow) : null;
+          const r = kitUsageCost(kit, ue, bu, bd);
+          let c = r.cost;
+          const paidSeparately = idx === 0
+            ? isChecked('#kit_paid_separately_cb')
+            : !!(row && row.querySelector('input[name="line_' + idx + '_kit_paid_separately"]') && row.querySelector('input[name="line_' + idx + '_kit_paid_separately"]').checked);
+          if (paidSeparately) c = 0;
+          out.kitCost += c;
+          if (r.warn) out.warn = r.warn;
+          if (r.kitParts) out.stockParts = out.stockParts ? (out.stockParts + ' · ' + r.kitParts) : r.kitParts;
+        });
+      }
+      const extraOn = idx === 0
+        ? isChecked('#own_extra_blanks')
+        : !!(row && row.querySelector('input[name="line_' + idx + '_own_extra_blanks"]') && row.querySelector('input[name="line_' + idx + '_own_extra_blanks"]').checked);
+      if (kk === 'OWN' && extraOn) {
+        const rows = idx === 0
+          ? document.querySelectorAll('#own_extra_stock_kit_rows_wrap .visit-stock-kit-row')
+          : (row ? row.querySelectorAll('[data-line-own-extra-kit-wrap="' + idx + '"] .visit-stock-kit-row') : []);
+        rows.forEach(function (kitRow) {
+          const kit = kitRow._visitStockKit || kitRow._lbKitData || null;
+          const ue = !!((kitRow.querySelector('.lb-kit-use-entire, .vsk-use-entire') || {}).checked);
+          const buEl = kitRow.querySelector('.lb-kit-blanks-simple, .vsk-blanks-used');
+          const bu = Math.max(0, parseInt(String(buEl && buEl.value || '0'), 10) || 0);
+          const bd = window.LbKitStockPick ? LbKitStockPick.readBreakdown(kitRow) : null;
+          const r2 = kitUsageCost(kit, ue, bu, bd);
+          out.kitCost += r2.cost;
+          if (r2.warn) out.warn = r2.warn;
+          if (r2.kitParts) out.extraParts = out.extraParts ? (out.extraParts + ' · ' + r2.kitParts) : r2.kitParts;
+        });
+      }
+      return out;
+    }
+
+    function bindExtraLinePreviewInputs(idx, box) {
+      if (!box) return;
+      const sync = function () { syncVisitPreview(); };
+      box.querySelectorAll(
+        'input[name="line_' + idx + '_amount_from_client"],' +
+        'input[name="line_' + idx + '_kanekalon_grams"],' +
+        'input[name="line_' + idx + '_kudri_grams"],' +
+        'input[name="line_' + idx + '_amortization_level"],' +
+        'input[name="line_' + idx + '_mix_source"],' +
+        'input[name="line_' + idx + '_mix_complexity"],' +
+        'input[name="line_' + idx + '_kit_kind"],' +
+        'input[name="line_' + idx + '_kit_paid_separately"],' +
+        'input[name="line_' + idx + '_own_extra_blanks"]'
+      ).forEach(function (el) {
+        el.addEventListener('input', sync);
+        el.addEventListener('change', sync);
+      });
+      const bm = box.querySelector('select[name="line_' + idx + '_mix_bonus_master_id"]');
+      if (bm) {
+        bm.addEventListener('change', sync);
+      }
+    }
+
     function syncVisitPreview() {
       const payEl = document.getElementById('visit_preview_master_lines');
       const costEl = document.getElementById('visit_preview_cost_line');
       const clientTotalEl = document.getElementById('visit_preview_client_total');
       if (!payEl || !costEl) return;
 
-      const kan = Math.max(0, numVal('#kanekalon_grams'));
-      const kud = Math.max(0, numVal('#kudri_grams'));
-      const mat = kan * (parseFloat(materialPricePerGram.kanekalon) || 0) + kud * (parseFloat(materialPricePerGram.kudri) || 0);
-
       const addons = Math.max(0, numVal('input[name="addon_sales_amount"]'));
-
-      const gramsTotal = kan + kud;
-      const mixSource = (document.querySelector('input[name="mix_source"]:checked') || {}).value || 'NO_MIX';
-      const mixComp = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || null;
-      const mixCoef = mixComp ? (parseFloat(mixComplexityRatesPerGram[mixComp]) || 0) : 0;
-      const mixCost = (gramsTotal > 0 && mixSource !== 'NO_MIX' && mixComp && mixCoef) ? (gramsTotal * mixCoef) : 0;
-      const mixBonus = (mixSource === 'SELF_MIXED') ? mixCost : 0;
-
-      const amort = (function () {
-        const v = (document.querySelector('input[name="amortization_level"]:checked') || {}).value || 'MIN';
-        return parseFloat(amortizationRublesByLevel[v]) || 0;
-      })();
-
-      let kitCostTotal = 0;
-      let warn = '';
+      let amountTotal = 0;
+      let costTotal = addons;
+      let mixBonusTotal = 0;
       let stockKitParts = '';
       let extraKitParts = '';
-      const kk = (document.querySelector('input[name="kit_kind"]:checked') || {}).value || '';
-      const needKit = !!(getSelectedService() && getSelectedService().requires_kit_block);
-      if (needKit && kk === 'STOCK') {
-        document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row').forEach(function (row) {
-          const kit = row._visitStockKit || null;
-          const ueEl = row.querySelector('.vsk-use-entire');
-          const buEl = row.querySelector('.vsk-blanks-used');
-          const ue = !!(ueEl && ueEl.checked);
-          const bu = Math.max(0, parseInt(String(buEl && buEl.value || '0'), 10) || 0);
-          const bd = window.LbKitStockPick ? LbKitStockPick.readBreakdown(row) : null;
-          const r = kitUsageCost(kit, ue, bu, bd);
-          let c = r.cost;
-          if (isChecked('#kit_paid_separately_cb')) c = 0;
-          kitCostTotal += c;
-          if (r.warn) warn = r.warn;
-          if (r.kitParts) {
-            stockKitParts = stockKitParts ? (stockKitParts + ' · ' + r.kitParts) : r.kitParts;
-          }
-        });
-      }
-      if (needKit && kk === 'OWN' && isChecked('#own_extra_blanks')) {
-        document.querySelectorAll('#own_extra_stock_kit_rows_wrap .visit-stock-kit-row').forEach(function (row) {
-          const kit = row._visitStockKit || row._lbKitData || null;
-          const ue = !!((row.querySelector('.lb-kit-use-entire, .vsk-use-entire') || {}).checked);
-          const buEl = row.querySelector('.lb-kit-blanks-simple, .vsk-blanks-used');
-          const bu = Math.max(0, parseInt(String(buEl && buEl.value || '0'), 10) || 0);
-          const bd = window.LbKitStockPick ? LbKitStockPick.readBreakdown(row) : null;
-          const r2 = kitUsageCost(kit, ue, bu, bd);
-          kitCostTotal += r2.cost;
-          if (r2.warn) warn = r2.warn;
-          if (r2.kitParts) extraKitParts = extraKitParts ? (extraKitParts + ' · ' + r2.kitParts) : r2.kitParts;
-        });
-      }
+      let warn = '';
 
-      const costTotal = mat + kitCostTotal + addons + mixCost + amort;
-      let amountTotal = Math.max(0, numVal('#amount_from_client'));
-      document.querySelectorAll('[data-visit-line-card]').forEach(function (card) {
-        const amtIn = card.querySelector('input[name^="line_"][name$="_amount_from_client"]');
-        if (amtIn) amountTotal += Math.max(0, parseFloat(String(amtIn.value || '0')) || 0);
+      visitLineIndicesForPreview().forEach(function (idx) {
+        amountTotal += lineAmountFromClient(idx);
+        costTotal += lineMaterialCost(idx) + lineAmortCost(idx);
+        const mix = lineMixCostAndBonus(idx);
+        costTotal += mix.mixCost;
+        mixBonusTotal += mix.mixBonus;
+        const meta = visitLineServiceMeta(idx);
+        const kit = lineKitCostParts(idx, meta);
+        costTotal += kit.kitCost;
+        if (kit.stockParts) stockKitParts = stockKitParts ? (stockKitParts + ' · ' + kit.stockParts) : kit.stockParts;
+        if (kit.extraParts) extraKitParts = extraKitParts ? (extraKitParts + ' · ' + kit.extraParts) : kit.extraParts;
+        if (kit.warn) warn = kit.warn;
       });
+
       if (clientTotalEl) {
         clientTotalEl.textContent = 'С клиента (итого): ' + money2(amountTotal) + ' ₽';
       }
-      const amount = Math.max(0, numVal('#amount_from_client'));
-      const profitBefore = amount - costTotal;
+      const profitBefore = amountTotal - costTotal;
       const salonProfit = profitBefore * (parseFloat(salonCutPct) || 0);
       const mastersPool = profitBefore - salonProfit;
 
@@ -1558,7 +1685,7 @@
         const lines = [];
         for (const r of alloc) {
           const base = mastersPool * (r.pct / 100.0);
-          const bonus = (r.mid === currentUserId) ? mixBonus : 0;
+          const bonus = (r.mid === currentUserId) ? mixBonusTotal : 0;
           lines.push('ЗП «' + masterNameById(r.mid) + '»: ' + money2(base + bonus) + ' ₽');
         }
         payEl.innerHTML = lines.map((l) => '<div>' + l + '</div>').join('');
@@ -2155,10 +2282,10 @@
         if (bonusBlk) bonusBlk.style.display = (showMix && src === 'SELF_MIXED') ? 'block' : 'none';
       }
       row.querySelectorAll('input[name="line_' + idx + '_mix_source"]').forEach(function (r) {
-        r.addEventListener('change', syncMixUi);
+        r.addEventListener('change', function () { syncMixUi(); syncVisitPreview(); });
       });
       row.querySelectorAll('input[name="line_' + idx + '_kanekalon_grams"], input[name="line_' + idx + '_kudri_grams"]').forEach(function (inp) {
-        inp.addEventListener('input', syncMixUi);
+        inp.addEventListener('input', function () { syncMixUi(); syncVisitPreview(); });
       });
       syncMixUi();
     }
@@ -2223,9 +2350,9 @@
           if (corrWrap) corrWrap.style.display = (corrOn && corrOn.checked) ? 'block' : 'none';
           if (extraWrap) extraWrap.style.display = (extraOn && extraOn.checked) ? 'block' : 'none';
         }
-        radios.forEach(function (r) { r.addEventListener('change', syncKind); });
-        if (corrOn) corrOn.addEventListener('change', syncOwnSubsections);
-        if (extraOn) extraOn.addEventListener('change', syncOwnSubsections);
+        radios.forEach(function (r) { r.addEventListener('change', function () { syncKind(); syncVisitPreview(); }); });
+        if (corrOn) corrOn.addEventListener('change', function () { syncOwnSubsections(); syncVisitPreview(); });
+        if (extraOn) extraOn.addEventListener('change', function () { syncOwnSubsections(); syncVisitPreview(); });
         syncKind();
         syncOwnSubsections();
         initLineStockKitEditors(idx, row);
@@ -2507,20 +2634,8 @@
       const discIn = box.querySelector('input[name="line_' + idx + '_client_discount_percent"]');
       if (discIn) discIn.addEventListener('input', function () { updateExtraLinePriceHint(idx); });
       renderExtraLineServiceFlags(idx);
+      bindExtraLinePreviewInputs(idx, box);
 
-      const hd = document.getElementById('lb-line-hidden-defaults');
-      if (hd) {
-        [
-          ['line_' + idx + '_kit_kind', 'STOCK'],
-          ['line_' + idx + '_mix_source', 'NO_MIX'],
-        ].forEach(function (pair) {
-          const el = document.createElement('input');
-          el.type = 'hidden';
-          el.name = pair[0];
-          el.value = pair[1];
-          hd.appendChild(el);
-        });
-      }
       syncExtraLinesVisibility();
       syncMastersScopeUi();
       syncPerServiceMasterPctInputs();
