@@ -47,6 +47,24 @@ def test_validate_types_requires_selection() -> None:
     assert validate_types_selected({}) is not None
 
 
+def test_parse_consultation_datetime_past_date() -> None:
+    from app.routes.consultations import _parse_consultation_datetime
+
+    dt = _parse_consultation_datetime("2026-06-21", "17:30", "Asia/Novosibirsk")
+    assert dt.year == 2026 and dt.month == 6 and dt.day == 21
+    assert dt.hour == 10 and dt.minute == 30  # UTC offset Novosibirsk +7
+
+    dt2 = _parse_consultation_datetime("21.06.2026", "17:30", "Asia/Novosibirsk")
+    assert dt2 == dt
+
+
+def test_parse_date_form_accepts_iso_and_ru() -> None:
+    from app.forms_parse import parse_date_form
+
+    assert parse_date_form("2026-06-21").isoformat() == "2026-06-21"
+    assert parse_date_form("21.06.2026").isoformat() == "2026-06-21"
+
+
 def test_consultation_kind_for_category_name() -> None:
     assert consultation_kind_for_category_name("Наращивание") == ConsultationKind.EXTENSION
     assert consultation_kind_for_category_name("Снятие") == ConsultationKind.OTHER

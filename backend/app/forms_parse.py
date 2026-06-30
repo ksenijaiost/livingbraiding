@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 
@@ -88,3 +88,20 @@ def parse_date_iso(raw: str | None, *, field_name: str = "date") -> date:
         return date.fromisoformat(s)
     except ValueError as e:
         raise ValueError(f"{field_name}: ожидается дата YYYY-MM-DD") from e
+
+
+def parse_date_form(raw: str | None, *, field_name: str = "date") -> date:
+    """Дата из формы: ISO `YYYY-MM-DD` или `ДД.ММ.ГГГГ` / `ДД/ММ/ГГГГ`."""
+    s = ("" if raw is None else str(raw)).strip()
+    if not s:
+        raise ValueError(f"{field_name}: пустая дата")
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        pass
+    for fmt in ("%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"{field_name}: ожидается дата YYYY-MM-DD или ДД.ММ.ГГГГ")

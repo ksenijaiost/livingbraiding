@@ -48,7 +48,7 @@ from app.planned_services_db import (
 )
 from app.db.session import get_db
 from app.display_time import get_display_timezone
-from app.forms_parse import parse_int
+from app.forms_parse import parse_date_form
 from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
 from app.time_utils import utcnow_naive
 from app.webui import templates, ctx as _ctx
@@ -72,13 +72,14 @@ def _consultations_list_url(*, mine_only: bool, booking_status: str | None) -> s
     return "/consultations" + ("?" + urlencode(q) if q else "")
 
 
-def _parse_consultation_datetime(date_raw: str, time_raw: str, tz: ZoneInfo) -> datetime:
-    d = date.fromisoformat(date_raw.strip())
+def _parse_consultation_datetime(date_raw: str, time_raw: str, tz: str | ZoneInfo) -> datetime:
+    tzinfo = tz if isinstance(tz, ZoneInfo) else ZoneInfo(str(tz))
+    d = parse_date_form(date_raw, field_name="consultation_date")
     t = (time_raw or "").strip() or "00:00"
     parts = t.split(":")
     hour = int(parts[0]) if parts else 0
     minute = int(parts[1]) if len(parts) > 1 else 0
-    local = datetime(d.year, d.month, d.day, hour, minute, 0, tzinfo=tz)
+    local = datetime(d.year, d.month, d.day, hour, minute, 0, tzinfo=tzinfo)
     return local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
 
 
@@ -354,8 +355,8 @@ def consultation_edit_get(
     if not _master_may_edit_consultation(current_user, c):
         raise HTTPException(status_code=403, detail="Нет прав на редактирование")
 
-    tz = get_display_timezone(db)
-    local = c.consultation_date.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
+    tz_name = get_display_timezone(db)
+    local = c.consultation_date.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(tz_name))
     types_data = types_json_loads(c.types_json)
     svc_ids = consultation_service_ids(db, c.id)
     import json as _json
