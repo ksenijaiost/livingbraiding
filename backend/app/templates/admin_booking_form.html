@@ -97,6 +97,23 @@
         </div>
       </div>
 
+      {% if not is_new and current_user and current_user.role.value == 'ADMIN_SUPER' %}
+      <div class="row" style="margin-top:12px;">
+        <div>
+          <label>Статус брони</label>
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:6px;">
+            <span class="muted" style="font-size:13px;">Сейчас: <strong>{{ booking_status_display(booking.status) }}</strong></span>
+            <select name="booking_status" style="min-width:16rem;">
+              {% for st in ['PENDING_CONFIRMATION', 'ACTIVE', 'DONE', 'CANCELLED'] %}
+                <option value="{{ st }}" {% if (fp.get('booking_status') or booking.status.value) == st %}selected{% endif %}>{{ booking_status_display(st) }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <p class="muted" style="margin:6px 0 0;font-size:0.9em;">Только для суперадмина: можно вернуть отменённую или выполненную бронь в работу.</p>
+        </div>
+      </div>
+      {% endif %}
+
       <div id="lbBookingMastersModeTop" class="card" style="margin-top: 12px; background:#f8fafc; display:none;">
         <div style="font-weight: 600; margin-bottom: 8px;">Выбор мастера для услуг</div>
         <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">

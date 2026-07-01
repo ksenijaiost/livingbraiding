@@ -116,6 +116,40 @@ def _booking_status_label(s: str) -> str:
         return s
 
 
+def _apply_super_admin_booking_status_change(
+    db: Session,
+    b: Booking,
+    new_status: BookingStatus,
+    editor_user_id: int,
+) -> None:
+    """Смена статуса брони суперадмином при редактировании (в любую сторону)."""
+    old_status = b.status
+    if new_status == old_status:
+        return
+    if new_status == BookingStatus.CANCELLED:
+        b.status = BookingStatus.CANCELLED
+        b.cancelled_at = utcnow_naive()
+        b.cancelled_by_user_id = editor_user_id
+        if not (b.cancelled_reason or "").strip():
+            b.cancelled_reason = "Статус изменён суперадмином"
+        if b.consultation_id:
+            from app.payroll_fund import storno_source_accruals
+
+            storno_source_accruals(
+                db,
+                PayrollFundSourceKind.CONSULTATION,
+                int(b.consultation_id),
+                editor_user_id,
+            )
+            b.consultation_id = None
+        return
+    if old_status == BookingStatus.CANCELLED:
+        b.cancelled_at = None
+        b.cancelled_by_user_id = None
+        b.cancelled_reason = None
+    b.status = new_status
+
+
 def _product_kind_label(k: str | None) -> str:
     if not k:
         return "—"
@@ -411,6 +445,7 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
         "quoted_price_text": b.quoted_price_text or "",
         "deposit_amount": "" if b.deposit_amount is None else str(int(b.deposit_amount)),
         "comment": b.comment or "",
+        "booking_status": b.status.value if b.status else BookingStatus.PENDING_CONFIRMATION.value,
     }
     if b.kind == BookingKind.VISIT:
         service_ids_for_hidden: list[int] = []
@@ -2453,6 +2488,7 @@ async def admin_booking_edit_post(
     planned_service_lines: list[dict[str, Any]] = []
     on_ids: list[int] = []
     tz_name: str | None = None
+    new_booking_status: BookingStatus | None = None
 
     try:
         client_id = parse_int(client_id_raw, min=1, field_name="client_id")
@@ -2464,6 +2500,13 @@ async def admin_booking_edit_post(
         client = db.get(Client, client_id)
         if client is None:
             err = "Клиент не найден."
+
+    if not err and UserRole.ADMIN_SUPER in current_user.roles:
+        status_raw = str(fp.get("booking_status") or "").strip() or str(b.status.value)
+        try:
+            new_booking_status = BookingStatus(status_raw)
+        except ValueError:
+            err = "Некорректный статус брони."
 
     if not err:
         try:
@@ -2586,6 +2629,8 @@ async def admin_booking_edit_post(
         )
 
     assert client is not None and planned_date is not None
+    if UserRole.ADMIN_SUPER in current_user.roles and new_booking_status is not None:
+        _apply_super_admin_booking_status_change(db, b, new_booking_status, current_user.id)
     before_visit_master_ids = [int(bm.master_id) for bm in (b.masters or [])]
     before_visit_masters = _audit_user_names(db, before_visit_master_ids)
     before_sale_staff = _audit_sale_order_masters_label(db, b.id)
@@ -2701,13 +2746,14 @@ async def admin_booking_edit_post(
 
     _sync_booking_staff_rows_for_sale(db, booking_id=b.id, fp=fp, form_raw=form_raw)
     release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
-    _apply_booking_auto_reserves(
-        db,
-        booking_id=b.id,
-        booking_client_id=b.client_id,
-        fp=fp,
-        changed_by_user_id=current_user.id,
-    )
+    if booking_is_open(b.status):
+        _apply_booking_auto_reserves(
+            db,
+            booking_id=b.id,
+            booking_client_id=b.client_id,
+            fp=fp,
+            changed_by_user_id=current_user.id,
+        )
     _refresh_sale_order_master_ids_in_fp(db, booking_id=b.id, fp=fp)
     b.details_json = json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False)
     after_details_json = b.details_json
