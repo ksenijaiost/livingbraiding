@@ -116,6 +116,40 @@ def _booking_status_label(s: str) -> str:
         return s
 
 
+def _apply_super_admin_booking_status_change(
+    db: Session,
+    b: Booking,
+    new_status: BookingStatus,
+    editor_user_id: int,
+) -> None:
+    """Смена статуса брони суперадмином при редактировании (в любую сторону)."""
+    old_status = b.status
+    if new_status == old_status:
+        return
+    if new_status == BookingStatus.CANCELLED:
+        b.status = BookingStatus.CANCELLED
+        b.cancelled_at = utcnow_naive()
+        b.cancelled_by_user_id = editor_user_id
+        if not (b.cancelled_reason or "").strip():
+            b.cancelled_reason = "Статус изменён суперадмином"
+        if b.consultation_id:
+            from app.payroll_fund import storno_source_accruals
+
+            storno_source_accruals(
+                db,
+                PayrollFundSourceKind.CONSULTATION,
+                int(b.consultation_id),
+                editor_user_id,
+            )
+            b.consultation_id = None
+        return
+    if old_status == BookingStatus.CANCELLED:
+        b.cancelled_at = None
+        b.cancelled_by_user_id = None
+        b.cancelled_reason = None
+    b.status = new_status
+
+
 def _product_kind_label(k: str | None) -> str:
     if not k:
         return "—"
@@ -253,12 +287,25 @@ def _apply_parsed_visit_lines_to_fp(fp: dict[str, str], line_specs: list[dict[st
         dur = _parse_line_duration_minutes(spec.get("duration_minutes"))
         t0 = spec.get("planned_time")
         t_s = t0.strftime("%H:%M") if isinstance(t0, time) else str(fp.get("planned_time") or "")
+        mst: dict[str, str] = {}
+        raw_mst = spec.get("master_start_times")
+        if isinstance(raw_mst, dict):
+            for mid, tm in raw_mst.items():
+                try:
+                    mid_i = int(mid)
+                except Exception:
+                    continue
+                if mid_i <= 0 or not isinstance(tm, time):
+                    continue
+                mst[str(mid_i)] = tm.strftime("%H:%M")
         item: dict[str, Any] = {
             "service_id": int(spec["service_id"]),
             "planned_time": t_s,
             "master_ids": [int(x) for x in (spec.get("master_ids") or []) if int(x) > 0],
             "comment": str(spec.get("comment") or ""),
         }
+        if mst:
+            item["master_start_times"] = mst
         if dur > 0:
             item["duration_minutes"] = dur
         line_payload.append(item)
@@ -411,6 +458,7 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
         "quoted_price_text": b.quoted_price_text or "",
         "deposit_amount": "" if b.deposit_amount is None else str(int(b.deposit_amount)),
         "comment": b.comment or "",
+        "booking_status": b.status.value if b.status else BookingStatus.PENDING_CONFIRMATION.value,
     }
     if b.kind == BookingKind.VISIT:
         service_ids_for_hidden: list[int] = []
@@ -451,6 +499,20 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
                     "master_ids": [int(x.master_id) for x in (ps.masters or []) if x.master_id],
                     "comment": (ps.comment or ""),
                 }
+                master_start_map: dict[str, str] = {}
+                for psm in (ps.masters or []):
+                    if not psm.master_id or not psm.planned_start_time:
+                        continue
+                    m_local = planned_start_local_datetime(
+                        psm.planned_start_time,
+                        booking_planned_date=b.planned_date,
+                        tz_name=tz,
+                    )
+                    if m_local is None:
+                        continue
+                    master_start_map[str(int(psm.master_id))] = m_local.strftime("%H:%M")
+                if master_start_map:
+                    line_item["master_start_times"] = master_start_map
                 if dur > 0:
                     line_item["duration_minutes"] = dur
                 line_payload.append(line_item)
@@ -621,6 +683,53 @@ def _parse_hhmm_to_time(raw: str) -> time | None:
     return time(hour=hh, minute=mm)
 
 
+def _parse_master_start_times_raw(item: dict[str, Any]) -> tuple[dict[int, time], bool]:
+    raw_map = item.get("master_start_times")
+    if raw_map in (None, "", {}):
+        return {}, True
+    if not isinstance(raw_map, dict):
+        return {}, False
+    out: dict[int, time] = {}
+    for mk, mv in raw_map.items():
+        try:
+            mid = int(mk)
+        except Exception:
+            continue
+        if mid <= 0:
+            continue
+        tm = _parse_hhmm_to_time(str(mv or "").strip())
+        if tm is None:
+            return {}, False
+        out[mid] = tm
+    return out, True
+
+
+def _line_master_time_info(
+    spec: dict[str, Any],
+    *,
+    local_day: date,
+    duration_minutes: int,
+) -> tuple[datetime, datetime, dict[int, datetime]]:
+    """Окно услуги: общее окончание от самого раннего старта, индивидуальные старты по мастерам."""
+    t0 = spec.get("planned_time")
+    if not isinstance(t0, time):
+        t0 = time(0, 0)
+    mids = [int(x) for x in (spec.get("master_ids") or []) if int(x) > 0]
+    raw_map = spec.get("master_start_times")
+    map_t: dict[int, time] = raw_map if isinstance(raw_map, dict) else {}
+    starts_t = [t0] + [tm for mid, tm in map_t.items() if mid in mids and isinstance(tm, time)]
+    earliest_t = min(starts_t) if starts_t else t0
+    start_dt = datetime.combine(local_day, earliest_t).replace(second=0, microsecond=0)
+    end_dt = start_dt + timedelta(minutes=int(duration_minutes))
+    master_start_dt: dict[int, datetime] = {}
+    for mid in mids:
+        tm = map_t.get(mid, t0)
+        if not isinstance(tm, time):
+            tm = t0
+        master_start_dt[mid] = datetime.combine(local_day, tm).replace(second=0, microsecond=0)
+    return start_dt, end_dt, master_start_dt
+
+
 def _parse_booking_visit_lines_and_masters(
     db: Session, form_raw: Any, fp: dict[str, str]
 ) -> tuple[str | None, list[int], int | None, list[dict[str, Any]], list[int]]:
@@ -651,6 +760,9 @@ def _parse_booking_visit_lines_and_masters(
             tm = _parse_hhmm_to_time(t_raw)
             if tm is None:
                 return "Укажите время начала для каждой услуги.", [], None, [], []
+            raw_master_starts, ok_mst = _parse_master_start_times_raw(item)
+            if not ok_mst:
+                return "Некорректное индивидуальное время начала мастера.", [], None, [], []
             mids_raw = item.get("master_ids")
             mids: list[int] = []
             if isinstance(mids_raw, list):
@@ -666,6 +778,7 @@ def _parse_booking_visit_lines_and_masters(
                     "service_id": sid,
                     "planned_time": tm,
                     "master_ids": mids,
+                    "_raw_master_start_times": raw_master_starts,
                     "comment": str(item.get("comment") or "").strip(),
                     "duration_minutes": _parse_line_duration_minutes(item.get("duration_minutes")),
                 }
@@ -683,6 +796,7 @@ def _parse_booking_visit_lines_and_masters(
                     "service_id": sid,
                     "planned_time": tm,
                     "master_ids": [],
+                    "_raw_master_start_times": {},
                     "comment": "",
                     "duration_minutes": 0,
                 }
@@ -723,6 +837,11 @@ def _parse_booking_visit_lines_and_masters(
         on_ids = sorted(union_ids)
 
     service_ids = [int(spec["service_id"]) for spec in line_specs]
+    for spec in line_specs:
+        mids = [int(x) for x in (spec.get("master_ids") or []) if int(x) > 0]
+        raw_map = spec.pop("_raw_master_start_times", {})
+        map_t: dict[int, time] = raw_map if isinstance(raw_map, dict) else {}
+        spec["master_start_times"] = {mid: map_t[mid] for mid in mids if mid in map_t}
     planned_service_id = service_ids[0] if service_ids else None
     return None, service_ids, planned_service_id, line_specs, on_ids
 
@@ -779,16 +898,19 @@ def _validate_booking_visit_line_availability(
             dur = int(duration_override_minutes)
         if dur <= 0:
             continue
-        t0 = spec.get("planned_time")
-        if not isinstance(t0, time):
-            t0 = time(0, 0)
-        start_dt = datetime.combine(local_day, t0).replace(second=0, microsecond=0)
-        end_dt = start_dt + timedelta(minutes=dur)
+        start_dt, end_dt, master_start_dt = _line_master_time_info(
+            spec,
+            local_day=local_day,
+            duration_minutes=dur,
+        )
         for mid in [int(x) for x in (spec.get("master_ids") or []) if int(x) > 0]:
+            mid_start_dt = master_start_dt.get(mid, start_dt)
+            if mid_start_dt >= end_dt:
+                return "Индивидуальное время мастера должно быть раньше общего окончания услуги."
             if is_master_available_for_interval(
                 db,
                 master_id=mid,
-                start_dt=start_dt,
+                start_dt=mid_start_dt,
                 end_dt=end_dt,
             ):
                 continue
@@ -814,12 +936,13 @@ def _sync_booking_planned_services_with_lines(
     db.flush()
     for i, spec in enumerate(line_specs):
         sid = int(spec["service_id"])
-        t0 = spec.get("planned_time")
-        if not isinstance(t0, time):
-            t0 = time(0, 0)
-        start_local = datetime.combine(local_day, t0).replace(second=0, microsecond=0)
-        start_utc = _local_naive_to_utc_naive(start_local, tz_name).replace(second=0, microsecond=0)
         line_dur = _parse_line_duration_minutes(spec.get("duration_minutes"))
+        start_local, _line_end_local, per_master_local = _line_master_time_info(
+            spec,
+            local_day=local_day,
+            duration_minutes=line_dur if line_dur > 0 else 1,
+        )
+        start_utc = _local_naive_to_utc_naive(start_local, tz_name).replace(second=0, microsecond=0)
         ps = BookingPlannedService(
             booking_id=booking_id,
             service_id=sid,
@@ -833,7 +956,15 @@ def _sync_booking_planned_services_with_lines(
         for mid in sorted(set([int(x) for x in (spec.get("master_ids") or []) if int(x) > 0])):
             if db.get(User, mid) is None:
                 continue
-            db.add(BookingPlannedServiceMaster(booking_planned_service_id=ps.id, master_id=mid))
+            mid_start_local = per_master_local.get(mid, start_local)
+            mid_start_utc = _local_naive_to_utc_naive(mid_start_local, tz_name).replace(second=0, microsecond=0)
+            db.add(
+                BookingPlannedServiceMaster(
+                    booking_planned_service_id=ps.id,
+                    master_id=mid,
+                    planned_start_time=(mid_start_utc if mid_start_utc != start_utc else None),
+                )
+            )
 
 
 def try_auto_complete_booking(db: Session, booking_id: int) -> None:
@@ -2453,6 +2584,7 @@ async def admin_booking_edit_post(
     planned_service_lines: list[dict[str, Any]] = []
     on_ids: list[int] = []
     tz_name: str | None = None
+    new_booking_status: BookingStatus | None = None
 
     try:
         client_id = parse_int(client_id_raw, min=1, field_name="client_id")
@@ -2464,6 +2596,13 @@ async def admin_booking_edit_post(
         client = db.get(Client, client_id)
         if client is None:
             err = "Клиент не найден."
+
+    if not err and UserRole.ADMIN_SUPER in current_user.roles:
+        status_raw = str(fp.get("booking_status") or "").strip() or str(b.status.value)
+        try:
+            new_booking_status = BookingStatus(status_raw)
+        except ValueError:
+            err = "Некорректный статус брони."
 
     if not err:
         try:
@@ -2586,6 +2725,8 @@ async def admin_booking_edit_post(
         )
 
     assert client is not None and planned_date is not None
+    if UserRole.ADMIN_SUPER in current_user.roles and new_booking_status is not None:
+        _apply_super_admin_booking_status_change(db, b, new_booking_status, current_user.id)
     before_visit_master_ids = [int(bm.master_id) for bm in (b.masters or [])]
     before_visit_masters = _audit_user_names(db, before_visit_master_ids)
     before_sale_staff = _audit_sale_order_masters_label(db, b.id)
@@ -2701,13 +2842,14 @@ async def admin_booking_edit_post(
 
     _sync_booking_staff_rows_for_sale(db, booking_id=b.id, fp=fp, form_raw=form_raw)
     release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
-    _apply_booking_auto_reserves(
-        db,
-        booking_id=b.id,
-        booking_client_id=b.client_id,
-        fp=fp,
-        changed_by_user_id=current_user.id,
-    )
+    if booking_is_open(b.status):
+        _apply_booking_auto_reserves(
+            db,
+            booking_id=b.id,
+            booking_client_id=b.client_id,
+            fp=fp,
+            changed_by_user_id=current_user.id,
+        )
     _refresh_sale_order_master_ids_in_fp(db, booking_id=b.id, fp=fp)
     b.details_json = json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False)
     after_details_json = b.details_json

@@ -97,6 +97,23 @@
         </div>
       </div>
 
+      {% if not is_new and current_user and current_user.role.value == 'ADMIN_SUPER' %}
+      <div class="row" style="margin-top:12px;">
+        <div>
+          <label>Статус брони</label>
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:6px;">
+            <span class="muted" style="font-size:13px;">Сейчас: <strong>{{ booking_status_display(booking.status) }}</strong></span>
+            <select name="booking_status" style="min-width:16rem;">
+              {% for st in ['PENDING_CONFIRMATION', 'ACTIVE', 'DONE', 'CANCELLED'] %}
+                <option value="{{ st }}" {% if (fp.get('booking_status') or booking.status.value) == st %}selected{% endif %}>{{ booking_status_display(st) }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <p class="muted" style="margin:6px 0 0;font-size:0.9em;">Только для суперадмина: можно вернуть отменённую или выполненную бронь в работу.</p>
+        </div>
+      </div>
+      {% endif %}
+
       <div id="lbBookingMastersModeTop" class="card" style="margin-top: 12px; background:#f8fafc; display:none;">
         <div style="font-weight: 600; margin-bottom: 8px;">Выбор мастера для услуг</div>
         <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
@@ -150,6 +167,10 @@
               <div id="lbBookingLine0AvailMsg" class="muted" style="margin-top:10px; font-size:12px;"></div>
             </div>
           {% endif %}
+          <div id="lbBookingLine0MasterStartWrap" style="margin-top:8px; display:none;">
+            <button type="button" class="secondary" data-line-master-times-toggle="0" style="display:none;">Разное время начала</button>
+            <div data-line-master-times-list="0" style="margin-top:8px; display:none; border:1px solid #e5e7eb; border-radius:8px; padding:8px;"></div>
+          </div>
 
           <div style="margin-top:8px;">
             <div style="font-weight:600; margin-bottom:6px;">Время выполнения первой услуги</div>
@@ -1145,12 +1166,17 @@
             '<div style="font-weight:600; margin-bottom:6px;">Мастера для этой услуги *</div>' +
             '<div data-line-masters="1" style="display:flex; flex-direction:column; gap:8px;">' + mastersChecksHtml(idx) + '</div>' +
             '<div data-line-msg="1" class="muted" style="margin-top:8px; font-size:12px;"></div>' +
+          '</div>' +
+          '<div style="margin-top:8px;">' +
+            '<button type="button" class="secondary" data-line-master-times-toggle="' + idx + '" style="display:none;">Разное время начала</button>' +
+            '<div data-line-master-times-list="' + idx + '" style="margin-top:8px; display:none; border:1px solid #e5e7eb; border-radius:8px; padding:8px;"></div>' +
           '</div>';
         linesWrap.appendChild(box);
         state.extraLines.push({ idx: idx, el: box });
         box.querySelector('[data-line-remove]').addEventListener('click', function () {
           box.remove();
           state.extraLines = state.extraLines.filter(function (x) { return x.el !== box; });
+          allLineIndices().forEach(function (lid) { syncLineMasterStartUi(lid); });
           syncBookingHiddenLines();
           refreshAvailableMasters();
         });
@@ -1185,7 +1211,11 @@
           if (durOn && durOn.checked) fillLineDefaultDurationIfEmpty(box, idx);
           syncBookingHiddenLines();
         });
-        box.querySelector('[data-line-time]').addEventListener('change', function () { refreshAvailableMasters(); syncBookingHiddenLines(); });
+        box.querySelector('[data-line-time]').addEventListener('change', function () {
+          syncLineMasterStartUi(idx);
+          refreshAvailableMasters();
+          syncBookingHiddenLines();
+        });
         var durEls = lineDurationEls(idx, box);
         var durOnCb = durEls.on;
         if (durOnCb) {
@@ -1210,7 +1240,11 @@
           durEls.m.addEventListener('change', onExtraLineDurInput);
         }
         box.querySelectorAll('input[data-line-master]').forEach(function (cb) {
-          cb.addEventListener('change', refreshAvailableMasters);
+          cb.addEventListener('change', function () {
+            syncLineMasterStartUi(idx);
+            refreshAvailableMasters();
+            syncBookingHiddenLines();
+          });
         });
         if (prefill && Array.isArray(prefill.master_ids)) {
           var mids = uniqIds(prefill.master_ids);
@@ -1221,12 +1255,95 @@
         syncLineSubcategories();
         renderLineServiceFlags(idx);
         applyLineDurationPrefill(idx, prefill, box);
+        bindLineMasterStartToggle(idx);
+        syncLineMasterStartUi(idx);
         syncBookingHiddenLines();
         setModeUi();
       }
 
       function readLineMasters(lineIdx) {
         return uniqIds(Array.from(document.querySelectorAll('input[data-line-master="' + lineIdx + '"]:checked')).map(function (x) { return x.value; }));
+      }
+      function selectedMasterIdsForLine(lineIdx) {
+        if (modeValue() === 'per_service') return readLineMasters(lineIdx);
+        return uniqIds(Array.from(document.querySelectorAll('input[name="booking_master_on"]:checked')).map(function (x) { return x.value; }));
+      }
+      function parseMasterStartMap(raw) {
+        if (!raw || typeof raw !== 'object') return {};
+        var out = {};
+        Object.keys(raw).forEach(function (k) {
+          var mid = toInt(k);
+          var vv = String(raw[k] || '').trim();
+          if (mid > 0 && /^\d{2}:\d{2}$/.test(vv)) out[String(mid)] = vv;
+        });
+        return out;
+      }
+      function lineMasterTimesPrefill(idx) {
+        var pref = getInitialLineSpec(idx);
+        if (!pref || typeof pref !== 'object') return {};
+        return parseMasterStartMap(pref.master_start_times || {});
+      }
+      function lineMasterTimesNodes(idx) {
+        var btn = document.querySelector('[data-line-master-times-toggle="' + idx + '"]');
+        var list = document.querySelector('[data-line-master-times-list="' + idx + '"]');
+        var wrap = idx === 0 ? document.getElementById('lbBookingLine0MasterStartWrap') : (list ? list.parentElement : null);
+        return { btn: btn, list: list, wrap: wrap };
+      }
+      function lineMasterStartMapFromInputs(idx) {
+        var nd = lineMasterTimesNodes(idx);
+        if (!nd.list) return {};
+        var out = {};
+        nd.list.querySelectorAll('input[data-line-master-start]').forEach(function (inp) {
+          var mid = toInt(inp.getAttribute('data-master-id') || 0);
+          var vv = String(inp.value || '').trim();
+          if (mid > 0 && vv) out[String(mid)] = vv;
+        });
+        return out;
+      }
+      function syncLineMasterStartUi(idx) {
+        var nd = lineMasterTimesNodes(idx);
+        if (!nd.btn || !nd.list) return;
+        var mids = selectedMasterIdsForLine(idx);
+        if (nd.wrap) nd.wrap.style.display = mids.length > 1 ? '' : 'none';
+        if (mids.length <= 1) {
+          nd.btn.style.display = 'none';
+          nd.btn.setAttribute('data-active', '0');
+          nd.btn.textContent = 'Разное время начала';
+          nd.list.style.display = 'none';
+          nd.list.innerHTML = '';
+          return;
+        }
+        nd.btn.style.display = '';
+        var active = nd.btn.getAttribute('data-active') === '1';
+        var old = lineMasterStartMapFromInputs(idx);
+        var pref = lineMasterTimesPrefill(idx);
+        var lineStart = lineTimeValue(idx);
+        var h = '<div class="muted" style="font-size:12px; margin-bottom:6px;">Для каждого выбранного мастера укажите индивидуальное время старта услуги.</div>';
+        for (var i = 0; i < mids.length; i++) {
+          var mid = mids[i];
+          var m = mastersMeta.find(function (x) { return toInt(x.id) === mid; });
+          var label = m ? m.label : ('#' + mid);
+          var vv = old[String(mid)] || pref[String(mid)] || lineStart || '';
+          h += '<div class="row" style="align-items:flex-end; margin-bottom:6px;">' +
+            '<div style="flex:1;"><label>' + esc(label) + '</label></div>' +
+            '<div><input type="time" step="60" data-line-master-start="1" data-master-id="' + mid + '" value="' + esc(vv) + '" /></div>' +
+          '</div>';
+        }
+        nd.list.innerHTML = h;
+        nd.list.style.display = active ? '' : 'none';
+        nd.btn.textContent = active ? 'Одинаковое время начала' : 'Разное время начала';
+      }
+      function bindLineMasterStartToggle(idx) {
+        var nd = lineMasterTimesNodes(idx);
+        if (!nd.btn || nd.btn.getAttribute('data-bound') === '1') return;
+        nd.btn.setAttribute('data-bound', '1');
+        nd.btn.addEventListener('click', function () {
+          var active = nd.btn.getAttribute('data-active') === '1';
+          nd.btn.setAttribute('data-active', active ? '0' : '1');
+          syncLineMasterStartUi(idx);
+          syncBookingHiddenLines();
+          refreshAvailableMasters();
+        });
       }
       function getLineSpecSourceJson() {
         if (hidLines && String(hidLines.value || '').trim()) {
@@ -1315,12 +1432,19 @@
           }
           var dur = lineDurationOverrideValue(idx);
           if (dur == null || dur <= 0) dur = 0;
+          var masterStartTimes = {};
+          var nd = lineMasterTimesNodes(idx);
+          if (nd.btn && nd.btn.getAttribute('data-active') === '1') {
+            masterStartTimes = lineMasterStartMapFromInputs(idx);
+          }
           out.push({
+            line_idx: idx,
             service_id: sid,
             planned_time: lineTimeValue(idx),
             master_ids: mids,
             comment: lineCommentValue(idx),
             duration_minutes: dur > 0 ? dur : 0,
+            master_start_times: masterStartTimes,
           });
         }
         return out;
@@ -1562,6 +1686,8 @@
         }
         if (line0Comment) line0Comment.value = String((first && first.comment) || '');
         applyLineDurationPrefill(0, first, null);
+        bindLineMasterStartToggle(0);
+        syncLineMasterStartUi(0);
         for (var i = 1; i < arr.length; i++) addExtraLine(arr[i]);
         syncBookingHiddenLines();
       }
@@ -1569,6 +1695,7 @@
       if (addBtn) addBtn.addEventListener('click', function () { addExtraLine(null); });
       if (plannedDate) plannedDate.addEventListener('change', refreshAvailableMasters);
       if (plannedTime) plannedTime.addEventListener('change', refreshAvailableMasters);
+      if (plannedTime) plannedTime.addEventListener('change', function () { syncLineMasterStartUi(0); });
       if (serviceSel) serviceSel.addEventListener('change', refreshAvailableMasters);
       if (serviceSel) serviceSel.addEventListener('change', function () { renderLineServiceFlags(0); });
       if (line0DurOn) {
@@ -1592,20 +1719,34 @@
       if (serviceSel) serviceSel.addEventListener('change', syncBookingHiddenLines);
       if (plannedTime) plannedTime.addEventListener('change', syncBookingHiddenLines);
       document.querySelectorAll('input[name="booking_masters_mode"]').forEach(function (r) {
-        r.addEventListener('change', function () { setModeUi(); refreshAvailableMasters(); });
+        r.addEventListener('change', function () {
+          setModeUi();
+          allLineIndices().forEach(function (idx) { syncLineMasterStartUi(idx); });
+          refreshAvailableMasters();
+        });
       });
       document.querySelectorAll('input[name="kind"]').forEach(function (r) {
         r.addEventListener('change', function () { setModeUi(); refreshAvailableMasters(); });
       });
       document.querySelectorAll('input[name="booking_master_on"]').forEach(function (cb) {
-        cb.addEventListener('change', refreshAvailableMasters);
+        cb.addEventListener('change', function () {
+          allLineIndices().forEach(function (idx) { syncLineMasterStartUi(idx); });
+          refreshAvailableMasters();
+          syncBookingHiddenLines();
+        });
       });
       document.querySelectorAll('input[data-line-master="0"]').forEach(function (cb) {
-        cb.addEventListener('change', refreshAvailableMasters);
+        cb.addEventListener('change', function () {
+          syncLineMasterStartUi(0);
+          refreshAvailableMasters();
+          syncBookingHiddenLines();
+        });
       });
 
       function bootBookingServiceLines() {
         initPrefillLines();
+        bindLineMasterStartToggle(0);
+        syncLineMasterStartUi(0);
         renderAllServiceFlags();
         setModeUi();
       }
@@ -1661,6 +1802,23 @@
               e.preventDefault();
               alert('Укажите время начала для каждой выбранной услуги.');
               return;
+            }
+            var idxLine = toInt(lines[j].line_idx);
+            var nd = lineMasterTimesNodes(idxLine);
+            if (nd.btn && nd.btn.getAttribute('data-active') === '1') {
+              var midsLine = Array.isArray(lines[j].master_ids) ? lines[j].master_ids : [];
+              var mst = (lines[j].master_start_times && typeof lines[j].master_start_times === 'object')
+                ? lines[j].master_start_times
+                : {};
+              for (var mi = 0; mi < midsLine.length; mi++) {
+                var key = String(toInt(midsLine[mi]));
+                var vv = String(mst[key] || '').trim();
+                if (!/^\d{2}:\d{2}$/.test(vv)) {
+                  e.preventDefault();
+                  alert('При режиме «Разное время начала» заполните время для каждого выбранного мастера.');
+                  return;
+                }
+              }
             }
           }
           syncBookingHiddenLines();

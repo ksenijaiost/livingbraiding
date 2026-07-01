@@ -762,6 +762,7 @@ class BookingPlannedServiceMaster(Base):
         nullable=False,
     )
     master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    planned_start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     planned_service: Mapped["BookingPlannedService"] = relationship(back_populates="masters")
     master: Mapped["User"] = relationship()
