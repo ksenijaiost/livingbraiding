@@ -195,8 +195,15 @@
               <div style="margin-top:4px;">
                 <span class="muted">Мастера:</span>
                 {% if ps.masters %}
+                  {% set has_individual_start = ps.masters | selectattr('planned_start_time') | list | length > 0 %}
                   {% for psm in ps.masters %}
-                    {{ psm.master.display_name if psm.master else ("#" ~ psm.master_id) }}{% if not loop.last %}, {% endif %}
+                    {% set _m_name = psm.master.display_name if psm.master else ("#" ~ psm.master_id) %}
+                    {% if has_individual_start %}
+                      {% set _m_start = format_planned_service_start_local(psm.planned_start_time, booking_planned_date=booking.planned_date, tz_name=display_tz, fmt="%H:%M") if psm.planned_start_time else (local_start or "—") %}
+                      {{ _m_name }} ({{ _m_start }}){% if not loop.last %}, {% endif %}
+                    {% else %}
+                      {{ _m_name }}{% if not loop.last %}, {% endif %}
+                    {% endif %}
                   {% endfor %}
                 {% elif booking.masters %}
                   {% for bm in booking.masters %}
