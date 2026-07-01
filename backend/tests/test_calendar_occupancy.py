@@ -22,6 +22,7 @@ from app.db.models import (
     BookingKind,
     BookingMaster,
     BookingPlannedService,
+    BookingPlannedServiceMaster,
     BookingStatus,
     Client,
     Service,
@@ -198,3 +199,72 @@ def test_build_occupancy_uses_planned_service_duration_override(memory_db) -> No
     assert len(segs) == 1
     assert segs[0]["start_minutes"] == 10 * 60
     assert segs[0]["end_minutes"] == 14 * 60
+
+
+def test_build_occupancy_uses_individual_master_start(memory_db) -> None:
+    db = memory_db
+    db.add(Setting(key=DISPLAY_TIMEZONE, value="Europe/Moscow"))
+    cat = ServiceCategory(name="Cat")
+    sub = ServiceSubcategory(name="Sub", category_id=None)
+    db.add(cat)
+    db.flush()
+    sub.category_id = cat.id
+    db.add(sub)
+    db.flush()
+    svc = Service(
+        subcategory_id=sub.id,
+        name="Услуга",
+        estimated_duration_minutes=240,
+        is_active=True,
+    )
+    m1 = User(username="m3", password_hash="x", display_name="Мастер 1", role=UserRole.MASTER, is_active=True)
+    m2 = User(username="m4", password_hash="x", display_name="Мастер 2", role=UserRole.MASTER, is_active=True)
+    admin = User(username="a3", password_hash="x", display_name="Admin", role=UserRole.ADMIN, is_active=True)
+    client = Client(name="Клиент", is_confirmed=True)
+    db.add_all([svc, m1, m2, admin, client])
+    db.flush()
+
+    planned = datetime(2026, 5, 23, 7, 0, 0)  # 10:00 Moscow
+    booking = Booking(
+        created_by_user_id=admin.id,
+        client_id=client.id,
+        planned_date=planned,
+        planned_service_id=svc.id,
+        kind=BookingKind.VISIT,
+        status=BookingStatus.ACTIVE,
+    )
+    db.add(booking)
+    db.flush()
+    ps = BookingPlannedService(
+        booking_id=booking.id,
+        service_id=svc.id,
+        sort_order=0,
+        planned_start_time=planned,
+        duration_minutes=240,
+    )
+    db.add(ps)
+    db.flush()
+    db.add(BookingPlannedServiceMaster(booking_planned_service_id=ps.id, master_id=m1.id))
+    db.add(
+        BookingPlannedServiceMaster(
+            booking_planned_service_id=ps.id,
+            master_id=m2.id,
+            planned_start_time=datetime(2026, 5, 23, 8, 0, 0),  # 11:00 Moscow
+        )
+    )
+    db.commit()
+
+    db.refresh(booking)
+    booking.planned_services = list(db.query(BookingPlannedService).filter_by(booking_id=booking.id).all())
+    for row in booking.planned_services:
+        row.service = svc
+        row.masters = list(
+            db.query(BookingPlannedServiceMaster).filter_by(booking_planned_service_id=row.id).all()
+        )
+
+    day = date(2026, 5, 23)
+    occ = build_occupancy_for_day(db, day=day, hour_from=9, hour_to=21, bookings=[booking])
+    segs = sorted(occ["segments"], key=lambda x: x["master_id"])
+    assert len(segs) == 2
+    assert segs[0]["master_id"] == m1.id and segs[0]["start_minutes"] == 10 * 60 and segs[0]["end_minutes"] == 14 * 60
+    assert segs[1]["master_id"] == m2.id and segs[1]["start_minutes"] == 11 * 60 and segs[1]["end_minutes"] == 14 * 60

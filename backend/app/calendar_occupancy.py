@@ -228,17 +228,31 @@ def build_occupancy_for_day(
                     start_local = _utc_naive_to_local(b.planned_date, tz)
                 start_m = _minutes_on_day(start_local, day)
                 end_m = start_m + dur
-                master_ids = [int(m.master_id) for m in (ps.masters or []) if m.master_id]
+                masters_rows = list(ps.masters or [])
+                master_ids = [int(m.master_id) for m in masters_rows if m.master_id]
                 if not master_ids:
                     master_ids = booking_master_ids
+                per_master_start: dict[int, int] = {}
+                for m in masters_rows:
+                    if not m.master_id or not m.planned_start_time:
+                        continue
+                    m_local = planned_start_local_datetime(
+                        m.planned_start_time,
+                        booking_planned_date=b.planned_date,
+                        tz_name=tz,
+                    )
+                    if m_local is None:
+                        continue
+                    per_master_start[int(m.master_id)] = _minutes_on_day(m_local, day)
                 for mid in master_ids:
-                    if end_m <= grid_start or start_m >= grid_end:
+                    start_m_mid = per_master_start.get(mid, start_m)
+                    if end_m <= grid_start or start_m_mid >= grid_end:
                         continue
                     segments.append(
                         OccupancySegment(
                             booking_id=int(b.id),
                             master_id=mid,
-                            start_minutes=max(start_m, grid_start),
+                            start_minutes=max(start_m_mid, grid_start),
                             end_minutes=min(end_m, grid_end),
                             status=status_s,
                             color=color,

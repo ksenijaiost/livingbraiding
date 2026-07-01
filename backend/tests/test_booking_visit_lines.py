@@ -14,6 +14,7 @@ from app.db.models import (
     Booking,
     BookingKind,
     BookingPlannedService,
+    BookingPlannedServiceMaster,
     BookingStatus,
     Client,
     Service,
@@ -96,6 +97,33 @@ def test_parse_multi_service_lines_with_duration(memory_db) -> None:
     assert on_ids == [1]
 
 
+def test_parse_line_master_start_times(memory_db) -> None:
+    db = memory_db
+    svc1, _svc2, _admin, _client = _visit_setup(db)
+    lines_json = (
+        '[{"service_id": %d, "planned_time": "10:00", "master_ids": [], '
+        '"master_start_times": {"1": "10:00", "2": "11:00"}}]'
+    ) % (svc1.id,)
+    fp = {
+        "planned_time": "10:00",
+        "booking_service_lines_json": lines_json,
+        "booking_masters_mode": "all",
+    }
+
+    class Form:
+        def getlist(self, name):
+            return ["1", "2"] if name == "booking_master_on" else []
+
+        def get(self, key):
+            return fp.get(key)
+
+    err, _ids, _first_id, specs, _on_ids = _parse_booking_visit_lines_and_masters(db, Form(), fp)
+    assert err is None
+    assert len(specs) == 1
+    assert specs[0]["master_start_times"][1] == time(10, 0)
+    assert specs[0]["master_start_times"][2] == time(11, 0)
+
+
 def test_sync_planned_services_persists_duration_and_times(memory_db) -> None:
     db = memory_db
     svc1, svc2, admin, client = _visit_setup(db)
@@ -141,6 +169,58 @@ def test_sync_planned_services_persists_duration_and_times(memory_db) -> None:
     assert by_sid[svc1.id].duration_minutes == 240
     assert by_sid[svc2.id].comment == "вторая"
     assert by_sid[svc2.id].planned_start_time is not None
+
+
+def test_sync_planned_services_persists_master_individual_start(memory_db) -> None:
+    db = memory_db
+    svc1, _svc2, admin, client = _visit_setup(db)
+    m1 = User(username="m_start_1", password_hash="x", display_name="M1", role=UserRole.MASTER, is_active=True)
+    m2 = User(username="m_start_2", password_hash="x", display_name="M2", role=UserRole.MASTER, is_active=True)
+    db.add_all([m1, m2])
+    db.flush()
+    booking = Booking(
+        created_by_user_id=admin.id,
+        client_id=client.id,
+        planned_date=datetime(2026, 6, 8, 7, 0),
+        kind=BookingKind.VISIT,
+        status=BookingStatus.ACTIVE,
+        planned_service_id=svc1.id,
+    )
+    db.add(booking)
+    db.flush()
+
+    line_specs = [
+        {
+            "service_id": svc1.id,
+            "planned_time": time(10, 0),
+            "master_ids": [m1.id, m2.id],
+            "master_start_times": {m1.id: time(10, 0), m2.id: time(11, 0)},
+            "comment": "",
+            "duration_minutes": 240,
+        },
+    ]
+    _sync_booking_planned_services_with_lines(
+        db,
+        booking_id=booking.id,
+        local_day=date(2026, 6, 8),
+        tz_name="Europe/Moscow",
+        line_specs=line_specs,
+    )
+    db.commit()
+
+    ps = db.scalar(select(BookingPlannedService).where(BookingPlannedService.booking_id == booking.id))
+    assert ps is not None
+    rows = list(
+        db.scalars(
+            select(BookingPlannedServiceMaster).where(
+                BookingPlannedServiceMaster.booking_planned_service_id == ps.id
+            )
+        ).all()
+    )
+    assert len(rows) == 2
+    by_mid = {int(r.master_id): r for r in rows}
+    assert by_mid[m1.id].planned_start_time is None
+    assert by_mid[m2.id].planned_start_time is not None
 
 
 def test_apply_parsed_visit_lines_updates_fp_duration(memory_db) -> None:
