@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.list_master_labels import work_list_master_labels
 from app.payroll_fund import post_work_accruals, replace_work_accruals, storno_source_accruals
 from starlette.datastructures import UploadFile
 
@@ -1641,12 +1642,14 @@ def work_list(
         )
     stmt = stmt.order_by(WorkForInventory.id.desc()).limit(100)
     rows = list(db.scalars(stmt).all())
+    row_masters = work_list_master_labels(rows)
     return templates.TemplateResponse(
         "work_products_list.html",
         _ctx(
             request,
             current_user=current_user,
             rows=rows,
+            row_masters=row_masters,
             msg=msg,
             can_create=(current_user.role == UserRole.MASTER),
             work_mine_only=work_mine_only,

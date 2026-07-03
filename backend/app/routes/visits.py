@@ -11,6 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_assigned_roles, require_role
+from app.list_master_labels import visit_list_master_labels
 from app.time_utils import utcnow_naive
 from app.db.session import get_db
 from app.db.models import (
@@ -22,6 +23,7 @@ from app.db.models import (
     VisitKitUsage,
     VisitMaster,
     VisitService,
+    VisitServiceMaster,
 )
 from app.payroll_fund import storno_source_accruals
 from app.payroll_fund import PayrollFundSourceKind
@@ -95,7 +97,14 @@ def admin_visits(
     mine_raw = (mine or "").strip().lower()
     visits_mine_only = mine_raw in ("1", "true", "yes", "only")
     visits_show_cancelled = parse_bool(show_cancelled)
-    stmt = select(Visit).options(selectinload(Visit.client), selectinload(Visit.services))
+    stmt = select(Visit).options(
+        selectinload(Visit.client),
+        selectinload(Visit.masters).selectinload(VisitMaster.master),
+        selectinload(Visit.services)
+        .selectinload(VisitService.masters)
+        .selectinload(VisitServiceMaster.master),
+        selectinload(Visit.services).selectinload(VisitService.service),
+    )
     if not visits_show_cancelled:
         stmt = stmt.where(Visit.is_cancelled.is_(False))
     if visits_mine_only:
@@ -125,12 +134,14 @@ def admin_visits(
     visits = list(db.scalars(stmt).all())
     for v in visits:
         v.services_line = visit_services_catalog_line(v)  # type: ignore[attr-defined]
+    row_masters = visit_list_master_labels(db, visits)
     return templates.TemplateResponse(
         "admin_visits.html",
         _ctx(
             request,
             current_user=current_user,
             visits=visits,
+            row_masters=row_masters,
             visits_mine_only=visits_mine_only,
             visits_show_cancelled=visits_show_cancelled,
             visits_url_scope_all=_visits_list_url(mine_only=False, show_cancelled=visits_show_cancelled),

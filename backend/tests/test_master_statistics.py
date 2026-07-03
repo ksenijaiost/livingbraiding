@@ -156,6 +156,7 @@ def test_build_master_statistics_visit_and_fund(memory_db) -> None:
     assert stats.master_name == "Мастер 1"
     assert len(stats.visits) == 1
     assert stats.visits[0].amount_from_client == 5000.0
+    assert stats.visits[0].payment_display == "нал"
     assert stats.visits[0].discount_display == "5"
     assert stats.visits[0].master_payroll > 0
     assert stats.payroll_accrued >= 100.0
