@@ -40,7 +40,7 @@
         <h3 style="margin-top:0;">Реквизиты</h3>
         <p style="margin:6px 0;"><strong>Дата</strong>: {{ sale.performed_date.date().isoformat() }}</p>
         <p style="margin:6px 0;"><strong>Клиент</strong>: {{ sale.client.name }}</p>
-        <p style="margin:6px 0;"><strong>Сумма с клиента</strong>: {{ sale.amount_from_client }} ₽</p>
+        <p style="margin:6px 0;"><strong>Сумма с клиента</strong>: {{ sale.amount_from_client }} ₽ <span class="muted">({{ client_payment_kind_label(sale.client_payment_kind) }})</span></p>
         <p style="margin:6px 0;"><strong>Маржа в фонд студии (ЗП)</strong>: {{ "%.2f"|format(sale.studio_margin_amount|float) }} ₽</p>
         <p style="margin:6px 0;"><strong>Кто внёс</strong>: {{ sale.created_by_user.display_name if sale.created_by_user else '—' }}</p>
         {% if sale.booking_id %}

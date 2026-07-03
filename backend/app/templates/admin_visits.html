@@ -44,6 +44,7 @@
           <th>Себестоимость</th>
           <th>Студия</th>
           <th>Мастера</th>
+          <th>ЗП мастеров</th>
         </tr>
       </thead>
       <tbody>
@@ -58,7 +59,7 @@
             <td>
               <a href="/visits/{{ v.id }}">{{ v.performed_date.strftime("%d.%m.%Y") }}</a>
             </td>
-            <td>{{ v.client.name }}</td>
+            <td style="max-width:9rem; word-break:break-word; line-height:1.35;">{{ v.client.name }}</td>
             <td>
               {% if v.services %}
                 {{ v.services_line }}
@@ -67,6 +68,10 @@
             <td>{{ "%.0f"|format(v.amount_from_client) }}</td>
             <td>{{ "%.0f"|format(v.cost_total) }}</td>
             <td>{{ "%.0f"|format(v.salon_profit) }}</td>
+            <td style="max-width:12rem; font-size:13px; line-height:1.35; word-break:break-word;">
+              {% set masters_label = (row_masters.get(v.id) or '') %}
+              {% if masters_label %}{{ masters_label }}{% else %}<span class="muted">—</span>{% endif %}
+            </td>
             <td>{{ "%.0f"|format(v.masters_pool) }}</td>
           </tr>
         {% endfor %}

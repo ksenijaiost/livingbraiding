@@ -12,10 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
+from app.client_payment import parse_client_payment_kind
 from app.client_validation import client_has_any_contact, strip_or_none
 from app.db.models import (
     AmortizationLevel,
     Client,
+    ClientPaymentKind,
     MixComplexity,
     MixSource,
     Service,
@@ -142,6 +144,7 @@ class VisitServiceLineInput:
     comment: str | None = None
     sort_order: int = 0
     visit_service_id: int | None = None
+    client_payment_kind: ClientPaymentKind = ClientPaymentKind.CASH
 
 
 @dataclass
@@ -592,6 +595,7 @@ def save_visit_with_services(
             service_name=service.name,
             sort_order=line.sort_order if line.sort_order else idx,
             amount_from_client=computed.amount_from_client,
+            client_payment_kind=line.client_payment_kind,
             client_discount_percent=computed.client_discount_percent,
             kanekalon_grams=computed.kanekalon_grams,
             kudri_grams=computed.kudri_grams,
@@ -862,6 +866,7 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
     return VisitServiceLineInput(
         service_id=int(parse_float(g("service_id", "0") or "0", field_name="service_id")),
         amount_from_client=g_float("amount_from_client", 0),
+        client_payment_kind=parse_client_payment_kind(g("client_payment_kind", "")),
         client_discount_percent=_parse_visit_client_discount_percent(g),
         kanekalon_grams=kanekalon_grams,
         kudri_grams=kudri_grams,
@@ -1079,6 +1084,7 @@ def _visit_service_financial_signature(
 
 def _apply_computed_to_visit_service(vs: VisitService, computed: VisitServiceLineComputed, line: VisitServiceLineInput) -> None:
     vs.amount_from_client = computed.amount_from_client
+    vs.client_payment_kind = line.client_payment_kind
     vs.client_discount_percent = computed.client_discount_percent
     vs.kanekalon_grams = computed.kanekalon_grams
     vs.kudri_grams = computed.kudri_grams

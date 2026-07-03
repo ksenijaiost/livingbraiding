@@ -8,6 +8,7 @@ from datetime import date, datetime, time, timedelta
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.client_payment import format_client_payment_kinds
 from app.db.models import (
     Booking,
     Consultation,
@@ -36,6 +37,7 @@ class MasterStatsVisitRow:
     visit_id: int
     visit_date: datetime
     amount_from_client: float
+    payment_display: str
     discount_display: str
     cost_total: float
     master_payroll: float
@@ -47,6 +49,7 @@ class MasterStatsWorkRow:
     work_id: int
     work_date: datetime
     amount_from_client: float
+    payment_display: str
     discount_display: str
     cost_total: float
     master_payroll: float
@@ -58,6 +61,7 @@ class MasterStatsSaleRow:
     sale_id: int
     sale_date: datetime
     amount_from_client: float
+    payment_display: str
     discount_display: str
     cost_total: float
     master_payroll: float
@@ -287,6 +291,11 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
                 visit_id=int(visit.id),
                 visit_date=visit.performed_date,
                 amount_from_client=money_q2(sum(float(vs.amount_from_client or 0) for vs in svc_lines)),
+                payment_display=format_client_payment_kinds(
+                    vs.client_payment_kind
+                    for vs in svc_lines
+                    if float(vs.amount_from_client or 0) > 0
+                ),
                 discount_display=format_discounts([int(vs.client_discount_percent or 0) for vs in svc_lines]),
                 cost_total=money_q2(sum(float(vs.cost_total or 0) for vs in svc_lines)),
                 master_payroll=money_q2(
@@ -324,6 +333,11 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
                 work_id=int(work.id),
                 work_date=work.performed_date or work.created_at,
                 amount_from_client=money_q2(float(work.amount_from_client or 0)),
+                payment_display=(
+                    format_client_payment_kinds([work.client_payment_kind])
+                    if work.amount_from_client is not None and float(work.amount_from_client or 0) > 0
+                    else "—"
+                ),
                 discount_display=discount,
                 cost_total=money_q2(float(work.cost_total_amount or 0)),
                 master_payroll=money_q2(float(staff.master_profit_amount or 0)),
@@ -356,6 +370,11 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
                 sale_id=int(sale.id),
                 sale_date=sale.performed_date,
                 amount_from_client=money_q2(float(sale.amount_from_client or 0)),
+                payment_display=(
+                    format_client_payment_kinds([sale.client_payment_kind])
+                    if float(sale.amount_from_client or 0) > 0
+                    else "—"
+                ),
                 discount_display=_sale_discount_display(db, sale),
                 cost_total=_sale_cost_total(sale),
                 master_payroll=master_pay,

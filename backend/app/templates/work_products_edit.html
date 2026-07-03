@@ -20,7 +20,12 @@
         <div class="row">
           <div>
             <label>Сумма от клиента, ₽</label>
-            <input name="amount_from_client" type="number" step="1" min="0" value="{{ row.amount_from_client if row.amount_from_client is not none else '' }}" />
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px;">
+              <input name="amount_from_client" type="number" step="1" min="0" value="{{ row.amount_from_client if row.amount_from_client is not none else '' }}" style="max-width:12rem;" />
+              {% with name='client_payment_kind', value=(row.client_payment_kind.value if row.client_payment_kind else 'CASH') %}
+                {% include "partials/client_payment_kind_radios.html" %}
+              {% endwith %}
+            </div>
           </div>
           <div>
             <label>Комментарий</label>

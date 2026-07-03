@@ -86,7 +86,7 @@
               <strong>{{ vs.service_name }}</strong>
               {% if vs.is_cancelled %}<span class="muted"> (отменена)</span>{% endif %}
               <p class="muted" style="margin:4px 0 0;font-size:13px;">{{ vs.category_name }} → {{ vs.subcategory_name }}</p>
-              <p style="margin:6px 0 0;">С клиента: <strong>{{ vs.amount_from_client|round(0) }} ₽</strong></p>
+              <p style="margin:6px 0 0;">С клиента: <strong>{{ vs.amount_from_client|round(0) }} ₽</strong> <span class="muted">({{ client_payment_kind_label(vs.client_payment_kind) }})</span></p>
             </div>
             {% if visit_super_priv and not visit.is_cancelled and not vs.is_cancelled and not visit_closed_period %}
               <form method="post" action="/visits/{{ visit.id }}/services/{{ vs.id }}/cancel" style="margin:0;">

@@ -152,7 +152,12 @@
                     <a href="/visits/{{ row.visit_id }}">№{{ row.visit_id }}</a>,
                     <a href="/visits/{{ row.visit_id }}">{{ row.visit_date.strftime('%d.%m.%Y') }}</a>
                   </td>
-                  <td>{{ "%.2f"|format(row.amount_from_client) }}</td>
+                  <td>
+                    {{ "%.2f"|format(row.amount_from_client) }}
+                    {% if row.payment_display and row.payment_display != '—' %}
+                      <span class="muted">({{ row.payment_display }})</span>
+                    {% endif %}
+                  </td>
                   <td>{{ row.discount_display }}</td>
                   <td>{{ "%.2f"|format(row.cost_total) }}</td>
                   <td>{{ "%.2f"|format(row.master_payroll) }}</td>
@@ -187,7 +192,12 @@
                     <a href="/admin/sales/work/{{ row.work_id }}">№{{ row.work_id }}</a>,
                     <a href="/admin/sales/work/{{ row.work_id }}">{{ row.work_date.strftime('%d.%m.%Y') }}</a>
                   </td>
-                  <td>{{ "%.2f"|format(row.amount_from_client) }}</td>
+                  <td>
+                    {{ "%.2f"|format(row.amount_from_client) }}
+                    {% if row.payment_display and row.payment_display != '—' %}
+                      <span class="muted">({{ row.payment_display }})</span>
+                    {% endif %}
+                  </td>
                   <td>{{ row.discount_display }}</td>
                   <td>{{ "%.2f"|format(row.cost_total) }}</td>
                   <td>{{ "%.2f"|format(row.master_payroll) }}</td>
@@ -222,7 +232,12 @@
                     <a href="/admin/sales/products/{{ row.sale_id }}">№{{ row.sale_id }}</a>,
                     <a href="/admin/sales/products/{{ row.sale_id }}">{{ row.sale_date.strftime('%d.%m.%Y') }}</a>
                   </td>
-                  <td>{{ "%.2f"|format(row.amount_from_client) }}</td>
+                  <td>
+                    {{ "%.2f"|format(row.amount_from_client) }}
+                    {% if row.payment_display and row.payment_display != '—' %}
+                      <span class="muted">({{ row.payment_display }})</span>
+                    {% endif %}
+                  </td>
                   <td>{{ row.discount_display }}</td>
                   <td>{{ "%.2f"|format(row.cost_total) }}</td>
                   <td>{{ "%.2f"|format(row.master_payroll) }}</td>

@@ -69,7 +69,12 @@
           </div>
           <div>
             <strong>Сумма от клиента</strong>
-            <div class="muted">{% if row.amount_from_client is not none %}{{ row.amount_from_client }} ₽{% else %}—{% endif %}</div>
+            <div class="muted">
+              {% if row.amount_from_client is not none %}
+                {{ row.amount_from_client }} ₽
+                {% if row.client_payment_kind %}<span class="muted">({{ client_payment_kind_label(row.client_payment_kind) }})</span>{% endif %}
+              {% else %}—{% endif %}
+            </div>
           </div>
         </div>
         {% if row.booking_id or linked_sale_ids %}

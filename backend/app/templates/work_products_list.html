@@ -51,7 +51,7 @@
               <th>Режим</th>
               <th>Вид</th>
               <th>Клиент</th>
-              <th>Сотрудники</th>
+              <th>Мастера</th>
               <th>Материал (г)</th>
             </tr>
           </thead>
@@ -83,12 +83,9 @@
                     <span class="muted">—</span>
                   {% endif %}
                 </td>
-                <td>
-                  {% for s in w.staff_rows %}
-                    <div class="muted" style="font-size: 12px;">
-                      {{ s.user.display_name }}{% if w.kind.value != "KIT" and s.share is not none and s.share != 1 %} ({{ s.share }}){% endif %}
-                    </div>
-                  {% endfor %}
+                <td style="max-width:12rem; font-size:13px; line-height:1.35; word-break:break-word;">
+                  {% set masters_label = (row_masters.get(w.id) or '') %}
+                  {% if masters_label %}{{ masters_label }}{% else %}<span class="muted">—</span>{% endif %}
                 </td>
                 <td>
                   {{ w.kanekalon_grams }} / {{ w.kudri_grams }}
