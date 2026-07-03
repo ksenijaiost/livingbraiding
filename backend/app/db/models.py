@@ -648,6 +648,7 @@ class VisitMastersScope(str, enum.Enum):
 class BookingKind(str, enum.Enum):
     VISIT = "VISIT"
     PRODUCT_SALE = "PRODUCT_SALE"
+    CONSULTATION = "CONSULTATION"
 
 
 class BookingStatus(str, enum.Enum):
@@ -726,6 +727,11 @@ class Booking(Base):
     consultation: Mapped["Consultation | None"] = relationship(
         back_populates="booking",
         foreign_keys=[consultation_id],
+    )
+    consultation_for: Mapped["Consultation | None"] = relationship(
+        back_populates="source_booking",
+        foreign_keys="Consultation.source_booking_id",
+        uselist=False,
     )
     planned_services: Mapped[list["BookingPlannedService"]] = relationship(
         back_populates="booking",
@@ -918,6 +924,11 @@ class Consultation(Base):
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    source_booking_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bookings.id"),
+        nullable=True,
+        unique=True,
+    )
     consultation_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     types_json: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -935,6 +946,10 @@ class Consultation(Base):
         back_populates="consultation",
         foreign_keys="Booking.consultation_id",
         uselist=False,
+    )
+    source_booking: Mapped["Booking | None"] = relationship(
+        back_populates="consultation_for",
+        foreign_keys=[source_booking_id],
     )
     planned_services: Mapped[list["ConsultationService"]] = relationship(
         back_populates="consultation",

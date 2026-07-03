@@ -49,6 +49,11 @@
         Бронь подтверждена.
       </p>
     {% endif %}
+    {% if flash_msg == 'consultation_created' %}
+      <p class="lb-flash" style="background:#d1fae5;border-color:#6ee7b7;color:#065f46;">
+        Консультация создана.
+      </p>
+    {% endif %}
     {% if request.query_params.get('err') == 'reason' %}
       <p class="lb-flash" style="background:#fee2e2;border-color:#fecaca;color:#991b1b;">
         Укажите причину отмены.
@@ -73,8 +78,55 @@
     </div>
 
     {% if linked_consultation %}
-      <p class="lb-my-6"><strong>Консультация</strong>: <a href="/consultations/{{ linked_consultation.id }}">#{{ linked_consultation.id }}</a></p>
+      {# legacy: показывается в блоке «Связанные консультации» #}
     {% endif %}
+
+    <h3 class="lb-mt-18">Связанные консультации</h3>
+    <table class="lb-table-compact lb-max-720" style="margin-top:8px;">
+      <tbody>
+        <tr class="lb-table-compact-row">
+          <td class="lb-td-pad-left0 lb-va-mid lb-nowrap"><strong>Консультация, на которую бронь</strong></td>
+          <td class="lb-td-pad-mid lb-va-mid">
+            {% if consultation_for_booking %}
+              <a href="/consultations/{{ consultation_for_booking.id }}">№{{ consultation_for_booking.id }}</a>
+            {% elif need_consultation_for %}
+              <span class="muted">нет записи</span>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td class="lb-td-pad-right0 lb-va-mid lb-text-right lb-nowrap">
+            {% if not need_consultation_for %}
+              <span class="muted">—</span>
+            {% elif consultation_for_booking %}
+              <a href="/consultations/{{ consultation_for_booking.id }}"><button type="button" class="secondary">Открыть</button></a>
+            {% elif not booking_can_create_master_records %}
+              <span title="{{ booking_link_master_only_title }}" class="lb-cursor-help">
+                <button type="button" class="secondary lb-btn-disabled" disabled>Создать</button>
+              </span>
+            {% elif can_create_consultation_for %}
+              <a href="{{ consultation_for_create_url }}"><button type="button" class="secondary">Создать</button></a>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td class="lb-td-pad-left0 lb-va-mid lb-nowrap"><strong>Консультация, после которой бронь</strong></td>
+          <td class="lb-td-pad-mid lb-va-mid" colspan="2">
+            {% if linked_consultation %}
+              <a href="/consultations/{{ linked_consultation.id }}">№{{ linked_consultation.id }}</a>
+              <span class="muted"> · </span>
+              {{ format_naive_utc_datetime(linked_consultation.consultation_date, display_tz) }}
+              <span class="muted"> · </span>
+              {% if linked_consultation.created_by_user %}{{ linked_consultation.created_by_user.display_name }}{% else %}—{% endif %}
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
 
     <h3 class="lb-mt-18">Связанные записи</h3>
     {% if not booking_can_create_master_records and (need_work or need_visit) %}

@@ -5,11 +5,24 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Booking, BookingStatus, Consultation
+from app.db.models import Booking, BookingKind, BookingStatus, Consultation
 
 
 def booking_for_consultation(db: Session, consultation_id: int) -> Booking | None:
     return db.scalar(select(Booking).where(Booking.consultation_id == consultation_id).limit(1))
+
+
+def consultation_for_booking(db: Session, booking_id: int) -> Consultation | None:
+    return db.scalar(select(Consultation).where(Consultation.source_booking_id == booking_id).limit(1))
+
+
+def can_create_consultation_from_booking(db: Session, booking_id: int) -> bool:
+    b = db.get(Booking, booking_id)
+    if b is None or b.kind != BookingKind.CONSULTATION:
+        return False
+    if b.status == BookingStatus.CANCELLED:
+        return False
+    return consultation_for_booking(db, booking_id) is None
 
 
 OPEN_BOOKING_STATUSES = frozenset(

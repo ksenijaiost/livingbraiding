@@ -13,6 +13,9 @@
 
     <form id="consultation-form" method="post" action="{% if is_new %}/consultations/new{% else %}/consultations/{{ consultation.id }}/edit{% endif %}" enctype="multipart/form-data">
       <input type="hidden" name="client_id" id="client_id" value="{{ selected_client.id if selected_client else fp.get('client_id','') }}" />
+      {% if source_booking_id %}
+        <input type="hidden" name="booking_id" value="{{ source_booking_id }}" />
+      {% endif %}
 
       <div class="card" style="background:#f8fafc;">
         <h3 style="margin-top:0;">Клиент</h3>

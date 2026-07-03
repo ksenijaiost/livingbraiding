@@ -25,6 +25,15 @@ from app.consultation_booking import (
     booking_is_open,
     booking_status_label,
     can_create_booking_from_consultation,
+    can_create_consultation_from_booking,
+    consultation_for_booking,
+)
+from app.consultation_types import (
+    CONSULTATION_TYPE_CHOICES,
+    list_consultation_services_catalog,
+    parse_types_from_form,
+    types_json_dumps,
+    types_json_loads,
 )
 from app.db.models import (
     Booking,
@@ -106,7 +115,16 @@ def _booking_kind_label(k: str) -> str:
         return "Визит (услуга)"
     if k == BookingKind.PRODUCT_SALE.value:
         return "Продажа (без услуги)"
+    if k == BookingKind.CONSULTATION.value:
+        return "Консультация"
     return k
+
+
+_BOOKING_KIND_OPTIONS = [
+    BookingKind.VISIT.value,
+    BookingKind.PRODUCT_SALE.value,
+    BookingKind.CONSULTATION.value,
+]
 
 
 def _booking_status_label(s: str) -> str:
@@ -548,6 +566,12 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
                     fp["service_category_id"] = str(sub.category_id)
     elif b.kind == BookingKind.PRODUCT_SALE:
         fp["product_kind"] = b.planned_product_kind or ""
+    elif b.kind == BookingKind.CONSULTATION:
+        from app.planned_services_db import booking_planned_service_ids
+
+        svc_ids = booking_planned_service_ids(db, b.id)
+        if svc_ids:
+            fp["planned_service_ids"] = json.dumps(svc_ids, ensure_ascii=False)
     if b.details_json:
         try:
             d = json.loads(b.details_json)
@@ -643,6 +667,77 @@ def _prefill_booking_fp_from_consultation(db: Session, cons: Consultation, fp: d
     if cons.photo_2:
         fp["prefill_photo_2"] = cons.photo_2
     return None
+
+
+def _parse_booking_consultation_fields(
+    db: Session, form_raw: Any, fp: dict[str, str]
+) -> tuple[str | None, dict[str, Any], list[int]]:
+    """Вид и услуги консультации для брони типа CONSULTATION (оба необязательны)."""
+    from app.planned_services_db import parse_service_ids_from_form
+
+    types_list = form_raw.getlist("consultation_types") if hasattr(form_raw, "getlist") else []
+    types_data = parse_types_from_form(types_list, str(fp.get("other_text") or ""))
+    service_ids = parse_service_ids_from_form(form_raw)
+    for sid in service_ids:
+        if db.get(Service, sid) is None:
+            return "Услуга не найдена.", types_data, []
+    return None, types_data, service_ids
+
+
+def _consultation_types_data_from_booking_details(details: dict[str, Any]) -> dict[str, Any]:
+    raw = details.get("consultation_types_json")
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    return types_json_loads(str(raw))
+
+
+def _booking_form_consultation_types_data(fp: dict[str, str], details: dict[str, Any] | None = None) -> dict[str, Any]:
+    if details:
+        data = _consultation_types_data_from_booking_details(details)
+        if data:
+            return data
+    raw = str(fp.get("consultation_types_json") or "").strip()
+    if raw:
+        return types_json_loads(raw)
+    types_list = [x.strip() for x in str(fp.get("consultation_types") or "").split(",") if x.strip()]
+    return parse_types_from_form(types_list, str(fp.get("other_text") or ""))
+
+
+def _booking_form_consultation_template_ctx(
+    db: Session,
+    fp: dict[str, str],
+    booking: Booking | None = None,
+) -> dict[str, Any]:
+    details: dict[str, Any] = {}
+    if booking and booking.details_json:
+        try:
+            raw = json.loads(booking.details_json)
+            if isinstance(raw, dict):
+                details = raw
+        except Exception:
+            details = {}
+    types_data = _booking_form_consultation_types_data(fp, details)
+    svc_ids: list[int] = []
+    raw_ids = str(fp.get("planned_service_ids") or "").strip()
+    if raw_ids.startswith("["):
+        try:
+            parsed = json.loads(raw_ids)
+            if isinstance(parsed, list):
+                svc_ids = [int(x) for x in parsed if int(x) > 0]
+        except Exception:
+            svc_ids = []
+    elif booking is not None:
+        from app.planned_services_db import booking_planned_service_ids
+
+        svc_ids = booking_planned_service_ids(db, booking.id)
+    return {
+        "consultation_service_catalog": list_consultation_services_catalog(db),
+        "consultation_type_choices": CONSULTATION_TYPE_CHOICES,
+        "consultation_types_data": types_data,
+        "consultation_selected_service_ids": svc_ids,
+    }
 
 
 def _parse_booking_visit_planned_services(
@@ -1450,6 +1545,8 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
                 "corr_steam",
                 "corr_circle",
             )
+    elif kind_raw == BookingKind.CONSULTATION.value:
+        keys = ("consultation_types_json", "other_text", "comment")
     else:
         keys = ("product_kind",) + calc_keys
         if product_kind == "KIT":
@@ -2001,7 +2098,7 @@ def admin_booking_new_get(
             staff_users=staff_users,
             after_reserve=str(request.url),
             service_catalog=service_catalog,
-            kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+            kind_options=_BOOKING_KIND_OPTIONS,
             product_kind_options=[k.value for k in ProductSaleKind],
             rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
             fp=fp,
@@ -2010,6 +2107,7 @@ def admin_booking_new_get(
             line_service_kits_prefill=_line_service_kits_prefill_for_form(db, fp),
             consultation_id=consultation.id if consultation else None,
             consultation_comment=consultation_comment,
+            **_booking_form_consultation_template_ctx(db, fp),
         ),
     )
 
@@ -2073,7 +2171,7 @@ async def admin_booking_new_post(  # noqa: C901
             err = "Укажите дату и время брони."
 
     if not err:
-        if kind_raw not in (BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value):
+        if kind_raw not in _BOOKING_KIND_OPTIONS:
             err = "Некорректный тип брони."
 
     if not err and deposit_raw:
@@ -2126,6 +2224,14 @@ async def admin_booking_new_post(  # noqa: C901
                 except ValueError:
                     err = "Выберите мастера для заказа хвоста/резинки."
 
+    if not err and kind_raw == BookingKind.CONSULTATION.value:
+        cons_err, types_data, planned_service_ids = _parse_booking_consultation_fields(db, form_raw, fp)
+        if cons_err:
+            err = cons_err
+        else:
+            fp["consultation_types_json"] = types_json_dumps(types_data)
+            planned_service_id = planned_service_ids[0] if planned_service_ids else None
+
     masters = _masters_for_visit_form(db)
     service_catalog = list_master_visit_services_catalog(db)
     staff_users = list(db.scalars(select_users_with_any_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)).all())
@@ -2144,13 +2250,14 @@ async def admin_booking_new_post(  # noqa: C901
                 staff_users=staff_users,
                 after_reserve=str(request.url),
                 service_catalog=service_catalog,
-                kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                kind_options=_BOOKING_KIND_OPTIONS,
                 product_kind_options=[k.value for k in ProductSaleKind],
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
                 fp=fp,
                 booking_master_on_ids=[],
                 consultation_id=int(fp["consultation_id"]) if str(fp.get("consultation_id") or "").isdigit() else None,
                 consultation_comment=None,
+                **_booking_form_consultation_template_ctx(db, fp),
             ),
             status_code=400,
         )
@@ -2183,7 +2290,7 @@ async def admin_booking_new_post(  # noqa: C901
                     staff_users=staff_users,
                     after_reserve=str(request.url),
                     service_catalog=service_catalog,
-                    kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                    kind_options=_BOOKING_KIND_OPTIONS,
                     product_kind_options=[k.value for k in ProductSaleKind],
                     rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
                     fp=fp,
@@ -2221,7 +2328,7 @@ async def admin_booking_new_post(  # noqa: C901
                 staff_users=staff_users,
                 after_reserve=str(request.url),
                 service_catalog=service_catalog,
-                kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                kind_options=_BOOKING_KIND_OPTIONS,
                 product_kind_options=[k.value for k in ProductSaleKind],
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
                 fp=fp,
@@ -2264,7 +2371,7 @@ async def admin_booking_new_post(  # noqa: C901
                 staff_users=staff_users,
                 after_reserve=str(request.url),
                 service_catalog=service_catalog,
-                kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                kind_options=_BOOKING_KIND_OPTIONS,
                 product_kind_options=[k.value for k in ProductSaleKind],
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
                 fp=fp,
@@ -2310,6 +2417,16 @@ async def admin_booking_new_post(  # noqa: C901
                 continue
             db.add(BookingMaster(booking_id=booking.id, master_id=mid))
 
+    if kind_raw == BookingKind.CONSULTATION.value:
+        from app.planned_services_db import sync_booking_planned_services
+
+        sync_booking_planned_services(
+            db,
+            booking.id,
+            planned_service_ids,
+            planned_date=planned_date,
+        )
+
     _sync_booking_staff_rows_for_sale(db, booking_id=booking.id, fp=fp, form_raw=form_raw)
     _apply_booking_auto_reserves(
         db,
@@ -2349,13 +2466,22 @@ def admin_booking_detail(
             selectinload(Booking.planned_services)
             .selectinload(BookingPlannedService.masters)
             .selectinload(BookingPlannedServiceMaster.master),
-            selectinload(Booking.consultation),
+            selectinload(Booking.consultation).selectinload(Consultation.created_by_user),
         )
     )
     if b is None:
         raise HTTPException(status_code=404, detail="Бронь не найдена")
 
     linked_consultation = b.consultation
+    consultation_for_booking_row = db.scalar(
+        select(Consultation)
+        .where(Consultation.source_booking_id == booking_id)
+        .options(selectinload(Consultation.created_by_user))
+        .limit(1)
+    )
+    need_consultation_for = b.kind == BookingKind.CONSULTATION
+    can_create_consultation_for = can_create_consultation_from_booking(db, booking_id)
+    consultation_for_create_url = f"/consultations/new?booking_id={booking_id}" if need_consultation_for else ""
     linked_visit_id = db.scalar(select(Visit.id).where(Visit.booking_id == booking_id).limit(1))
     linked_sale_id = db.scalar(select(ProductSale.id).where(ProductSale.booking_id == booking_id).limit(1))
     linked_work_id = db.scalar(select(WorkForInventory.id).where(WorkForInventory.booking_id == booking_id).limit(1))
@@ -2461,6 +2587,10 @@ def admin_booking_detail(
             linked_sale_id=linked_sale_id,
             linked_work_id=linked_work_id,
             linked_consultation=linked_consultation,
+            consultation_for_booking=consultation_for_booking_row,
+            need_consultation_for=need_consultation_for,
+            can_create_consultation_for=can_create_consultation_for,
+            consultation_for_create_url=consultation_for_create_url,
             audit_rows=audit_rows,
             display_tz=display_tz,
             sale_kit_order_users=sale_kit_order_users,
@@ -2520,18 +2650,16 @@ def admin_booking_edit_get(
             staff_users=staff_users,
             after_reserve=str(request.url),
             service_catalog=service_catalog,
-            kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+            kind_options=_BOOKING_KIND_OPTIONS,
             product_kind_options=[k.value for k in ProductSaleKind],
             rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
             fp=fp,
             booking_master_on_ids=master_ids,
             visit_stock_kit_initial=_visit_stock_kit_initial_for_form(db, fp),
             line_service_kits_prefill=_line_service_kits_prefill_for_form(db, fp),
+            **_booking_form_consultation_template_ctx(db, fp, b),
         ),
     )
-
-
-@router.post("/{booking_id}/edit")
 @legacy_bookings_admin_router.post("/{booking_id}/edit")
 async def admin_booking_edit_post(
     request: Request,
@@ -2612,7 +2740,7 @@ async def admin_booking_edit_post(
             err = "Укажите дату и время брони."
 
     if not err:
-        if kind_raw not in (BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value):
+        if kind_raw not in _BOOKING_KIND_OPTIONS:
             err = "Некорректный тип брони."
 
     if not err and deposit_raw:
@@ -2676,6 +2804,14 @@ async def admin_booking_edit_post(
                 except ValueError:
                     err = "Выберите мастера для заказа хвоста/резинки."
 
+    if not err and kind_raw == BookingKind.CONSULTATION.value:
+        cons_err, types_data, planned_service_ids = _parse_booking_consultation_fields(db, form_raw, fp)
+        if cons_err:
+            err = cons_err
+        else:
+            fp["consultation_types_json"] = types_json_dumps(types_data)
+            planned_service_id = planned_service_ids[0] if planned_service_ids else None
+
     masters = _masters_for_visit_form(db)
     service_catalog = list_master_visit_services_catalog(db)
     staff_users = list(db.scalars(select_users_with_any_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)).all())
@@ -2713,7 +2849,7 @@ async def admin_booking_edit_post(
                 staff_users=staff_users,
                 after_reserve=str(request.url),
                 service_catalog=service_catalog,
-                kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                kind_options=_BOOKING_KIND_OPTIONS,
                 product_kind_options=[k.value for k in ProductSaleKind],
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
                 fp=fp,
@@ -2794,7 +2930,7 @@ async def admin_booking_edit_post(
                 staff_users=staff_users,
                 after_reserve=str(request.url),
                 service_catalog=service_catalog,
-                kind_options=[BookingKind.VISIT.value, BookingKind.PRODUCT_SALE.value],
+                kind_options=_BOOKING_KIND_OPTIONS,
                 product_kind_options=[k.value for k in ProductSaleKind],
                 rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
                 fp=fp,
@@ -2827,6 +2963,15 @@ async def admin_booking_edit_post(
             local_day=local_day,
             tz_name=tz_name or get_display_timezone(db),
             line_specs=planned_service_lines,
+        )
+    elif kind_raw == BookingKind.CONSULTATION.value:
+        from app.planned_services_db import sync_booking_planned_services
+
+        sync_booking_planned_services(
+            db,
+            b.id,
+            planned_service_ids,
+            planned_date=planned_date,
         )
     else:
         db.execute(delete(BookingPlannedService).where(BookingPlannedService.booking_id == b.id))
