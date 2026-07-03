@@ -221,6 +221,8 @@ def _apply_service_line_to_fp(
         _set(fp, f"{p}service_id", vs.service_id)
 
     _set(fp, f"{p}amount_from_client", int(vs.amount_from_client or 0))
+    if vs.client_payment_kind:
+        _set(fp, f"{p}client_payment_kind", vs.client_payment_kind.value)
     _set(fp, f"{p}client_discount_percent", vs.client_discount_percent or 0)
     _set(fp, f"{p}kanekalon_grams", vs.kanekalon_grams or 0)
     _set(fp, f"{p}kudri_grams", vs.kudri_grams or 0)
@@ -243,6 +245,8 @@ def _apply_service_line_to_fp(
 
     if idx == 0:
         _set(fp, "amount_from_client", int(vs.amount_from_client or 0))
+        if vs.client_payment_kind:
+            _set(fp, "client_payment_kind", vs.client_payment_kind.value)
         _set(fp, "client_discount_percent", vs.client_discount_percent or 0)
         _set(fp, "kanekalon_grams", vs.kanekalon_grams or 0)
         _set(fp, "kudri_grams", vs.kudri_grams or 0)

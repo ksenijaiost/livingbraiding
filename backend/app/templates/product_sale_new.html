@@ -42,7 +42,12 @@
         </div>
         <div>
           <label>Сумма с клиента, ₽ (целое) *</label>
-          <input type="number" name="amount_from_client" min="0" step="1" required value="{{ fp.get('amount_from_client', '') }}" />
+          <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px;">
+            <input type="number" name="amount_from_client" min="0" step="1" required value="{{ fp.get('amount_from_client', '') }}" style="max-width:12rem;" />
+            {% with name='client_payment_kind', value=fp.get('client_payment_kind','') %}
+              {% include "partials/client_payment_kind_radios.html" %}
+            {% endwith %}
+          </div>
         </div>
       </div>
 

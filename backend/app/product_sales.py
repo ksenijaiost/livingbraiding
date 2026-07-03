@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
 from app.auth import AuthUser, require_role
+from app.client_payment import parse_client_payment_kind
 from app.display_time import get_display_timezone
 from app.ui_visit_display import ru_mix_complexity
 from app.audit import diff_fields, write_audit_rows
@@ -28,6 +29,7 @@ from app.db.models import (
     Booking,
     BookingKind,
     Client,
+    ClientPaymentKind,
     Kit,
     KitReserve,
     MixComplexity,
@@ -1072,6 +1074,7 @@ def product_sale_edit_form(
         "existing_client_id": str(sale.client_id),
         "performed_date": sale.performed_date.date().isoformat(),
         "amount_from_client": str(sale.amount_from_client),
+        "client_payment_kind": sale.client_payment_kind.value if sale.client_payment_kind else ClientPaymentKind.CASH.value,
         "kind": sale.kind.value,
         "material_service_id": str(sale.material_service_id or ""),
         "material_grams": "" if sale.material_grams is None else str(sale.material_grams),
@@ -1211,6 +1214,7 @@ async def product_sale_edit_save(
     sale.client_id = client.id
     sale.performed_date = performed
     sale.amount_from_client = int(amount_from_client)
+    sale.client_payment_kind = parse_client_payment_kind(_g_str(form, "client_payment_kind"))
     sale.kind = kind
 
     # reset all kind-specific fields
@@ -1407,6 +1411,7 @@ async def product_sale_new_post(
         "existing_client_id": _g_str(form, "existing_client_id"),
         "performed_date": _g_str(form, "performed_date") or date.today().isoformat(),
         "amount_from_client": _g_str(form, "amount_from_client"),
+        "client_payment_kind": _g_str(form, "client_payment_kind"),
         "kind": _g_str(form, "kind") or ProductSaleKind.MATERIAL.value,
         # material
         "material_service_id": _g_str(form, "material_service_id"),
@@ -1457,6 +1462,7 @@ async def product_sale_new_post(
     amount_from_client = _g_int(form, "amount_from_client", 0)
     if amount_from_client < 0:
         return _fail("Сумма с клиента не может быть отрицательной.")
+    client_payment_kind = parse_client_payment_kind(_g_str(form, "client_payment_kind"))
 
     kind_raw = (fp["kind"] or "").strip().upper()
     try:
@@ -1469,6 +1475,7 @@ async def product_sale_new_post(
         performed_date=performed,
         client_id=client.id,
         amount_from_client=amount_from_client,
+        client_payment_kind=client_payment_kind,
         kind=kind,
     )
     bid_raw = (_g_str(form, "booking_id") or "").strip()

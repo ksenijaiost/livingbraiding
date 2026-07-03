@@ -20,9 +20,11 @@ from app.payroll_fund import post_work_accruals, replace_work_accruals, storno_s
 from starlette.datastructures import UploadFile
 
 from app.auth import AuthUser, require_role
+from app.client_payment import parse_client_payment_kind
 from app.client_validation import format_created_by_label
 from app.db.models import (
     Client,
+    ClientPaymentKind,
     Kit,
     KitAuthorStaff,
     KitBlanksCondition,
@@ -975,6 +977,7 @@ async def work_new_post(
 
         client_id: int | None = None
         amount_from_client: int | None = None
+        client_payment_kind: ClientPaymentKind | None = None
         if scope == WorkScope.CUSTOM_ORDER:
             cid_raw = (_g_str(form, "client_id", "") or "").strip()
             try:
@@ -992,6 +995,11 @@ async def work_new_post(
                     raise ValueError("Сумма от клиента должна быть числом.")
                 if amount_from_client < 0:
                     raise ValueError("Сумма от клиента не может быть отрицательной.")
+            client_payment_kind = (
+                parse_client_payment_kind(_g_str(form, "client_payment_kind"))
+                if amount_from_client is not None
+                else None
+            )
 
         kanek = max(0.0, _g_float(form, "kanekalon_grams", 0.0))
         kudri = max(0.0, _g_float(form, "kudri_grams", 0.0))
@@ -1336,6 +1344,7 @@ async def work_new_post(
             scope=scope,
             client_id=client_id,
             amount_from_client=amount_from_client,
+            client_payment_kind=client_payment_kind if amount_from_client is not None else None,
             comment=(_g_str(form, "comment", "") or "").strip() or None,
             kanekalon_grams=kanek,
             kudri_grams=kudri,
@@ -1912,6 +1921,7 @@ async def work_edit_save(
     try:
         before = SimpleNamespace(
             amount_from_client=w.amount_from_client,
+            client_payment_kind=w.client_payment_kind,
             comment=w.comment,
             kanekalon_grams=w.kanekalon_grams,
             kudri_grams=w.kudri_grams,
@@ -1924,6 +1934,11 @@ async def work_edit_save(
         )
         # base fields
         w.amount_from_client = _p_int_opt("amount_from_client")
+        w.client_payment_kind = (
+            parse_client_payment_kind(_g_str(form, "client_payment_kind"))
+            if w.amount_from_client is not None
+            else None
+        )
         w.comment = (_g_str(form, "comment", "") or "").strip() or None
 
         w.kanekalon_grams = max(0.0, _p_float("kanekalon_grams", float(w.kanekalon_grams or 0.0)))
@@ -1955,6 +1970,7 @@ async def work_edit_save(
             w,
             (
                 "amount_from_client",
+                "client_payment_kind",
                 "comment",
                 "kanekalon_grams",
                 "kudri_grams",

@@ -1,0 +1,12 @@
+{# name: имя поля формы; value: CASH|NON_CASH #}
+{% set _cpk = (value or 'CASH')|upper %}
+<div class="lb-client-payment-kind" style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; font-size:13px;">
+  <label style="display:flex; gap:6px; align-items:center; font-weight:normal; margin:0;">
+    <input type="radio" name="{{ name }}" value="CASH" {% if _cpk != 'NON_CASH' %}checked{% endif %} />
+    <span>Нал</span>
+  </label>
+  <label style="display:flex; gap:6px; align-items:center; font-weight:normal; margin:0;">
+    <input type="radio" name="{{ name }}" value="NON_CASH" {% if _cpk == 'NON_CASH' %}checked{% endif %} />
+    <span>Безнал</span>
+  </label>
+</div>

@@ -993,6 +993,13 @@ class ConsultationAuditLog(Base):
     changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
 
 
+class ClientPaymentKind(str, enum.Enum):
+    """Способ оплаты суммы, взятой с клиента."""
+
+    CASH = "CASH"
+    NON_CASH = "NON_CASH"
+
+
 class ProductSaleKind(str, enum.Enum):
     MATERIAL = "MATERIAL"
     KIT = "KIT"
@@ -1013,6 +1020,11 @@ class ProductSale(Base):
     performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False)
     amount_from_client: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    client_payment_kind: Mapped[ClientPaymentKind] = mapped_column(
+        Enum(ClientPaymentKind, native_enum=False, length=16),
+        nullable=False,
+        default=ClientPaymentKind.CASH,
+    )
     booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True)
 
     is_voided: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -1112,6 +1124,10 @@ class WorkForInventory(Base):
     booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True)
     client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
     amount_from_client: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    client_payment_kind: Mapped[ClientPaymentKind | None] = mapped_column(
+        Enum(ClientPaymentKind, native_enum=False, length=16),
+        nullable=True,
+    )
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Материал (как в визите) + снимки цен/ставок на момент записи
@@ -1663,6 +1679,11 @@ class VisitService(Base):
     cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     amount_from_client: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    client_payment_kind: Mapped[ClientPaymentKind] = mapped_column(
+        Enum(ClientPaymentKind, native_enum=False, length=16),
+        nullable=False,
+        default=ClientPaymentKind.CASH,
+    )
     client_discount_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     kanekalon_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     kudri_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
