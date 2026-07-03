@@ -108,8 +108,6 @@ def admin_visits(
     if not visits_show_cancelled:
         stmt = stmt.where(Visit.is_cancelled.is_(False))
     if visits_mine_only:
-        from app.db.models import VisitServiceMaster
-
         stmt = stmt.where(
             or_(
                 Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == current_user.id)),
