@@ -117,8 +117,8 @@ def booking_list_detail_parts(
             parts.append(f"Продажа: {sale_map.get(sk, sk.value)}")
         else:
             pk = (getattr(booking, "planned_product_kind", None) or "").strip()
-            if pk and product_kind_label_fn is not None:
-                label = product_kind_label_fn(pk)
-                if label and label != "—":
-                    parts.append(f"Продажа: {label}")
+            if pk and product_kind_label_fn:
+                parts.append(f"Продажа: {product_kind_label_fn(pk)}")
+    elif kind == BookingKind.CONSULTATION:
+        parts.append("Консультация")
     return parts

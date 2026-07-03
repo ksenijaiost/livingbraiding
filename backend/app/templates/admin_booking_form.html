@@ -85,7 +85,11 @@
           <label>Дата брони *</label>
           <input type="date" name="planned_date" value="{{ fp.get('planned_date','') }}" required />
         </div>
-        <div>
+        <div id="lb_booking_planned_time_wrap" style="display:none;">
+          <label>Время *</label>
+          <input type="time" name="planned_time" value="{{ fp.get('planned_time','') }}" step="60" />
+        </div>
+        <div id="lb_booking_planned_time_hint">
           <p class="muted" style="margin:26px 0 0;font-size:0.9em;">Дата общая для брони. Время задаётся в блоке первой услуги.</p>
         </div>
         <div>
@@ -93,6 +97,7 @@
           <div style="display:flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
             <label><input type="radio" name="kind" value="VISIT" {% if (fp.get('kind') or 'VISIT') == 'VISIT' %}checked{% endif %} /> Визит (услуга)</label>
             <label><input type="radio" name="kind" value="PRODUCT_SALE" {% if fp.get('kind') == 'PRODUCT_SALE' %}checked{% endif %} /> Продажа (без услуги)</label>
+            <label><input type="radio" name="kind" value="CONSULTATION" {% if fp.get('kind') == 'CONSULTATION' %}checked{% endif %} /> Консультация</label>
           </div>
         </div>
       </div>
@@ -120,6 +125,54 @@
           {% set masters_mode = fp.get('booking_masters_mode') or 'all' %}
           <label><input type="radio" name="booking_masters_mode" value="all" {% if masters_mode != 'per_service' %}checked{% endif %} /> На все услуги</label>
           <label><input type="radio" name="booking_masters_mode" value="per_service" {% if masters_mode == 'per_service' %}checked{% endif %} /> Отдельно по услугам</label>
+        </div>
+      </div>
+
+      <div id="kind_consultation_block" style="margin-top: 14px; display:none;">
+        {% set consultation_type_choices = consultation_type_choices|default([]) %}
+        {% set consultation_types_data = consultation_types_data|default({}) %}
+        {% set consultation_selected_service_ids = consultation_selected_service_ids|default([]) %}
+        {% set consultation_service_catalog = consultation_service_catalog|default([]) %}
+        <div class="card" style="background:#f8fafc;">
+          <h3 style="margin-top:0;">Бронь консультации</h3>
+          <div style="margin-top:10px;">
+            <label>Вид консультации</label>
+            <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:6px;">
+              {% for code, label in consultation_type_choices %}
+                <label>
+                  <input type="checkbox" name="consultation_types" value="{{ code }}"
+                    {% if consultation_types_data.get(code) %}checked{% endif %}
+                    {% if code == 'OTHER' %}data-lb-consult-other-toggle="1"{% endif %} />
+                  {{ label }}
+                </label>
+              {% endfor %}
+            </div>
+            <div id="booking_consult_other_text_wrap" style="margin-top:8px;{% if not consultation_types_data.get('OTHER') %}display:none;{% endif %}">
+              <label>Текст для «Другое»</label>
+              <input type="text" name="other_text" maxlength="500" value="{{ consultation_types_data.get('other_text','') }}" style="width:100%;box-sizing:border-box;" />
+            </div>
+          </div>
+          <div style="margin-top:12px;">
+            <label>Услуги (можно несколько)</label>
+            <div id="booking-consultation-services-list" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-top:6px;">
+              {% for c in consultation_service_catalog %}
+                <div class="consultation-cat-group" data-consultation-kind="{{ c.consultation_kind }}">
+                  {% for sc in c.subcategories %}
+                    <div class="consultation-subcat-group" data-consultation-kind="{{ c.consultation_kind }}">
+                      <div class="muted consultation-subcat-title" style="font-size:12px;margin-top:6px;">{{ c.name }} → {{ sc.name }}</div>
+                      {% for s in sc.services %}
+                        <label class="consultation-service-label" style="display:flex;align-items:center;gap:8px;font-weight:normal;" data-consultation-kind="{{ c.consultation_kind }}">
+                          <input type="checkbox" class="booking-consultation-service-on" value="{{ s.id }}"
+                            {% if s.id in consultation_selected_service_ids %}checked{% endif %} />
+                          {{ s.name }}
+                        </label>
+                      {% endfor %}
+                    </div>
+                  {% endfor %}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2305,5 +2358,28 @@
   </script>
 
   {# Резерв комплекта делается автоматически при сохранении брони #}
+  <script>
+    (function () {
+      var otherBox = document.querySelector('#kind_consultation_block input[data-lb-consult-other-toggle]');
+      var otherWrap = document.getElementById('booking_consult_other_text_wrap');
+      if (otherBox && otherWrap) {
+        otherBox.addEventListener('change', function () {
+          otherWrap.style.display = otherBox.checked ? '' : 'none';
+        });
+      }
+      var form = document.querySelector('form[action*="/bookings/"]');
+      if (form) {
+        form.addEventListener('submit', function () {
+          var kindConsult = document.querySelector('input[name="kind"][value="CONSULTATION"]');
+          if (!kindConsult || !kindConsult.checked) return;
+          var ids = Array.from(document.querySelectorAll('.booking-consultation-service-on:checked')).map(function (cb) {
+            return parseInt(cb.value, 10);
+          }).filter(function (x) { return x > 0; });
+          var hid = document.getElementById('planned_service_ids');
+          if (hid) hid.value = JSON.stringify(ids);
+        });
+      }
+    })();
+  </script>
 {% endblock %}
 

@@ -674,8 +674,14 @@ function initAdminBookingForm() {
     var k = radioVal("kind", "VISIT");
     var vb = byId("kind_visit_block");
     var sb = byId("kind_sale_block");
+    var cb = byId("kind_consultation_block");
+    var timeWrap = byId("lb_booking_planned_time_wrap");
+    var timeHint = byId("lb_booking_planned_time_hint");
     if (vb) vb.style.display = (k === "VISIT") ? "block" : "none";
     if (sb) sb.style.display = (k === "PRODUCT_SALE") ? "block" : "none";
+    if (cb) cb.style.display = (k === "CONSULTATION") ? "block" : "none";
+    if (timeWrap) timeWrap.style.display = (k === "CONSULTATION") ? "block" : "none";
+    if (timeHint) timeHint.style.display = (k === "CONSULTATION") ? "none" : "block";
     // Make required fields conditional
     var svc = byId("service_id");
     if (svc) svc.required = (k === "VISIT");

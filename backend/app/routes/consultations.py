@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -17,6 +19,7 @@ from app.consultation_booking import (
     booking_for_consultation,
     booking_status_label,
     can_create_booking_from_consultation,
+    can_create_consultation_from_booking,
 )
 from app.consultation_types import (
     CONSULTATION_TYPE_CHOICES,
@@ -204,11 +207,46 @@ def consultations_list(
 def consultation_new_get(
     request: Request,
     client_id: int | None = None,
+    booking_id: int | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
     selected_client = db.get(Client, client_id) if client_id else None
     fp: dict[str, str] = {"consultation_date": date.today().isoformat(), "consultation_time": ""}
+    types_data: dict[str, Any] = {}
+    selected_service_ids: list[int] = []
+    source_booking_id: int | None = None
+
+    if booking_id:
+        b = db.get(Booking, booking_id)
+        if b is None:
+            raise HTTPException(status_code=404, detail="Бронь не найдена")
+        if not can_create_consultation_from_booking(db, booking_id):
+            raise HTTPException(status_code=400, detail="Консультация по этой брони уже создана или бронь недоступна")
+        source_booking_id = int(booking_id)
+        selected_client = db.get(Client, b.client_id)
+        tz = get_display_timezone(db)
+        from zoneinfo import ZoneInfo
+
+        local_dt = b.planned_date.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(tz))
+        fp["client_id"] = str(b.client_id)
+        fp["consultation_date"] = local_dt.date().isoformat()
+        fp["consultation_time"] = local_dt.strftime("%H:%M")
+        fp["comment"] = b.comment or ""
+        fp["booking_id"] = str(booking_id)
+        if b.details_json:
+            try:
+                details = json.loads(b.details_json)
+                if isinstance(details, dict):
+                    types_data = types_json_loads(str(details.get("consultation_types_json") or ""))
+            except Exception:
+                types_data = {}
+        from app.planned_services_db import booking_planned_service_ids
+
+        selected_service_ids = booking_planned_service_ids(db, b.id)
+        if selected_service_ids:
+            fp["planned_service_ids"] = json.dumps(selected_service_ids, ensure_ascii=False)
+
     return templates.TemplateResponse(
         "admin_consultation_form.html",
         _ctx(
@@ -220,8 +258,9 @@ def consultation_new_get(
             service_catalog=list_consultation_services_catalog(db),
             type_choices=CONSULTATION_TYPE_CHOICES,
             fp=fp,
-            types_data={},
-            selected_service_ids=[],
+            types_data=types_data,
+            selected_service_ids=selected_service_ids,
+            source_booking_id=source_booking_id,
             error=None,
         ),
     )
@@ -262,10 +301,18 @@ async def consultation_new_post(
         )
 
     photo_1, photo_2 = await _save_consultation_photos(form_raw, None, None)
+    booking_id_raw = str(fp.get("booking_id") or "").strip()
+    source_booking_id: int | None = None
+    if booking_id_raw.isdigit():
+        bid = int(booking_id_raw)
+        if not can_create_consultation_from_booking(db, bid):
+            return RedirectResponse(url=f"/bookings/{bid}?err=consultation_exists", status_code=303)
+        source_booking_id = bid
     c = Consultation(
         created_at=utcnow_naive(),
         created_by_user_id=current_user.id,
         client_id=client.id,
+        source_booking_id=source_booking_id,
         consultation_date=consultation_dt,
         duration_minutes=duration_minutes,
         types_json=types_json_dumps(types_data),
@@ -280,6 +327,8 @@ async def consultation_new_post(
     sync_consultation_services(db, c.id, service_ids)
     db.commit()
     db.refresh(c)
+    if source_booking_id:
+        return RedirectResponse(url=f"/bookings/{source_booking_id}?msg=consultation_created", status_code=303)
     return RedirectResponse(url=f"/consultations/{c.id}?msg=created", status_code=303)
 
 
@@ -531,7 +580,8 @@ def _parse_consultation_form(db, fp, form_raw):
     types_data = parse_types_from_form(types_list, str(fp.get("other_text") or ""))
     if not err:
         terr = validate_types_selected(types_data)
-        if terr:
+        booking_id_raw = str(fp.get("booking_id") or "").strip()
+        if terr and not booking_id_raw.isdigit():
             err = terr
 
     service_ids = parse_service_ids_from_form(form_raw, list_field="planned_service_ids")

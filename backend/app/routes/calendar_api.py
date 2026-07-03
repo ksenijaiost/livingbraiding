@@ -68,6 +68,8 @@ def _booking_kind_label(k: str) -> str:
         return "Визит (услуга)"
     if k == BookingKind.PRODUCT_SALE.value:
         return "Продажа (без услуги)"
+    if k == BookingKind.CONSULTATION.value:
+        return "Консультация"
     return k
 
 
