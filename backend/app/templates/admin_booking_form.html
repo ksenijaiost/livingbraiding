@@ -172,6 +172,7 @@
                 </div>
               {% endfor %}
             </div>
+            <p class="muted" style="font-size:12px;margin:6px 0 0;">Необязательно. Если вид не выбран — показаны все услуги.</p>
           </div>
         </div>
       </div>
@@ -950,7 +951,8 @@
 
       var state = { extraLines: [] };
       var plannedDate = document.querySelector('input[name="planned_date"]');
-      var plannedTime = document.querySelector('input[name="planned_time"]');
+      var plannedTime = document.querySelector('#kind_visit_block input[name="planned_time"]');
+      var consultPlannedTime = document.querySelector('#lb_booking_planned_time_wrap input[name="planned_time"]');
       var serviceSel = document.getElementById('service_id');
       var addBtn = document.getElementById('lbBookingAddServiceBtn');
       var linesWrap = document.getElementById('lbBookingServiceLines');
@@ -974,11 +976,27 @@
       }
       function setModeUi() {
         var kindVisit = !!((document.querySelector('input[name="kind"][value="VISIT"]') || {}).checked);
-        var per = modeValue() === 'per_service';
+        var kindSale = !!((document.querySelector('input[name="kind"][value="PRODUCT_SALE"]') || {}).checked);
+        var kindConsult = !!((document.querySelector('input[name="kind"][value="CONSULTATION"]') || {}).checked);
+        var vb = document.getElementById('kind_visit_block');
+        var sb = document.getElementById('kind_sale_block');
+        var cb = document.getElementById('kind_consultation_block');
+        var timeWrap = document.getElementById('lb_booking_planned_time_wrap');
+        var timeHint = document.getElementById('lb_booking_planned_time_hint');
+        if (vb) vb.style.display = kindVisit ? 'block' : 'none';
+        if (sb) sb.style.display = kindSale ? 'block' : 'none';
+        if (cb) cb.style.display = kindConsult ? 'block' : 'none';
+        if (timeWrap) timeWrap.style.display = kindConsult ? 'block' : 'none';
+        if (timeHint) timeHint.style.display = kindConsult ? 'none' : 'block';
+        if (consultPlannedTime) {
+          consultPlannedTime.disabled = !kindConsult;
+          consultPlannedTime.required = kindConsult;
+        }
         if (plannedTime) {
           plannedTime.disabled = !kindVisit;
           plannedTime.required = kindVisit;
         }
+        var per = modeValue() === 'per_service';
         if (mastersModeTop) mastersModeTop.style.display = kindVisit ? '' : 'none';
         if (!kindVisit) per = false;
         if (allBlock) allBlock.style.display = per ? 'none' : '';
@@ -1779,7 +1797,11 @@
         });
       });
       document.querySelectorAll('input[name="kind"]').forEach(function (r) {
-        r.addEventListener('change', function () { setModeUi(); refreshAvailableMasters(); });
+        r.addEventListener('change', function () {
+          setModeUi();
+          refreshAvailableMasters();
+          setTimeout(setModeUi, 0);
+        });
       });
       document.querySelectorAll('input[name="booking_master_on"]').forEach(function (cb) {
         cb.addEventListener('change', function () {
@@ -1806,6 +1828,7 @@
       document.addEventListener('DOMContentLoaded', bootBookingServiceLines);
       window.lbBookingRefreshMasters = refreshAvailableMasters;
       window.lbBookingSyncHiddenLines = syncBookingHiddenLines;
+      window.lbBookingSyncKindBlocks = setModeUi;
 
       if (bookingForm) {
         bookingForm.addEventListener('submit', function () {
@@ -2360,13 +2383,39 @@
   {# Резерв комплекта делается автоматически при сохранении брони #}
   <script>
     (function () {
+      function syncBookingConsultServicesFilter() {
+        var kinds = Array.from(document.querySelectorAll('#kind_consultation_block input[name="consultation_types"]:checked')).map(function (cb) {
+          return String(cb.value || '').trim().toUpperCase();
+        }).filter(Boolean);
+        var hasKinds = kinds.length > 0;
+        document.querySelectorAll('#booking-consultation-services-list .consultation-cat-group, #booking-consultation-services-list .consultation-subcat-group, #booking-consultation-services-list .consultation-service-label').forEach(function (el) {
+          var kind = String(el.getAttribute('data-consultation-kind') || '').toUpperCase();
+          var show = !hasKinds || kinds.indexOf(kind) >= 0;
+          el.style.display = show ? '' : 'none';
+        });
+      }
       var otherBox = document.querySelector('#kind_consultation_block input[data-lb-consult-other-toggle]');
       var otherWrap = document.getElementById('booking_consult_other_text_wrap');
       if (otherBox && otherWrap) {
         otherBox.addEventListener('change', function () {
           otherWrap.style.display = otherBox.checked ? '' : 'none';
+          syncBookingConsultServicesFilter();
         });
       }
+      document.querySelectorAll('#kind_consultation_block input[name="consultation_types"]').forEach(function (cb) {
+        cb.addEventListener('change', syncBookingConsultServicesFilter);
+      });
+      syncBookingConsultServicesFilter();
+      if (typeof window.lbBookingSyncKindBlocks === 'function') {
+        window.lbBookingSyncKindBlocks();
+      }
+      document.querySelectorAll('input[name="kind"]').forEach(function (radio) {
+        radio.addEventListener('change', function () {
+          if (typeof window.lbBookingSyncKindBlocks === 'function') {
+            setTimeout(window.lbBookingSyncKindBlocks, 0);
+          }
+        });
+      });
       var form = document.querySelector('form[action*="/bookings/"]');
       if (form) {
         form.addEventListener('submit', function () {
