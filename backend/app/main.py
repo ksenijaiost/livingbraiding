@@ -67,6 +67,8 @@ app.include_router(legacy_kits_admin_router)
 app.include_router(master_kits_router)
 from app.routes.reports import router as reports_router  # noqa: E402
 app.include_router(reports_router)
+from app.routes.master_statistics import router as master_statistics_router  # noqa: E402
+app.include_router(master_statistics_router)
 from app.routes.payroll import router as payroll_router  # noqa: E402
 app.include_router(payroll_router)
 from app.routes.staff import router as staff_router  # noqa: E402
