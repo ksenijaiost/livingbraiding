@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 
 import pytest
 from sqlalchemy import create_engine
@@ -15,15 +15,25 @@ from app.db.base import Base
 from app.db.models import (
     Booking,
     BookingKind,
+    BookingMaster,
     BookingStatus,
     Client,
     Consultation,
+    MasterScheduleDay,
+    MasterScheduleStatus,
     PayrollPeriod,
     User,
     UserRole,
     UserRoleAssignment,
 )
 from app.planned_services_db import booking_planned_service_ids
+from app.routes.bookings import (
+    CONSULTATION_BOOKING_DEFAULT_DURATION_MINUTES,
+    _booking_list_master_labels,
+    _consultation_booking_duration_minutes,
+    _parse_consultation_master_id,
+    _validate_consultation_booking_availability,
+)
 
 
 @pytest.fixture()
@@ -43,8 +53,17 @@ def _seed(db):
         role=UserRole.ADMIN_SUPER,
         is_active=True,
     )
+    master = User(
+        username="m",
+        password_hash="x",
+        display_name="Master",
+        role=UserRole.MASTER,
+        is_active=True,
+    )
     db.add(admin)
+    db.add(master)
     db.flush()
+    db.add(UserRoleAssignment(user_id=master.id, role=UserRole.MASTER))
     client = Client(name="C", phone="+79990000002", is_confirmed=True)
     db.add(client)
     db.add(
@@ -54,13 +73,22 @@ def _seed(db):
             closed_at=None,
         )
     )
+    db.add(
+        MasterScheduleDay(
+            master_id=master.id,
+            work_date=date(2026, 4, 15),
+            status=MasterScheduleStatus.WORKING,
+            time_from=time(9, 0),
+            time_to=time(18, 0),
+        )
+    )
     db.commit()
-    return int(admin.id), int(client.id)
+    return int(admin.id), int(client.id), int(master.id)
 
 
 def test_consultation_booking_and_link(memory_db) -> None:
     db = memory_db
-    _admin_id, client_id = _seed(db)
+    _admin_id, client_id, _master_id = _seed(db)
     planned = datetime(2026, 4, 15, 10, 30, 0)
     b = Booking(
         created_by_user_id=_admin_id,
@@ -90,3 +118,97 @@ def test_consultation_booking_and_link(memory_db) -> None:
     assert int(linked.id) == int(c.id)
     assert not can_create_consultation_from_booking(db, b.id)
     assert booking_planned_service_ids(db, b.id) == []
+
+
+def test_consultation_booking_master_required(memory_db) -> None:
+    db = memory_db
+    _admin_id, _client_id, master_id = _seed(db)
+    err, mid = _parse_consultation_master_id(db, {})
+    assert err is not None
+    assert mid is None
+
+    err2, mid2 = _parse_consultation_master_id(db, {"consultation_master_id": str(master_id)})
+    assert err2 is None
+    assert mid2 == master_id
+
+
+def test_consultation_booking_default_duration(memory_db) -> None:
+    assert _consultation_booking_duration_minutes({}) == CONSULTATION_BOOKING_DEFAULT_DURATION_MINUTES
+    assert _consultation_booking_duration_minutes({"consultation_duration_on": "1", "consultation_duration_h": "2", "consultation_duration_m": "30"}) == 150
+
+
+def test_consultation_booking_availability(memory_db) -> None:
+    db = memory_db
+    _admin_id, _client_id, master_id = _seed(db)
+    ok = _validate_consultation_booking_availability(
+        db,
+        local_day=date(2026, 4, 15),
+        planned_time="10:30",
+        master_id=master_id,
+        duration_minutes=60,
+    )
+    assert ok is None
+
+    bad = _validate_consultation_booking_availability(
+        db,
+        local_day=date(2026, 4, 15),
+        planned_time="17:30",
+        master_id=master_id,
+        duration_minutes=60,
+    )
+    assert bad is not None
+
+
+def test_consultation_booking_stores_master(memory_db) -> None:
+    db = memory_db
+    admin_id, client_id, master_id = _seed(db)
+    planned = datetime(2026, 4, 15, 10, 30, 0)
+    b = Booking(
+        created_by_user_id=admin_id,
+        client_id=client_id,
+        planned_date=planned,
+        kind=BookingKind.CONSULTATION,
+        status=BookingStatus.ACTIVE,
+        details_json='{"consultation_duration_minutes": "60"}',
+    )
+    db.add(b)
+    db.flush()
+    db.add(BookingMaster(booking_id=b.id, master_id=master_id))
+    db.commit()
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    loaded = db.scalar(select(Booking).where(Booking.id == b.id).options(selectinload(Booking.masters)))
+    assert loaded is not None
+    assert [int(x.master_id) for x in loaded.masters] == [master_id]
+
+
+def test_booking_list_master_labels(memory_db) -> None:
+    db = memory_db
+    admin_id, client_id, master_id = _seed(db)
+    master2 = User(
+        username="m2",
+        password_hash="x",
+        display_name="Анна",
+        role=UserRole.MASTER,
+        is_active=True,
+    )
+    db.add(master2)
+    db.flush()
+    db.add(UserRoleAssignment(user_id=master2.id, role=UserRole.MASTER))
+    planned = datetime(2026, 4, 15, 10, 30, 0)
+    b = Booking(
+        created_by_user_id=admin_id,
+        client_id=client_id,
+        planned_date=planned,
+        kind=BookingKind.CONSULTATION,
+        status=BookingStatus.ACTIVE,
+        details_json='{"visit_order_master_ids": "' + str(master2.id) + '"}',
+    )
+    db.add(b)
+    db.flush()
+    db.add(BookingMaster(booking_id=b.id, master_id=master_id))
+    db.commit()
+    labels = _booking_list_master_labels(db, [b])
+    assert "Master" in labels[int(b.id)]
+    assert "Анна" in labels[int(b.id)]

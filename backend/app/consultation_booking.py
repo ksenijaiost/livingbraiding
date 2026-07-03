@@ -57,6 +57,20 @@ def booking_status_display(status: BookingStatus | object | str | None) -> str:
         return str(val)
 
 
+def booking_kind_label(kind: BookingKind | object | str | None) -> str:
+    """Краткая подпись типа брони для списков и шаблонов."""
+    if kind is None:
+        return "—"
+    k = kind.value if isinstance(kind, BookingKind) else str(getattr(kind, "value", kind))
+    if k == BookingKind.VISIT.value:
+        return "Визит"
+    if k == BookingKind.PRODUCT_SALE.value:
+        return "Продажа"
+    if k == BookingKind.CONSULTATION.value:
+        return "Консультация"
+    return k
+
+
 def booking_is_open(status: BookingStatus) -> bool:
     """Бронь не отменена и не выполнена — можно работы/визиты/продажи и отмену."""
     return status in OPEN_BOOKING_STATUSES

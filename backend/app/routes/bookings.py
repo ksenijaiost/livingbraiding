@@ -224,6 +224,68 @@ def _pretty_user_ids_csv(db: Session, raw: str | None) -> str:
     return _audit_user_names(db, ids)
 
 
+def _master_ids_from_booking_details_json(details_json: str | None) -> set[int]:
+    if not details_json:
+        return set()
+    try:
+        d = json.loads(details_json)
+    except Exception:
+        return set()
+    if not isinstance(d, dict):
+        return set()
+    ids: set[int] = set()
+    ids.update(_parse_ids_csv(str(d.get("visit_order_master_ids") or "")))
+    ids.update(_parse_ids_csv(str(d.get("sale_kit_order_master_ids") or "")))
+    raw_rub = str(d.get("sale_rubber_order_master_id") or "").strip()
+    if raw_rub.isdigit():
+        ids.add(int(raw_rub))
+    return ids
+
+
+def _master_ids_from_loaded_booking(b: Booking) -> set[int]:
+    ids: set[int] = set()
+    for bm in (b.masters or []):
+        if bm.master_id:
+            ids.add(int(bm.master_id))
+    for ps in (b.planned_services or []):
+        for psm in (ps.masters or []):
+            if psm.master_id:
+                ids.add(int(psm.master_id))
+    ids.update(_master_ids_from_booking_details_json(b.details_json))
+    return ids
+
+
+def _booking_list_master_labels(db: Session, bookings: list[Booking]) -> dict[int, str]:
+    """Имена всех мастеров, упомянутых в брони (через запятую)."""
+    if not bookings:
+        return {}
+    booking_ids = [int(b.id) for b in bookings]
+    staff_by_booking: dict[int, set[int]] = defaultdict(set)
+    for st in db.scalars(select(BookingStaff).where(BookingStaff.booking_id.in_(booking_ids))).all():
+        if st.user_id:
+            staff_by_booking[int(st.booking_id)].add(int(st.user_id))
+
+    per_booking: dict[int, set[int]] = {}
+    all_user_ids: set[int] = set()
+    for b in bookings:
+        bid = int(b.id)
+        mids = _master_ids_from_loaded_booking(b)
+        mids.update(staff_by_booking.get(bid, set()))
+        per_booking[bid] = mids
+        all_user_ids.update(mids)
+
+    name_by_id: dict[int, str] = {}
+    if all_user_ids:
+        for u in db.scalars(select(User).where(User.id.in_(all_user_ids))).all():
+            name_by_id[int(u.id)] = (u.display_name or u.username or f"#{u.id}").strip() or f"#{u.id}"
+
+    out: dict[int, str] = {}
+    for bid, mids in per_booking.items():
+        names = sorted([name_by_id.get(mid, f"#{mid}") for mid in mids], key=lambda x: x.casefold())
+        out[bid] = ", ".join(names)
+    return out
+
+
 def _parse_line_duration_minutes(raw: Any) -> int:
     if raw is None or raw == "":
         return 0
@@ -572,6 +634,9 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
         svc_ids = booking_planned_service_ids(db, b.id)
         if svc_ids:
             fp["planned_service_ids"] = json.dumps(svc_ids, ensure_ascii=False)
+        consult_mids = [int(bm.master_id) for bm in (b.masters or []) if bm.master_id]
+        if consult_mids:
+            fp["consultation_master_id"] = str(consult_mids[0])
     if b.details_json:
         try:
             d = json.loads(b.details_json)
@@ -583,6 +648,15 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
         except Exception:
             pass
     _expand_line_service_kits_to_fp(fp)
+    if b.kind == BookingKind.CONSULTATION:
+        try:
+            consult_dur = int(fp.get("consultation_duration_minutes") or "60")
+        except ValueError:
+            consult_dur = 60
+        if consult_dur != 60 and not parse_bool(fp.get("consultation_duration_on")):
+            fp["consultation_duration_on"] = "1"
+            fp["consultation_duration_h"] = str(consult_dur // 60)
+            fp["consultation_duration_m"] = str(consult_dur % 60)
     master_ids = [bm.master_id for bm in (b.masters or [])]
     if not master_ids:
         for ps in (b.planned_services or []):
@@ -682,6 +756,64 @@ def _parse_booking_consultation_fields(
         if db.get(Service, sid) is None:
             return "Услуга не найдена.", types_data, []
     return None, types_data, service_ids
+
+
+CONSULTATION_BOOKING_DEFAULT_DURATION_MINUTES = 60
+
+
+def _consultation_booking_duration_minutes(fp: dict[str, str]) -> int:
+    if parse_bool(fp.get("consultation_duration_on")):
+        try:
+            hh = int(parse_float(str(fp.get("consultation_duration_h") or "0"), min=0.0, field_name="consultation_duration_h"))
+        except ValueError:
+            hh = 0
+        try:
+            mm = int(parse_float(str(fp.get("consultation_duration_m") or "0"), min=0.0, field_name="consultation_duration_m"))
+        except ValueError:
+            mm = 0
+        if mm > 59:
+            mm = 59
+        total = int(hh) * 60 + int(mm)
+        if total > 0:
+            return total
+    return CONSULTATION_BOOKING_DEFAULT_DURATION_MINUTES
+
+
+def _parse_consultation_master_id(db: Session, fp: dict[str, str]) -> tuple[str | None, int | None]:
+    raw = str(fp.get("consultation_master_id") or "").strip()
+    if not raw.isdigit():
+        return "Выберите мастера для консультации.", None
+    mid = int(raw)
+    allowed = {int(u.id) for u in _masters_for_visit_form(db)}
+    if mid not in allowed:
+        return "Мастер не найден.", None
+    return None, mid
+
+
+def _validate_consultation_booking_availability(
+    db: Session,
+    *,
+    local_day: date,
+    planned_time: str,
+    master_id: int,
+    duration_minutes: int,
+) -> str | None:
+    tm = _parse_hhmm_to_time(planned_time)
+    if tm is None:
+        return "Укажите время консультации."
+    dur = int(duration_minutes or 0) or CONSULTATION_BOOKING_DEFAULT_DURATION_MINUTES
+    start_dt = datetime.combine(local_day, tm)
+    end_dt = start_dt + timedelta(minutes=dur)
+    if is_master_available_for_interval(
+        db,
+        master_id=master_id,
+        start_dt=start_dt,
+        end_dt=end_dt,
+    ):
+        return None
+    u = db.get(User, master_id)
+    name = (u.display_name or u.username) if u else f"#{master_id}"
+    return f"Мастер недоступен по графику на выбранное время: {name}"
 
 
 def _consultation_types_data_from_booking_details(details: dict[str, Any]) -> dict[str, Any]:
@@ -1546,7 +1678,15 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
                 "corr_circle",
             )
     elif kind_raw == BookingKind.CONSULTATION.value:
-        keys = ("consultation_types_json", "other_text", "comment")
+        keys = (
+            "consultation_types_json",
+            "other_text",
+            "comment",
+            "consultation_duration_on",
+            "consultation_duration_h",
+            "consultation_duration_m",
+            "consultation_duration_minutes",
+        )
     else:
         keys = ("product_kind",) + calc_keys
         if product_kind == "KIT":
@@ -2150,6 +2290,7 @@ async def admin_booking_new_post(  # noqa: C901
     planned_service_ids: list[int] = []
     planned_service_lines: list[dict[str, Any]] = []
     on_ids: list[int] = []
+    consultation_master_id: int | None = None
 
     try:
         client_id = parse_int(client_id_raw, min=1, field_name="client_id")
@@ -2231,6 +2372,11 @@ async def admin_booking_new_post(  # noqa: C901
         else:
             fp["consultation_types_json"] = types_json_dumps(types_data)
             planned_service_id = planned_service_ids[0] if planned_service_ids else None
+            master_err, consultation_master_id = _parse_consultation_master_id(db, fp)
+            if master_err:
+                err = master_err
+            else:
+                fp["consultation_duration_minutes"] = str(_consultation_booking_duration_minutes(fp))
 
     masters = _masters_for_visit_form(db)
     service_catalog = list_master_visit_services_catalog(db)
@@ -2297,6 +2443,39 @@ async def admin_booking_new_post(  # noqa: C901
                     booking_master_on_ids=on_ids,
                     consultation_id=int(fp["consultation_id"]) if str(fp.get("consultation_id") or "").isdigit() else None,
                     consultation_comment=None,
+                ),
+                status_code=400,
+            )
+    elif kind_raw == BookingKind.CONSULTATION.value and consultation_master_id:
+        avail_err = _validate_consultation_booking_availability(
+            db,
+            local_day=local_day,
+            planned_time=str(fp.get("planned_time") or ""),
+            master_id=consultation_master_id,
+            duration_minutes=_consultation_booking_duration_minutes(fp),
+        )
+        if avail_err:
+            return templates.TemplateResponse(
+                "admin_booking_form.html",
+                _ctx(
+                    request,
+                    current_user=current_user,
+                    error=avail_err,
+                    is_new=True,
+                    booking=None,
+                    selected_client=client,
+                    masters=masters,
+                    staff_users=staff_users,
+                    after_reserve=str(request.url),
+                    service_catalog=service_catalog,
+                    kind_options=_BOOKING_KIND_OPTIONS,
+                    product_kind_options=[k.value for k in ProductSaleKind],
+                    rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+                    fp=fp,
+                    booking_master_on_ids=[],
+                    consultation_id=int(fp["consultation_id"]) if str(fp.get("consultation_id") or "").isdigit() else None,
+                    consultation_comment=None,
+                    **_booking_form_consultation_template_ctx(db, fp),
                 ),
                 status_code=400,
             )
@@ -2426,6 +2605,8 @@ async def admin_booking_new_post(  # noqa: C901
             planned_service_ids,
             planned_date=planned_date,
         )
+        if consultation_master_id:
+            db.add(BookingMaster(booking_id=booking.id, master_id=consultation_master_id))
 
     _sync_booking_staff_rows_for_sale(db, booking_id=booking.id, fp=fp, form_raw=form_raw)
     _apply_booking_auto_reserves(
@@ -2711,6 +2892,7 @@ async def admin_booking_edit_post(
     planned_service_ids: list[int] = []
     planned_service_lines: list[dict[str, Any]] = []
     on_ids: list[int] = []
+    consultation_master_id: int | None = None
     tz_name: str | None = None
     new_booking_status: BookingStatus | None = None
 
@@ -2811,6 +2993,11 @@ async def admin_booking_edit_post(
         else:
             fp["consultation_types_json"] = types_json_dumps(types_data)
             planned_service_id = planned_service_ids[0] if planned_service_ids else None
+            master_err, consultation_master_id = _parse_consultation_master_id(db, fp)
+            if master_err:
+                err = master_err
+            else:
+                fp["consultation_duration_minutes"] = str(_consultation_booking_duration_minutes(fp))
 
     masters = _masters_for_visit_form(db)
     service_catalog = list_master_visit_services_catalog(db)
@@ -2834,6 +3021,21 @@ async def admin_booking_edit_post(
             line_specs=planned_service_lines,
             duration_override_minutes=dur_override,
         )
+    elif (
+        not err
+        and kind_raw == BookingKind.CONSULTATION.value
+        and consultation_master_id
+        and planned_date is not None
+        and tz_name is not None
+    ):
+        local_day = _booking_local_day_from_fp(fp, planned_date_utc=planned_date, tz_name=tz_name)
+        err = _validate_consultation_booking_availability(
+            db,
+            local_day=local_day,
+            planned_time=str(fp.get("planned_time") or ""),
+            master_id=consultation_master_id,
+            duration_minutes=_consultation_booking_duration_minutes(fp),
+        )
 
     if err:
         return templates.TemplateResponse(
@@ -2856,6 +3058,7 @@ async def admin_booking_edit_post(
                 booking_master_on_ids=on_ids,
                 visit_stock_kit_initial=_visit_stock_kit_initial_for_form(db, fp),
             line_service_kits_prefill=_line_service_kits_prefill_for_form(db, fp),
+                **_booking_form_consultation_template_ctx(db, fp, booking=b),
             ),
             status_code=400,
         )
@@ -2984,6 +3187,8 @@ async def admin_booking_edit_post(
             if db.get(User, mid) is None:
                 continue
             db.add(BookingMaster(booking_id=b.id, master_id=mid))
+    elif kind_raw == BookingKind.CONSULTATION.value and consultation_master_id:
+        db.add(BookingMaster(booking_id=b.id, master_id=consultation_master_id))
 
     _sync_booking_staff_rows_for_sale(db, booking_id=b.id, fp=fp, form_raw=form_raw)
     release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
@@ -3110,6 +3315,10 @@ def admin_bookings(
         select(Booking)
         .options(
             selectinload(Booking.client),
+            selectinload(Booking.masters).selectinload(BookingMaster.master),
+            selectinload(Booking.planned_services)
+            .selectinload(BookingPlannedService.masters)
+            .selectinload(BookingPlannedServiceMaster.master),
             selectinload(Booking.planned_services)
             .selectinload(BookingPlannedService.service)
             .selectinload(Service.subcategory)
@@ -3164,6 +3373,7 @@ def admin_bookings(
         )
         for b in rows
     }
+    row_masters = _booking_list_master_labels(db, rows)
     display_tz = get_display_timezone(db)
     return templates.TemplateResponse(
         "admin_bookings.html",
@@ -3172,6 +3382,7 @@ def admin_bookings(
             current_user=current_user,
             rows=rows,
             row_details=row_details,
+            row_masters=row_masters,
             show_mode="all" if show_mode == "all" else "active",
             display_tz=display_tz,
             can_manage=can_manage,
