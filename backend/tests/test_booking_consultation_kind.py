@@ -29,6 +29,7 @@ from app.db.models import (
 from app.planned_services_db import booking_planned_service_ids
 from app.routes.bookings import (
     CONSULTATION_BOOKING_DEFAULT_DURATION_MINUTES,
+    _booking_list_master_labels,
     _consultation_booking_duration_minutes,
     _parse_consultation_master_id,
     _validate_consultation_booking_availability,
@@ -180,3 +181,34 @@ def test_consultation_booking_stores_master(memory_db) -> None:
     loaded = db.scalar(select(Booking).where(Booking.id == b.id).options(selectinload(Booking.masters)))
     assert loaded is not None
     assert [int(x.master_id) for x in loaded.masters] == [master_id]
+
+
+def test_booking_list_master_labels(memory_db) -> None:
+    db = memory_db
+    admin_id, client_id, master_id = _seed(db)
+    master2 = User(
+        username="m2",
+        password_hash="x",
+        display_name="Анна",
+        role=UserRole.MASTER,
+        is_active=True,
+    )
+    db.add(master2)
+    db.flush()
+    db.add(UserRoleAssignment(user_id=master2.id, role=UserRole.MASTER))
+    planned = datetime(2026, 4, 15, 10, 30, 0)
+    b = Booking(
+        created_by_user_id=admin_id,
+        client_id=client_id,
+        planned_date=planned,
+        kind=BookingKind.CONSULTATION,
+        status=BookingStatus.ACTIVE,
+        details_json='{"visit_order_master_ids": "' + str(master2.id) + '"}',
+    )
+    db.add(b)
+    db.flush()
+    db.add(BookingMaster(booking_id=b.id, master_id=master_id))
+    db.commit()
+    labels = _booking_list_master_labels(db, [b])
+    assert "Master" in labels[int(b.id)]
+    assert "Анна" in labels[int(b.id)]

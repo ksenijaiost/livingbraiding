@@ -68,6 +68,7 @@
             <th>Дата</th>
             <th>Клиент</th>
             <th>Тип</th>
+            <th>Мастера</th>
             <th>Детали</th>
             <th>Статус</th>
             {% if can_manage %}
@@ -79,9 +80,24 @@
           {% for b in rows %}
             <tr>
               <td><a href="/bookings/{{ b.id }}">#{{ b.id }}</a></td>
-              <td class="lb-nowrap"><a href="/bookings/{{ b.id }}">{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</a></td>
-              <td><a href="/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
-              <td>{{ "Визит" if b.kind.value == "VISIT" else "Продажа" }}</td>
+              <td style="font-size:13px; line-height:1.35;">
+                <a href="/bookings/{{ b.id }}" style="display:inline-block;">
+                  <span style="display:block;">{{ format_naive_utc_datetime(b.planned_date, display_tz, '%d.%m.%Y') }}</span>
+                  <span class="muted" style="display:block;">{{ format_naive_utc_datetime(b.planned_date, display_tz, '%H:%M') }}</span>
+                </a>
+              </td>
+              <td style="max-width:9rem; word-break:break-word; line-height:1.35;">
+                <a href="/clients/{{ b.client.id }}">{{ b.client.name }}</a>
+              </td>
+              <td>{{ booking_kind_label(b.kind) }}</td>
+              <td style="max-width:12rem; font-size:13px; line-height:1.35; word-break:break-word;">
+                {% set masters_label = (row_masters.get(b.id) or '') %}
+                {% if masters_label %}
+                  {{ masters_label }}
+                {% else %}
+                  <span class="muted">—</span>
+                {% endif %}
+              </td>
               <td style="max-width:18rem;">
                 {% set parts = row_details.get(b.id) or [] %}
                 {% if parts %}

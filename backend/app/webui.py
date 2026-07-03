@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
-from app.consultation_booking import booking_status_display
+from app.consultation_booking import booking_kind_label, booking_status_display
 from app.consultation_types import format_types_display
 from app.display_time import format_naive_utc_datetime, timezone_label
 from app.planned_service_time import format_planned_service_start_local
@@ -51,6 +51,7 @@ templates.env.globals["format_service_catalog_path"] = format_service_catalog_pa
 templates.env.globals["format_types_display"] = format_types_display
 templates.env.globals["timezone_label"] = timezone_label
 templates.env.globals["booking_status_display"] = booking_status_display
+templates.env.globals["booking_kind_label"] = booking_kind_label
 templates.env.globals["UserRole"] = UserRole
 templates.env.globals["master_levels"] = tuple(MasterLevel)
 

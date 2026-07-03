@@ -224,6 +224,68 @@ def _pretty_user_ids_csv(db: Session, raw: str | None) -> str:
     return _audit_user_names(db, ids)
 
 
+def _master_ids_from_booking_details_json(details_json: str | None) -> set[int]:
+    if not details_json:
+        return set()
+    try:
+        d = json.loads(details_json)
+    except Exception:
+        return set()
+    if not isinstance(d, dict):
+        return set()
+    ids: set[int] = set()
+    ids.update(_parse_ids_csv(str(d.get("visit_order_master_ids") or "")))
+    ids.update(_parse_ids_csv(str(d.get("sale_kit_order_master_ids") or "")))
+    raw_rub = str(d.get("sale_rubber_order_master_id") or "").strip()
+    if raw_rub.isdigit():
+        ids.add(int(raw_rub))
+    return ids
+
+
+def _master_ids_from_loaded_booking(b: Booking) -> set[int]:
+    ids: set[int] = set()
+    for bm in (b.masters or []):
+        if bm.master_id:
+            ids.add(int(bm.master_id))
+    for ps in (b.planned_services or []):
+        for psm in (ps.masters or []):
+            if psm.master_id:
+                ids.add(int(psm.master_id))
+    ids.update(_master_ids_from_booking_details_json(b.details_json))
+    return ids
+
+
+def _booking_list_master_labels(db: Session, bookings: list[Booking]) -> dict[int, str]:
+    """Имена всех мастеров, упомянутых в брони (через запятую)."""
+    if not bookings:
+        return {}
+    booking_ids = [int(b.id) for b in bookings]
+    staff_by_booking: dict[int, set[int]] = defaultdict(set)
+    for st in db.scalars(select(BookingStaff).where(BookingStaff.booking_id.in_(booking_ids))).all():
+        if st.user_id:
+            staff_by_booking[int(st.booking_id)].add(int(st.user_id))
+
+    per_booking: dict[int, set[int]] = {}
+    all_user_ids: set[int] = set()
+    for b in bookings:
+        bid = int(b.id)
+        mids = _master_ids_from_loaded_booking(b)
+        mids.update(staff_by_booking.get(bid, set()))
+        per_booking[bid] = mids
+        all_user_ids.update(mids)
+
+    name_by_id: dict[int, str] = {}
+    if all_user_ids:
+        for u in db.scalars(select(User).where(User.id.in_(all_user_ids))).all():
+            name_by_id[int(u.id)] = (u.display_name or u.username or f"#{u.id}").strip() or f"#{u.id}"
+
+    out: dict[int, str] = {}
+    for bid, mids in per_booking.items():
+        names = sorted([name_by_id.get(mid, f"#{mid}") for mid in mids], key=lambda x: x.casefold())
+        out[bid] = ", ".join(names)
+    return out
+
+
 def _parse_line_duration_minutes(raw: Any) -> int:
     if raw is None or raw == "":
         return 0
@@ -3253,6 +3315,10 @@ def admin_bookings(
         select(Booking)
         .options(
             selectinload(Booking.client),
+            selectinload(Booking.masters).selectinload(BookingMaster.master),
+            selectinload(Booking.planned_services)
+            .selectinload(BookingPlannedService.masters)
+            .selectinload(BookingPlannedServiceMaster.master),
             selectinload(Booking.planned_services)
             .selectinload(BookingPlannedService.service)
             .selectinload(Service.subcategory)
@@ -3307,6 +3373,7 @@ def admin_bookings(
         )
         for b in rows
     }
+    row_masters = _booking_list_master_labels(db, rows)
     display_tz = get_display_timezone(db)
     return templates.TemplateResponse(
         "admin_bookings.html",
@@ -3315,6 +3382,7 @@ def admin_bookings(
             current_user=current_user,
             rows=rows,
             row_details=row_details,
+            row_masters=row_masters,
             show_mode="all" if show_mode == "all" else "active",
             display_tz=display_tz,
             can_manage=can_manage,
