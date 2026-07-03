@@ -417,14 +417,16 @@ def api_calendar_day(
 def api_booking_available_masters(
     d: str,
     t: str,
-    service_id: int,
+    service_id: int | None = Query(None),
     duration_minutes: int | None = None,
+    for_consultation: int | None = Query(None),
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     """
-    Для админ-формы брони: какие мастера доступны по графику на выбранную дату/время
-    (интервал = duration из estimated_duration_minutes).
+    Для админ-формы брони: какие мастера доступны по графику на выбранную дату/время.
+    Для визита — интервал из estimated_duration_minutes услуги (или duration_minutes).
+    Для консультации — for_consultation=1, по умолчанию 60 мин.
     """
     try:
         day = date.fromisoformat((d or "").strip())
@@ -440,11 +442,16 @@ def api_booking_available_masters(
     except Exception:
         raise HTTPException(status_code=400, detail="bad time")
 
-    svc = db.get(Service, int(service_id))
-    if svc is None:
-        raise HTTPException(status_code=400, detail="service not found")
-
-    dur_min = int(duration_minutes or 0) or int(svc.estimated_duration_minutes or 0)
+    is_consultation = int(for_consultation or 0) > 0
+    if is_consultation:
+        dur_min = int(duration_minutes or 0) or 60
+    else:
+        if service_id is None:
+            raise HTTPException(status_code=400, detail="service_id required")
+        svc = db.get(Service, int(service_id))
+        if svc is None:
+            raise HTTPException(status_code=400, detail="service not found")
+        dur_min = int(duration_minutes or 0) or int(svc.estimated_duration_minutes or 0)
     if dur_min <= 0:
         return JSONResponse({"available_master_ids": []})
 

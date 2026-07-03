@@ -41,7 +41,8 @@
 
     <form method="post" action="{% if is_new %}/bookings/new{% else %}/bookings/{{ booking.id }}/edit{% endif %}" enctype="multipart/form-data"
       {% if not is_new and booking %}data-booking-id="{{ booking.id }}"{% endif %}
-      data-initial-master-ids="{{ (booking_master_on_ids or [])|join(',') }}">
+      data-initial-master-ids="{{ (booking_master_on_ids or [])|join(',') }}"
+      data-initial-consultation-master-id="{{ fp.get('consultation_master_id','') }}">
       <input type="hidden" name="client_id" id="client_id" value="{{ selected_client.id if selected_client else fp.get('client_id','') }}" />
       {% if consultation_id %}
         <input type="hidden" name="consultation_id" value="{{ consultation_id }}" />
@@ -153,8 +154,50 @@
             </div>
           </div>
           <div style="margin-top:12px;">
+            <div style="font-weight:600;margin-bottom:6px;">Длительность консультации</div>
+            <p class="muted" style="margin:0 0 6px;font-size:12px;">По умолчанию 1 час.</p>
+            <label style="display:flex;gap:10px;align-items:center;">
+              <input type="checkbox" name="consultation_duration_on" value="1" id="lbBookingConsultDurOn"
+                {% if fp.get('consultation_duration_on') %}checked{% endif %} />
+              <span>Выбрать время</span>
+            </label>
+            <div class="row" id="lbBookingConsultDurInputs" style="margin-top:8px;{% if not fp.get('consultation_duration_on') %}display:none;{% endif %} align-items:flex-end;gap:12px;flex-wrap:wrap;">
+              <div>
+                <label>Часы</label>
+                <input type="number" name="consultation_duration_h" id="lbBookingConsultDurH" min="0" step="1" style="max-width:7rem;"
+                  value="{{ fp.get('consultation_duration_h','') }}" />
+              </div>
+              <div>
+                <label>Минуты</label>
+                <input type="number" name="consultation_duration_m" id="lbBookingConsultDurM" min="0" max="59" step="1" style="max-width:7rem;"
+                  value="{{ fp.get('consultation_duration_m','') }}" />
+              </div>
+            </div>
+          </div>
+          {% if masters %}
+          <div style="margin-top:12px;">
+            <label>Мастер *</label>
+            {% set consult_master_sel = fp.get('consultation_master_id')|int if fp.get('consultation_master_id') else none %}
+            <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px;">
+              {% for m in masters %}
+                <label style="display:flex;gap:8px;align-items:center;font-weight:normal;">
+                  <input type="radio" name="consultation_master_id" value="{{ m.id }}"
+                    {% if consult_master_sel == m.id %}checked{% endif %} />
+                  <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
+                </label>
+              {% endfor %}
+            </div>
+            <div id="lbBookingConsultAvailMsg" class="muted" style="margin-top:8px;font-size:12px;"></div>
+          </div>
+          {% else %}
+            <p class="muted" style="margin-top:12px;">Нет активных мастеров.</p>
+          {% endif %}
+          <div style="margin-top:12px;">
             <label>Услуги (можно несколько)</label>
-            <div id="booking-consultation-services-list" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-top:6px;">
+            <div id="booking-consultation-services-empty" class="muted" style="display:none;margin-top:6px;font-size:12px;">
+              Выберите вид консультации — появятся подходящие услуги.
+            </div>
+            <div id="booking-consultation-services-list" style="display:none;flex-direction:column;gap:6px;max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-top:6px;">
               {% for c in consultation_service_catalog %}
                 <div class="consultation-cat-group" data-consultation-kind="{{ c.consultation_kind }}">
                   {% for sc in c.subcategories %}
@@ -172,7 +215,7 @@
                 </div>
               {% endfor %}
             </div>
-            <p class="muted" style="font-size:12px;margin:6px 0 0;">Необязательно. Если вид не выбран — показаны все услуги.</p>
+            <p class="muted" style="font-size:12px;margin:6px 0 0;">Необязательно.</p>
           </div>
         </div>
       </div>
@@ -1007,6 +1050,9 @@
           var mb = row.querySelector('[data-line-masters-wrap]');
           if (mb) mb.style.display = per ? '' : 'none';
         }
+        if (typeof refreshAvailableMasters === 'function') {
+          refreshAvailableMasters();
+        }
       }
 
       function categoryOptionsHtml(selectedId) {
@@ -1630,6 +1676,30 @@
         return new Set((data.available_master_ids || []).map(function (x) { return String(x); }));
       }
 
+      async function fetchConsultAllowSet(day, t, durationMinutes) {
+        if (!day || !t) return new Set();
+        var url =
+          '/api/booking/available-masters?d=' + encodeURIComponent(day) +
+          '\x26t=' + encodeURIComponent(t) +
+          '\x26for_consultation=1';
+        if (durationMinutes != null) url += '\x26duration_minutes=' + encodeURIComponent(String(durationMinutes));
+        var res = await fetch(url);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var data = await res.json();
+        return new Set((data.available_master_ids || []).map(function (x) { return String(x); }));
+      }
+
+      function consultDurationMinutes() {
+        var on = document.getElementById('lbBookingConsultDurOn');
+        var h = document.getElementById('lbBookingConsultDurH');
+        var m = document.getElementById('lbBookingConsultDurM');
+        if (on && on.checked) {
+          var total = readDurationMinutesFromInputs(on, h, m);
+          return total > 0 ? total : 60;
+        }
+        return 60;
+      }
+
       var bookingFormEl = document.querySelector('form[data-initial-master-ids]') || bookingForm;
       var initialMasterIds = new Set(
         String((bookingFormEl && bookingFormEl.getAttribute('data-initial-master-ids')) || '')
@@ -1637,10 +1707,48 @@
           .map(function (x) { return String(x).trim(); })
           .filter(function (x) { return !!x; })
       );
+      var initialConsultMasterId = String(
+        (bookingFormEl && bookingFormEl.getAttribute('data-initial-consultation-master-id')) || ''
+      ).trim();
       var editingBookingId = bookingFormEl ? toInt(bookingFormEl.getAttribute('data-booking-id')) : 0;
 
       async function refreshAvailableMasters() {
         var kindVisit = !!((document.querySelector('input[name="kind"][value="VISIT"]') || {}).checked);
+        var kindConsult = !!((document.querySelector('input[name="kind"][value="CONSULTATION"]') || {}).checked);
+        if (kindConsult) {
+          var msgConsult = document.getElementById('lbBookingConsultAvailMsg');
+          var day = plannedDate ? String(plannedDate.value || '').trim() : '';
+          var t = consultPlannedTime ? String(consultPlannedTime.value || '').trim() : '';
+          function disableConsultMasters(reason) {
+            Array.from(document.querySelectorAll('input[name="consultation_master_id"]')).forEach(function (rb) {
+              rb.disabled = true;
+            });
+            if (msgConsult) msgConsult.textContent = reason || '';
+          }
+          if (!day || !t) {
+            disableConsultMasters('Сначала выберите дату и время брони.');
+            return;
+          }
+          try {
+            var dur = consultDurationMinutes();
+            var allow = await fetchConsultAllowSet(day, t, dur);
+            var radios = Array.from(document.querySelectorAll('input[name="consultation_master_id"]'));
+            for (var ri = 0; ri < radios.length; ri++) {
+              var rb = radios[ri];
+              var keepAssigned = editingBookingId > 0 && initialConsultMasterId && initialConsultMasterId === String(rb.value);
+              var ok = allow.has(String(rb.value)) || keepAssigned;
+              rb.disabled = !ok;
+              if (!ok && !keepAssigned) rb.checked = false;
+            }
+            if (msgConsult) msgConsult.textContent = allow.size ? '' : 'На выбранное время доступных мастеров нет.';
+          } catch (e) {
+            console.error('refreshAvailableMasters (consultation) failed', e);
+            var errTxt = 'Не удалось проверить график мастеров.';
+            if (e && e.message) errTxt += ' (' + String(e.message) + ')';
+            if (msgConsult) msgConsult.textContent = errTxt;
+          }
+          return;
+        }
         if (!kindVisit) return;
         var day = plannedDate ? String(plannedDate.value || '').trim() : '';
         var idxs = allLineIndices();
@@ -1766,7 +1874,27 @@
       if (addBtn) addBtn.addEventListener('click', function () { addExtraLine(null); });
       if (plannedDate) plannedDate.addEventListener('change', refreshAvailableMasters);
       if (plannedTime) plannedTime.addEventListener('change', refreshAvailableMasters);
+      if (consultPlannedTime) consultPlannedTime.addEventListener('change', refreshAvailableMasters);
       if (plannedTime) plannedTime.addEventListener('change', function () { syncLineMasterStartUi(0); });
+      var consultDurOn = document.getElementById('lbBookingConsultDurOn');
+      var consultDurH = document.getElementById('lbBookingConsultDurH');
+      var consultDurM = document.getElementById('lbBookingConsultDurM');
+      if (consultDurOn) {
+        consultDurOn.addEventListener('change', function () {
+          var wrap = document.getElementById('lbBookingConsultDurInputs');
+          if (wrap) wrap.style.display = consultDurOn.checked ? 'flex' : 'none';
+          refreshAvailableMasters();
+        });
+      }
+      function onConsultDurInput() { refreshAvailableMasters(); }
+      if (consultDurH) {
+        consultDurH.addEventListener('input', onConsultDurInput);
+        consultDurH.addEventListener('change', onConsultDurInput);
+      }
+      if (consultDurM) {
+        consultDurM.addEventListener('input', onConsultDurInput);
+        consultDurM.addEventListener('change', onConsultDurInput);
+      }
       if (serviceSel) serviceSel.addEventListener('change', refreshAvailableMasters);
       if (serviceSel) serviceSel.addEventListener('change', function () { renderLineServiceFlags(0); });
       if (line0DurOn) {
@@ -2387,11 +2515,29 @@
         var kinds = Array.from(document.querySelectorAll('#kind_consultation_block input[name="consultation_types"]:checked')).map(function (cb) {
           return String(cb.value || '').trim().toUpperCase();
         }).filter(Boolean);
+        var emptyEl = document.getElementById('booking-consultation-services-empty');
+        var listEl = document.getElementById('booking-consultation-services-list');
         var hasKinds = kinds.length > 0;
+        if (emptyEl) emptyEl.style.display = hasKinds ? 'none' : 'block';
+        if (listEl) listEl.style.display = hasKinds ? 'flex' : 'none';
+
         document.querySelectorAll('#booking-consultation-services-list .consultation-cat-group, #booking-consultation-services-list .consultation-subcat-group, #booking-consultation-services-list .consultation-service-label').forEach(function (el) {
           var kind = String(el.getAttribute('data-consultation-kind') || '').toUpperCase();
-          var show = !hasKinds || kinds.indexOf(kind) >= 0;
+          var show = hasKinds && kinds.indexOf(kind) >= 0;
           el.style.display = show ? '' : 'none';
+          if (!show && el.classList.contains('consultation-service-label')) {
+            var cb = el.querySelector('.booking-consultation-service-on');
+            if (cb) cb.checked = false;
+          }
+        });
+
+        document.querySelectorAll('#booking-consultation-services-list .consultation-subcat-group').forEach(function (sub) {
+          if (sub.style.display === 'none') return;
+          var visible = Array.from(sub.querySelectorAll('.consultation-service-label')).some(function (lbl) {
+            return lbl.style.display !== 'none';
+          });
+          var title = sub.querySelector('.consultation-subcat-title');
+          if (title) title.style.display = visible ? '' : 'none';
         });
       }
       var otherBox = document.querySelector('#kind_consultation_block input[data-lb-consult-other-toggle]');
