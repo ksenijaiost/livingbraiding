@@ -9,27 +9,28 @@
       </div>
     {% endif %}
 
+    {% set _wq = ('&q=' ~ (list_search_q|urlencode)) if list_search_q else '' %}
     <div style="display:flex; align-items:flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap:wrap;">
       <p style="margin:0;font-size:13px;max-width:36rem;">
         {% if current_user.role.value == 'MASTER' %}
           {% if work_mine_only %}
             <strong>Мои работы</strong>
             <span class="muted">·</span>
-            <a href="/sales/work?mine=0">Все работы студии</a>
+            <a href="/sales/work?mine=0{{ _wq }}">Все работы студии</a>
           {% else %}
             <strong>Все работы студии</strong>
             <span class="muted">·</span>
-            <a href="/sales/work?mine=1">Только мои</a>
+            <a href="/sales/work?mine=1{{ _wq }}">Только мои</a>
           {% endif %}
         {% else %}
           {% if work_mine_only %}
             <strong>Мои работы</strong>
             <span class="muted">·</span>
-            <a href="/sales/work">Все работы</a>
+            <a href="/sales/work{% if list_search_q %}?q={{ list_search_q|urlencode }}{% endif %}">Все работы</a>
           {% else %}
             <strong>Все работы</strong>
             <span class="muted">·</span>
-            <a href="/sales/work?mine=1">Только мои</a>
+            <a href="/sales/work?mine=1{{ _wq }}">Только мои</a>
             <span class="muted">(создатель или доля в работе)</span>
           {% endif %}
         {% endif %}
@@ -40,6 +41,9 @@
         {% endif %}
       </div>
     </div>
+    {% with search_action='/sales/work', list_search_q=list_search_q, search_clear_url='/sales/work' ~ ('?mine=1' if work_mine_only else ''), search_input_id='work_search_q', search_hidden_fields=([{'name':'mine','value':'1'}] if work_mine_only else []) %}
+      {% include "partials/list_id_search_form.html" %}
+    {% endwith %}
 
     {% if rows %}
       <div style="overflow-x:auto;">
@@ -96,7 +100,7 @@
         </table>
       </div>
     {% else %}
-      <p class="muted">Пока нет записей.</p>
+      <p class="muted">{% if search_id is not none %}Работа №{{ search_id }} не найдена{% if work_mine_only %} среди ваших{% endif %}.{% else %}Пока нет записей.{% endif %}</p>
     {% endif %}
   </div>
 {% endblock %}

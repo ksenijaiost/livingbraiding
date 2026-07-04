@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
@@ -76,6 +76,7 @@ from app.visit_edit_policy import (
 )
 from app.ru_labels import ru_user_role
 from app.forms_parse import parse_date_iso, parse_float, parse_int, parse_optional_float
+from app.list_search import parse_list_id_search
 from app.time_utils import utcnow_naive
 
 templates = Jinja2Templates(directory="app/templates")
@@ -868,27 +869,38 @@ def _render_new(
 @router.get("", response_class=HTMLResponse)
 def product_sales_list(
     request: Request,
+    q: str | None = Query(None),
     current_user: AuthUser = _STAFF,
     db: Session = Depends(get_db),
 ):
     msg = request.query_params.get("msg")
-    rows = list(
-        db.scalars(
-            select(ProductSale)
-            .options(
-                selectinload(ProductSale.client),
-                selectinload(ProductSale.created_by_user),
-                selectinload(ProductSale.voided_by_user),
-                selectinload(ProductSale.material_service).selectinload(Service.subcategory),
-                selectinload(ProductSale.kit),
-            )
-            .order_by(ProductSale.created_at.desc())
-            .limit(200)
-        ).all()
+    list_search_q = (q or "").strip()
+    search_id = parse_list_id_search(list_search_q)
+    stmt = (
+        select(ProductSale)
+        .options(
+            selectinload(ProductSale.client),
+            selectinload(ProductSale.created_by_user),
+            selectinload(ProductSale.voided_by_user),
+            selectinload(ProductSale.material_service).selectinload(Service.subcategory),
+            selectinload(ProductSale.kit),
+        )
+        .order_by(ProductSale.created_at.desc())
+        .limit(200)
     )
+    if search_id is not None:
+        stmt = stmt.where(ProductSale.id == search_id)
+    rows = list(db.scalars(stmt).all())
     return templates.TemplateResponse(
         "product_sales_list.html",
-        _ctx(request, current_user=current_user, rows=rows, msg=msg),
+        _ctx(
+            request,
+            current_user=current_user,
+            rows=rows,
+            msg=msg,
+            list_search_q=list_search_q,
+            search_id=search_id,
+        ),
     )
 
 

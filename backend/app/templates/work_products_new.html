@@ -202,6 +202,9 @@
           <label style="display:block; margin-bottom: 6px;"><input type="checkbox" name="corr_steam" {% if fp.corr_steam %}checked{% endif %} /> Отпаривание</label>
           <label style="display:block; margin-bottom: 0;"><input type="checkbox" name="corr_circle" id="corr_circle" {% if fp.corr_circle %}checked{% endif %} /> Одевание на круг</label>
         </div>
+        {% with prefix='corr_', fp=fp %}
+          {% include "partials/correction_custom_amount_block.html" %}
+        {% endwith %}
       </div>
 
       <div id="corr_add_kit_btn_wrap" style="margin: 12px 0; display:none;">
@@ -373,6 +376,7 @@
   <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
   <script type="application/json" id="corr_kit_table_state">{{ kit_table_state_json | safe }}</script>
   <script type="application/json" id="work_price_meta">{{ work_price_meta_json | safe }}</script>
+  <script src="/static/correction_custom_amount.js"></script>
   <script>
     function kitTableCurrentUserId() {
       var el = document.getElementById('kit_table_state');
@@ -695,8 +699,23 @@
         if (circle) { payT += mpSum('Одевание на круг', 1); fxT += fxSum('Одевание на круг', 1); }
 
         var uid1 = st.currentUserId || 0;
-        setPayLines([('ЗП «' + nameByUserId(st, uid1) + '»: ' + money2(payT * bonus) + ' ₽')]);
-        setCost('Себестоимость (итого): ' + money2(mat + fxT) + ' ₽ (материал + доп. расходы)');
+        var costCorr = mat + fxT;
+        var customOn = (document.querySelector('input[name="corr_use_custom_amount"]') || {}).value === '1';
+        if (customOn) {
+          var amtC = parseInt(String((document.querySelector('input[name="corr_custom_amount"]') || {}).value || '0'), 10) || 0;
+          var salonPct = (meta && meta.salonCutPct != null) ? parseFloat(meta.salonCutPct) : 0.5;
+          var profitC = amtC - costCorr;
+          var studioC = profitC * salonPct;
+          var masterC = profitC - studioC;
+          setPayLines([
+            ('ЗП «' + nameByUserId(st, uid1) + '»: ' + money2(Math.max(0, masterC)) + ' ₽'),
+            ('Студия: ' + money2(Math.max(0, studioC)) + ' ₽')
+          ]);
+          setCost('Себестоимость: ' + money2(costCorr) + ' ₽ · с клиента ' + money2(amtC) + ' ₽');
+        } else {
+          setPayLines([('ЗП «' + nameByUserId(st, uid1) + '»: ' + money2(payT * bonus) + ' ₽')]);
+          setCost('Себестоимость (итого): ' + money2(costCorr) + ' ₽ (материал + доп. расходы)');
+        }
         if (isCorrAddKitEnabled()) {
           syncCorrKitPricePreview();
         } else {
@@ -1017,7 +1036,8 @@
     if (corrWash) corrWash.addEventListener('change', function () { syncCorrectionRules(); syncPriceHint(); syncWorkPreview(); });
     var corrCircle = document.getElementById('corr_circle');
     if (corrCircle) corrCircle.addEventListener('change', function(){ syncPriceHint(); syncWorkPreview(); });
-    document.querySelectorAll('input[name="corr_trim_qty"], input[name="corr_hourly_hours"], input[name="corr_steam"], input[name="corr_kit_description"], input[name="corr_kit_blanks_count"], input[name="rubber_attach_qty"], input[name="rubber_braids_qty"], select[name="rubber_variant"], input[name="mix_complexity"], input[name="mix_source"]').forEach(function(el){ el.addEventListener('change', function(){ syncPriceHint(); syncWorkPreview(); }); el.addEventListener('input', function(){ syncPriceHint(); syncWorkPreview(); }); });
+    document.querySelectorAll('input[name="corr_trim_qty"], input[name="corr_hourly_hours"], input[name="corr_steam"], input[name="corr_kit_description"], input[name="corr_kit_blanks_count"], input[name="corr_custom_amount"], input[name="corr_client_payment_kind"], input[name="rubber_attach_qty"], input[name="rubber_braids_qty"], select[name="rubber_variant"], input[name="mix_complexity"], input[name="mix_source"]').forEach(function(el){ el.addEventListener('change', function(){ syncPriceHint(); syncWorkPreview(); }); el.addEventListener('input', function(){ syncPriceHint(); syncWorkPreview(); }); });
+    document.addEventListener('lbCorrCustomAmountChanged', function () { syncWorkPreview(); syncPriceHint(); });
     document.querySelectorAll('input[name="kanekalon_grams"], input[name="kudri_grams"]').forEach(function (el) {
       el.addEventListener('change', function () { syncMixUI(); syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });
       el.addEventListener('input', function () { syncMixUI(); syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });

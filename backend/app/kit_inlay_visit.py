@@ -16,8 +16,10 @@ from sqlalchemy import exists, func, or_, select
 from starlette.datastructures import UploadFile
 from sqlalchemy.orm import Session, selectinload
 
+from app.client_payment import parse_client_payment_kind
 from app.db.models import (
     Client,
+    ClientPaymentKind,
     Kit,
     KitReserve,
     MaterialPriceCurrent,
@@ -749,6 +751,14 @@ def parse_kit_inlay_form(
     else:
         visit_master_allocations = _parse_visit_master_allocations_from_form(form)
 
+    own_corr_use_custom = g_bool("own_corr_use_custom_amount")
+    own_corr_custom_amt = max(0.0, g_float("own_corr_custom_amount", 0))
+    visit_amount = (
+        own_corr_custom_amt
+        if g_bool("own_correction") and own_corr_use_custom
+        else g_float("amount_from_client", 0)
+    )
+
     return KitInlayFormInput(
         client_mode=client_mode,
         existing_client_id=existing_client_id,
@@ -762,7 +772,7 @@ def parse_kit_inlay_form(
         client_discount_percent=disc_pct,
         performed_date=performed_date,
         duration_minutes=g_int("duration_h", 0) * 60 + g_int("duration_m", 0),
-        amount_from_client=g_float("amount_from_client", 0),
+        amount_from_client=visit_amount,
         kanekalon_grams=kanekalon_grams,
         kudri_grams=kudri_grams,
         mix_source=mix,
@@ -806,6 +816,10 @@ def parse_kit_inlay_form(
         own_corr_wash=g_bool("own_corr_wash"),
         own_corr_circle=g_bool("own_corr_circle"),
         own_corr_steam=g_bool("own_corr_steam"),
+        own_corr_use_custom_amount=own_corr_use_custom,
+        own_corr_custom_amount=own_corr_custom_amt,
+        own_corr_client_payment_kind=parse_client_payment_kind(g("own_corr_client_payment_kind", "")),
+        client_payment_kind=parse_client_payment_kind(g("client_payment_kind", "")),
         visit_master_allocations=visit_master_allocations,
         questionnaire_raw=extract_questionnaire_raw_from_form(form),
         addon_sales_amount=max(0.0, g_float("addon_sales_amount", 0)),
@@ -871,6 +885,10 @@ class KitInlayFormInput:
     thermo_parsed: ThermoFormParsed
     stock_kit_lines: list[StockKitLineInput] = field(default_factory=list)
     own_extra_stock_kit_lines: list[StockKitLineInput] = field(default_factory=list)
+    own_corr_use_custom_amount: bool = False
+    own_corr_custom_amount: float = 0.0
+    own_corr_client_payment_kind: ClientPaymentKind = ClientPaymentKind.CASH
+    client_payment_kind: ClientPaymentKind = ClientPaymentKind.CASH
 
 
 def _answers_labels_display_from_specs(
@@ -949,6 +967,12 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
                 wash=inp.own_corr_wash,
                 circle=inp.own_corr_circle,
                 steam=inp.own_corr_steam,
+                use_custom_amount=bool(inp.own_corr_use_custom_amount),
+                custom_amount=(
+                    float(inp.own_corr_custom_amount)
+                    if inp.own_corr_use_custom_amount and float(inp.own_corr_custom_amount or 0) > 0
+                    else None
+                ),
             )
         extra: KitOwnExtra | None = None
         if inp.own_extra_blanks:

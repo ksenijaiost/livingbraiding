@@ -139,6 +139,10 @@ def _apply_kit_to_line_fp(
                 fp[f"{p}own_corr_circle"] = "on"
             if cd.steam:
                 fp[f"{p}own_corr_steam"] = "on"
+            if getattr(cd, "use_custom_amount", False):
+                fp[f"{p}own_corr_use_custom_amount"] = "1"
+                if cd.custom_amount is not None:
+                    _set(fp, f"{p}own_corr_custom_amount", cd.custom_amount)
         if own.extra_blanks and own.extra:
             fp[f"{p}own_extra_blanks"] = "on"
             if own.extra.source == "STOCK":
@@ -277,6 +281,8 @@ def _apply_service_line_to_fp(
 
     usages = _kit_usages_for_service(db, visit, vs)
     _apply_kit_to_line_fp(fp, prefix, payload, usages, db)
+    if fp.get(f"{p}own_corr_use_custom_amount") and vs.client_payment_kind:
+        _set(fp, f"{p}own_corr_client_payment_kind", vs.client_payment_kind.value)
     _apply_questionnaire_to_fp(fp, prefix if idx > 0 else "", payload)
     _apply_thermo_to_fp(fp, prefix, payload)
 

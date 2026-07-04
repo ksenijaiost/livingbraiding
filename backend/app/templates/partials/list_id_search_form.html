@@ -1,0 +1,14 @@
+{# search_action, list_search_q, search_clear_url; search_hidden_fields: [{name, value}] #}
+<form method="get" action="{{ search_action }}" class="lb-list-id-search" style="margin: 0 0 12px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px;">
+  {% for hf in search_hidden_fields or [] %}
+    <input type="hidden" name="{{ hf.name }}" value="{{ hf.value }}" />
+  {% endfor %}
+  <div>
+    <label for="{{ search_input_id|default('list_search_q') }}" style="font-size: 12px; display: block; margin-bottom: 4px;">Поиск по номеру (ID)</label>
+    <input type="search" name="q" id="{{ search_input_id|default('list_search_q') }}" value="{{ list_search_q or '' }}" placeholder="например, 146" inputmode="numeric" autocomplete="off" style="max-width: 12rem;" />
+  </div>
+  <button type="submit" class="secondary">Найти</button>
+  {% if list_search_q %}
+    <a href="{{ search_clear_url }}" class="muted" style="font-size: 13px; padding-bottom: 6px;">Сбросить</a>
+  {% endif %}
+</form>

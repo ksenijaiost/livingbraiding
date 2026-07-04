@@ -33,6 +33,57 @@ def corr_hourly_pay_units(*, hourly_hours: float, hourly_avg: bool) -> float:
     return h
 
 
+def compute_correction_extra_costs(
+    db: Session,
+    *,
+    corr_trim_qty: int,
+    corr_hourly_hours: float,
+    corr_hourly_avg: bool,
+    corr_wash: bool,
+    corr_circle: bool,
+    corr_steam: bool,
+) -> float:
+    """Себестоимость коррекции: доп. расходы (fixed_expense) по прайсу «Коррекция комплекта»."""
+    from app.work_products import _zakaz_subcategory_services_map  # noqa: WPS433
+
+    corr_map = _zakaz_subcategory_services_map(db, "Коррекция комплекта")
+
+    def _fx_sum(name: str, units: float) -> float:
+        row = corr_map.get(name) or {}
+        return float(row.get("fixed_expense") or 0.0) * max(0.0, float(units))
+
+    fx_total = 0.0
+    if corr_trim_qty > 0:
+        fx_total += _fx_sum(CORR_SVC_TRIM, float(corr_trim_qty))
+    hh_pay = corr_hourly_pay_units(hourly_hours=corr_hourly_hours, hourly_avg=corr_hourly_avg)
+    if hh_pay > 0:
+        fx_total += _fx_sum(CORR_SVC_HOURLY, hh_pay)
+    if corr_circle:
+        fx_total += _fx_sum(CORR_SVC_CIRCLE, 1)
+    if corr_wash:
+        wash_nm = corr_wash_catalog_name(
+            trim_qty=int(corr_trim_qty),
+            hourly_hours=float(corr_hourly_hours),
+            hourly_avg=bool(corr_hourly_avg),
+        )
+        fx_total += _fx_sum(wash_nm, 1)
+    if corr_steam:
+        fx_total += _fx_sum(CORR_SVC_STEAM, 1)
+    return fx_total
+
+
+def split_profit_from_client_amount(
+    amount_from_client: float,
+    cost_total: float,
+    salon_cut_pct: float,
+) -> tuple[float, float, float]:
+    """Прибыль и деление между студией и мастерами (как в услугах визита)."""
+    profit = float(amount_from_client) - float(cost_total)
+    salon_profit = profit * float(salon_cut_pct)
+    masters_pool = profit - salon_profit
+    return profit, masters_pool, salon_profit
+
+
 @dataclass(frozen=True)
 class WorkFinancials:
     staff_master_profit: dict[int, float]

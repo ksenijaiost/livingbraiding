@@ -1,0 +1,23 @@
+{# prefix: corr_ (работа) или own_corr_ (визит); fp — form prefill #}
+{% set pfx = prefix|default('corr_') %}
+{% set enabled = fp.get(pfx ~ 'use_custom_amount') in ('1', 'on', 'true', 'yes', 1, True) %}
+<div class="lb-corr-custom-amount" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+  <button type="button" class="secondary lb-corr-custom-amount-btn"{% if enabled %} style="display:none;"{% endif %}>Своя сумма</button>
+  <div class="lb-corr-custom-amount-panel card" style="margin-top: 0; padding: 12px; background: #fff;{% if not enabled %} display: none;{% endif %}">
+    <input type="hidden" name="{{ pfx }}use_custom_amount" class="lb-corr-custom-amount-flag" value="{% if enabled %}1{% endif %}" />
+    <div style="font-weight: 600; margin-bottom: 8px;">Своя сумма с клиента</div>
+    <p class="muted" style="font-size: 12px; margin: 0 0 10px;">Себестоимость считается по заполненным полям коррекции; остаток делится между мастером и студией.</p>
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;">
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <label style="margin: 0; white-space: nowrap;">Сумма с клиента</label>
+        <input name="{{ pfx }}custom_amount" type="number" step="1" min="0" class="lb-corr-custom-amount-input"
+          value="{{ fp.get(pfx ~ 'custom_amount', fp.get('amount_from_client', '')) or '' }}" style="max-width: 10rem;" />
+        <span class="muted">₽</span>
+      </div>
+      {% with name=pfx ~ 'client_payment_kind', value=fp.get(pfx ~ 'client_payment_kind', fp.get('client_payment_kind', '')) %}
+        {% include "partials/client_payment_kind_radios.html" %}
+      {% endwith %}
+    </div>
+    <button type="button" class="secondary lb-corr-custom-amount-cancel" style="margin-top: 10px;">Убрать свою сумму</button>
+  </div>
+</div>

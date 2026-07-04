@@ -372,9 +372,8 @@ def api_calendar_day(
         )
 
     hour_from, hour_to = get_calendar_display_hours(db)
-    occupancy = build_occupancy_for_day(
-        db, day=day, hour_from=hour_from, hour_to=hour_to, bookings=bookings
-    )
+    # Занятость — общая для всех ролей (все мастера и все брони на день).
+    occupancy = build_occupancy_for_day(db, day=day, hour_from=hour_from, hour_to=hour_to)
 
     if (view or "").strip().lower() == "occupancy":
         return JSONResponse(

@@ -83,6 +83,7 @@ from app.kit_inlay_visit import (
     list_master_visit_services_catalog,
     service_requires_kit_block,
 )
+from app.list_search import parse_list_id_search
 from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
 from app.time_utils import utcnow_naive
 from app.user_roles import select_users_with_any_role, select_users_with_role
@@ -2841,6 +2842,9 @@ def admin_booking_edit_get(
             **_booking_form_consultation_template_ctx(db, fp, b),
         ),
     )
+
+
+@router.post("/{booking_id}/edit")
 @legacy_bookings_admin_router.post("/{booking_id}/edit")
 async def admin_booking_edit_post(
     request: Request,
@@ -3295,10 +3299,13 @@ def admin_bookings(
     show: str | None = None,
     mine: str | None = Query(None),
     sort_date: str | None = Query(None),
+    q: str | None = Query(None),
     current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     show_mode = (show or "").strip().lower() or "active"
+    list_search_q = (q or "").strip()
+    search_id = parse_list_id_search(list_search_q)
     mine_raw = (mine or "").strip().lower()
     sort_date_raw = (sort_date or "").strip().lower()
     sort_date_mode = "desc" if sort_date_raw == "desc" else "asc"
@@ -3340,6 +3347,8 @@ def admin_bookings(
                 exists(select(1).where(and_(BookingStaff.booking_id == Booking.id, BookingStaff.user_id == current_user.id))),
             )
         )
+    if search_id is not None:
+        stmt = stmt.where(Booking.id == search_id)
     if sort_date_mode == "desc":
         stmt = stmt.order_by(Booking.planned_date.desc(), Booking.id.desc())
     else:
@@ -3388,6 +3397,8 @@ def admin_bookings(
             can_manage=can_manage,
             bookings_mine_only=bookings_mine_only,
             sort_date_mode=sort_date_mode,
+            list_search_q=list_search_q,
+            search_id=search_id,
         ),
     )
 

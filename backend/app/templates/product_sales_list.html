@@ -15,6 +15,13 @@
       <div class="ok" style="margin-top:12px;">Сохранено.</div>
     {% endif %}
 
+    {% with search_action='/sales/products', list_search_q=list_search_q, search_clear_url='/sales/products', search_input_id='sales_search_q' %}
+      {% include "partials/list_id_search_form.html" %}
+    {% endwith %}
+    {% if search_id is not none and not rows %}
+      <p class="muted">Продажа №{{ search_id }} не найдена.</p>
+    {% endif %}
+
     <div style="overflow:auto;margin-top:14px;">
       <table>
         <thead>
