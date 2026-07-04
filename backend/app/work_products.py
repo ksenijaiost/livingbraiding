@@ -17,6 +17,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.list_master_labels import work_list_master_labels
+from app.list_search import parse_list_id_search
 from app.payroll_fund import post_work_accruals, replace_work_accruals, storno_source_accruals
 from starlette.datastructures import UploadFile
 
@@ -1636,6 +1637,7 @@ async def work_new_post(
 def work_list(
     request: Request,
     mine: str | None = Query(None),
+    q: str | None = Query(None),
     current_user: AuthUser = _VIEW,
     db: Session = Depends(get_db),
 ):
@@ -1651,6 +1653,8 @@ def work_list(
     else:
         work_mine_only = mine_raw in ("1", "true", "yes", "only")
 
+    list_search_q = (q or "").strip()
+    search_id = parse_list_id_search(list_search_q)
     stmt = select(WorkForInventory).options(
         selectinload(WorkForInventory.client),
         selectinload(WorkForInventory.staff_rows).selectinload(WorkForInventoryStaff.user),
@@ -1666,6 +1670,8 @@ def work_list(
             )
             .distinct()
         )
+    if search_id is not None:
+        stmt = stmt.where(WorkForInventory.id == search_id)
     stmt = stmt.order_by(WorkForInventory.id.desc()).limit(100)
     rows = list(db.scalars(stmt).all())
     row_masters = work_list_master_labels(rows)
@@ -1679,6 +1685,8 @@ def work_list(
             msg=msg,
             can_create=(current_user.role == UserRole.MASTER),
             work_mine_only=work_mine_only,
+            list_search_q=list_search_q,
+            search_id=search_id,
         ),
     )
 

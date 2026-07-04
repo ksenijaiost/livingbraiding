@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_assigned_roles, require_role
 from app.list_master_labels import visit_list_master_labels
+from app.list_search import parse_list_id_search
 from app.time_utils import utcnow_naive
 from app.db.session import get_db
 from app.db.models import (
@@ -59,13 +60,16 @@ from app.webui import templates, ctx as _ctx
 router = APIRouter()
 
 
-def _visits_list_url(*, mine_only: bool, show_cancelled: bool) -> str:
-    q: dict[str, str] = {}
+def _visits_list_url(*, mine_only: bool, show_cancelled: bool, q: str | None = None) -> str:
+    qparams: dict[str, str] = {}
     if mine_only:
-        q["mine"] = "1"
+        qparams["mine"] = "1"
     if show_cancelled:
-        q["show_cancelled"] = "1"
-    return "/visits" + ("?" + urlencode(q) if q else "")
+        qparams["show_cancelled"] = "1"
+    sq = (q or "").strip()
+    if sq:
+        qparams["q"] = sq
+    return "/visits" + ("?" + urlencode(qparams) if qparams else "")
 
 
 def _redirect_admin_visits_to_canon(request: Request, *, visit_id: int | None = None) -> RedirectResponse:
@@ -91,12 +95,15 @@ def admin_visits(
     request: Request,
     mine: str | None = Query(None),
     show_cancelled: str | None = Query(None),
+    q: str | None = Query(None),
     current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
     mine_raw = (mine or "").strip().lower()
     visits_mine_only = mine_raw in ("1", "true", "yes", "only")
     visits_show_cancelled = parse_bool(show_cancelled)
+    list_search_q = (q or "").strip()
+    search_id = parse_list_id_search(list_search_q)
     stmt = select(Visit).options(
         selectinload(Visit.client),
         selectinload(Visit.masters).selectinload(VisitMaster.master),
@@ -128,11 +135,18 @@ def admin_visits(
                 Visit.mix_bonus_master_id == current_user.id,
             )
         )
+    if search_id is not None:
+        stmt = stmt.where(Visit.id == search_id)
     stmt = stmt.order_by(Visit.performed_date.desc()).limit(200)
     visits = list(db.scalars(stmt).all())
     for v in visits:
         v.services_line = visit_services_catalog_line(v)  # type: ignore[attr-defined]
     row_masters = visit_list_master_labels(db, visits)
+    search_hidden_fields: list[dict[str, str]] = []
+    if visits_mine_only:
+        search_hidden_fields.append({"name": "mine", "value": "1"})
+    if visits_show_cancelled:
+        search_hidden_fields.append({"name": "show_cancelled", "value": "1"})
     return templates.TemplateResponse(
         "admin_visits.html",
         _ctx(
@@ -142,10 +156,16 @@ def admin_visits(
             row_masters=row_masters,
             visits_mine_only=visits_mine_only,
             visits_show_cancelled=visits_show_cancelled,
-            visits_url_scope_all=_visits_list_url(mine_only=False, show_cancelled=visits_show_cancelled),
-            visits_url_scope_mine=_visits_list_url(mine_only=True, show_cancelled=visits_show_cancelled),
-            visits_url_active_only=_visits_list_url(mine_only=visits_mine_only, show_cancelled=False),
-            visits_url_include_cancelled=_visits_list_url(mine_only=visits_mine_only, show_cancelled=True),
+            visits_url_scope_all=_visits_list_url(mine_only=False, show_cancelled=visits_show_cancelled, q=list_search_q),
+            visits_url_scope_mine=_visits_list_url(mine_only=True, show_cancelled=visits_show_cancelled, q=list_search_q),
+            visits_url_active_only=_visits_list_url(mine_only=visits_mine_only, show_cancelled=False, q=list_search_q),
+            visits_url_include_cancelled=_visits_list_url(mine_only=visits_mine_only, show_cancelled=True, q=list_search_q),
+            visits_url_clear_search=_visits_list_url(
+                mine_only=visits_mine_only, show_cancelled=visits_show_cancelled, q=None
+            ),
+            list_search_q=list_search_q,
+            search_id=search_id,
+            search_hidden_fields=search_hidden_fields,
         ),
     )
 

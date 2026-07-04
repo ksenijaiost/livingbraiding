@@ -33,6 +33,12 @@
         <a href="{{ visits_url_include_cancelled }}">Показать с аннулированными</a>
       {% endif %}
     </p>
+    {% with search_action='/visits', list_search_q=list_search_q, search_clear_url=visits_url_clear_search, search_input_id='visits_search_q', search_hidden_fields=search_hidden_fields %}
+      {% include "partials/list_id_search_form.html" %}
+    {% endwith %}
+    {% if search_id is not none and not visits %}
+      <p class="muted">Визит №{{ search_id }} не найден{% if visits_mine_only %} среди ваших{% endif %}.</p>
+    {% endif %}
     <table>
       <thead>
         <tr>

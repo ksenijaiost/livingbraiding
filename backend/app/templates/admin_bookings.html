@@ -11,16 +11,17 @@
     {% set _show = 'all' if show_mode == 'all' else 'active' %}
     {% set _mine = '1' if bookings_mine_only else '0' %}
     {% set _sort = 'desc' if sort_date_mode == 'desc' else 'asc' %}
+    {% set _q_suffix = ('&q=' ~ (list_search_q|urlencode)) if list_search_q else '' %}
     <p style="margin:12px 0 14px;font-size:13px;">
       {# Show mode #}
       {% if _show == 'active' %}
         <strong>Только активные</strong>
         <span class="muted">·</span>
-        <a href="/bookings?show=all&mine={{ _mine }}&sort_date={{ _sort }}">Все брони</a>
+        <a href="/bookings?show=all&mine={{ _mine }}&sort_date={{ _sort }}{{ _q_suffix }}">Все брони</a>
       {% else %}
         <strong>Все брони</strong>
         <span class="muted">·</span>
-        <a href="/bookings?show=active&mine={{ _mine }}&sort_date={{ _sort }}">Только активные</a>
+        <a href="/bookings?show=active&mine={{ _mine }}&sort_date={{ _sort }}{{ _q_suffix }}">Только активные</a>
       {% endif %}
 
       <span class="muted" style="margin:0 6px;">·</span>
@@ -31,11 +32,11 @@
       {% if _mine == '1' %}
         <strong>Мои</strong>
         <span class="muted">·</span>
-        <a href="/bookings?show={{ _show }}&mine=0&sort_date={{ _sort }}">Все</a>
+        <a href="/bookings?show={{ _show }}&mine=0&sort_date={{ _sort }}{{ _q_suffix }}">Все</a>
       {% else %}
         <strong>Все</strong>
         <span class="muted">·</span>
-        <a href="/bookings?show={{ _show }}&mine=1&sort_date={{ _sort }}">Мои</a>
+        <a href="/bookings?show={{ _show }}&mine=1&sort_date={{ _sort }}{{ _q_suffix }}">Мои</a>
       {% endif %}
 
       <span class="muted" style="margin:0 6px;">·</span>
@@ -46,11 +47,11 @@
       {% if _sort == 'asc' %}
         <strong>Дата ↑</strong>
         <span class="muted">·</span>
-        <a href="/bookings?show={{ _show }}&mine={{ _mine }}&sort_date=desc">Дата ↓</a>
+        <a href="/bookings?show={{ _show }}&mine={{ _mine }}&sort_date=desc{{ _q_suffix }}">Дата ↓</a>
       {% else %}
         <strong>Дата ↓</strong>
         <span class="muted">·</span>
-        <a href="/bookings?show={{ _show }}&mine={{ _mine }}&sort_date=asc">Дата ↑</a>
+        <a href="/bookings?show={{ _show }}&mine={{ _mine }}&sort_date=asc{{ _q_suffix }}">Дата ↑</a>
       {% endif %}
 
       {% if current_user.role.value == "MASTER" %}
@@ -58,8 +59,12 @@
       {% endif %}
     </p>
 
+    {% with search_action='/bookings', list_search_q=list_search_q, search_clear_url='/bookings?show=' ~ _show ~ '&mine=' ~ _mine ~ '&sort_date=' ~ _sort, search_input_id='bookings_search_q', search_hidden_fields=[{'name':'show','value':_show},{'name':'mine','value':_mine},{'name':'sort_date','value':_sort}] %}
+      {% include "partials/list_id_search_form.html" %}
+    {% endwith %}
+
     {% if not rows %}
-      <p class="muted">Пока нет броней.</p>
+      <p class="muted">{% if search_id is not none %}Бронь №{{ search_id }} не найдена{% if bookings_mine_only %} среди ваших{% endif %}.{% else %}Пока нет броней.{% endif %}</p>
     {% else %}
       <table>
         <thead>
