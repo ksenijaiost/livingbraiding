@@ -2841,6 +2841,9 @@ def admin_booking_edit_get(
             **_booking_form_consultation_template_ctx(db, fp, b),
         ),
     )
+
+
+@router.post("/{booking_id}/edit")
 @legacy_bookings_admin_router.post("/{booking_id}/edit")
 async def admin_booking_edit_post(
     request: Request,
