@@ -102,6 +102,8 @@ class KitOwnCorrectionDetails(BaseModel):
     wash: bool = False
     circle: bool = False
     steam: bool = False
+    use_custom_amount: bool = False
+    custom_amount: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _validate_wash_circle(self):

@@ -80,7 +80,7 @@ from app.kit_composition_lines import (
 )
 from app.kit_inlay_visit import get_salon_cut_pct
 from app.kit_inlay_visit import _materials_cost_and_snapshot
-from app.work_products_compute import compute_work_financials
+from app.work_products_compute import compute_work_financials, split_profit_from_client_amount
 from app.forms_parse import parse_bool, parse_date_iso, parse_float, parse_int
 from app.work_rate_keys import CUSTOM_ORDER_BONUS_MULTIPLIER, STUDIO_SHARE
 from app.time_utils import utcnow_naive
@@ -919,6 +919,7 @@ def work_new_get(
         "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
         "customOrderBonus": _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0),
         "mixRates": mix_rates_meta_json_dict(db),
+        "salonCutPct": float(get_salon_cut_pct(db, current_user.id)),
     }
     return templates.TemplateResponse(
         "work_products_new.html",
@@ -1294,6 +1295,30 @@ async def work_new_post(
             composition_lines=composition_lines if kind == WorkKind.KIT else None,
         )
         staff_master_profit = dict(fin.staff_master_profit)
+        corr_custom_studio_total: float | None = None
+        if kind == WorkKind.KIT_CORRECTION and _g_bool(form, "corr_use_custom_amount"):
+            raw_custom = (_g_str(form, "corr_custom_amount", "") or "").strip()
+            if not raw_custom:
+                raise ValueError("Укажите сумму с клиента для «Своей суммы».")
+            try:
+                custom_amt = int(parse_float(raw_custom, min=0.0, field_name="corr_custom_amount"))
+            except ValueError:
+                raise ValueError("Сумма с клиента должна быть числом.")
+            if custom_amt <= 0:
+                raise ValueError("Сумма с клиента должна быть больше нуля.")
+            salon_pct = float(get_salon_cut_pct(db, current_user.id))
+            profit, master_pay, studio_pay = split_profit_from_client_amount(
+                custom_amt, float(fin.cost_total_amount), salon_pct
+            )
+            if profit < -0.01:
+                raise ValueError("Сумма с клиента меньше себестоимости коррекции.")
+            staff_master_profit = {current_user.id: float(master_pay)}
+            corr_custom_studio_total = float(studio_pay)
+            amount_from_client = custom_amt
+            client_payment_kind = parse_client_payment_kind(_g_str(form, "corr_client_payment_kind"))
+            if "correction" in details:
+                details["correction"]["use_custom_amount"] = True
+                details["correction"]["custom_amount"] = float(custom_amt)
         if kind == WorkKind.KIT and kit_bu_correction:
             bd = details["kit"].get("bu_correction_details") or {}
             corr_fin = compute_work_financials(
@@ -1332,7 +1357,7 @@ async def work_new_post(
                 float(staff_master_profit.get(current_user.id, 0.0)) + corr_pay
             )
         master_total = float(sum(staff_master_profit.values()))
-        studio_total = fin.studio_total
+        studio_total = corr_custom_studio_total if corr_custom_studio_total is not None else fin.studio_total
         profit_total = master_total + studio_total
         extra_costs_amount = fin.extra_costs_amount
         cost_total_amount = fin.cost_total_amount
@@ -1575,6 +1600,7 @@ async def work_new_post(
             "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
             "customOrderBonus": _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0),
             "mixRates": mix_rates_meta_json_dict(db),
+            "salonCutPct": float(get_salon_cut_pct(db, current_user.id)),
         }
         kit_master_on_ids = _read_kit_master_on_ids(form)
         kit_prefill = _kit_qty_prefill_from_form(form)

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
 from app.client_payment import parse_client_payment_kind
+from app.work_products_compute import compute_correction_extra_costs
 from app.client_validation import client_has_any_contact, strip_or_none
 from app.db.models import (
     AmortizationLevel,
@@ -135,6 +136,9 @@ class VisitServiceLineInput:
     own_corr_wash: bool = False
     own_corr_circle: bool = False
     own_corr_steam: bool = False
+    own_corr_use_custom_amount: bool = False
+    own_corr_custom_amount: float = 0.0
+    own_corr_client_payment_kind: ClientPaymentKind = ClientPaymentKind.CASH
     service_master_allocations: list[tuple[int, int]] = field(default_factory=list)
     questionnaire_raw: dict[str, str] = field(default_factory=dict)
     addon_sales_amount: float = 0.0
@@ -175,6 +179,7 @@ class MultiServiceVisitInput:
 @dataclass
 class VisitServiceLineComputed:
     amount_from_client: float
+    client_payment_kind: ClientPaymentKind
     client_discount_percent: int
     kanekalon_grams: float
     kudri_grams: float
@@ -259,6 +264,9 @@ def _line_kit_inlay_adapter(line: VisitServiceLineInput, header: VisitHeaderInpu
         own_corr_wash=line.own_corr_wash,
         own_corr_circle=line.own_corr_circle,
         own_corr_steam=line.own_corr_steam,
+        own_corr_use_custom_amount=line.own_corr_use_custom_amount,
+        own_corr_custom_amount=line.own_corr_custom_amount,
+        own_corr_client_payment_kind=line.own_corr_client_payment_kind,
         visit_master_allocations=line.service_master_allocations,
         questionnaire_raw=line.questionnaire_raw,
         addon_sales_amount=line.addon_sales_amount,
@@ -376,12 +384,31 @@ def compute_visit_service_line(
         amort_amount = float(AMORTIZATION_LEVEL_RUBLES.get(line.amortization_level.value, 0.0))
 
     cost_total = mat_cost + kit_cost_total + addons + mix_cost + amort_amount
-    profit_before = line.amount_from_client - cost_total
+    amount_from_client = float(line.amount_from_client or 0)
+    client_payment_kind = line.client_payment_kind
+    if line.own_correction and line.own_corr_use_custom_amount:
+        cost_total += compute_correction_extra_costs(
+            db,
+            corr_trim_qty=int(line.own_corr_trim_qty or 0),
+            corr_hourly_hours=float(line.own_corr_hourly_hours or 0),
+            corr_hourly_avg=False,
+            corr_wash=bool(line.own_corr_wash),
+            corr_circle=bool(line.own_corr_circle),
+            corr_steam=bool(line.own_corr_steam),
+        )
+        amount_from_client = float(line.own_corr_custom_amount or 0)
+        client_payment_kind = line.own_corr_client_payment_kind
+        if amount_from_client <= 0:
+            raise ValueError("Укажите сумму с клиента для коррекции («Своя сумма»).")
+    profit_before = amount_from_client - cost_total
+    if line.own_correction and line.own_corr_use_custom_amount and profit_before < -0.01:
+        raise ValueError("Сумма с клиента меньше себестоимости коррекции.")
     salon_profit = profit_before * salon_pct
     masters_pool = profit_before - salon_profit
 
     return VisitServiceLineComputed(
-        amount_from_client=line.amount_from_client,
+        amount_from_client=amount_from_client,
+        client_payment_kind=client_payment_kind,
         client_discount_percent=line.client_discount_percent,
         kanekalon_grams=line.kanekalon_grams,
         kudri_grams=line.kudri_grams,
@@ -595,7 +622,7 @@ def save_visit_with_services(
             service_name=service.name,
             sort_order=line.sort_order if line.sort_order else idx,
             amount_from_client=computed.amount_from_client,
-            client_payment_kind=line.client_payment_kind,
+            client_payment_kind=computed.client_payment_kind,
             client_discount_percent=computed.client_discount_percent,
             kanekalon_grams=computed.kanekalon_grams,
             kudri_grams=computed.kudri_grams,
@@ -664,7 +691,16 @@ def save_visit_with_services(
 def kit_inlay_to_multi(inp: KitInlayFormInput, *, booking_id: int | None = None) -> MultiServiceVisitInput:
     line = VisitServiceLineInput(
         service_id=inp.service_id,
-        amount_from_client=inp.amount_from_client,
+        amount_from_client=(
+            inp.own_corr_custom_amount
+            if inp.own_correction and inp.own_corr_use_custom_amount
+            else inp.amount_from_client
+        ),
+        client_payment_kind=(
+            inp.own_corr_client_payment_kind
+            if inp.own_correction and inp.own_corr_use_custom_amount
+            else inp.client_payment_kind
+        ),
         client_discount_percent=inp.client_discount_percent,
         kanekalon_grams=inp.kanekalon_grams,
         kudri_grams=inp.kudri_grams,
@@ -690,6 +726,9 @@ def kit_inlay_to_multi(inp: KitInlayFormInput, *, booking_id: int | None = None)
         own_corr_wash=inp.own_corr_wash,
         own_corr_circle=inp.own_corr_circle,
         own_corr_steam=inp.own_corr_steam,
+        own_corr_use_custom_amount=inp.own_corr_use_custom_amount,
+        own_corr_custom_amount=inp.own_corr_custom_amount,
+        own_corr_client_payment_kind=inp.own_corr_client_payment_kind,
         service_master_allocations=inp.visit_master_allocations,
         questionnaire_raw=inp.questionnaire_raw,
         addon_sales_amount=inp.addon_sales_amount,
@@ -863,10 +902,19 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
     if vs_id_raw.isdigit() and int(vs_id_raw) > 0:
         visit_service_id = int(vs_id_raw)
 
+    own_corr_use_custom = g_bool("own_corr_use_custom_amount")
+    own_corr_custom = max(0.0, g_float("own_corr_custom_amount", 0))
+    own_corr_pk = parse_client_payment_kind(g("own_corr_client_payment_kind", ""))
+    line_amount = g_float("amount_from_client", 0)
+    line_pk = parse_client_payment_kind(g("client_payment_kind", ""))
+    if own_corr_use_custom:
+        line_amount = own_corr_custom
+        line_pk = own_corr_pk
+
     return VisitServiceLineInput(
         service_id=int(parse_float(g("service_id", "0") or "0", field_name="service_id")),
-        amount_from_client=g_float("amount_from_client", 0),
-        client_payment_kind=parse_client_payment_kind(g("client_payment_kind", "")),
+        amount_from_client=line_amount,
+        client_payment_kind=line_pk,
         client_discount_percent=_parse_visit_client_discount_percent(g),
         kanekalon_grams=kanekalon_grams,
         kudri_grams=kudri_grams,
@@ -904,6 +952,9 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
         own_corr_wash=g_bool("own_corr_wash"),
         own_corr_circle=g_bool("own_corr_circle"),
         own_corr_steam=g_bool("own_corr_steam"),
+        own_corr_use_custom_amount=own_corr_use_custom,
+        own_corr_custom_amount=own_corr_custom,
+        own_corr_client_payment_kind=own_corr_pk,
         service_master_allocations=_parse_service_master_allocations_from_form(form, idx),
         questionnaire_raw=q_raw,
         addon_sales_amount=max(0.0, g_float("addon_sales_amount", 0)),
@@ -1084,7 +1135,7 @@ def _visit_service_financial_signature(
 
 def _apply_computed_to_visit_service(vs: VisitService, computed: VisitServiceLineComputed, line: VisitServiceLineInput) -> None:
     vs.amount_from_client = computed.amount_from_client
-    vs.client_payment_kind = line.client_payment_kind
+    vs.client_payment_kind = computed.client_payment_kind
     vs.client_discount_percent = computed.client_discount_percent
     vs.kanekalon_grams = computed.kanekalon_grams
     vs.kudri_grams = computed.kudri_grams
