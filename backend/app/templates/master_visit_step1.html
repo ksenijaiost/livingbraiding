@@ -719,6 +719,7 @@
       });
       updateRecommendedPriceHint();
       updateAllExtraLinePriceHints();
+      syncVisitPreview();
     }
 
     function escapeHtml(s) {
@@ -1303,7 +1304,12 @@
       return !!(el && el.checked);
     }
     function masterNameById(mid) {
-      const cb = document.querySelector('input[name="visit_master_on"][value="' + String(mid) + '"]');
+      let cb = document.querySelector('input[name="visit_master_on"][value="' + String(mid) + '"]');
+      if (!cb) cb = document.querySelector('input[name="line_0_service_master_on"][value="' + String(mid) + '"]');
+      if (!cb) {
+        const any = document.querySelector('input[name$="_service_master_on"][value="' + String(mid) + '"]');
+        if (any) cb = any;
+      }
       if (!cb) return 'ID ' + mid;
       const lab = cb.closest('label');
       if (!lab) return 'ID ' + mid;
@@ -1311,28 +1317,41 @@
       const t = (lab.textContent || '').replace(/\s+/g, ' ').trim();
       return t || ('ID ' + mid);
     }
-    function readAllocationsForPreview() {
-      const ids = Array.from(document.querySelectorAll('input[name="visit_master_on"]:checked')).map((x) => parseInt(x.value, 10)).filter((x) => x > 0);
-      if (ids.length === 0) return null;
+    function readMasterAllocRows(ids, pctPrefix) {
+      if (!ids.length) return null;
       if (ids.length === 1) {
         const mid = ids[0];
-        const s = (document.querySelector('input[name="visit_master_pct_' + String(mid) + '"]') || {}).value || '';
+        const s = (document.querySelector('input[name="' + pctPrefix + String(mid) + '"]') || {}).value || '';
         const p = s.trim() ? parseInt(s.trim(), 10) : 100;
         if (!(p >= 0)) return null;
-        return [{ mid, pct: p }];
+        return [{ mid: mid, pct: p }];
       }
       const rows = [];
       let sum = 0;
       for (const mid of ids) {
-        const s = (document.querySelector('input[name="visit_master_pct_' + String(mid) + '"]') || {}).value || '';
+        const s = (document.querySelector('input[name="' + pctPrefix + String(mid) + '"]') || {}).value || '';
         if (!String(s).trim()) return null;
         const p = parseInt(String(s).trim(), 10);
         if (isNaN(p)) return null;
         sum += p;
-        rows.push({ mid, pct: p });
+        rows.push({ mid: mid, pct: p });
       }
       if (sum !== 100) return null;
       return rows;
+    }
+    function readAllocationsForPreview() {
+      const ids = Array.from(document.querySelectorAll('input[name="visit_master_on"]:checked')).map((x) => parseInt(x.value, 10)).filter((x) => x > 0);
+      if (!ids.length && !(document.getElementById('visit_use_multi_masters') || {}).checked && currentUserId) {
+        return [{ mid: currentUserId, pct: 100 }];
+      }
+      return readMasterAllocRows(ids, 'visit_master_pct_');
+    }
+    function readLineAllocationsForPreview(idx) {
+      const ids = Array.from(document.querySelectorAll('input[name="line_' + idx + '_service_master_on"]:checked'))
+        .map((x) => parseInt(x.value, 10))
+        .filter((x) => x > 0);
+      if (!ids.length) return null;
+      return readMasterAllocRows(ids, 'line_' + idx + '_service_master_pct_');
     }
     function distributeIntegerByWeights(weights, total) {
       const keys = Object.keys(weights || {});
@@ -1576,6 +1595,8 @@
         kud = Math.max(0, numVal('#kudri_grams'));
         mixSource = (document.querySelector('input[name="mix_source"]:checked') || {}).value || 'NO_MIX';
         mixComp = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || null;
+        const bm0 = document.querySelector('select[name="mix_bonus_master_id"]');
+        bonusMasterId = bm0 ? (parseInt(String(bm0.value || '0'), 10) || 0) : 0;
       } else {
         const row = visitLineRow(idx);
         if (!row) return { mixCost: 0, mixBonus: 0 };
@@ -1594,9 +1615,9 @@
       let mixBonus = 0;
       if (mixSource === 'SELF_MIXED' && mixCost > 0) {
         const target = bonusMasterId > 0 ? bonusMasterId : currentUserId;
-        if (target === currentUserId) mixBonus = mixCost;
+        if (target > 0) mixBonus = mixCost;
       }
-      return { mixCost: mixCost, mixBonus: mixBonus };
+      return { mixCost: mixCost, mixBonus: mixBonus, bonusMasterId: bonusMasterId > 0 ? bonusMasterId : (mixSource === 'SELF_MIXED' ? currentUserId : 0) };
     }
 
     function lineKitCostParts(idx, meta) {
@@ -1704,19 +1725,62 @@
       if (clientTotalEl) {
         clientTotalEl.textContent = 'С клиента (итого): ' + money2(amountTotal) + ' ₽';
       }
-      const profitBefore = amountTotal - costTotal;
-      const salonProfit = profitBefore * (parseFloat(salonCutPct) || 0);
-      const mastersPool = profitBefore - salonProfit;
 
-      const alloc = readAllocationsForPreview();
-      if (!alloc) {
+      const scope = (document.querySelector('input[name="masters_scope"]:checked') || {}).value || 'VISIT';
+      const salonRate = parseFloat(salonCutPct) || 0;
+      const totalsByMaster = {};
+
+      function addMasterPay(mid, base, bonus) {
+        if (!mid) return;
+        if (!totalsByMaster[mid]) totalsByMaster[mid] = { base: 0, bonus: 0 };
+        totalsByMaster[mid].base += base;
+        totalsByMaster[mid].bonus += bonus;
+      }
+
+      if (scope === 'PER_SERVICE') {
+        visitLineIndicesForPreview().forEach(function (idx) {
+          const lineAmount = effectiveAmountFromClient(idx);
+          let lineCost = lineMaterialCost(idx) + lineAmortCost(idx);
+          const mix = lineMixCostAndBonus(idx);
+          lineCost += mix.mixCost;
+          const meta = visitLineServiceMeta(idx);
+          const kit = lineKitCostParts(idx, meta);
+          lineCost += kit.kitCost;
+          const profitBefore = lineAmount - lineCost;
+          const mastersPool = profitBefore - profitBefore * salonRate;
+          const alloc = readLineAllocationsForPreview(idx);
+          if (!alloc) return;
+          for (const r of alloc) {
+            const base = mastersPool * (r.pct / 100.0);
+            const bonus = (mix.bonusMasterId && r.mid === mix.bonusMasterId) ? mix.mixBonus : 0;
+            addMasterPay(r.mid, base, bonus);
+          }
+        });
+      } else {
+        const profitBefore = amountTotal - costTotal;
+        const mastersPool = profitBefore - profitBefore * salonRate;
+        const alloc = readAllocationsForPreview();
+        if (alloc) {
+          for (const r of alloc) {
+            addMasterPay(r.mid, mastersPool * (r.pct / 100.0), 0);
+          }
+        }
+        visitLineIndicesForPreview().forEach(function (idx) {
+          const mix = lineMixCostAndBonus(idx);
+          if (mix.mixBonus > 0 && mix.bonusMasterId) {
+            addMasterPay(mix.bonusMasterId, 0, mix.mixBonus);
+          }
+        });
+      }
+
+      const mids = Object.keys(totalsByMaster).map(function (x) { return parseInt(x, 10); }).filter(function (x) { return x > 0; }).sort(function (a, b) { return a - b; });
+      if (!mids.length) {
         payEl.innerHTML = '—';
       } else {
         const lines = [];
-        for (const r of alloc) {
-          const base = mastersPool * (r.pct / 100.0);
-          const bonus = (r.mid === currentUserId) ? mixBonusTotal : 0;
-          lines.push('ЗП «' + masterNameById(r.mid) + '»: ' + money2(base + bonus) + ' ₽');
+        for (const mid of mids) {
+          const t = totalsByMaster[mid];
+          lines.push('ЗП «' + masterNameById(mid) + '»: ' + money2(t.base + t.bonus) + ' ₽');
         }
         payEl.innerHTML = lines.map((l) => '<div>' + l + '</div>').join('');
       }
@@ -1981,6 +2045,24 @@
       }
     }
 
+    function resolveServiceMeta(sid) {
+      const id = parseInt(String(sid || '0'), 10) || 0;
+      if (!id) return null;
+      const base = serviceMetaById[id] || {};
+      const svc = getServiceById(id);
+      if (!svc && !base.categoryId) return null;
+      const qf = svc && Array.isArray(svc.questionnaire_fields) ? svc.questionnaire_fields : (base.questionnaire_fields || []);
+      return {
+        categoryId: base.categoryId,
+        subcategoryId: base.subcategoryId,
+        requires_kit_block: !!(svc && svc.requires_kit_block) || !!base.requires_kit_block,
+        requires_tail_block: !!(svc && svc.requires_tail_block) || !!base.requires_tail_block,
+        requires_thermo: !!(svc && svc.requires_thermo) || !!base.requires_thermo,
+        questionnaire_count: qf.length,
+        questionnaire_fields: qf,
+      };
+    }
+
     function serviceFeatureFlagsText(meta) {
       if (!meta) return '';
       const tags = [];
@@ -2202,7 +2284,7 @@
       const host = document.getElementById('line0_service_feature_flags');
       if (!host) return;
       const sid = parseInt((document.getElementById('service_id') || {}).value || '0', 10) || 0;
-      const meta = sid ? serviceMetaById[sid] : null;
+      const meta = sid ? resolveServiceMeta(sid) : null;
       const text = serviceFeatureFlagsText(meta);
       host.textContent = text;
       host.style.display = text ? 'block' : 'none';
@@ -2299,7 +2381,7 @@
       const host = row.querySelector('[data-extra-line-service-flags]');
       if (!host) return;
       const sid = parseInt((document.getElementById('line_' + idx + '_service_id') || {}).value || '0', 10) || 0;
-      const meta = sid ? serviceMetaById[sid] : null;
+      const meta = sid ? resolveServiceMeta(sid) : null;
       const text = serviceFeatureFlagsText(meta);
       host.textContent = text;
       host.style.display = text ? 'block' : 'none';
@@ -2531,7 +2613,7 @@
       const subs = (cat && cat.subcategories) ? cat.subcategories : [];
       const sub = subs.find(function (x) { return Number(x.id) === subId; }) || subs[0] || null;
       const services = (sub && sub.services) ? sub.services : [];
-      const keep = parseInt(svcSel.value || '0');
+      const keep = parseInt(svcSel.value || '0', 10);
       svcSel.innerHTML = '<option value="">— выберите услугу —</option>';
       for (let i = 0; i < services.length; i++) {
         const s = services[i];
@@ -2540,6 +2622,9 @@
         opt.textContent = s.name;
         if (keep && Number(s.id) === keep) opt.selected = true;
         svcSel.appendChild(opt);
+      }
+      if (!keep && services.length === 1) {
+        svcSel.value = String(services[0].id);
       }
       renderExtraLineServiceFlags(idx);
     }
@@ -2704,7 +2789,12 @@
         cb.addEventListener('change', function () {
           syncPerServiceMasterPctInputs();
           updateExtraLinePriceHint(idx);
+          syncVisitPreview();
         });
+      });
+      box.querySelectorAll('input[name^="line_' + idx + '_service_master_pct_"]').forEach(function (inp) {
+        inp.addEventListener('input', syncVisitPreview);
+        inp.addEventListener('change', syncVisitPreview);
       });
       const discIn = box.querySelector('input[name="line_' + idx + '_client_discount_percent"]');
       if (discIn) discIn.addEventListener('input', function () { updateExtraLinePriceHint(idx); });
@@ -2782,7 +2872,14 @@
       document.addEventListener('DOMContentLoaded', bootVisitExtraServiceLines);
 
       document.querySelectorAll('input[name="line_0_service_master_on"]').forEach(function (cb) {
-        cb.addEventListener('change', syncPerServiceMasterPctInputs);
+        cb.addEventListener('change', function () {
+          syncPerServiceMasterPctInputs();
+          syncVisitPreview();
+        });
+      });
+      document.querySelectorAll('input[name^="line_0_service_master_pct_"]').forEach(function (inp) {
+        inp.addEventListener('input', syncVisitPreview);
+        inp.addEventListener('change', syncVisitPreview);
       });
     })();
 

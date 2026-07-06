@@ -1,2 +1,4 @@
 {# Состав комплекта для админки /kits/new — одна колонка мастера (id=0). #}
-{% include "partials/kit_composition_lines_table.html" %}
+{% with se_type_selector='input[name="blank_type_se"]', de_type_selector='input[name="blank_type_de"]' %}
+  {% include "partials/kit_composition_lines_table.html" %}
+{% endwith %}

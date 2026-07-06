@@ -1025,6 +1025,12 @@
         syncWorkPreview();
       });
     });
+    document.querySelectorAll('input[name="kit_type_se"], input[name="kit_type_de"]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        if (typeof window.rebuildKitCompositionTable === 'function') window.rebuildKitCompositionTable('kit');
+        syncWorkPreview();
+      });
+    });
     var kindSel = document.querySelector('select[name="kind"]');
     if (kindSel) kindSel.addEventListener('change', function () { syncKitBlock(); syncRubberBlock(); syncOtherBlock(); syncCorrectionBlock(); syncMixUI(); syncPriceHint(); syncWorkPreview(); });
     document.querySelectorAll('input[name="rubber_family"], input[name="rubber_size"]').forEach(function(el){
@@ -1090,7 +1096,16 @@
       var stateEl = document.getElementById('kit_table_state');
       try {
         if (stateEl && stateEl.textContent && typeof window.kitCompositionInit === 'function') {
-          window.kitCompositionInit(JSON.parse(stateEl.textContent));
+          window.kitCompositionInit(JSON.parse(stateEl.textContent), {
+            mountId: 'kit',
+            linePrefix: 'kit_line',
+            theadId: 'kit_composition_thead',
+            tbodyId: 'kit_composition_tbody',
+            usedOnly: false,
+            seTypeSelector: 'input[name="kit_type_se"]',
+            deTypeSelector: 'input[name="kit_type_de"]',
+            typeFilterRoot: '#kit_block',
+          });
         }
       } catch (e) {}
 

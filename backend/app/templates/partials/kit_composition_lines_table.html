@@ -50,10 +50,25 @@
     tbodyId: '{{ tbody_id }}',
     usedOnly: {{ 'true' if used_only else 'false' }}
   };
-  {% if used_only %}
-  opts.forceMasterIds = [state.currentUserId || 0];
+  {% if se_type_selector is defined and se_type_selector %}
+  opts.seTypeSelector = {{ se_type_selector | tojson }};
+  {% elif mount_id == 'corr_kit' %}
   opts.seTypeSelector = 'input[name="corr_kit_type_se"]';
   opts.deTypeSelector = 'input[name="corr_kit_type_de"]';
+  opts.typeFilterRoot = '#correction_block';
+  {% else %}
+  opts.seTypeSelector = 'input[name="kit_type_se"]';
+  opts.deTypeSelector = 'input[name="kit_type_de"]';
+  opts.typeFilterRoot = '#kit_block';
+  {% endif %}
+  {% if de_type_selector is defined and de_type_selector %}
+  opts.deTypeSelector = {{ de_type_selector | tojson }};
+  {% endif %}
+  {% if type_filter_root is defined and type_filter_root %}
+  opts.typeFilterRoot = {{ type_filter_root | tojson }};
+  {% endif %}
+  {% if used_only and mount_id == 'corr_kit' %}
+  opts.forceMasterIds = [state.currentUserId || 0];
   {% endif %}
   if (typeof window.kitCompositionInit === 'function') {
     window.kitCompositionInit(state, opts);
