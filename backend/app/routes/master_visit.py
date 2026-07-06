@@ -468,7 +468,9 @@ def master_visit_new_get(
     request: Request,
     saved: str | None = None,
     booking_id: int | None = None,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
     db: Session = Depends(get_db),
 ):
     saved_draft_client = False
@@ -560,7 +562,9 @@ def master_visit_new_get(
 @router.post("/master/visit/new")
 async def master_visit_new_post(
     request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    current_user: AuthUser = Depends(
+        require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    ),
     db: Session = Depends(get_db),
 ):
     form = await request.form()

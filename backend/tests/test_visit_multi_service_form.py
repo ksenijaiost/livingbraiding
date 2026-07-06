@@ -122,3 +122,31 @@ def test_discover_includes_line0_when_only_visit_service_id_hidden() -> None:
     assert len(multi.lines) == 2
     assert multi.lines[0].visit_service_id == 100
     assert multi.lines[1].visit_service_id is None
+
+
+def test_parse_per_service_master_allocations() -> None:
+    items = [
+        ("service_id", "5"),
+        ("amount_from_client", "3000"),
+        ("masters_scope", "PER_SERVICE"),
+        ("line_0_service_master_on", "10"),
+        ("line_0_service_master_on", "11"),
+        ("line_0_service_master_pct_10", "50"),
+        ("line_0_service_master_pct_11", "50"),
+        ("line_1_service_id", "7"),
+        ("line_1_amount_from_client", "2000"),
+        ("line_1_service_master_on", "10"),
+        ("line_1_service_master_pct_10", "100"),
+        ("line_1_kit_kind", "STOCK"),
+        ("line_1_mix_source", "NO_MIX"),
+        ("client_mode", "existing"),
+        ("existing_client_id", "1"),
+        ("performed_date", "2026-05-24"),
+        ("kit_kind", "STOCK"),
+        ("mix_source", "NO_MIX"),
+    ]
+    form = FormData(items)
+    multi = parse_multi_service_visit_form(form, single_master_default_id=99)
+    assert multi.header.masters_scope.value == "PER_SERVICE"
+    assert multi.lines[0].service_master_allocations == [(10, 50), (11, 50)]
+    assert multi.lines[1].service_master_allocations == [(10, 100)]
