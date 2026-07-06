@@ -26,17 +26,24 @@
 
   function typeFilterSelector(state, kind) {
     if (kind === 'se') {
-      return state.seTypeSelector || 'input[name="kit_type_se"], input[name="blank_type_se"], input[name="corr_kit_type_se"]';
+      return state.seTypeSelector || 'input[name="kit_type_se"]';
     }
-    return state.deTypeSelector || 'input[name="kit_type_de"], input[name="blank_type_de"], input[name="corr_kit_type_de"]';
+    return state.deTypeSelector || 'input[name="kit_type_de"]';
+  }
+
+  function findTypeCheckbox(state, kind) {
+    var selector = typeFilterSelector(state, kind);
+    var root = state.typeFilterRoot ? document.querySelector(state.typeFilterRoot) : document;
+    if (!root) root = document;
+    return root.querySelector(selector);
   }
 
   function filteredCatalog(state) {
     var cat = state.blankCatalog || [];
-    var showSe = true;
-    var showDe = true;
-    var seEl = document.querySelector(typeFilterSelector(state, 'se'));
-    var deEl = document.querySelector(typeFilterSelector(state, 'de'));
+    var showSe = false;
+    var showDe = false;
+    var seEl = findTypeCheckbox(state, 'se');
+    var deEl = findTypeCheckbox(state, 'de');
     if (seEl) showSe = !!seEl.checked;
     if (deEl) showDe = !!deEl.checked;
     return cat.filter(function (it) {
@@ -273,8 +280,11 @@
     }
 
     function wireTypeFilters() {
-      var sel = typeFilterSelector(state, 'se') + ', ' + typeFilterSelector(state, 'de');
-      document.querySelectorAll(sel).forEach(function (el) {
+      var seSel = typeFilterSelector(state, 'se');
+      var deSel = typeFilterSelector(state, 'de');
+      var root = state.typeFilterRoot ? document.querySelector(state.typeFilterRoot) : document;
+      if (!root) root = document;
+      root.querySelectorAll(seSel + ', ' + deSel).forEach(function (el) {
         el.removeEventListener('change', el._kclTypeHandler);
         el._kclTypeHandler = function () {
           rebuildForMount(state.mountId);
