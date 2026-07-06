@@ -769,7 +769,8 @@
       const self = document.querySelector('input[name="client_is_self"]');
       const amt = document.getElementById('amount_from_client');
       if (!amt || !self) return;
-      if (self.checked) amt.removeAttribute('required');
+      const useCustom = isLineCustomCorrectionAmount(0);
+      if (self.checked || useCustom) amt.removeAttribute('required');
       else amt.setAttribute('required', 'required');
     }
     let suggestTimer = null;
@@ -1060,6 +1061,7 @@
     if (_ug) _ug.addEventListener('input', function(){ updateMixBlockUI(); syncVisitPreview(); });
     const _cis = document.querySelector('input[name="client_is_self"]');
     if (_cis) _cis.addEventListener('change', syncAmountRequired);
+    document.addEventListener('lbCorrCustomAmountChanged', syncAmountRequired);
     const _amt = document.getElementById('amount_from_client');
     if (_amt) { _amt.addEventListener('input', syncVisitPreview); _amt.addEventListener('change', syncVisitPreview); }
     const _disc = document.getElementById('client_discount_percent');
@@ -1171,9 +1173,10 @@
       }
       const selfCb = document.querySelector('input[name="client_is_self"]');
       if (selfCb && !selfCb.checked) {
-        const raw = (document.getElementById('amount_from_client').value || '').trim();
-        const n = parseFloat(raw.replace(',', '.'));
-        if (!raw || !(n >= 0) || n <= 0) {
+        const missing = visitLineIndicesForPreview().filter(function (idx) {
+          return effectiveAmountFromClient(idx) <= 0;
+        });
+        if (missing.length) {
           e.preventDefault();
           alert('Укажите сумму, взятую с клиента.');
           return;
@@ -1505,6 +1508,25 @@
       return out.sort(function (a, b) { return a - b; });
     }
 
+    function isLineCustomCorrectionAmount(idx) {
+      const flagName = idx === 0 ? 'own_corr_use_custom_amount' : ('line_' + idx + '_own_corr_use_custom_amount');
+      const scope = idx === 0 ? document : visitLineRow(idx);
+      if (!scope) return false;
+      const flag = scope.querySelector('input[name="' + flagName + '"]');
+      return !!(flag && String(flag.value || '').trim() === '1');
+    }
+
+    function effectiveAmountFromClient(idx) {
+      if (isLineCustomCorrectionAmount(idx)) {
+        const scope = idx === 0 ? document : visitLineRow(idx);
+        const inp = scope ? scope.querySelector('.lb-corr-custom-amount-input') : null;
+        const raw = String((inp && inp.value) || '').replace(',', '.').trim();
+        const n = parseFloat(raw);
+        return (!raw || isNaN(n)) ? 0 : Math.max(0, n);
+      }
+      return lineAmountFromClient(idx);
+    }
+
     function lineAmountFromClient(idx) {
       if (idx === 0) return Math.max(0, numVal('#amount_from_client'));
       const row = visitLineRow(idx);
@@ -1666,7 +1688,7 @@
       let warn = '';
 
       visitLineIndicesForPreview().forEach(function (idx) {
-        amountTotal += lineAmountFromClient(idx);
+        amountTotal += effectiveAmountFromClient(idx);
         costTotal += lineMaterialCost(idx) + lineAmortCost(idx);
         const mix = lineMixCostAndBonus(idx);
         costTotal += mix.mixCost;

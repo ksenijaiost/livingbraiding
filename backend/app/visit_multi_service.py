@@ -151,6 +151,13 @@ class VisitServiceLineInput:
     client_payment_kind: ClientPaymentKind = ClientPaymentKind.CASH
 
 
+def effective_amount_from_client(line: VisitServiceLineInput) -> float:
+    """Сумма с клиента: основное поле или «Своя сумма» при коррекции комплекта."""
+    if line.own_correction and line.own_corr_use_custom_amount:
+        return float(line.own_corr_custom_amount or 0)
+    return float(line.amount_from_client or 0)
+
+
 @dataclass
 class VisitHeaderInput:
     client_mode: str
@@ -596,7 +603,7 @@ def save_visit_with_services(
         db.flush()
 
     for idx, line in enumerate(inp.lines):
-        if inp.header.client_type != VisitClientType.SELF and line.amount_from_client <= 0:
+        if inp.header.client_type != VisitClientType.SELF and effective_amount_from_client(line) <= 0:
             raise ValueError("Укажите сумму, взятую с клиента.")
         computed = compute_visit_service_line(
             db,
@@ -904,6 +911,8 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
 
     own_corr_use_custom = g_bool("own_corr_use_custom_amount")
     own_corr_custom = max(0.0, g_float("own_corr_custom_amount", 0))
+    if g_bool("own_correction") and not own_corr_use_custom and own_corr_custom > 0:
+        own_corr_use_custom = True
     own_corr_pk = parse_client_payment_kind(g("own_corr_client_payment_kind", ""))
     line_amount = g_float("amount_from_client", 0)
     line_pk = parse_client_payment_kind(g("client_payment_kind", ""))
@@ -1204,7 +1213,7 @@ def _insert_visit_service_from_line(
     editor_user_id: int,
     performed_dt: datetime,
 ) -> VisitService:
-    if inp.header.client_type != VisitClientType.SELF and line.amount_from_client <= 0:
+    if inp.header.client_type != VisitClientType.SELF and effective_amount_from_client(line) <= 0:
         raise ValueError("Укажите сумму, взятую с клиента.")
     computed = compute_visit_service_line(
         db,
