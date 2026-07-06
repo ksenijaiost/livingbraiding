@@ -290,6 +290,7 @@ class ServiceCategory(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    short_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     consultation_kind: Mapped[ConsultationKind] = mapped_column(
         Enum(ConsultationKind),
@@ -345,6 +346,7 @@ class ServiceSubcategory(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     category_id: Mapped[int] = mapped_column(ForeignKey("service_categories.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
+    short_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Форма визита: блок «Комплект» (склад) для услуг этой подкатегории, если у услуги нет своего override.
     show_kit_section: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -374,6 +376,7 @@ class Service(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     subcategory_id: Mapped[int] = mapped_column(ForeignKey("service_subcategories.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    short_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     estimated_duration_minutes: Mapped[int] = mapped_column(Integer, default=120, nullable=False)
 

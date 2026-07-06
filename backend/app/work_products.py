@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -24,6 +25,7 @@ from starlette.datastructures import UploadFile
 from app.auth import AuthUser, require_role
 from app.client_payment import parse_client_payment_kind
 from app.client_validation import format_created_by_label
+from app.form_validation_log import log_user_validation_error
 from app.db.models import (
     Client,
     ClientPaymentKind,
@@ -134,6 +136,7 @@ from app.zakaz_blanks import kit_composition_catalog_items, kit_form_blank_defs
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_user_role"] = ru_user_role
 router = APIRouter(prefix="/sales/work", tags=["work-products"])
+_logger = logging.getLogger("livingbraiding.app")
 # GET-алиас под старые закладки/ссылки (если где-то фигурировал /admin/sales/...):
 #   /admin/sales/work/...  -> 308 -> /sales/work/...
 legacy_admin_router = APIRouter(prefix="/admin/sales/work", tags=["work-products-legacy"])
@@ -1592,6 +1595,16 @@ async def work_new_post(
             db.commit()
         return RedirectResponse(url=f"/sales/work/{work.id}?msg=created", status_code=303)
     except ValueError as exc:
+        log_user_validation_error(
+            _logger,
+            request=request,
+            route="POST /sales/work/new",
+            message=str(exc),
+            form=form,
+            user_id=current_user.id,
+            username=current_user.username,
+            context="work",
+        )
         _enrich_fp_rubber(fp)
         other_items = _other_items_for_work_form(db)
         masters = _list_masters_for_work_form(db)
@@ -1988,6 +2001,17 @@ async def work_edit_save(
         w.studio_profit_amount = max(0.0, _p_float("studio_profit_amount", float(w.studio_profit_amount or 0.0)))
         w.profit_total_amount = max(0.0, _p_float("profit_total_amount", float(w.profit_total_amount or 0.0)))
     except ValueError as exc:
+        log_user_validation_error(
+            _logger,
+            request=request,
+            route=f"POST /sales/work/{work_id}/edit",
+            message=str(exc),
+            form=form,
+            user_id=current_user.id,
+            username=current_user.username,
+            context="work",
+            extra={"work_id": work_id},
+        )
         return templates.TemplateResponse(
             "work_products_edit.html",
             _ctx(request, current_user=current_user, row=w, err=str(exc)),

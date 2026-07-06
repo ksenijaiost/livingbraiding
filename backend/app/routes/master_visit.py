@@ -67,7 +67,7 @@ from app.mix_rates import mix_rates_meta_json_dict
 from app.ru_labels import ru_master_level, ru_user_role
 from app.routes.bookings import try_auto_complete_booking
 from app.thermo_visit import collect_thermo_prefill_from_form
-from app.user_roles import select_users_with_role
+from app.form_validation_log import log_user_validation_error
 from app.webui import templates, ctx as _ctx
 
 
@@ -75,18 +75,25 @@ router = APIRouter()
 _logger = logging.getLogger("livingbraiding.app")
 
 
-def _log_visit_new_validation_error(
+def _log_visit_form_error(
     request: Request,
     exc: ValueError,
     *,
     current_user: AuthUser,
+    form: Any,
+    route: str,
+    extra: dict | None = None,
 ) -> None:
-    msg = str(exc)
-    request.state.validation_error = msg
-    _logger.warning(
-        'POST /master/visit/new validation failed: %s | user=%s',
-        msg,
-        current_user.username,
+    log_user_validation_error(
+        _logger,
+        request=request,
+        route=route,
+        message=str(exc),
+        form=form,
+        user_id=current_user.id,
+        username=current_user.username,
+        context="visit",
+        extra=extra,
     )
 
 
@@ -374,6 +381,17 @@ def _draft_form_response_from_error(
     lock_banner: dict[str, str] | None,
     error: str,
 ):
+    log_user_validation_error(
+        _logger,
+        request=request,
+        route=f"{request.method} {request.url.path}",
+        message=error,
+        form=form,
+        user_id=current_user.id,
+        username=current_user.username,
+        context="visit",
+        extra={"draft_id": draft_id} if draft_id else None,
+    )
     fp = collect_form_dict(form)
     fp.update(collect_questionnaire_prefill_from_form(form))
     fp.update(collect_thermo_prefill_from_form(form))
@@ -583,7 +601,13 @@ async def master_visit_new_post(
             db.commit()
         except ValueError as exc:
             db.rollback()
-            _log_visit_new_validation_error(request, exc, current_user=current_user)
+            _log_visit_form_error(
+                request,
+                exc,
+                current_user=current_user,
+                form=form,
+                route="POST /master/visit/new",
+            )
             fp, vm_on_ids, vm_pct_str = master_visit_step1_prefill_from_form(form)
             fp.update(collect_questionnaire_prefill_from_form(form))
             fp.update(collect_thermo_prefill_from_form(form))
@@ -620,7 +644,13 @@ async def master_visit_new_post(
             except Exception:
                 db.rollback()
     except ValueError as exc:
-        _log_visit_new_validation_error(request, exc, current_user=current_user)
+        _log_visit_form_error(
+            request,
+            exc,
+            current_user=current_user,
+            form=form,
+            route="POST /master/visit/new",
+        )
         fp, vm_on_ids, vm_pct_str = master_visit_step1_prefill_from_form(form)
         fp.update(collect_questionnaire_prefill_from_form(form))
         fp.update(collect_thermo_prefill_from_form(form))

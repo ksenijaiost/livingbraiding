@@ -152,7 +152,7 @@ def api_calendar_day(
         time_l = format_naive_utc_datetime(b.planned_date, tz)
         svc_label = ""
         if b.kind == BookingKind.VISIT:
-            svc_label = booking_service_labels_from_booking(b)
+            svc_label = booking_service_labels_from_booking(b, prefer_short=True)
         booking_items.append(
             {
                 "id": int(b.id),

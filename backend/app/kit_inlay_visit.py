@@ -753,6 +753,8 @@ def parse_kit_inlay_form(
 
     own_corr_use_custom = g_bool("own_corr_use_custom_amount")
     own_corr_custom_amt = max(0.0, g_float("own_corr_custom_amount", 0))
+    if g_bool("own_correction") and not own_corr_use_custom and own_corr_custom_amt > 0:
+        own_corr_use_custom = True
     visit_amount = (
         own_corr_custom_amt
         if g_bool("own_correction") and own_corr_use_custom

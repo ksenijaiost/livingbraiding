@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
@@ -29,6 +30,7 @@ from app.db.models import (
 from app.payroll_fund import storno_source_accruals
 from app.payroll_fund import PayrollFundSourceKind
 from app.forms_parse import parse_bool, parse_int
+from app.form_validation_log import log_user_validation_error
 from app.ui_visit_display import (
     build_service_human_display,
     kit_usages_empty_explanation,
@@ -58,6 +60,7 @@ from app.webui import templates, ctx as _ctx
 
 
 router = APIRouter()
+_logger = logging.getLogger("livingbraiding.app")
 
 
 def _visits_list_url(*, mine_only: bool, show_cancelled: bool, q: str | None = None) -> str:
@@ -331,6 +334,17 @@ def _visit_edit_form_error_response(
     form: Any,
     error: str,
 ):
+    log_user_validation_error(
+        _logger,
+        request=request,
+        route=f"{request.method} {request.url.path}",
+        message=error,
+        form=form,
+        user_id=current_user.id,
+        username=current_user.username,
+        context="visit",
+        extra={"visit_id": visit_id},
+    )
     fp = {}
     for key in form.keys():
         last = None

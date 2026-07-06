@@ -126,8 +126,8 @@ def _booking_client_name(booking: Booking) -> str:
 
 def _segment_service_label(booking: Booking, svc: Service | None) -> str:
     if svc is not None:
-        return format_service_catalog_path(svc)
-    return booking_service_labels_from_booking(booking)
+        return format_service_catalog_path(svc, prefer_short=True)
+    return booking_service_labels_from_booking(booking, prefer_short=True)
 
 
 def _booking_load_options():

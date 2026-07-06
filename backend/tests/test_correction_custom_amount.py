@@ -27,7 +27,7 @@ from app.db.models import (
     WorkForInventory,
     WorkKind,
 )
-from app.visit_multi_service import VisitHeaderInput, VisitServiceLineInput, compute_visit_service_line
+from app.visit_multi_service import VisitHeaderInput, VisitServiceLineInput, compute_visit_service_line, effective_amount_from_client
 from app.work_products_compute import (
     CORR_SVC_TRIM,
     compute_correction_extra_costs,
@@ -213,3 +213,60 @@ def test_visit_correction_custom_amount(memory_db) -> None:
     assert computed.client_payment_kind == ClientPaymentKind.CASH
     assert computed.cost_total >= 20.0
     assert computed.masters_pool + computed.salon_profit == pytest.approx(computed.profit_before_split)
+
+
+def test_effective_amount_from_client_custom_correction() -> None:
+    line = VisitServiceLineInput(
+        service_id=1,
+        amount_from_client=0,
+        client_discount_percent=0,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_source=None,
+        mix_complexity=None,
+        mix_bonus_master_id=None,
+        amortization_level=None,
+        own_correction=True,
+        own_corr_use_custom_amount=True,
+        own_corr_custom_amount=4500.0,
+        kit_kind="OWN",
+    )
+    assert effective_amount_from_client(line) == 4500.0
+
+
+def test_parse_visit_line_custom_amount_without_flag() -> None:
+    from app.visit_multi_service import _parse_line_from_form
+
+    class _Form:
+        def keys(self):
+            return self._data.keys()
+
+        def get(self, key, default=None):
+            return self._data.get(key, default)
+
+        def getlist(self, key):
+            v = self._data.get(key)
+            if v is None:
+                return []
+            return [v]
+
+        def __init__(self, data):
+            self._data = data
+
+    form = _Form(
+        {
+            "service_id": "1",
+            "amount_from_client": "",
+            "own_correction": "on",
+            "own_corr_custom_amount": "3200",
+            "own_corr_client_payment_kind": "CASH",
+            "kit_kind": "OWN",
+            "kanekalon_grams": "0",
+            "kudri_grams": "0",
+            "mix_source": "NO_MIX",
+        }
+    )
+    line = _parse_line_from_form(form, 0)
+    assert line.own_corr_use_custom_amount is True
+    assert line.amount_from_client == 3200.0
+    assert effective_amount_from_client(line) == 3200.0

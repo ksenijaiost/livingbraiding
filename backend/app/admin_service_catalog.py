@@ -78,6 +78,13 @@ def _parse_optional_price(raw: object) -> float | None:
     return float(t.replace(",", "."))
 
 
+def _parse_optional_short_name(raw: str | None, *, max_len: int) -> str | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    return s[:max_len]
+
+
 def _parse_autocalc_percent(raw: object | None, *, max_pct: float = 10_000.0) -> float:
     if raw is None:
         raise ValueError("pct missing")
@@ -515,6 +522,7 @@ def category_new_form(
             is_new=True,
             category=None,
             form_name="",
+            form_short_name="",
             form_active=True,
             form_include_in_visit=True,
             form_consultation_kind=ConsultationKind.BRAIDING.value,
@@ -534,6 +542,7 @@ def _parse_consultation_kind(raw: str | None) -> ConsultationKind:
 @router.post("/categories/new")
 def category_new_save(
     name: str = Form(...),
+    short_name: str | None = Form(None),
     is_active: str | None = Form(None),
     consultation_kind: str = Form(ConsultationKind.BRAIDING.value),
     current_user: AuthUser = _SUPER,
@@ -544,6 +553,7 @@ def category_new_save(
         return RedirectResponse(url="/admin/catalog/categories/new?err=empty", status_code=303)
     cat = ServiceCategory(
         name=nm,
+        short_name=_parse_optional_short_name(short_name, max_len=120),
         is_active=_is_checked(is_active),
         consultation_kind=_parse_consultation_kind(consultation_kind),
     )
@@ -576,6 +586,7 @@ def category_edit_form(
             is_new=False,
             category=cat,
             form_name=cat.name,
+            form_short_name=cat.short_name or "",
             form_active=cat.is_active,
             form_include_in_visit=True,
             form_consultation_kind=cat.consultation_kind.value,
@@ -588,6 +599,7 @@ def category_edit_form(
 def category_edit_save(
     category_id: int,
     name: str = Form(...),
+    short_name: str | None = Form(None),
     is_active: str | None = Form(None),
     consultation_kind: str = Form(ConsultationKind.BRAIDING.value),
     current_user: AuthUser = _SUPER,
@@ -598,6 +610,7 @@ def category_edit_save(
         raise HTTPException(status_code=404, detail="Категория не найдена")
     before = SimpleNamespace(
         name=cat.name,
+        short_name=cat.short_name,
         is_active=cat.is_active,
         consultation_kind=cat.consultation_kind,
     )
@@ -608,6 +621,7 @@ def category_edit_save(
             status_code=303,
         )
     cat.name = nm
+    cat.short_name = _parse_optional_short_name(short_name, max_len=120)
     cat.is_active = _is_checked(is_active)
     cat.consultation_kind = _parse_consultation_kind(consultation_kind)
     cat.updated_at = utcnow_naive()
@@ -618,7 +632,7 @@ def category_edit_save(
         entity_field="category_id",
         entity_id=cat.id,
         changed_by_user_id=current_user.id,
-        changes=diff_fields(before, cat, ("name", "is_active", "consultation_kind")),
+        changes=diff_fields(before, cat, ("name", "short_name", "is_active", "consultation_kind")),
     )
     try:
         db.commit()
@@ -701,6 +715,7 @@ def subcategory_new_form(
             category=cat,
             sub=None,
             form_name="",
+            form_short_name="",
             form_active=True,
             form_show_kit=False,
             form_show_tail=False,
@@ -714,6 +729,7 @@ def subcategory_new_form(
 def subcategory_new_save(
     category_id: int = Form(...),
     name: str = Form(...),
+    short_name: str | None = Form(None),
     is_active: str | None = Form(None),
     show_kit_section: str | None = Form(None),
     show_tail_section: str | None = Form(None),
@@ -734,6 +750,7 @@ def subcategory_new_save(
     sub = ServiceSubcategory(
         category_id=category_id,
         name=nm,
+        short_name=_parse_optional_short_name(short_name, max_len=160),
         is_active=_is_checked(is_active),
         show_kit_section=_is_checked(show_kit_section),
         show_tail_section=_is_checked(show_tail_section),
@@ -774,6 +791,7 @@ def subcategory_edit_form(
             category=cat,
             sub=sub,
             form_name=sub.name,
+            form_short_name=sub.short_name or "",
             form_active=sub.is_active,
             form_show_kit=sub.show_kit_section,
             form_show_tail=getattr(sub, "show_tail_section", False),
@@ -787,6 +805,7 @@ def subcategory_edit_form(
 def subcategory_edit_save(
     subcategory_id: int,
     name: str = Form(...),
+    short_name: str | None = Form(None),
     is_active: str | None = Form(None),
     show_kit_section: str | None = Form(None),
     show_tail_section: str | None = Form(None),
@@ -800,6 +819,7 @@ def subcategory_edit_save(
         raise HTTPException(status_code=404, detail="Подкатегория не найдена")
     before = SimpleNamespace(
         name=sub.name,
+        short_name=sub.short_name,
         is_active=sub.is_active,
         show_kit_section=sub.show_kit_section,
         show_tail_section=getattr(sub, "show_tail_section", False),
@@ -816,6 +836,7 @@ def subcategory_edit_save(
             status_code=303,
         )
     sub.name = nm
+    sub.short_name = _parse_optional_short_name(short_name, max_len=160)
     sub.is_active = _is_checked(is_active)
     sub.show_kit_section = _is_checked(show_kit_section)
     sub.show_tail_section = _is_checked(show_tail_section)
@@ -834,6 +855,7 @@ def subcategory_edit_save(
             sub,
             (
                 "name",
+                "short_name",
                 "is_active",
                 "show_kit_section",
                 "show_tail_section",
@@ -906,6 +928,7 @@ def service_new_form(
             subcategory=sub,
             svc=None,
             form_name="",
+            form_short_name="",
             form_active=True,
             form_jf="",
             form_jt="",
@@ -928,6 +951,7 @@ def service_new_form(
 def service_new_save(
     subcategory_id: int = Form(...),
     name: str = Form(...),
+    short_name: str | None = Form(None),
     is_active: str | None = Form(None),
     price_junior_from: str | None = Form(None),
     price_junior_to: str | None = Form(None),
@@ -974,6 +998,7 @@ def service_new_save(
     svc = Service(
         subcategory_id=subcategory_id,
         name=nm,
+        short_name=_parse_optional_short_name(short_name, max_len=200),
         is_active=_is_checked(is_active),
         estimated_duration_minutes=duration,
         price_junior_from=jf,
@@ -1028,6 +1053,7 @@ def service_edit_form(
             subcategory=sub,
             svc=svc,
             form_name=svc.name,
+            form_short_name=svc.short_name or "",
             form_active=svc.is_active,
             form_jf=_fmt_price_input(svc.price_junior_from),
             form_jt=_fmt_price_input(svc.price_junior_to),
@@ -1062,6 +1088,7 @@ def service_edit_form(
 def service_edit_save(
     service_id: int,
     name: str = Form(...),
+    short_name: str | None = Form(None),
     is_active: str | None = Form(None),
     price_junior_from: str | None = Form(None),
     price_junior_to: str | None = Form(None),
@@ -1088,6 +1115,7 @@ def service_edit_save(
         return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
     before = SimpleNamespace(
         name=svc.name,
+        short_name=svc.short_name,
         is_active=svc.is_active,
         estimated_duration_minutes=svc.estimated_duration_minutes,
         price_junior_from=svc.price_junior_from,
@@ -1130,6 +1158,7 @@ def service_edit_save(
         )
 
     svc.name = nm
+    svc.short_name = _parse_optional_short_name(short_name, max_len=200)
     svc.is_active = _is_checked(is_active)
     svc.estimated_duration_minutes = duration
     svc.price_junior_from = jf
@@ -1157,6 +1186,7 @@ def service_edit_save(
             svc,
             (
                 "name",
+                "short_name",
                 "is_active",
                 "estimated_duration_minutes",
                 "price_junior_from",
