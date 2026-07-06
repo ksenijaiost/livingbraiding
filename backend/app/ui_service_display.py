@@ -7,6 +7,34 @@ from app.db.models import Service, VisitService
 _ARROW = " → "
 
 
+def _catalog_part_label(obj, *, prefer_short: bool) -> str:
+    if obj is None:
+        return ""
+    if prefer_short:
+        short = (getattr(obj, "short_name", None) or "").strip()
+        if short:
+            return short
+    return (getattr(obj, "name", None) or "").strip()
+
+
+def format_service_catalog_path(service: Service | None, *, prefer_short: bool = False) -> str:
+    if service is None:
+        return ""
+    sub = getattr(service, "subcategory", None)
+    cat = getattr(sub, "category", None) if sub else None
+    parts: list[str] = []
+    cat_label = _catalog_part_label(cat, prefer_short=prefer_short)
+    sub_label = _catalog_part_label(sub, prefer_short=prefer_short)
+    svc_label = _catalog_part_label(service, prefer_short=prefer_short)
+    if cat_label:
+        parts.append(cat_label)
+    if sub_label:
+        parts.append(sub_label)
+    if svc_label:
+        parts.append(svc_label)
+    return _ARROW.join(parts) if parts else svc_label
+
+
 def format_duration_minutes_ru(minutes: int | None, *, default_minutes: int | None = None) -> str:
     """Человекочитаемая длительность: «2 ч», «2 ч 30 мин», «45 мин»."""
     m = int(minutes or 0)
@@ -23,21 +51,6 @@ def format_duration_minutes_ru(minutes: int | None, *, default_minutes: int | No
     return " ".join(parts) if parts else "—"
 
 
-def format_service_catalog_path(service: Service | None) -> str:
-    if service is None:
-        return ""
-    sub = getattr(service, "subcategory", None)
-    cat = getattr(sub, "category", None) if sub else None
-    parts: list[str] = []
-    if cat and (cat.name or "").strip():
-        parts.append(str(cat.name).strip())
-    if sub and (sub.name or "").strip():
-        parts.append(str(sub.name).strip())
-    if (service.name or "").strip():
-        parts.append(str(service.name).strip())
-    return _ARROW.join(parts) if parts else (service.name or "").strip()
-
-
 def format_visit_service_catalog_path(vs: VisitService | None) -> str:
     if vs is None:
         return ""
@@ -50,20 +63,20 @@ def format_visit_service_catalog_path(vs: VisitService | None) -> str:
     return _ARROW.join(parts) if parts else (vs.service_name or "").strip()
 
 
-def booking_service_labels_from_booking(booking) -> str:
+def booking_service_labels_from_booking(booking, *, prefer_short: bool = False) -> str:
     """Пути услуг брони для таблицы календаря (через «; »)."""
     lines = list(getattr(booking, "planned_services", None) or [])
     if lines:
         paths: list[str] = []
         for ps in sorted(lines, key=lambda x: (int(x.sort_order or 0), int(x.id or 0))):
             svc = getattr(ps, "service", None)
-            p = format_service_catalog_path(svc)
+            p = format_service_catalog_path(svc, prefer_short=prefer_short)
             if p:
                 paths.append(p)
         if paths:
             return "; ".join(paths)
     svc = getattr(booking, "planned_service", None)
-    return format_service_catalog_path(svc)
+    return format_service_catalog_path(svc, prefer_short=prefer_short)
 
 
 def booking_list_detail_parts(

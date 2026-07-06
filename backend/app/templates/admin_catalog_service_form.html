@@ -23,6 +23,10 @@
       <label>Название
         <input name="name" value="{{ form_name }}" required maxlength="200" />
       </label>
+      <label style="margin-top: 10px; display: block;">Краткое название
+        <input name="short_name" value="{{ form_short_name or '' }}" maxlength="200" placeholder="для занятости в календаре" />
+      </label>
+      <p class="muted" style="font-size: 12px; margin: 4px 0 0;">Если пусто — в занятости показывается полное название.</p>
       <label style="display:flex; align-items:center; gap:8px; margin-top: 12px;">
         <input type="checkbox" name="is_active" {% if form_active %}checked{% endif %} />
         Активна
