@@ -68,6 +68,7 @@ from app.ru_labels import ru_master_level, ru_user_role
 from app.routes.bookings import try_auto_complete_booking
 from app.thermo_visit import collect_thermo_prefill_from_form
 from app.form_validation_log import log_user_validation_error
+from app.user_roles import select_users_with_role
 from app.webui import templates, ctx as _ctx
 
 
