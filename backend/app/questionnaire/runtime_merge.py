@@ -78,6 +78,16 @@ def _spec_from_category_row(row: CategoryQuestionnaireField) -> MergedQuestionna
     )
 
 
+def _material_description_visible(service: Service, subcategory: ServiceSubcategory) -> bool:
+    """Показывать поле material_description с учётом подкатегории и переопределения услуги."""
+    md_override = getattr(service, "material_description_override", None)
+    if md_override is True:
+        return True
+    if md_override is False:
+        return False
+    return bool(subcategory.show_material_description)
+
+
 def _filter_category_specs(
     specs: list[MergedQuestionnaireFieldSpec],
     *,
@@ -85,21 +95,21 @@ def _filter_category_specs(
     subcategory: ServiceSubcategory,
 ) -> list[MergedQuestionnaireFieldSpec]:
     """Скрыть «Описание про материал» по флагам подкатегории и услуги."""
-    out: list[MergedQuestionnaireFieldSpec] = []
-    for s in specs:
-        if s.field_key == "material_description":
-            # 3-состояния:
-            # - None → как у подкатегории
-            # - True → всегда показывать
-            # - False → не показывать
-            md_override = getattr(service, "material_description_override", None)
-            if md_override is None:
-                if not subcategory.show_material_description:
-                    continue
-            elif md_override is False:
-                continue
-        out.append(s)
-    return out
+    if _material_description_visible(service, subcategory):
+        return specs
+    return [s for s in specs if s.field_key != "material_description"]
+
+
+def _drop_hidden_material_description(
+    specs: list[MergedQuestionnaireFieldSpec],
+    *,
+    service: Service,
+    subcategory: ServiceSubcategory,
+) -> list[MergedQuestionnaireFieldSpec]:
+    """Убрать material_description на любом уровне (категория/подкатегория/услуга)."""
+    if _material_description_visible(service, subcategory):
+        return specs
+    return [s for s in specs if s.field_key != "material_description"]
 
 
 def _spec_from_subcat_row(row: SubcategoryQuestionnaireField) -> MergedQuestionnaireFieldSpec:
@@ -169,10 +179,12 @@ def load_merged_questionnaire_specs(db: Session, service_id: int) -> list[Merged
             .order_by(ServiceQuestionnaireField.sort_order, ServiceQuestionnaireField.id)
         ).all()
     )
-    return (
+    return _drop_hidden_material_description(
         cat_specs
         + [_spec_from_subcat_row(r) for r in sub_rows]
-        + [_spec_from_service_row(r) for r in svc_rows]
+        + [_spec_from_service_row(r) for r in svc_rows],
+        service=svc,
+        subcategory=sub,
     )
 
 

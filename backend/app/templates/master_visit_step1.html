@@ -2171,15 +2171,15 @@
                 '<label><input type="checkbox" name="line_' + String(idx) + '_own_corr_circle"' + checkedAttr('own_corr_circle') + ' /> Одевание на круг</label>' +
               '</div>' +
               '<div class="lb-corr-custom-amount" style="margin-top:8px;padding-top:8px;border-top:1px solid #e5e7eb;">' +
-                '<button type="button" class="secondary lb-corr-custom-amount-btn"' + (fp('own_corr_use_custom_amount') ? ' style="display:none;"' : '') + '>Своя сумма</button>' +
-                '<div class="lb-corr-custom-amount-panel" style="margin-top:8px;' + (fp('own_corr_use_custom_amount') ? '' : 'display:none;') + '">' +
-                  '<input type="hidden" name="line_' + String(idx) + '_own_corr_use_custom_amount" class="lb-corr-custom-amount-flag" value="' + (fp('own_corr_use_custom_amount') ? '1' : '') + '" />' +
+                '<button type="button" class="secondary lb-corr-custom-amount-btn"' + (pf('own_corr_use_custom_amount') ? ' style="display:none;"' : '') + '>Своя сумма</button>' +
+                '<div class="lb-corr-custom-amount-panel" style="margin-top:8px;' + (pf('own_corr_use_custom_amount') ? '' : 'display:none;') + '">' +
+                  '<input type="hidden" name="line_' + String(idx) + '_own_corr_use_custom_amount" class="lb-corr-custom-amount-flag" value="' + (pf('own_corr_use_custom_amount') ? '1' : '') + '" />' +
                   '<div style="font-weight:600;margin-bottom:6px;">Своя сумма с клиента</div>' +
                   '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;">' +
-                    '<input type="number" name="line_' + String(idx) + '_own_corr_custom_amount" min="0" step="1" class="lb-corr-custom-amount-input" value="' + escapeHtml(fp('own_corr_custom_amount', '')) + '" style="max-width:10rem;" />' +
+                    '<input type="number" name="line_' + String(idx) + '_own_corr_custom_amount" min="0" step="1" class="lb-corr-custom-amount-input" value="' + escapeHtml(pf('own_corr_custom_amount', '')) + '" style="max-width:10rem;" />' +
                     '<span class="muted">₽</span>' +
-                    '<label style="display:flex;gap:4px;align-items:center;font-weight:normal;"><input type="radio" name="line_' + String(idx) + '_own_corr_client_payment_kind" value="CASH"' + ((String(fp('own_corr_client_payment_kind', 'CASH')).toUpperCase() !== 'NON_CASH') ? ' checked' : '') + ' /> Нал</label>' +
-                    '<label style="display:flex;gap:4px;align-items:center;font-weight:normal;"><input type="radio" name="line_' + String(idx) + '_own_corr_client_payment_kind" value="NON_CASH"' + ((String(fp('own_corr_client_payment_kind', '')).toUpperCase() === 'NON_CASH') ? ' checked' : '') + ' /> Безнал</label>' +
+                    '<label style="display:flex;gap:4px;align-items:center;font-weight:normal;"><input type="radio" name="line_' + String(idx) + '_own_corr_client_payment_kind" value="CASH"' + ((String(pf('own_corr_client_payment_kind', 'CASH')).toUpperCase() !== 'NON_CASH') ? ' checked' : '') + ' /> Нал</label>' +
+                    '<label style="display:flex;gap:4px;align-items:center;font-weight:normal;"><input type="radio" name="line_' + String(idx) + '_own_corr_client_payment_kind" value="NON_CASH"' + ((String(pf('own_corr_client_payment_kind', '')).toUpperCase() === 'NON_CASH') ? ' checked' : '') + ' /> Безнал</label>' +
                   '</div>' +
                   '<button type="button" class="secondary lb-corr-custom-amount-cancel" style="margin-top:8px;">Убрать свою сумму</button>' +
                 '</div>' +
