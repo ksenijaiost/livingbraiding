@@ -27,7 +27,14 @@ from app.db.models import (
     WorkForInventory,
     WorkKind,
 )
-from app.visit_multi_service import VisitHeaderInput, VisitServiceLineInput, compute_visit_service_line, effective_amount_from_client
+from app.kit_inlay_visit import KitInlayFormInput
+from app.visit_multi_service import (
+    VisitHeaderInput,
+    VisitServiceLineInput,
+    compute_visit_service_line,
+    effective_amount_from_client,
+    kit_inlay_to_multi,
+)
 from app.work_products_compute import (
     CORR_SVC_TRIM,
     compute_correction_extra_costs,
@@ -324,3 +331,66 @@ def test_visit_correction_custom_amount_adds_to_service_sum(memory_db) -> None:
     computed = compute_visit_service_line(db, line, header, default_mix_bonus_master_id=None, apply_kit_stock=False)
     assert computed.amount_from_client == 8000.0
     assert computed.cost_total >= 20.0
+
+
+def test_kit_inlay_to_multi_keeps_base_amount_and_custom_correction() -> None:
+    inp = KitInlayFormInput(
+        client_mode="existing",
+        existing_client_id=1,
+        draft_name="",
+        draft_phone="",
+        draft_telegram="",
+        draft_vk="",
+        draft_instagram="",
+        draft_other_contact="",
+        client_type=VisitClientType.RETURNING,
+        client_discount_percent=0,
+        performed_date=datetime(2025, 6, 1).date(),
+        duration_minutes=60,
+        amount_from_client=5000.0,
+        kanekalon_grams=0.0,
+        kudri_grams=0.0,
+        mix_source=None,
+        mix_complexity=None,
+        amortization_level=None,
+        service_id=10,
+        kit_kind="OWN",
+        stock_kit_id=None,
+        stock_use_entire=False,
+        stock_blanks_used=0,
+        stock_usage_by_key=None,
+        kit_paid_separately=False,
+        new_title="",
+        new_description=None,
+        new_blanks_total=0,
+        new_sku=None,
+        new_made_by_self=False,
+        new_notes=None,
+        own_origin="FOREIGN",
+        own_correction=True,
+        own_extra_blanks=False,
+        own_extra_stock_kit_id=None,
+        own_extra_stock_use_entire=False,
+        own_extra_stock_blanks_used=0,
+        own_extra_stock_usage_by_key=None,
+        own_corr_trim_qty=0,
+        own_corr_hourly_hours=0.0,
+        own_corr_kit_description="",
+        own_corr_kit_blanks_count=None,
+        own_corr_wash=False,
+        own_corr_circle=False,
+        own_corr_steam=False,
+        own_corr_use_custom_amount=True,
+        own_corr_custom_amount=500.0,
+        own_corr_client_payment_kind=ClientPaymentKind.CASH,
+        visit_master_allocations=[],
+        questionnaire_raw={},
+        addon_sales_amount=0.0,
+        addon_sales_description="",
+        thermo_parsed=None,
+    )
+    multi = kit_inlay_to_multi(inp)
+    assert len(multi.lines) == 1
+    assert multi.lines[0].amount_from_client == 5000.0
+    assert multi.lines[0].own_corr_custom_amount == 500.0
+    assert effective_amount_from_client(multi.lines[0]) == 5500.0

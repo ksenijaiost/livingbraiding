@@ -39,8 +39,6 @@ from app.ui_visit_display import (
     visit_services_catalog_line,
 )
 from app.visit_multi_service import (
-    form_uses_multi_service_lines,
-    kit_inlay_to_multi,
     parse_multi_service_visit_form,
     recalc_visit_totals,
     update_visit_with_services,
@@ -51,7 +49,6 @@ from app.visit_stock import visit_cancel_revert_stock, visit_service_revert_stoc
 from app.audit import diff_fields, write_audit_rows
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
-    parse_kit_inlay_form,
 )
 from app.media_store import get_nonempty_upload, save_upload_image
 from app.routes.master_visit import _master_visit_step1_template_response, _visit_master_state_from_prefill
@@ -406,13 +403,8 @@ async def admin_visit_edit_post(
 
     form = await request.form()
     try:
-        if form_uses_multi_service_lines(form):
-            multi = parse_multi_service_visit_form(form, booking_id=visit.booking_id)
-            update_visit_with_services(db, visit_id, current_user.id, multi)
-        else:
-            kinp = parse_kit_inlay_form(form, single_master_default_id=current_user.id)
-            multi = kit_inlay_to_multi(kinp, booking_id=visit.booking_id)
-            update_visit_with_services(db, visit_id, current_user.id, multi)
+        multi = parse_multi_service_visit_form(form, booking_id=visit.booking_id)
+        update_visit_with_services(db, visit_id, current_user.id, multi)
         visit = db.get(Visit, visit_id)
         assert visit is not None
         try:

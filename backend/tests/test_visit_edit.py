@@ -27,6 +27,7 @@ from app.db.models import (
     UserRole,
     UserRoleAssignment,
     Visit,
+    VisitAuditLog,
     VisitClientType,
     VisitMaster,
     VisitMastersScope,
@@ -276,6 +277,49 @@ def test_update_comment_only_no_storno(memory_db):
     )
     after_storno = sum(1 for r in after if r.entry_kind == PayrollFundEntryKind.STORNO)
     assert after_storno == before_storno
+
+
+def test_update_visit_writes_audit_rows(memory_db):
+    db = memory_db
+    master_a, _master_b, _admin, svc_ids = _seed_users_and_services(db)
+    client = db.scalar(select(Client).limit(1))
+    visit = _make_visit(db, master_a, client.id, svc_ids[0])
+    vs = db.scalar(select(VisitService).where(VisitService.visit_id == visit.id))
+    assert vs is not None
+
+    header = VisitHeaderInput(
+        client_mode="existing",
+        existing_client_id=client.id,
+        draft_name="",
+        draft_phone="",
+        draft_telegram="",
+        draft_vk="",
+        draft_instagram="",
+        draft_other_contact="",
+        client_type=VisitClientType.RETURNING,
+        performed_date=visit.performed_date.date(),
+        duration_minutes=visit.duration_minutes,
+        masters_scope=VisitMastersScope.VISIT,
+        same_master_shares_all_services=False,
+        visit_master_allocations=[(master_a.id, 100)],
+    )
+    line = VisitServiceLineInput(
+        service_id=svc_ids[0],
+        amount_from_client=1500.0,
+        client_discount_percent=0,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_source=MixSource.NO_MIX,
+        mix_complexity=None,
+        mix_bonus_master_id=None,
+        amortization_level=None,
+        kit_kind="STOCK",
+        visit_service_id=vs.id,
+    )
+    update_visit_with_services(db, visit.id, master_a.id, MultiServiceVisitInput(header=header, lines=[line]))
+    rows = db.scalars(select(VisitAuditLog).where(VisitAuditLog.visit_id == visit.id)).all()
+    assert rows
+    assert any(r.field_name == "amount_from_client" for r in rows)
 
 
 def test_visit_ledger_net_reflects_amount_edit_for_calendar(memory_db):

@@ -32,9 +32,11 @@ from app.db.models import (
     VisitMaster,
     VisitMastersScope,
     VisitPriceType,
+    VisitAuditLog,
     VisitService,
     VisitServiceMaster,
 )
+from app.audit import diff_fields, write_audit_rows
 from app.forms_parse import parse_bool, parse_date_iso, parse_float
 from app.kit_inlay_visit import (
     AMORTIZATION_LEVEL_RUBLES,
@@ -702,11 +704,7 @@ def save_visit_with_services(
 def kit_inlay_to_multi(inp: KitInlayFormInput, *, booking_id: int | None = None) -> MultiServiceVisitInput:
     line = VisitServiceLineInput(
         service_id=inp.service_id,
-        amount_from_client=(
-            inp.own_corr_custom_amount
-            if inp.own_correction and inp.own_corr_use_custom_amount
-            else inp.amount_from_client
-        ),
+        amount_from_client=inp.amount_from_client,
         client_payment_kind=(
             inp.own_corr_client_payment_kind
             if inp.own_correction and inp.own_corr_use_custom_amount
@@ -764,6 +762,32 @@ def kit_inlay_to_multi(inp: KitInlayFormInput, *, booking_id: int | None = None)
         booking_id=booking_id,
     )
     return MultiServiceVisitInput(header=header, lines=[line])
+
+
+def _active_services_summary(visit: Visit) -> str:
+    active = [s for s in (visit.services or []) if not s.is_cancelled]
+    payload = [
+        {
+            "id": int(s.id or 0),
+            "service_id": int(s.service_id or 0),
+            "sort_order": int(s.sort_order or 0),
+            "amount_from_client": round(float(s.amount_from_client or 0), 2),
+            "comment": s.comment or "",
+        }
+        for s in sorted(active, key=lambda x: (int(x.sort_order or 0), int(x.id or 0)))
+    ]
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _visit_masters_summary(visit: Visit) -> str:
+    payload = [
+        {
+            "master_id": int(vm.master_id or 0),
+            "percent": round(float(vm.percent or 0), 2),
+        }
+        for vm in sorted((visit.masters or []), key=lambda x: (int(x.master_id or 0), int(x.id or 0)))
+    ]
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
 def _line0_present_in_form(form: Any) -> bool:
@@ -1315,6 +1339,22 @@ def update_visit_with_services(
     if visit.is_cancelled:
         raise ValueError("Визит отменён — редактирование невозможно.")
 
+    before = {
+        "client_id": visit.client_id,
+        "client_type": visit.client_type,
+        "performed_date": visit.performed_date,
+        "duration_minutes": visit.duration_minutes,
+        "masters_scope": visit.masters_scope,
+        "same_master_shares_all_services": visit.same_master_shares_all_services,
+        "amount_from_client": float(visit.amount_from_client or 0),
+        "cost_total": float(visit.cost_total or 0),
+        "profit_before_split": float(visit.profit_before_split or 0),
+        "salon_profit": float(visit.salon_profit or 0),
+        "masters_pool": float(visit.masters_pool or 0),
+        "services_summary": _active_services_summary(visit),
+        "visit_masters_summary": _visit_masters_summary(visit),
+    }
+
     visit_master_rows, line_master_rows = _validate_lines_masters(db, inp)
     client = _resolve_client(db, inp.header, created_by_label=None)
     performed_dt = datetime.combine(inp.header.performed_date, datetime.min.time())
@@ -1418,10 +1458,38 @@ def update_visit_with_services(
 
     db.flush()
     visit = db.scalar(
-        select(Visit).options(selectinload(Visit.services)).where(Visit.id == visit.id)
+        select(Visit).options(selectinload(Visit.services), selectinload(Visit.masters)).where(Visit.id == visit.id)
     )
     assert visit is not None
     recalc_visit_totals(visit)
+
+    after = {
+        "client_id": visit.client_id,
+        "client_type": visit.client_type,
+        "performed_date": visit.performed_date,
+        "duration_minutes": visit.duration_minutes,
+        "masters_scope": visit.masters_scope,
+        "same_master_shares_all_services": visit.same_master_shares_all_services,
+        "amount_from_client": float(visit.amount_from_client or 0),
+        "cost_total": float(visit.cost_total or 0),
+        "profit_before_split": float(visit.profit_before_split or 0),
+        "salon_profit": float(visit.salon_profit or 0),
+        "masters_pool": float(visit.masters_pool or 0),
+        "services_summary": _active_services_summary(visit),
+        "visit_masters_summary": _visit_masters_summary(visit),
+    }
+    write_audit_rows(
+        db,
+        log_model=VisitAuditLog,
+        entity_field="visit_id",
+        entity_id=visit.id,
+        changed_by_user_id=editor_user_id,
+        changes=diff_fields(
+            type("VisitBefore", (), before)(),
+            type("VisitAfter", (), after)(),
+            tuple(before.keys()),
+        ),
+    )
 
     for vs in (visit.services or []):
         if vs.is_cancelled:
