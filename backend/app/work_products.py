@@ -82,8 +82,19 @@ from app.kit_composition_lines import (
 )
 from app.kit_inlay_visit import get_salon_cut_pct
 from app.kit_inlay_visit import _materials_cost_and_snapshot
-from app.work_products_compute import compute_work_financials, split_profit_from_client_amount
+from app.work_products_compute import (
+    compute_work_financials,
+    kit_studio_profit_amount,
+    resolve_kit_client_price,
+    split_profit_from_client_amount,
+)
 from app.forms_parse import parse_bool, parse_date_iso, parse_float, parse_int
+from app.work_products_detail_view import (
+    build_composition_table_view,
+    catalog_product_name,
+    rubber_type_label,
+    work_profit_explanation,
+)
 from app.work_rate_keys import CUSTOM_ORDER_BONUS_MULTIPLIER, STUDIO_SHARE
 from app.time_utils import utcnow_naive
 
@@ -1064,6 +1075,7 @@ async def work_new_post(
         kit_use_multi_masters = _g_bool(form, "kit_use_multi_masters")
         composition_lines: list[Any] = []
         kit_bu_correction = False
+        kit_catalog_client_price = 0.0
         corr_add_kit = False
         corr_kit_lines_saved: list[Any] = []
         corr_kit_discount_pct = 0
@@ -1107,6 +1119,10 @@ async def work_new_post(
                 "lines": lines_dicts_for_details(composition_lines),
                 "bu_correction": kit_bu_correction,
             }
+            kit_catalog_client_price, _kit_price_missing = client_price_for_lines(
+                db, composition_lines, extra_costs_amount=float(extra_costs_amount)
+            )
+            details["kit"]["catalog_client_price"] = float(kit_catalog_client_price)
             if kit_bu_correction:
                 corr_trim_qty = int(_g_float(form, "kit_corr_trim_qty", 0))
                 corr_hourly_hours = max(0.0, _g_float(form, "kit_corr_hourly_hours", 0.0))
@@ -1294,6 +1310,8 @@ async def work_new_post(
             corr_circle=corr_circle,
             corr_steam=corr_steam,
             composition_lines=composition_lines if kind == WorkKind.KIT else None,
+            kit_client_price=float(kit_catalog_client_price) if kind == WorkKind.KIT else None,
+            amount_from_client=float(amount_from_client) if amount_from_client is not None else None,
         )
         staff_master_profit = dict(fin.staff_master_profit)
         corr_custom_studio_total: float | None = None
@@ -1358,10 +1376,26 @@ async def work_new_post(
                 float(staff_master_profit.get(current_user.id, 0.0)) + corr_pay
             )
         master_total = float(sum(staff_master_profit.values()))
-        studio_total = corr_custom_studio_total if corr_custom_studio_total is not None else fin.studio_total
-        profit_total = master_total + studio_total
-        extra_costs_amount = fin.extra_costs_amount
         cost_total_amount = fin.cost_total_amount
+        extra_costs_amount = fin.extra_costs_amount
+        if kind == WorkKind.KIT:
+            studio_total = kit_studio_profit_amount(
+                scope=scope,
+                client_price=resolve_kit_client_price(
+                    scope=scope,
+                    catalog_client_price=float(kit_catalog_client_price),
+                    amount_from_client=float(amount_from_client)
+                    if amount_from_client is not None
+                    else None,
+                ),
+                cost_total=float(cost_total_amount),
+                master_total=master_total,
+            )
+        elif corr_custom_studio_total is not None:
+            studio_total = corr_custom_studio_total
+        else:
+            studio_total = fin.studio_total
+        profit_total = master_total + studio_total
         studio_share = fin.studio_share_snapshot
 
         work = WorkForInventory(
@@ -1760,6 +1794,29 @@ def work_detail(
     )
     linked_sale_ids: list[int] = []
     consultation = None
+    kit_detail = details.get("kit") if isinstance(details.get("kit"), dict) else None
+    kit_composition_table = None
+    if kit_detail and kit_detail.get("lines"):
+        kit_composition_table = build_composition_table_view(
+            db,
+            lines=kit_detail.get("lines"),
+            staff_rows=w.staff_rows or [],
+        )
+    corr_kit_stock = details.get("corr_kit_to_stock") if isinstance(details.get("corr_kit_to_stock"), dict) else None
+    corr_kit_stock_table = None
+    if corr_kit_stock and corr_kit_stock.get("lines"):
+        corr_kit_stock_table = build_composition_table_view(
+            db,
+            lines=corr_kit_stock.get("lines"),
+            staff_rows=w.staff_rows or [],
+        )
+    other_detail = details.get("other") if isinstance(details.get("other"), dict) else None
+    other_product_label = None
+    if other_detail:
+        other_product_label = catalog_product_name(db, other_detail.get("catalog_product_id"))
+    rubber_detail = details.get("rubber") if isinstance(details.get("rubber"), dict) else None
+    rubber_label = rubber_type_label(rubber_detail.get("type") if rubber_detail else None)
+    profit_explanation = work_profit_explanation(w, details)
     if w.booking_id:
         from app.db.models import Booking
 
@@ -1797,6 +1854,15 @@ def work_detail(
             msg=void_msg,
             linked_sale_ids=linked_sale_ids,
             consultation=consultation,
+            kit_detail=kit_detail,
+            kit_composition_table=kit_composition_table,
+            corr_kit_stock=corr_kit_stock,
+            corr_kit_stock_table=corr_kit_stock_table,
+            other_detail=other_detail,
+            other_product_label=other_product_label,
+            rubber_detail=rubber_detail,
+            rubber_label=rubber_label,
+            profit_explanation=profit_explanation,
         ),
     )
 

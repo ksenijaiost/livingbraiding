@@ -38,6 +38,9 @@
         <div class="row">
           <div><strong>ID</strong><div class="muted">{{ row.id }}</div></div>
           <div><strong>Создано</strong><div class="muted">{{ row.created_at.strftime('%Y-%m-%d %H:%M') if row.created_at else '—' }}</div></div>
+          {% if row.performed_date %}
+            <div><strong>Дата работы</strong><div class="muted">{{ row.performed_date.strftime('%Y-%m-%d') }}</div></div>
+          {% endif %}
         </div>
         {% if row.is_voided %}
           <div class="error" style="margin-top:10px;">
@@ -55,6 +58,7 @@
               {% elif row.kind.value == "MIX" %}Смешка
               {% elif row.kind.value == "RUBBER" %}Хвосты/резинки
               {% elif row.kind.value == "KIT_CORRECTION" %}Коррекция комплекта
+              {% elif row.kind.value == "OTHER" %}Другое
               {% else %}{{ row.kind.value }}
               {% endif %}
             </div>
@@ -77,7 +81,13 @@
             </div>
           </div>
         </div>
-        {% if row.booking_id or linked_sale_ids %}
+        {% if row.comment %}
+          <div style="margin-top: 10px;">
+            <strong>Комментарий</strong>
+            <div class="muted" style="white-space: pre-wrap; margin-top: 4px;">{{ row.comment }}</div>
+          </div>
+        {% endif %}
+        {% if row.booking_id or linked_sale_ids or row.created_kit_id %}
           <div class="row" style="margin-top: 12px;">
             {% if row.booking_id %}
               <div>
@@ -86,6 +96,12 @@
                 {% if consultation %}
                   <div class="muted" style="margin-top:4px;">Консультация: <a href="/consultations/{{ consultation.id }}">#{{ consultation.id }}</a></div>
                 {% endif %}
+              </div>
+            {% endif %}
+            {% if row.created_kit_id %}
+              <div>
+                <strong>Комплект на складе</strong>
+                <div class="muted"><a href="/kits/{{ row.created_kit_id }}">#{{ row.created_kit_id }}</a></div>
               </div>
             {% endif %}
             {% if linked_sale_ids %}
@@ -107,7 +123,13 @@
         {% if row.staff_rows %}
           {% for s in row.staff_rows %}
             <div class="muted" style="font-size: 12px; margin-top: 6px;">
-              {{ s.user.display_name }}{% if row.kind.value != "KIT" and s.share is not none and s.share != 1 %} ({{ s.share }}){% endif %}
+              {{ s.user.display_name }}
+              {% if s.master_profit_amount and s.master_profit_amount > 0 %}
+                · ЗП: {{ s.master_profit_amount }}
+              {% endif %}
+              {% if row.kind.value != "KIT" and s.share is not none and s.share != 1 %}
+                (доля {{ s.share }})
+              {% endif %}
             </div>
           {% endfor %}
         {% else %}
@@ -115,35 +137,96 @@
         {% endif %}
       </div>
 
-      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
-        <strong>Материал</strong>
-        <div class="muted" style="margin-top: 6px;">Канекалон: {{ row.kanekalon_grams }} г · Кудри/термо: {{ row.kudri_grams }} г</div>
-        <div class="muted" style="font-size: 12px; margin-top: 6px;">Себестоимость материалов: {{ row.materials_cost_total }}</div>
-        <div class="muted" style="font-size: 12px; margin-top: 2px;">Доп. расходы: {{ row.extra_costs_amount }}</div>
-        <div class="muted" style="font-size: 12px; margin-top: 2px;">Себестоимость всего: {{ row.cost_total_amount }}</div>
-        {% if row.kanekalon_grams == 0 and row.kudri_grams == 0 %}
-          <div class="muted" style="font-size: 12px; margin-top: 6px;">Смешка: —</div>
-        {% else %}
-          <div class="muted" style="font-size: 12px; margin-top: 6px;">Смешка: {{ "Без смешки" if (row.mix_source and row.mix_source.value == "NO_MIX") else ("Из наличия" if (row.mix_source and row.mix_source.value == "FROM_STOCK") else ("Сама мешала" if (row.mix_source and row.mix_source.value == "SELF_MIXED") else "—")) }}</div>
-          {% if details.get("mix_complexity") and row.mix_source and row.mix_source.value != "NO_MIX" %}
-            <div class="muted" style="font-size: 12px; margin-top: 2px;">Сложность: {{ mix_complexity_label }}</div>
+      {% if row.kind.value == "KIT" and kit_detail %}
+        <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+          <strong>Комплект / заготовки</strong>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">
+            Тип заготовок:
+            {% if kit_detail.get("blank_type_se") %}S.E.{% endif %}
+            {% if kit_detail.get("blank_type_se") and kit_detail.get("blank_type_de") %} · {% endif %}
+            {% if kit_detail.get("blank_type_de") %}D.E.{% endif %}
+            {% if not kit_detail.get("blank_type_se") and not kit_detail.get("blank_type_de") %}—{% endif %}
+          </div>
+          {% if kit_detail.get("bu_correction") %}
+            <div class="muted" style="font-size: 12px; margin-top: 4px;">Коррекция б/у в составе: да</div>
           {% endif %}
-        {% endif %}
-      </div>
 
-      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
-        <strong>Профит</strong>
-        <div class="muted" style="font-size: 12px; margin-top: 6px;">Мастер: {{ row.master_profit_amount }}</div>
-        <div class="muted" style="font-size: 12px; margin-top: 2px;">Студия: {{ row.studio_profit_amount }}</div>
-        <div class="muted" style="font-size: 12px; margin-top: 2px;">Всего: {{ row.profit_total_amount }}</div>
-      </div>
+          {% if kit_composition_table %}
+            <div style="margin-top: 10px; overflow-x: auto;">
+              <table style="font-size: 12px; min-width: 100%;">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;">Вид заготовки</th>
+                    <th style="text-align:left;">Состояние</th>
+                    {% for col in kit_composition_table.staff_columns %}
+                      <th style="text-align:center;">{{ col.name }}</th>
+                    {% endfor %}
+                    <th style="text-align:center;">Всего</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for r in kit_composition_table.rows %}
+                    <tr>
+                      <td>{{ r.label }}</td>
+                      <td class="muted">
+                        {{ r.condition_label }}
+                        {% if r.used_price_pct is not none %} ({{ r.used_price_pct }}%){% endif %}
+                      </td>
+                      {% for col in kit_composition_table.staff_columns %}
+                        <td style="text-align:center;" class="muted">
+                          {{ r.qty_by_staff.get(col.id, 0) or "—" }}
+                        </td>
+                      {% endfor %}
+                      <td style="text-align:center;"><strong>{{ r.total }}</strong></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colspan="{{ 2 + kit_composition_table.staff_columns|length }}" style="text-align:right;"><strong>Итого заготовок</strong></td>
+                    <td style="text-align:center;"><strong>{{ kit_composition_table.grand_total }}</strong></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          {% elif kit_detail.get("totals") %}
+            <div class="muted" style="font-size: 12px; margin-top: 8px;">
+              {% for k, v in kit_detail.totals.items() %}
+                <div>{{ k }}: {{ v }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
 
-      {% if row.kind.value == "RUBBER" and details.get("rubber") %}
+          {% if kit_detail.get("bu_correction_details") %}
+            {% set _bcd = kit_detail.bu_correction_details %}
+            <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #e2e8f0;">
+              <strong style="font-size: 13px;">Коррекция б/у</strong>
+              <div class="muted" style="font-size: 12px; margin-top: 6px;">Стрижка (шт): {{ _bcd.get("trim_qty", 0) }}</div>
+              <div class="muted" style="font-size: 12px; margin-top: 2px;">Почасовая коррекция (ч): {{ _bcd.get("hourly_hours", 0) }}</div>
+              {% if _bcd.get("kit_description") %}<div class="muted" style="font-size: 12px; margin-top: 2px;">Описание комплекта: {{ _bcd.kit_description }}</div>{% endif %}
+              {% if _bcd.get("kit_blanks_count") is not none %}<div class="muted" style="font-size: 12px; margin-top: 2px;">Заготовок в комплекте (учёт): {{ _bcd.kit_blanks_count }}</div>{% endif %}
+              <div class="muted" style="font-size: 12px; margin-top: 2px;">Стирка: {{ "да" if _bcd.get("wash") else "нет" }}</div>
+              <div class="muted" style="font-size: 12px; margin-top: 2px;">Отпаривание: {{ "да" if _bcd.get("steam") else "нет" }}</div>
+              <div class="muted" style="font-size: 12px; margin-top: 2px;">Одевание на круг: {{ "да" if _bcd.get("circle") else "нет" }}</div>
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      {% if row.kind.value == "RUBBER" and rubber_detail %}
         <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
           <strong>Хвосты/резинки</strong>
-          <div class="muted" style="font-size: 12px; margin-top: 6px;">Тип: {{ details.rubber.type }}</div>
-          <div class="muted" style="font-size: 12px; margin-top: 2px;">Вариант: {{ details.rubber.variant }}</div>
-          <div class="muted" style="font-size: 12px; margin-top: 2px;">Количество: {{ details.rubber.qty }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Тип: {{ rubber_label }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Количество: {{ rubber_detail.get("qty", 1) }}</div>
+        </div>
+      {% endif %}
+
+      {% if row.kind.value == "OTHER" and other_detail %}
+        <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+          <strong>Другое</strong>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">
+            Позиция прайса: {{ other_product_label or ("#" ~ other_detail.catalog_product_id) }}
+          </div>
         </div>
       {% endif %}
 
@@ -151,6 +234,9 @@
         {% set _corr = details.get("correction") or {} %}
         <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
           <strong>Коррекция комплекта</strong>
+          {% if _corr.get("use_custom_amount") %}
+            <div class="muted" style="font-size: 12px; margin-top: 6px;">Своя сумма с клиента: {{ _corr.get("custom_amount") }} ₽</div>
+          {% endif %}
           <div class="muted" style="font-size: 12px; margin-top: 6px;">Стрижка (шт): {{ _corr.get("trim_qty", 0) }}</div>
           <div class="muted" style="font-size: 12px; margin-top: 2px;">Почасовая коррекция (ч): {{ _corr.get("hourly_hours", 0) }}</div>
           {% if _corr.get("kit_description") %}<div class="muted" style="font-size: 12px; margin-top: 2px;">Описание комплекта: {{ _corr.kit_description }}</div>{% endif %}
@@ -162,6 +248,104 @@
           {% if _corr.get("curl_qty") %}<div class="muted" style="font-size: 12px; margin-top: 2px;">(архив) Коррекция кудрей (шт): {{ _corr.curl_qty }}</div>{% endif %}
         </div>
       {% endif %}
+
+      {% if corr_kit_stock %}
+        <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+          <strong>Комплект на склад (после коррекции)</strong>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Артикул: {{ corr_kit_stock.get("sku") or "—" }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Название: {{ corr_kit_stock.get("title") or "—" }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">
+            Тип заготовок:
+            {% if corr_kit_stock.get("blank_type_se") %}S.E.{% endif %}
+            {% if corr_kit_stock.get("blank_type_se") and corr_kit_stock.get("blank_type_de") %} · {% endif %}
+            {% if corr_kit_stock.get("blank_type_de") %}D.E.{% endif %}
+          </div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Скидка за б/у: {{ corr_kit_stock.get("used_discount_pct") }}%</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Цена «новый»: {{ corr_kit_stock.get("new_price_total") }}</div>
+          <div class="muted" style="font-size: 12px; margin-top: 2px;">Цена на склад: {{ corr_kit_stock.get("stock_price_total") }}</div>
+          {% if corr_kit_stock_table %}
+            <div style="margin-top: 10px; overflow-x: auto;">
+              <table style="font-size: 12px; min-width: 100%;">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;">Вид заготовки</th>
+                    <th style="text-align:left;">Состояние</th>
+                    {% for col in corr_kit_stock_table.staff_columns %}
+                      <th style="text-align:center;">{{ col.name }}</th>
+                    {% endfor %}
+                    <th style="text-align:center;">Всего</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for r in corr_kit_stock_table.rows %}
+                    <tr>
+                      <td>{{ r.label }}</td>
+                      <td class="muted">
+                        {{ r.condition_label }}
+                        {% if r.used_price_pct is not none %} ({{ r.used_price_pct }}%){% endif %}
+                      </td>
+                      {% for col in corr_kit_stock_table.staff_columns %}
+                        <td style="text-align:center;" class="muted">
+                          {{ r.qty_by_staff.get(col.id, 0) or "—" }}
+                        </td>
+                      {% endfor %}
+                      <td style="text-align:center;"><strong>{{ r.total }}</strong></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colspan="{{ 2 + corr_kit_stock_table.staff_columns|length }}" style="text-align:right;"><strong>Итого заготовок</strong></td>
+                    <td style="text-align:center;"><strong>{{ corr_kit_stock_table.grand_total }}</strong></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+        <strong>Материал</strong>
+        <div class="muted" style="margin-top: 6px;">Канекалон: {{ row.kanekalon_grams }} г · Кудри/термо: {{ row.kudri_grams }} г</div>
+        <div class="muted" style="font-size: 12px; margin-top: 6px;">Себестоимость материалов: {{ row.materials_cost_total }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 2px;">Доп. расходы: {{ row.extra_costs_amount }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 2px;">Себестоимость всего: {{ row.cost_total_amount }}</div>
+        {% if row.kanekalon_grams == 0 and row.kudri_grams == 0 and row.kind.value != "MIX" %}
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Смешка: —</div>
+        {% else %}
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Смешка: {{ "Без смешки" if (row.mix_source and row.mix_source.value == "NO_MIX") else ("Из наличия" if (row.mix_source and row.mix_source.value == "FROM_STOCK") else ("Сама мешала" if (row.mix_source and row.mix_source.value == "SELF_MIXED") else "—")) }}</div>
+          {% if details.get("mix_complexity") and row.mix_source and row.mix_source.value != "NO_MIX" %}
+            <div class="muted" style="font-size: 12px; margin-top: 2px;">Сложность: {{ mix_complexity_label }}</div>
+          {% endif %}
+        {% endif %}
+      </div>
+
+      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+        <strong>Профит</strong>
+        {% if row.kind.value == "KIT" and kit_detail and kit_detail.get("catalog_client_price") is not none %}
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">
+            Цена для расчёта:
+            {% if row.scope.value == "CUSTOM_ORDER" and row.amount_from_client is not none %}
+              {{ row.amount_from_client }} ₽ (с клиента)
+              <span class="muted">· по прайсу было {{ kit_detail.catalog_client_price }} ₽</span>
+            {% else %}
+              {{ kit_detail.catalog_client_price }} ₽ (по прайсу)
+            {% endif %}
+          </div>
+        {% endif %}
+        <div class="muted" style="font-size: 12px; margin-top: 6px;">Мастер: {{ row.master_profit_amount }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 2px;">Студия: {{ row.studio_profit_amount }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 2px;">Всего: {{ row.profit_total_amount }}</div>
+        {% if profit_explanation %}
+          <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #e2e8f0;">
+            <div class="muted" style="font-size: 11px; font-weight: 600; margin-bottom: 4px;">Как считается</div>
+            {% for line in profit_explanation %}
+              <div class="muted" style="font-size: 11px; margin-top: 3px;">{{ line }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
 
       {% if can_edit %}
         {% if edit_allowed %}
@@ -243,4 +427,3 @@
     {% endif %}
   </div>
 {% endblock %}
-
