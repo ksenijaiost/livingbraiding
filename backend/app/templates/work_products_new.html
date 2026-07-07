@@ -621,13 +621,29 @@
           if (mixBonusTotal > 0 && mixMasterId && uid === mixMasterId) sum += mixBonusTotal;
           payLines.push('ЗП «' + nameByUserId(st, uid) + '»: ' + money2(sum) + ' ₽');
         }
-        setPayLines(payLines);
 
         var extra = parseFloat((document.querySelector('input[name="extra_costs_amount"]') || {}).value) || 0;
         clientTotal += extra;
         var costKit = mat + extra;
+        var priceForProfit = clientTotal;
+        if (getScopeValue() === 'CUSTOM_ORDER') {
+          var afcRaw = String((document.querySelector('input[name="amount_from_client"]') || {}).value || '').trim();
+          var afcVal = afcRaw ? (parseInt(afcRaw, 10) || 0) : 0;
+          if (afcVal > 0) priceForProfit = afcVal;
+        }
+        var masterSum = 0;
+        for (var pi = 0; pi < payLines.length; pi++) {
+          var m = payLines[pi].match(/:\s*([\d\s]+[.,]?\d*)\s*₽/);
+          if (m) masterSum += parseFloat(String(m[1]).replace(/\s/g, '').replace(',', '.')) || 0;
+        }
+        if (getScopeValue() !== 'IN_STOCK') {
+          var studioSum = priceForProfit - costKit - masterSum;
+          payLines.push('Студия: ' + money2(studioSum) + ' ₽');
+        }
+        setPayLines(payLines);
         setCost(
           'С клиента (итого): ' + money2(clientTotal) + ' ₽ · Себестоимость: ' + money2(costKit) + ' ₽'
+          + (priceForProfit !== clientTotal ? ' · Для профита: ' + money2(priceForProfit) + ' ₽' : '')
           + (usedClientTotal > 0 ? ' · Б/У для клиента: ' + money2(usedClientTotal) + ' ₽' : '')
         );
         return;

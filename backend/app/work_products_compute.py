@@ -72,6 +72,33 @@ def compute_correction_extra_costs(
     return fx_total
 
 
+def resolve_kit_client_price(
+    *,
+    scope: WorkScope,
+    catalog_client_price: float,
+    amount_from_client: float | None = None,
+) -> float:
+    """Цена для расчёта профита комплекта: на заказ — своя сумма с клиента, иначе прайс."""
+    if scope == WorkScope.CUSTOM_ORDER and amount_from_client is not None:
+        afc = float(amount_from_client)
+        if afc > 0:
+            return afc
+    return float(catalog_client_price)
+
+
+def kit_studio_profit_amount(
+    *,
+    scope: WorkScope,
+    client_price: float,
+    cost_total: float,
+    master_total: float,
+) -> float:
+    """ЗП студии по комплекту: цена − себестоимость − ЗП мастера."""
+    if scope == WorkScope.IN_STOCK:
+        return 0.0
+    return float(client_price) - float(cost_total) - float(master_total)
+
+
 def split_profit_from_client_amount(
     amount_from_client: float,
     cost_total: float,
@@ -126,6 +153,8 @@ def compute_work_financials(
     corr_circle: bool,
     corr_steam: bool,
     composition_lines: list[Any] | None = None,
+    kit_client_price: float | None = None,
+    amount_from_client: float | None = None,
 ) -> WorkFinancials:
     # Local imports to avoid circular deps with work_products.py
     from app.work_products import (  # noqa: WPS433
@@ -263,15 +292,25 @@ def compute_work_financials(
             staff_master_profit[current_user_id] += max(0.0, float(grams_total) * rate)
 
     master_total = float(sum(staff_master_profit.values()))
+    cost_total_amount = float(mat_cost) + float(extra_costs_amount)
     studio_share = _studio_share_snapshot(db)
-    if kind not in (WorkKind.RUBBER, WorkKind.KIT_CORRECTION):
+    if kind == WorkKind.KIT:
+        price = resolve_kit_client_price(
+            scope=scope,
+            catalog_client_price=float(kit_client_price or 0.0),
+            amount_from_client=amount_from_client,
+        )
+        studio_total = kit_studio_profit_amount(
+            scope=scope,
+            client_price=price,
+            cost_total=cost_total_amount,
+            master_total=master_total,
+        )
+    elif kind not in (WorkKind.RUBBER, WorkKind.KIT_CORRECTION):
         studio_total = 0.0
-        # Для работ «в наличие» студия не получает долю на этапе производства:
-        # это расход (оплата мастерам) и себестоимость, а маржа появляется при продаже.
         if scope != WorkScope.IN_STOCK and 0 < studio_share < 1 and master_total > 0:
             studio_total = master_total * (studio_share / (1.0 - studio_share))
     profit_total = master_total + studio_total
-    cost_total_amount = float(mat_cost) + float(extra_costs_amount)
 
     return WorkFinancials(
         staff_master_profit=staff_master_profit,

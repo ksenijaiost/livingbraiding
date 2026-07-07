@@ -263,6 +263,10 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
                     blocks.append(
                         ("Корр.: заготовок в комплекте (учёт)", _format_card_scalar(cd.get("kit_blanks_count")))
                     )
+                if cd.get("use_custom_amount") and cd.get("custom_amount") is not None:
+                    blocks.append(
+                        ("Корр.: своя сумма с клиента", _format_card_scalar(cd.get("custom_amount")) + " ₽")
+                    )
                 blocks.append(("Корр.: стирка", "Да" if cd.get("wash") else "Нет"))
                 blocks.append(("Корр.: отпаривание", "Да" if cd.get("steam") else "Нет"))
                 blocks.append(("Корр.: одевание на круг", "Да" if cd.get("circle") else "Нет"))

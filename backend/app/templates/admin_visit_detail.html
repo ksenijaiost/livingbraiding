@@ -99,7 +99,7 @@
           {% endif %}
         </div>
       {% endfor %}
-      <p style="margin-top:8px;">Итого с клиента: <strong>{{ visit.amount_from_client|round(0) }} ₽</strong></p>
+      <p style="margin-top:8px;">Итого с клиента: <strong>{{ active_services_amount_total|round(0) }} ₽</strong></p>
     {% else %}
       <p class="muted">—</p>
     {% endif %}
@@ -115,10 +115,10 @@
     <p style="margin: 4px 0;">{{ duration_h }} ч {{ duration_m }} мин</p>
 
     <h4 style="margin: 16px 0 6px; font-size: 1rem;">Информация об услуге</h4>
-    {% if sorted_services %}
-      {% for vs in sorted_services %}
+    {% if active_sorted_services %}
+      {% for vs in active_sorted_services %}
         {% set disp = service_displays.get(vs.id) %}
-        {% if sorted_services|length > 1 %}
+        {% if active_sorted_services|length > 1 %}
           <p class="muted" style="margin: 8px 0 2px; font-size: 12px;">{{ vs.service_name }}</p>
         {% endif %}
         {% if disp %}

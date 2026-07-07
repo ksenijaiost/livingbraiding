@@ -210,6 +210,11 @@ async def api_products_calc(
                         kit_totals[str(k)] = qv
             kit_staff_ids = [int(current_user.id)]
             kit_by_staff = {int(current_user.id): dict(kit_totals)}
+            try:
+                client_total = _kit_client_stock_price_total(db, kit_totals=kit_totals, extra_costs_amount=float(extra_costs_amount))
+            except Exception:
+                client_total = None
+            afc_raw = _f("amount_from_client", 0.0)
             fin = compute_work_financials(
                 db,
                 kind=WorkKind.KIT,
@@ -233,11 +238,9 @@ async def api_products_calc(
                 corr_wash=False,
                 corr_circle=False,
                 corr_steam=False,
+                kit_client_price=float(client_total or 0.0),
+                amount_from_client=float(afc_raw) if afc_raw > 0 else None,
             )
-            try:
-                client_total = _kit_client_stock_price_total(db, kit_totals=kit_totals, extra_costs_amount=float(extra_costs_amount))
-            except Exception:
-                client_total = None
             if client_total is not None:
                 client_min = float(client_total)
                 client_max = float(client_total)

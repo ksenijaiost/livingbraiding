@@ -152,10 +152,11 @@ class VisitServiceLineInput:
 
 
 def effective_amount_from_client(line: VisitServiceLineInput) -> float:
-    """Сумма с клиента: основное поле или «Своя сумма» при коррекции комплекта."""
+    """Сумма с клиента: основная услуга + доплата за коррекцию при «Своей сумме»."""
+    base = float(line.amount_from_client or 0)
     if line.own_correction and line.own_corr_use_custom_amount:
-        return float(line.own_corr_custom_amount or 0)
-    return float(line.amount_from_client or 0)
+        return base + float(line.own_corr_custom_amount or 0)
+    return base
 
 
 @dataclass
@@ -391,7 +392,8 @@ def compute_visit_service_line(
         amort_amount = float(AMORTIZATION_LEVEL_RUBLES.get(line.amortization_level.value, 0.0))
 
     cost_total = mat_cost + kit_cost_total + addons + mix_cost + amort_amount
-    amount_from_client = float(line.amount_from_client or 0)
+    base_amount_from_client = float(line.amount_from_client or 0)
+    amount_from_client = base_amount_from_client
     client_payment_kind = line.client_payment_kind
     if line.own_correction and line.own_corr_use_custom_amount:
         cost_total += compute_correction_extra_costs(
@@ -403,9 +405,11 @@ def compute_visit_service_line(
             corr_circle=bool(line.own_corr_circle),
             corr_steam=bool(line.own_corr_steam),
         )
-        amount_from_client = float(line.own_corr_custom_amount or 0)
-        client_payment_kind = line.own_corr_client_payment_kind
-        if amount_from_client <= 0:
+        corr_amount = float(line.own_corr_custom_amount or 0)
+        amount_from_client = base_amount_from_client + corr_amount
+        if base_amount_from_client <= 0:
+            client_payment_kind = line.own_corr_client_payment_kind
+        if corr_amount <= 0:
             raise ValueError("Укажите сумму с клиента для коррекции («Своя сумма»).")
     profit_before = amount_from_client - cost_total
     if line.own_correction and line.own_corr_use_custom_amount and profit_before < -0.01:
@@ -916,8 +920,7 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
     own_corr_pk = parse_client_payment_kind(g("own_corr_client_payment_kind", ""))
     line_amount = g_float("amount_from_client", 0)
     line_pk = parse_client_payment_kind(g("client_payment_kind", ""))
-    if own_corr_use_custom:
-        line_amount = own_corr_custom
+    if own_corr_use_custom and line_amount <= 0:
         line_pk = own_corr_pk
 
     return VisitServiceLineInput(

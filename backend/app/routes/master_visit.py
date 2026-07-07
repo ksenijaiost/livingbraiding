@@ -70,6 +70,7 @@ from app.thermo_visit import collect_thermo_prefill_from_form
 from app.form_validation_log import log_user_validation_error
 from app.user_roles import select_users_with_role
 from app.webui import templates, ctx as _ctx
+from app.work_products import _zakaz_subcategory_services_map
 
 
 router = APIRouter()
@@ -350,6 +351,10 @@ def _master_visit_step1_template_response(
             mix_complexity_rates_json=json.dumps(mix_rates_meta_json_dict(db), ensure_ascii=False),
             amortization_rubles=AMORTIZATION_LEVEL_RUBLES,
             amortization_rubles_json=json.dumps(AMORTIZATION_LEVEL_RUBLES, ensure_ascii=False),
+            correction_catalog_json=json.dumps(
+                _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
+                ensure_ascii=False,
+            ),
             visit_master_level_ru=ru_master_level(current_user.master_level),
             default_date=performed,
             form_prefill=form_prefill,
