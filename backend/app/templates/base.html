@@ -251,11 +251,26 @@
               <details class="nav-dd">
                 <summary>График</summary>
                 <div class="dd">
+                  <a href="/masters-schedule">График всех мастеров</a>
                   <a href="/master/schedule">Редактировать график</a>
                   <a href="/master/schedule?block=1">Занять время</a>
                 </div>
               </details>
             {% endif %}
+
+            <details class="nav-dd">
+              <summary>Студия</summary>
+              <div class="dd">
+                <a href="/masters-schedule">График всех мастеров</a>
+                {% if current_user.role.value == "MASTER" %}
+                  <a href="/master/schedule">Управление графиком</a>
+                {% endif %}
+                {% if current_user.role.value == "ADMIN_SUPER" %}
+                  <a href="/admin/master-schedule">Управление графиком мастеров</a>
+                  <a href="/admin/settings/staff">Сотрудники</a>
+                {% endif %}
+              </div>
+            </details>
 
             {% if current_user.role.value == "ADMIN_SUPER" %}
               <details class="nav-dd">
@@ -266,9 +281,7 @@
                   <a href="/admin/payroll-periods">Периоды</a>
                   <a href="/admin/reports">Отчёты</a>
                   <a href="/admin/statistics">Статистика</a>
-                  <a href="/admin/master-schedule">График мастеров</a>
                   <a href="/admin/catalog">Управление прайсом</a>
-                  <a href="/admin/settings/staff">Сотрудники</a>
                   <a href="/admin/settings">Настройки</a>
                   <a href="/admin/super/purge" style="color:#b91c1c;">Удаление данных</a>
                 </div>
@@ -338,10 +351,23 @@
         {% if current_user.role.value == "MASTER" %}
           <details>
             <summary><strong>График</strong></summary>
+            <a class="md-link" href="/masters-schedule" onclick="window.lbToggleMobileNav(false)">График всех мастеров</a>
             <a class="md-link" href="/master/schedule" onclick="window.lbToggleMobileNav(false)">Редактировать график</a>
             <a class="md-link" href="/master/schedule?block=1" onclick="window.lbToggleMobileNav(false)">Занять время</a>
           </details>
         {% endif %}
+
+        <details>
+          <summary><strong>Студия</strong></summary>
+          <a class="md-link" href="/masters-schedule" onclick="window.lbToggleMobileNav(false)">График всех мастеров</a>
+          {% if current_user.role.value == "MASTER" %}
+            <a class="md-link" href="/master/schedule" onclick="window.lbToggleMobileNav(false)">Управление графиком</a>
+          {% endif %}
+          {% if current_user.role.value == "ADMIN_SUPER" %}
+            <a class="md-link" href="/admin/master-schedule" onclick="window.lbToggleMobileNav(false)">Управление графиком мастеров</a>
+            <a class="md-link" href="/admin/settings/staff" onclick="window.lbToggleMobileNav(false)">Сотрудники</a>
+          {% endif %}
+        </details>
 
         {% if current_user.role.value == "ADMIN_SUPER" %}
           <details>
@@ -351,9 +377,7 @@
             <a class="md-link" href="/admin/payroll-periods" onclick="window.lbToggleMobileNav(false)">Периоды</a>
             <a class="md-link" href="/admin/reports" onclick="window.lbToggleMobileNav(false)">Отчёты</a>
             <a class="md-link" href="/admin/statistics" onclick="window.lbToggleMobileNav(false)">Статистика</a>
-            <a class="md-link" href="/admin/master-schedule" onclick="window.lbToggleMobileNav(false)">График мастеров</a>
             <a class="md-link" href="/admin/catalog" onclick="window.lbToggleMobileNav(false)">Управление прайсом</a>
-            <a class="md-link" href="/admin/settings/staff" onclick="window.lbToggleMobileNav(false)">Сотрудники</a>
             <a class="md-link" href="/admin/settings" onclick="window.lbToggleMobileNav(false)">Настройки</a>
             <a class="md-link" href="/admin/super/purge" style="color:#b91c1c;" onclick="window.lbToggleMobileNav(false)">Удаление данных</a>
           </details>

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+  <script type="application/json" id="lb-msw-config">{{ {"weekStart": week_start_iso, "todayIso": today_iso, "isSuper": is_super} | tojson }}</script>
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+      <h2 style="margin:0;">График всех мастеров</h2>
+      {% if manage_schedule_url %}
+        <a href="{{ manage_schedule_url }}"><button type="button" class="secondary">{{ manage_schedule_label }}</button></a>
+      {% endif %}
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:14px; flex-wrap:wrap;">
+      <div>
+        <div class="muted" style="font-size:12px;">Неделя</div>
+        <h3 id="lbMswWeekLabel" style="margin:6px 0 0;"></h3>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="secondary" id="lbMswPrevWeek" aria-label="Предыдущая неделя">←</button>
+        <button type="button" class="secondary" id="lbMswNextWeek" aria-label="Следующая неделя">→</button>
+      </div>
+    </div>
+
+    <div id="lbMswLoading" class="muted" style="margin-top:12px;">Загрузка…</div>
+    <div id="lbMswGridWrap" style="overflow-x:auto; margin-top:12px; display:none;"></div>
+
+    <div class="muted" style="font-size:12px; margin-top:12px; display:flex; flex-wrap:wrap; gap:12px 18px;">
+      <span><span style="display:inline-block;width:14px;height:14px;border:1px solid #e5e7eb;background:#fff;vertical-align:middle;"></span> нет данных</span>
+      <span><span style="display:inline-block;width:14px;height:14px;border:1px solid #fecaca;background:#fc8580;vertical-align:middle;"></span> выходной</span>
+      <span><span style="display:inline-block;width:14px;height:14px;border:1px solid #bae6fd;background:#bae6fd;vertical-align:middle;"></span> рабочий день</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f97316;vertical-align:middle;"></span> есть брони</span>
+    </div>
+  </div>
+
+  <div id="lbMswOccBackdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:200;"></div>
+  <div id="lbMswOccModal" style="display:none; position:fixed; inset:0; z-index:210; padding:18px; overflow:auto; pointer-events:none;">
+    <div style="pointer-events:auto; max-width:980px; margin:30px auto; background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:14px 16px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+        <div>
+          <div class="muted" style="font-size:12px;">Занятость</div>
+          <h3 id="lbMswOccTitle" style="margin:0;">—</h3>
+        </div>
+        <button type="button" class="secondary" id="lbMswOccClose">Закрыть</button>
+      </div>
+      <div id="lbMswOccBody" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <script src="/static/calendar_occupancy_grid.js"></script>
+  <script src="/static/masters_schedule_week.js"></script>
+{% endblock %}

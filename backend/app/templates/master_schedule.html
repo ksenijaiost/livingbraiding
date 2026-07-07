@@ -2,7 +2,9 @@
 {% block content %}
   <script type="application/json" id="lb-ms-config">{{ {"isAdmin": is_admin_super, "masterId": master_id, "todayIso": today_iso, "defaultTimeFrom": ("%02d:00" % hour_from), "defaultTimeTo": ("%02d:00" % hour_to)} | tojson }}</script>
   <div class="card">
-    <h2 style="margin-top:0;">График мастеров</h2>
+    <h2 style="margin-top:0;">{% if is_admin_super %}Управление графиком мастеров{% else %}Мой график{% endif %}</h2>
+
+    <p style="margin:0 0 10px;"><a href="/masters-schedule" class="muted" style="font-size:13px;">← График всех мастеров</a></p>
 
     {% if is_admin_super %}
       <div class="row" style="gap:12px; align-items:center; flex-wrap:wrap;">
