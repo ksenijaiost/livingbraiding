@@ -15,7 +15,6 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
@@ -74,13 +73,10 @@ from app.visit_edit_policy import (
     is_in_closed_payroll_period,
     within_edit_window,
 )
-from app.ru_labels import ru_user_role
 from app.forms_parse import parse_date_iso, parse_float, parse_int, parse_optional_float
 from app.list_search import parse_list_id_search
 from app.time_utils import utcnow_naive
-
-templates = Jinja2Templates(directory="app/templates")
-templates.env.globals["ru_user_role"] = ru_user_role
+from app.webui import templates
 
 router = APIRouter(prefix="/sales/products", tags=["product-sales"])
 # GET-алиас под старые закладки/ссылки (если где-то фигурировал /admin/sales/...):

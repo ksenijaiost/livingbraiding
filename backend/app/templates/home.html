@@ -70,7 +70,8 @@
             График не заполнен
           {% endif %}
         </div>
-        <div style="margin-top:10px;">
+        <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
+          <a href="/masters-schedule"><button type="button" class="secondary">График всех мастеров</button></a>
           <a href="/master/schedule"><button type="button" class="secondary">Редактировать график</button></a>
         </div>
       </div>
@@ -265,6 +266,20 @@
             </div>
           </div>
 
+          <div class="card" style="background:#f8fafc;">
+            <h4 style="margin:0 0 10px;">Студия</h4>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+              <a href="/masters-schedule"><button type="button" class="secondary">График всех мастеров</button></a>
+              {% if sections_ctx.is_master %}
+                <a href="/master/schedule"><button type="button" class="secondary">Управление графиком</button></a>
+              {% endif %}
+              {% if sections_ctx.is_admin_super %}
+                <a href="/admin/master-schedule"><button type="button" class="secondary">Управление графиком мастеров</button></a>
+                <a href="/admin/settings/staff"><button type="button" class="secondary">Сотрудники</button></a>
+              {% endif %}
+            </div>
+          </div>
+
           {% if sections_ctx.is_admin_super %}
             <div class="card" style="background:#f8fafc;">
               <h4 style="margin:0 0 10px;">Управление</h4>
@@ -273,10 +288,8 @@
                 <a href="/admin/payroll-fund"><button type="button" class="secondary">Фонды</button></a>
                 <a href="/admin/payroll-periods"><button type="button" class="secondary">Периоды</button></a>
                 <a href="/admin/reports"><button type="button" class="secondary">Отчёты</button></a>
-                <a href="/admin/master-schedule"><button type="button" class="secondary">График мастеров</button></a>
                 <a href="/admin/catalog"><button type="button" class="secondary">Прайс</button></a>
                 <a href="/admin/settings"><button type="button" class="secondary">Настройки</button></a>
-                <a href="/admin/settings/staff"><button type="button" class="secondary">Сотрудники</button></a>
                 <a href="/admin/super/purge"><button type="button" class="secondary" style="color:#b91c1c;border-color:#fecaca;">Удаление данных</button></a>
               </div>
             </div>

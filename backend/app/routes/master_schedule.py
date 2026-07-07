@@ -28,6 +28,7 @@ from app.master_time_blocks import (
     list_time_blocks_for_day,
     time_block_to_dict,
 )
+from app.masters_schedule_week import build_masters_schedule_week, monday_of_week
 from app.webui import templates, ctx as _ctx
 
 
@@ -442,6 +443,46 @@ def api_delete_master_time_block(
 # ----------------------
 # Pages (UI)
 # ----------------------
+
+
+@router.get("/api/masters-schedule/week")
+def api_masters_schedule_week(
+    w: str | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    """Недельная сводка графика всех мастеров (понедельник — воскресенье)."""
+    if w and str(w).strip():
+        week_start = parse_date_iso(str(w).strip(), field_name="w")
+    else:
+        week_start = date.today()
+    week_start = monday_of_week(week_start)
+    return JSONResponse(build_masters_schedule_week(db, week_start=week_start))
+
+
+@router.get("/masters-schedule", response_class=HTMLResponse)
+def masters_schedule_week_page(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    today = date.today()
+    week_start = monday_of_week(today)
+    is_super = current_user.role == UserRole.ADMIN_SUPER
+    is_master = current_user.role == UserRole.MASTER
+    manage_url = "/admin/master-schedule" if is_super else ("/master/schedule" if is_master else None)
+    return templates.TemplateResponse(
+        "masters_schedule_week.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            today_iso=today.isoformat(),
+            week_start_iso=week_start.isoformat(),
+            manage_schedule_url=manage_url,
+            manage_schedule_label="Управление графиком мастеров" if is_super else "Редактировать мой график",
+            is_super=is_super,
+        ),
+    )
 
 
 @router.get("/master/schedule", response_class=HTMLResponse)

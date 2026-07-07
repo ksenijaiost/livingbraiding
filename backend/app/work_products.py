@@ -13,7 +13,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -126,15 +125,13 @@ from app.visit_edit_policy import (
     is_in_closed_payroll_period,
     within_edit_window,
 )
-from app.ru_labels import ru_user_role
 from app.audit import diff_fields, write_audit_rows
 from app.kit_crud import kit_key_excluded_from_client_price
 from app.mix_rates import mix_complexity_rate_for, mix_rates_meta_json_dict
 from app.ui_visit_display import ru_mix_complexity as ru_mix_complexity_label
 from app.zakaz_blanks import kit_composition_catalog_items, kit_form_blank_defs
+from app.webui import templates
 
-templates = Jinja2Templates(directory="app/templates")
-templates.env.globals["ru_user_role"] = ru_user_role
 router = APIRouter(prefix="/sales/work", tags=["work-products"])
 _logger = logging.getLogger("livingbraiding.app")
 # GET-алиас под старые закладки/ссылки (если где-то фигурировал /admin/sales/...):
