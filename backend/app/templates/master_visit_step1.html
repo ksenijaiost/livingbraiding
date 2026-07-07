@@ -1062,7 +1062,7 @@
     if (_ug) _ug.addEventListener('input', function(){ updateMixBlockUI(); syncVisitPreview(); });
     const _cis = document.querySelector('input[name="client_is_self"]');
     if (_cis) _cis.addEventListener('change', syncAmountRequired);
-    document.addEventListener('lbCorrCustomAmountChanged', syncAmountRequired);
+    document.addEventListener('lbCorrCustomAmountChanged', function () { syncAmountRequired(); syncVisitPreview(); });
     const _amt = document.getElementById('amount_from_client');
     if (_amt) { _amt.addEventListener('input', syncVisitPreview); _amt.addEventListener('change', syncVisitPreview); }
     const _disc = document.getElementById('client_discount_percent');
@@ -1070,7 +1070,7 @@
       _disc.addEventListener('input', function () { updateRecommendedPriceHint(); });
       _disc.addEventListener('change', function () { updateRecommendedPriceHint(); });
     }
-    document.querySelectorAll('input[name="addon_sales_amount"], input[name="mix_source"], input[name="mix_complexity"], input[name="amortization_level"]').forEach(function (el) {
+    document.querySelectorAll('input[name="addon_sales_amount"], input[name="mix_source"], input[name="mix_complexity"], input[name="amortization_level"], input[name="own_corr_trim_qty"], input[name="own_corr_hourly_hours"], input[name="own_corr_wash"], input[name="own_corr_steam"], input[name="own_corr_circle"], input[name="own_correction"]').forEach(function (el) {
       el.addEventListener('change', syncVisitPreview);
       el.addEventListener('input', syncVisitPreview);
     });
