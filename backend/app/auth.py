@@ -36,6 +36,8 @@ class AuthUser:
 
 
 COOKIE_NAME = "lb_session"
+SESSION_REMEMBER_DAYS = 30
+SESSION_REMEMBER_MAX_AGE = SESSION_REMEMBER_DAYS * 24 * 60 * 60
 
 
 def _serializer() -> URLSafeSerializer:
@@ -43,26 +45,46 @@ def _serializer() -> URLSafeSerializer:
     return URLSafeSerializer(settings.secret_key, salt="livingbraiding-session")
 
 
-def _session_token(user_id: int, active_role: UserRole) -> str:
+def _session_token(user_id: int, active_role: UserRole, *, remember: bool = False) -> str:
     s = _serializer()
-    return s.dumps({"user_id": user_id, "active_role": active_role.value})
+    payload: dict[str, object] = {"user_id": user_id, "active_role": active_role.value}
+    if remember:
+        payload["remember"] = True
+    return s.dumps(payload)
 
 
-def issue_session_cookie(response: Response, user_id: int, active_role: UserRole) -> None:
-    token = _session_token(user_id, active_role)
-    response.set_cookie(
-        COOKIE_NAME,
-        token,
-        httponly=True,
-        samesite="lax",
-    )
+def _cookie_secure() -> bool:
+    return get_settings().app_env == "prod"
+
+
+def _cookie_base_kwargs() -> dict[str, object]:
+    return {
+        "httponly": True,
+        "samesite": "lax",
+        "secure": _cookie_secure(),
+        "path": "/",
+    }
+
+
+def issue_session_cookie(
+    response: Response,
+    user_id: int,
+    active_role: UserRole,
+    *,
+    remember: bool = False,
+) -> None:
+    token = _session_token(user_id, active_role, remember=remember)
+    kwargs = dict(_cookie_base_kwargs())
+    if remember:
+        kwargs["max_age"] = SESSION_REMEMBER_MAX_AGE
+    response.set_cookie(COOKIE_NAME, token, **kwargs)
 
 
 def logout_response() -> Response:
     """Redirect to login and clear session cookie."""
     resp = Response(status_code=status.HTTP_303_SEE_OTHER)
     resp.headers["Location"] = "/login"
-    resp.delete_cookie(COOKIE_NAME)
+    resp.delete_cookie(COOKIE_NAME, **_cookie_base_kwargs())
     return resp
 
 
@@ -94,35 +116,41 @@ def authenticate(db: Session, login: str, password: str) -> Optional[User]:
     return user
 
 
-def login_response(user: User, db: Session) -> Response:
+def login_response(user: User, db: Session, *, remember: bool = False) -> Response:
     """Issue session cookie and redirect to `/`."""
     roles = get_roles_for_user(db, user.id)
     active = default_active_role(roles)
     resp = Response(status_code=status.HTTP_303_SEE_OTHER)
     resp.headers["Location"] = "/"
-    issue_session_cookie(resp, user.id, active)
+    issue_session_cookie(resp, user.id, active, remember=remember)
     return resp
 
 
-def _get_session_payload(request: Request) -> tuple[Optional[int], Optional[str]]:
+def _get_session_payload(request: Request) -> tuple[Optional[int], Optional[str], bool]:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
-        return None, None
+        return None, None, False
     s = _serializer()
     try:
         data = s.loads(token)
     except BadSignature:
-        return None, None
+        return None, None, False
     user_id = data.get("user_id")
     ar = data.get("active_role")
+    remember = bool(data.get("remember"))
     if isinstance(user_id, int):
-        return user_id, ar if isinstance(ar, str) else None
-    return None, None
+        return user_id, ar if isinstance(ar, str) else None, remember
+    return None, None, False
+
+
+def session_remember_from_request(request: Request) -> bool:
+    _uid, _role, remember = _get_session_payload(request)
+    return remember
 
 
 def optional_session_user_id(request: Request) -> Optional[int]:
     """Идентификатор пользователя из подписанной сессии или None (без редиректа на /login)."""
-    user_id, _ = _get_session_payload(request)
+    user_id, _, _remember = _get_session_payload(request)
     return user_id
 
 
@@ -131,7 +159,7 @@ def get_current_user(
     db: Annotated[Session, Depends(get_db)],
 ) -> AuthUser:
     """Resolve session cookie to an AuthUser or redirect to login."""
-    user_id, active_raw = _get_session_payload(request)
+    user_id, active_raw, _remember = _get_session_payload(request)
     if not user_id:
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
     user = db.get(User, user_id)

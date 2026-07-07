@@ -11,9 +11,11 @@ from app.auth import (
     issue_session_cookie,
     login_response,
     logout_response,
+    session_remember_from_request,
 )
 from app.db.models import UserRole
 from app.db.session import get_db
+from app.forms_parse import parse_bool
 from app.webui import ctx as _ctx, templates
 
 router = APIRouter()
@@ -40,6 +42,7 @@ def login_action(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
+    remember_me: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     """Cookie-based login. On success, redirects to `/`."""
@@ -51,10 +54,11 @@ def login_action(
                 request,
                 current_user=None,
                 error="Неверный логин / телефон или пароль.",
+                remember_me=parse_bool(remember_me),
             ),
             status_code=400,
         )
-    return login_response(user, db)
+    return login_response(user, db, remember=parse_bool(remember_me))
 
 
 @router.post("/session/active-role")
@@ -71,7 +75,12 @@ def session_set_active_role(
         raise HTTPException(status_code=403, detail="Эта роль не назначена пользователю")
     # Всегда на главную: прежний URL может быть только для другой роли (403).
     resp = RedirectResponse(url="/", status_code=303)
-    issue_session_cookie(resp, current_user.id, new_role)
+    issue_session_cookie(
+        resp,
+        current_user.id,
+        new_role,
+        remember=session_remember_from_request(request),
+    )
     return resp
 
 

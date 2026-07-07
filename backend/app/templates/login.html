@@ -15,6 +15,12 @@
         <label>Пароль</label>
         <input name="password" type="password" autocomplete="current-password" required />
       </div>
+      <div style="margin-bottom: 14px;">
+        <label style="display:flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
+          <input type="checkbox" name="remember_me" value="1" style="width:auto;"{% if remember_me is not defined or remember_me %} checked{% endif %} />
+          <span>Запомнить меня (30 дней)</span>
+        </label>
+      </div>
       <div class="row" style="align-items:center; flex-wrap:wrap;">
         <button type="submit">Войти</button>
         <a href="/login/forgot" style="margin-left:auto;"><span class="muted" style="font-size:13px;">Забыли пароль?</span></a>
