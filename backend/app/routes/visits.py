@@ -215,7 +215,9 @@ def admin_visit_detail(
     )
 
     sorted_services = sorted(visit.services or [], key=lambda s: (int(s.sort_order or 0), int(s.id or 0)))
+    active_sorted_services = [vs for vs in sorted_services if not vs.is_cancelled]
     service_displays = {vs.id: build_service_human_display(vs) for vs in sorted_services}
+    active_services_amount_total = sum(float(vs.amount_from_client or 0) for vs in active_sorted_services)
 
     mix_bonus_master_label: str | None = None
     if visit.mix_bonus_master_id:
@@ -247,6 +249,8 @@ def admin_visit_detail(
             audit_rows=audit_rows,
             service_displays=service_displays,
             sorted_services=sorted_services,
+            active_sorted_services=active_sorted_services,
+            active_services_amount_total=active_services_amount_total,
             mix_bonus_master_label=mix_bonus_master_label,
             mix_source_ru=ru_mix_source(visit.mix_source),
             mix_complexity_ru=ru_mix_complexity(getattr(visit, "mix_complexity", None)),

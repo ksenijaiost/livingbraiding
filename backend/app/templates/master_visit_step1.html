@@ -1270,6 +1270,7 @@
     const materialPricePerGram = {{ (material_price_per_gram_json or '{}') | safe }};
     const mixComplexityRatesPerGram = {{ (mix_complexity_rates_json or '{}') | safe }};
     const amortizationRublesByLevel = {{ (amortization_rubles_json or '{}') | safe }};
+    const correctionCatalogMap = {{ (correction_catalog_json or '{}') | safe }};
     const stockKitLinesPreviewInitial = {{ stock_kit_lines_preview | tojson }};
     const stockKitPreviewInitial = {{ stock_kit_preview | tojson }};
     const extraStockKitPreviewInitial = {{ extra_stock_kit_preview | tojson }};
@@ -1536,14 +1537,20 @@
     }
 
     function effectiveAmountFromClient(idx) {
-      if (isLineCustomCorrectionAmount(idx)) {
-        const scope = idx === 0 ? document : visitLineRow(idx);
-        const inp = scope ? scope.querySelector('.lb-corr-custom-amount-input') : null;
-        const raw = String((inp && inp.value) || '').replace(',', '.').trim();
-        const n = parseFloat(raw);
-        return (!raw || isNaN(n)) ? 0 : Math.max(0, n);
-      }
-      return lineAmountFromClient(idx);
+      return lineAmountFromClient(idx) + correctionCustomAmount(idx);
+    }
+
+    function correctionCustomAmount(idx) {
+      if (!isLineCustomCorrectionAmount(idx)) return 0;
+      const scope = idx === 0 ? document : visitLineRow(idx);
+      if (!scope) return 0;
+      const selector = idx === 0
+        ? 'input[name="own_corr_custom_amount"]'
+        : 'input[name="line_' + idx + '_own_corr_custom_amount"]';
+      const inp = scope.querySelector(selector) || scope.querySelector('.lb-corr-custom-amount-input');
+      const raw = String((inp && inp.value) || '').replace(',', '.').trim();
+      const n = parseFloat(raw);
+      return (!raw || isNaN(n)) ? 0 : Math.max(0, n);
     }
 
     function lineAmountFromClient(idx) {
@@ -1671,6 +1678,42 @@
       return out;
     }
 
+    function lineCorrectionExtraCost(idx) {
+      const row = idx === 0 ? document : visitLineRow(idx);
+      if (!row) return 0;
+      const corrOn = idx === 0
+        ? !!(document.querySelector('input[name="own_correction"]') || {}).checked
+        : !!(row.querySelector('input[name="line_' + idx + '_own_correction"]') || {}).checked;
+      if (!corrOn || !isLineCustomCorrectionAmount(idx)) return 0;
+      function q(name0, nameN) {
+        return idx === 0 ? document.querySelector(name0) : row.querySelector(nameN);
+      }
+      function fxSum(name, units) {
+        const rr = correctionCatalogMap[name] || null;
+        if (!rr) return 0;
+        return (parseFloat(rr.fixed_expense) || 0) * (parseFloat(units) || 0);
+      }
+      const trimEl = q('input[name="own_corr_trim_qty"]', 'input[name="line_' + idx + '_own_corr_trim_qty"]');
+      const hhEl = q('input[name="own_corr_hourly_hours"]', 'input[name="line_' + idx + '_own_corr_hourly_hours"]');
+      const washEl = q('input[name="own_corr_wash"]', 'input[name="line_' + idx + '_own_corr_wash"]');
+      const circleEl = q('input[name="own_corr_circle"]', 'input[name="line_' + idx + '_own_corr_circle"]');
+      const steamEl = q('input[name="own_corr_steam"]', 'input[name="line_' + idx + '_own_corr_steam"]');
+      const trimQ = Math.max(0, parseInt(String((trimEl && trimEl.value) || '0'), 10) || 0);
+      const hhRaw = String((hhEl && hhEl.value) || '').replace(',', '.').trim();
+      const hh = hhRaw ? Math.max(0, parseFloat(hhRaw) || 0) : 0;
+      const wash = !!(washEl && washEl.checked);
+      const circle = !!(circleEl && circleEl.checked);
+      const steam = !!(steamEl && steamEl.checked);
+      const washNm = (trimQ > 0 || hh > 0) ? 'Стирка (с коррекцией)' : 'Стирка (без коррекции)';
+      let total = 0;
+      if (trimQ > 0) total += fxSum('Стрижка (1шт)', trimQ);
+      if (hh > 0) total += fxSum('Почасовая коррекция заготовок (1 ч)', hh);
+      if (wash) total += fxSum(washNm, 1);
+      if (steam) total += fxSum('Отпаривание', 1);
+      if (circle) total += fxSum('Одевание на круг', 1);
+      return total;
+    }
+
     function bindExtraLinePreviewInputs(idx, box) {
       if (!box) return;
       const sync = function () { syncVisitPreview(); };
@@ -1710,7 +1753,7 @@
 
       visitLineIndicesForPreview().forEach(function (idx) {
         amountTotal += effectiveAmountFromClient(idx);
-        costTotal += lineMaterialCost(idx) + lineAmortCost(idx);
+        costTotal += lineMaterialCost(idx) + lineAmortCost(idx) + lineCorrectionExtraCost(idx);
         const mix = lineMixCostAndBonus(idx);
         costTotal += mix.mixCost;
         mixBonusTotal += mix.mixBonus;
@@ -1740,7 +1783,7 @@
       if (scope === 'PER_SERVICE') {
         visitLineIndicesForPreview().forEach(function (idx) {
           const lineAmount = effectiveAmountFromClient(idx);
-          let lineCost = lineMaterialCost(idx) + lineAmortCost(idx);
+          let lineCost = lineMaterialCost(idx) + lineAmortCost(idx) + lineCorrectionExtraCost(idx);
           const mix = lineMixCostAndBonus(idx);
           lineCost += mix.mixCost;
           const meta = visitLineServiceMeta(idx);

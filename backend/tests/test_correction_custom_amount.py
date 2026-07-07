@@ -218,7 +218,7 @@ def test_visit_correction_custom_amount(memory_db) -> None:
 def test_effective_amount_from_client_custom_correction() -> None:
     line = VisitServiceLineInput(
         service_id=1,
-        amount_from_client=0,
+        amount_from_client=5000,
         client_discount_percent=0,
         kanekalon_grams=0,
         kudri_grams=0,
@@ -231,7 +231,7 @@ def test_effective_amount_from_client_custom_correction() -> None:
         own_corr_custom_amount=4500.0,
         kit_kind="OWN",
     )
-    assert effective_amount_from_client(line) == 4500.0
+    assert effective_amount_from_client(line) == 9500.0
 
 
 def test_parse_visit_line_custom_amount_without_flag() -> None:
@@ -268,5 +268,59 @@ def test_parse_visit_line_custom_amount_without_flag() -> None:
     )
     line = _parse_line_from_form(form, 0)
     assert line.own_corr_use_custom_amount is True
-    assert line.amount_from_client == 3200.0
+    assert line.amount_from_client == 0.0
     assert effective_amount_from_client(line) == 3200.0
+
+
+def test_visit_correction_custom_amount_adds_to_service_sum(memory_db) -> None:
+    db = memory_db
+    cat = ServiceCategory(name="Cat2")
+    sub = ServiceSubcategory(name="Sub2", category_id=None, show_kit_section=True)
+    db.add(cat)
+    db.flush()
+    sub.category_id = cat.id
+    db.add(sub)
+    db.flush()
+    svc = Service(subcategory_id=sub.id, name="Вплетение 2", estimated_duration_minutes=60, is_active=True)
+    client = Client(name="Клиент 2", is_confirmed=True)
+    db.add_all([svc, client])
+    db.flush()
+    _seed_correction_catalog(db, fixed=20.0)
+
+    line = VisitServiceLineInput(
+        service_id=int(svc.id),
+        amount_from_client=5000.0,
+        client_discount_percent=0,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_source=None,
+        mix_complexity=None,
+        mix_bonus_master_id=None,
+        amortization_level=None,
+        own_correction=True,
+        own_corr_trim_qty=1,
+        own_corr_use_custom_amount=True,
+        own_corr_custom_amount=3000.0,
+        own_corr_client_payment_kind=ClientPaymentKind.CASH,
+        kit_kind="OWN",
+        own_origin="FOREIGN",
+    )
+    header = VisitHeaderInput(
+        client_mode="existing",
+        existing_client_id=int(client.id),
+        draft_name="",
+        draft_phone="",
+        draft_telegram="",
+        draft_vk="",
+        draft_instagram="",
+        draft_other_contact="",
+        client_type=VisitClientType.RETURNING,
+        performed_date=datetime(2025, 6, 1).date(),
+        duration_minutes=60,
+        masters_scope=VisitMastersScope.VISIT,
+        same_master_shares_all_services=False,
+        visit_master_allocations=[],
+    )
+    computed = compute_visit_service_line(db, line, header, default_mix_bonus_master_id=None, apply_kit_stock=False)
+    assert computed.amount_from_client == 8000.0
+    assert computed.cost_total >= 20.0
