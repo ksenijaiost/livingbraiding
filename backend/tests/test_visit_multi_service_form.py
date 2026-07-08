@@ -146,7 +146,32 @@ def test_parse_per_service_master_allocations() -> None:
         ("mix_source", "NO_MIX"),
     ]
     form = FormData(items)
-    multi = parse_multi_service_visit_form(form, single_master_default_id=99)
+    multi = parse_multi_service_visit_form(form)
     assert multi.header.masters_scope.value == "PER_SERVICE"
+    assert multi.header.visit_master_allocations == []
     assert multi.lines[0].service_master_allocations == [(10, 50), (11, 50)]
     assert multi.lines[1].service_master_allocations == [(10, 100)]
+
+
+def test_parse_per_service_single_master_without_pct() -> None:
+    """Один мастер на услугу без процента в POST (disabled поле) — 100%."""
+    items = [
+        ("service_id", "5"),
+        ("amount_from_client", "3000"),
+        ("masters_scope", "PER_SERVICE"),
+        ("line_0_service_master_on", "10"),
+        ("line_1_service_id", "7"),
+        ("line_1_amount_from_client", "2000"),
+        ("line_1_service_master_on", "11"),
+        ("line_1_kit_kind", "STOCK"),
+        ("line_1_mix_source", "NO_MIX"),
+        ("client_mode", "existing"),
+        ("existing_client_id", "1"),
+        ("performed_date", "2026-05-24"),
+        ("kit_kind", "STOCK"),
+        ("mix_source", "NO_MIX"),
+    ]
+    form = FormData(items)
+    multi = parse_multi_service_visit_form(form)
+    assert multi.lines[0].service_master_allocations == [(10, 100)]
+    assert multi.lines[1].service_master_allocations == [(11, 100)]
