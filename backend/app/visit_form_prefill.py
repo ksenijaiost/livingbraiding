@@ -293,10 +293,7 @@ def _apply_service_line_to_fp(
             ).all()
         )
         for vm in masters:
-            fp[f"line_{idx}_service_master_on"] = fp.get(f"line_{idx}_service_master_on", "")
-            # visit_master_on is comma list; per-service uses checkboxes in form POST
-            on_key = f"line_{idx}_service_master_pct_{vm.master_id}"
-            _set(fp, on_key, int(vm.percent or 0))
+            _set(fp, f"line_{idx}_service_master_pct_{int(vm.master_id)}", int(vm.percent or 0))
 
 
 def visit_to_form_prefill(

@@ -1098,7 +1098,9 @@ def parse_multi_service_visit_form(
     eid = g_int("existing_client_id", 0)
     existing_client_id = eid if eid > 0 else None
 
-    if single_master_default_id is not None and not g_bool("visit_use_multi_masters"):
+    if masters_scope == VisitMastersScope.PER_SERVICE:
+        visit_master_allocations: list[tuple[int, int]] = []
+    elif single_master_default_id is not None and not g_bool("visit_use_multi_masters"):
         visit_master_allocations = [(single_master_default_id, 100)]
     else:
         visit_master_allocations = _parse_visit_master_allocations_from_form(form)

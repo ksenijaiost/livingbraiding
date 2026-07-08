@@ -187,6 +187,7 @@
               <label style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 12rem;">
                 <input type="checkbox" name="visit_master_on" value="{{ m.id }}"
                   data-master-level="{{ m.master_level.value if m.master_level else '' }}"
+                  class="visit-master-on-cb"
                   {% if m.id in visit_master_on_ids %}checked{% endif %} />
                 <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
               </label>
@@ -243,12 +244,14 @@
           <div class="row" style="align-items:center; flex-wrap:wrap; gap: 10px 16px;">
             <label style="display:flex; align-items:center; gap:8px; flex:1; min-width: 12rem;">
               <input type="checkbox" name="line_0_service_master_on" value="{{ m.id }}"
-                data-master-level="{{ m.master_level.value if m.master_level else '' }}" />
+                data-master-level="{{ m.master_level.value if m.master_level else '' }}"
+                {% if fp.get('line_0_service_master_pct_' ~ m.id|string) %}checked{% endif %} />
               <span>{{ m.display_name or m.username }} ({{ ru_master_level(m.master_level) }})</span>
             </label>
             <div style="display:flex; align-items:center; gap:6px;">
               <label class="muted" style="font-size:12px; margin:0;">Доля, %</label>
-              <input type="number" name="line_0_service_master_pct_{{ m.id }}" min="0" max="100" step="1" style="width:5rem;" />
+              <input type="number" name="line_0_service_master_pct_{{ m.id }}" min="0" max="100" step="1" style="width:5rem;"
+                value="{{ fp.get('line_0_service_master_pct_' ~ m.id|string, '') }}" />
             </div>
           </div>
         {% endfor %}
@@ -657,6 +660,27 @@
     {% endif %}
   </div>
   <script>
+    function syncVisitMasterPctInputs() {
+      const cbs = Array.from(document.querySelectorAll('input[name="visit_master_on"]'));
+      const checked = cbs.filter(function (cb) { return cb.checked; });
+      const single = checked.length === 1;
+      cbs.forEach(function (cb) {
+        const pct = document.querySelector('input[name="visit_master_pct_' + cb.value + '"]');
+        if (!pct) return;
+        if (!cb.checked) {
+          pct.disabled = true;
+          pct.value = '';
+          return;
+        }
+        if (single) {
+          pct.disabled = true;
+          pct.value = '100';
+        } else {
+          pct.disabled = false;
+        }
+      });
+    }
+
     function visitMastersModeSync() {
       const cb = document.getElementById('visit_use_multi_masters');
       if (!cb) return;
@@ -667,9 +691,24 @@
       if (blk) blk.style.display = m ? 'flex' : 'none';
       if (sn) sn.style.display = m ? 'none' : 'block';
       if (mn) mn.style.display = m ? 'block' : 'none';
+      syncVisitMasterPctInputs();
       updateRecommendedPriceHint();
     }
-    document.addEventListener('DOMContentLoaded', visitMastersModeSync);
+    document.addEventListener('DOMContentLoaded', function () {
+      visitMastersModeSync();
+      syncMastersScopeUi();
+    });
+
+    document.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('.visit-master-on-cb').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          syncVisitMasterPctInputs();
+          updateRecommendedPriceHint();
+          syncVisitPreview();
+        });
+      });
+      syncVisitMasterPctInputs();
+    });
 
     function syncMastersScopeUi() {
       const scope = (document.querySelector('input[name="masters_scope"]:checked') || {}).value || 'VISIT';
@@ -2835,6 +2874,12 @@
           syncVisitPreview();
         });
       });
+      (prefill.service_masters || []).forEach(function (row) {
+        const cb = box.querySelector('input[name="line_' + idx + '_service_master_on"][value="' + String(row.id) + '"]');
+        if (cb) cb.checked = true;
+        const pct = box.querySelector('input[name="line_' + idx + '_service_master_pct_' + String(row.id) + '"]');
+        if (pct && row.pct !== undefined && row.pct !== null && String(row.pct) !== '') pct.value = String(row.pct);
+      });
       box.querySelectorAll('input[name^="line_' + idx + '_service_master_pct_"]').forEach(function (inp) {
         inp.addEventListener('input', syncVisitPreview);
         inp.addEventListener('change', syncVisitPreview);
@@ -2876,6 +2921,18 @@
         if (advHost && el && el.parentElement !== advHost) advHost.appendChild(el);
       });
 
+      function lineServiceMastersFromFp(idx, fpAll) {
+        const out = [];
+        const prefix = 'line_' + idx + '_service_master_pct_';
+        Object.keys(fpAll || {}).forEach(function (k) {
+          if (k.indexOf(prefix) !== 0) return;
+          const mid = k.slice(prefix.length);
+          if (!/^\d+$/.test(mid)) return;
+          out.push({ id: mid, pct: fpAll[k] });
+        });
+        return out;
+      }
+
       function bootVisitExtraServiceLines() {
         const fpAll = {{ fp | tojson }};
         const indices = [];
@@ -2900,6 +2957,7 @@
             comment: fpAll['line_' + idx + '_comment'] || '',
             kanekalon_grams: fpAll['line_' + idx + '_kanekalon_grams'] || '0',
             kudri_grams: fpAll['line_' + idx + '_kudri_grams'] || '0',
+            service_masters: lineServiceMastersFromFp(idx, fpAll),
           });
         }
         syncExtraLinesVisibility();
