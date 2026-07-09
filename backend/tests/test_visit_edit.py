@@ -34,7 +34,7 @@ from app.db.models import (
     VisitService,
     VisitServiceMaster,
 )
-from app.payroll_fund import sum_visit_ledger_by_visit_id
+from app.payroll_fund import sum_visit_ledger_by_visit_id, visit_ids_visible_to_master_clause
 from app.setting_keys import EDIT_WINDOW_DAYS
 from app.time_utils import utcnow_naive
 from app.visit_edit_policy import visit_edit_policy, user_participates_in_visit
@@ -666,3 +666,60 @@ def test_update_per_service_masters_replaces_existing_rows(memory_db):
         (master_a.id, 50),
         (master_b.id, 50),
     ]
+
+
+def test_calendar_master_payroll_includes_per_service_visit(memory_db):
+    """Месячный календарь: ЗП мастера по визиту с masters_scope=PER_SERVICE (без VisitMaster)."""
+    db = memory_db
+    master_a, master_b, _admin, svc_ids = _seed_users_and_services(db)
+    client = db.scalar(select(Client).limit(1))
+    header = VisitHeaderInput(
+        client_mode="existing",
+        existing_client_id=client.id,
+        draft_name="",
+        draft_phone="",
+        draft_telegram="",
+        draft_vk="",
+        draft_instagram="",
+        draft_other_contact="",
+        client_type=VisitClientType.RETURNING,
+        performed_date=datetime.utcnow().date(),
+        duration_minutes=60,
+        masters_scope=VisitMastersScope.PER_SERVICE,
+        same_master_shares_all_services=False,
+        visit_master_allocations=[],
+    )
+    line = VisitServiceLineInput(
+        service_id=svc_ids[0],
+        amount_from_client=4000.0,
+        client_discount_percent=0,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_source=MixSource.NO_MIX,
+        mix_complexity=None,
+        mix_bonus_master_id=None,
+        amortization_level=None,
+        kit_kind="STOCK",
+        service_master_allocations=[(master_b.id, 100)],
+    )
+    visit = save_visit_with_services(db, master_a.id, MultiServiceVisitInput(header=header, lines=[line]))
+
+    legacy_ids = list(
+        db.scalars(
+            select(Visit.id).where(
+                Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == master_b.id))
+            )
+        ).all()
+    )
+    assert int(visit.id) not in [int(x) for x in legacy_ids]
+
+    visible_ids = list(db.scalars(select(Visit.id).where(visit_ids_visible_to_master_clause(master_b.id))).all())
+    assert int(visit.id) in [int(x) for x in visible_ids]
+
+    pay = sum_visit_ledger_by_visit_id(
+        db,
+        side=PayrollFundSide.MASTER,
+        visit_ids=[int(visit.id)],
+        user_id=master_b.id,
+    )
+    assert float(pay.get(int(visit.id), 0.0)) > 0.0

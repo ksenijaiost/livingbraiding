@@ -42,7 +42,7 @@ from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_date_iso
-from app.payroll_fund import sum_ledger_amounts_by_source
+from app.payroll_fund import sum_ledger_amounts_by_source, visit_ids_visible_to_master_clause
 from app.ui_service_display import (
     booking_service_labels_from_booking,
     format_visit_service_catalog_path,
@@ -211,26 +211,7 @@ def api_calendar_day(
         .order_by(Visit.performed_date.asc(), Visit.id.asc())
     )
     if is_master:
-        v_stmt = v_stmt.where(
-            or_(
-                Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == current_user.id)),
-                Visit.id.in_(
-                    select(VisitService.visit_id).where(
-                        VisitService.is_cancelled.is_(False),
-                        VisitService.mix_bonus_master_id == current_user.id,
-                    )
-                ),
-                Visit.id.in_(
-                    select(VisitService.visit_id)
-                    .join(VisitServiceMaster, VisitServiceMaster.visit_service_id == VisitService.id)
-                    .where(
-                        VisitService.is_cancelled.is_(False),
-                        VisitServiceMaster.master_id == current_user.id,
-                    )
-                ),
-                Visit.mix_bonus_master_id == current_user.id,
-            )
-        )
+        v_stmt = v_stmt.where(visit_ids_visible_to_master_clause(current_user.id))
     visits = list(db.scalars(v_stmt).all())
     vs_ids: list[int] = []
     for v in visits:

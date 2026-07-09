@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from typing import Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.time_utils import utcnow_naive
@@ -57,6 +57,29 @@ _REVERSIBLE_ENTRY_KINDS = (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.EX
 
 def money_q2(x: float) -> float:
     return round(float(x), 2)
+
+
+def visit_ids_visible_to_master_clause(master_id: int):
+    """Визиты, где участвует мастер (как в модалке дня календаря и статистике)."""
+    mid = int(master_id)
+    return or_(
+        Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == mid)),
+        Visit.id.in_(
+            select(VisitService.visit_id).where(
+                VisitService.is_cancelled.is_(False),
+                VisitService.mix_bonus_master_id == mid,
+            )
+        ),
+        Visit.id.in_(
+            select(VisitService.visit_id)
+            .join(VisitServiceMaster, VisitServiceMaster.visit_service_id == VisitService.id)
+            .where(
+                VisitService.is_cancelled.is_(False),
+                VisitServiceMaster.master_id == mid,
+            )
+        ),
+        Visit.mix_bonus_master_id == mid,
+    )
 
 
 def sum_ledger_amounts_by_source(

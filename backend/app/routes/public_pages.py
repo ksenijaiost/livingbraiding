@@ -42,6 +42,7 @@ from app.payroll_fund import (
     studio_fund_balance,
     sum_ledger_amounts_by_source,
     sum_visit_ledger_by_visit_id,
+    visit_ids_visible_to_master_clause,
 )
 from app.master_schedule import schedule_filled_until
 from app.techspec_home import collect_techspec_home_stats
@@ -132,7 +133,7 @@ def home(
             )
         )
         if current_user.role == UserRole.MASTER:
-            v_stmt = v_stmt.where(Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == current_user.id)))
+            v_stmt = v_stmt.where(visit_ids_visible_to_master_clause(current_user.id))
         visit_rows = list(db.execute(v_stmt).all())
         visit_ids = [int(vid) for vid, _ in visit_rows if vid is not None]
         for _, dt0 in visit_rows:
