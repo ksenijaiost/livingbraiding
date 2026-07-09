@@ -154,6 +154,19 @@
       <tr><td>Доля салона</td><td>{{ visit.salon_cut_pct_at_time }}</td></tr>
       <tr><td>Заработок студии</td><td>{{ "%.0f"|format(visit.salon_profit) }} ₽</td></tr>
       <tr><td>ЗП мастеров (суммарно)</td><td>{{ "%.0f"|format(visit.masters_pool) }} ₽</td></tr>
+      {% if visit_master_pay_rows %}
+        {% for row in visit_master_pay_rows %}
+          <tr>
+            <td style="padding-left: 1.25rem; color: #6b7280;">{{ row.master_name }}</td>
+            <td>
+              {{ "%.0f"|format(row.total) }} ₽
+              {% if row.mix_bonus > 0 %}
+                <span class="muted" style="font-size: 12px;"> (пул {{ "%.0f"|format(row.pool_share) }} + бонус {{ "%.0f"|format(row.mix_bonus) }})</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      {% endif %}
     </table>
 
     <h3>Списания комплектов со склада</h3>
