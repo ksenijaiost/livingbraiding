@@ -42,7 +42,7 @@ from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_date_iso
-from app.payroll_fund import sum_ledger_amounts_by_source, visit_ids_visible_to_master_clause
+from app.payroll_fund import sum_ledger_amounts_by_source, visit_ids_visible_to_master_clause, sum_work_master_payroll_by_work_id, sum_work_studio_payroll_by_work_id
 from app.ui_service_display import (
     booking_service_labels_from_booking,
     format_visit_service_catalog_path,
@@ -338,21 +338,13 @@ def api_calendar_day(
         )
     works = list(db.scalars(w_stmt).all())
     work_ids = [int(w.id) for w in works if w.id is not None]
-    work_payout = _sum_ledger(
+    work_payout = sum_work_master_payroll_by_work_id(
         db,
-        side=PayrollFundSide.MASTER,
-        source_kind=PayrollFundSourceKind.WORK,
-        source_ids=work_ids,
+        work_ids=work_ids,
         user_id=current_user.id if is_master else None,
     )
     work_studio = (
-        _sum_ledger(
-            db,
-            side=PayrollFundSide.STUDIO,
-            source_kind=PayrollFundSourceKind.WORK,
-            source_ids=work_ids,
-            user_id=None,
-        )
+        sum_work_studio_payroll_by_work_id(db, work_ids=work_ids)
         if is_super
         else {}
     )
@@ -425,6 +417,7 @@ def api_calendar_day(
         },
         "is_super": is_super,
     }
+    db.commit()
     return JSONResponse(resp)
 
 

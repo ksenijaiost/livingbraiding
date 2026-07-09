@@ -1631,6 +1631,7 @@ async def work_new_post(
                 select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == work.id)
             ).all()
         )
+        db.flush()
         post_work_accruals(db, work.id, staff_saved, current_user.id)
         db.commit()
         if bid_for_auto_complete is not None:

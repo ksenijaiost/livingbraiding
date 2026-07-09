@@ -518,37 +518,7 @@ def post_work_accruals(
 ) -> None:
     if _has_accruals_for_source(db, PayrollFundSourceKind.WORK, work_id):
         return
-    total_staff = 0.0
-    for s in staff_rows:
-        amt = money_q2(float(s.master_profit_amount or 0))
-        if amt > 0:
-            total_staff = money_q2(total_staff + amt)
-            append_ledger(
-                db,
-                entry_kind=PayrollFundEntryKind.ACCRUAL,
-                side=PayrollFundSide.MASTER,
-                user_id=int(s.user_id),
-                amount=amt,
-                source_kind=PayrollFundSourceKind.WORK,
-                source_id=work_id,
-                created_by_user_id=created_by_user_id,
-            )
-    # Для работ «в наличие» начисление мастерам должно идти из фонда студии,
-    # чтобы не появлялись «деньги из воздуха» до продажи.
-    if total_staff > 0:
-        w = db.get(WorkForInventory, int(work_id))
-        if w and w.scope == WorkScope.IN_STOCK:
-            append_ledger(
-                db,
-                entry_kind=PayrollFundEntryKind.EXPENSE,
-                side=PayrollFundSide.STUDIO,
-                user_id=None,
-                amount=-money_q2(total_staff),
-                source_kind=PayrollFundSourceKind.WORK,
-                source_id=work_id,
-                created_by_user_id=created_by_user_id,
-                comment="Оплата мастерам (работа в наличие)",
-            )
+    _append_work_accruals(db, work_id, staff_rows, created_by_user_id)
 
 
 def replace_work_accruals(
@@ -558,6 +528,15 @@ def replace_work_accruals(
     created_by_user_id: int | None,
 ) -> None:
     storno_source_accruals(db, PayrollFundSourceKind.WORK, work_id, created_by_user_id)
+    _append_work_accruals(db, work_id, staff_rows, created_by_user_id)
+
+
+def _append_work_accruals(
+    db: Session,
+    work_id: int,
+    staff_rows: Sequence[WorkForInventoryStaff],
+    created_by_user_id: int | None,
+) -> None:
     total_staff = 0.0
     for s in staff_rows:
         amt = money_q2(float(s.master_profit_amount or 0))
@@ -573,20 +552,149 @@ def replace_work_accruals(
                 source_id=work_id,
                 created_by_user_id=created_by_user_id,
             )
-    if total_staff > 0:
-        w = db.get(WorkForInventory, int(work_id))
-        if w and w.scope == WorkScope.IN_STOCK:
+    w = db.get(WorkForInventory, int(work_id))
+    if w and w.scope == WorkScope.CUSTOM_ORDER:
+        studio_amt = money_q2(float(w.studio_profit_amount or 0))
+        if studio_amt > 0:
             append_ledger(
                 db,
-                entry_kind=PayrollFundEntryKind.EXPENSE,
+                entry_kind=PayrollFundEntryKind.ACCRUAL,
                 side=PayrollFundSide.STUDIO,
                 user_id=None,
-                amount=-money_q2(total_staff),
+                amount=studio_amt,
                 source_kind=PayrollFundSourceKind.WORK,
                 source_id=work_id,
                 created_by_user_id=created_by_user_id,
-                comment="Оплата мастерам (работа в наличие)",
             )
+    # Для работ «в наличие» начисление мастерам должно идти из фонда студии,
+    # чтобы не появлялись «деньги из воздуха» до продажи.
+    elif total_staff > 0 and w and w.scope == WorkScope.IN_STOCK:
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.EXPENSE,
+            side=PayrollFundSide.STUDIO,
+            user_id=None,
+            amount=-money_q2(total_staff),
+            source_kind=PayrollFundSourceKind.WORK,
+            source_id=work_id,
+            created_by_user_id=created_by_user_id,
+            comment="Оплата мастерам (работа в наличие)",
+        )
+
+
+def _net_work_ledger_sum(db: Session, work_id: int, side: PayrollFundSide) -> float:
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.source_kind == PayrollFundSourceKind.WORK,
+            PayrollFundLedger.source_id == int(work_id),
+            PayrollFundLedger.side == side,
+            PayrollFundLedger.entry_kind.in_(_REVERSIBLE_ENTRY_KINDS),
+        )
+    )
+    return money_q2(float(v or 0.0))
+
+
+def backfill_work_accruals_if_missing(db: Session, work: WorkForInventory) -> None:
+    """Восстановить проводки работы, если в карточке есть ЗП, а в журнале — нет."""
+    if work.is_voided or work.id is None:
+        return
+    staff = list(
+        db.scalars(
+            select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == int(work.id))
+        ).all()
+    )
+    exp_master = money_q2(sum(float(s.master_profit_amount or 0) for s in staff))
+    exp_studio = (
+        money_q2(float(work.studio_profit_amount or 0))
+        if work.scope == WorkScope.CUSTOM_ORDER
+        else 0.0
+    )
+    net_master = _net_work_ledger_sum(db, int(work.id), PayrollFundSide.MASTER)
+    net_studio = _net_work_ledger_sum(db, int(work.id), PayrollFundSide.STUDIO)
+    needs = False
+    if exp_master > 0 and abs(net_master - exp_master) > 0.02:
+        needs = True
+    if exp_studio > 0 and abs(net_studio - exp_studio) > 0.02:
+        needs = True
+    if needs:
+        replace_work_accruals(db, int(work.id), staff, work.created_by_user_id)
+
+
+def sum_work_master_payroll_by_work_id(
+    db: Session,
+    *,
+    work_ids: list[int],
+    user_id: int | None = None,
+    backfill: bool = True,
+) -> dict[int, float]:
+    if not work_ids:
+        return {}
+    out = sum_ledger_amounts_by_source(
+        db,
+        side=PayrollFundSide.MASTER,
+        source_kind=PayrollFundSourceKind.WORK,
+        source_ids=work_ids,
+        user_id=user_id,
+    )
+    missing = [wid for wid in work_ids if abs(out.get(int(wid), 0.0)) < 0.001]
+    if not missing:
+        return out
+    works = list(
+        db.scalars(
+            select(WorkForInventory)
+            .options(selectinload(WorkForInventory.staff_rows))
+            .where(WorkForInventory.id.in_(missing))
+        ).all()
+    )
+    for w in works:
+        wid = int(w.id)
+        if user_id is not None:
+            amt = money_q2(
+                sum(
+                    float(s.master_profit_amount or 0)
+                    for s in w.staff_rows
+                    if int(s.user_id) == int(user_id)
+                )
+            )
+        else:
+            amt = money_q2(sum(float(s.master_profit_amount or 0) for s in w.staff_rows))
+        if amt > 0:
+            out[wid] = amt
+            if backfill:
+                backfill_work_accruals_if_missing(db, w)
+    return out
+
+
+def sum_work_studio_payroll_by_work_id(
+    db: Session,
+    *,
+    work_ids: list[int],
+    backfill: bool = True,
+) -> dict[int, float]:
+    if not work_ids:
+        return {}
+    out = sum_ledger_amounts_by_source(
+        db,
+        side=PayrollFundSide.STUDIO,
+        source_kind=PayrollFundSourceKind.WORK,
+        source_ids=work_ids,
+        user_id=None,
+    )
+    missing = [wid for wid in work_ids if abs(out.get(int(wid), 0.0)) < 0.001]
+    if not missing:
+        return out
+    works = list(
+        db.scalars(select(WorkForInventory).where(WorkForInventory.id.in_(missing))).all()
+    )
+    for w in works:
+        if w.scope != WorkScope.CUSTOM_ORDER:
+            continue
+        amt = money_q2(float(w.studio_profit_amount or 0))
+        if amt > 0:
+            out[int(w.id)] = amt
+            if backfill:
+                backfill_work_accruals_if_missing(db, w)
+    return out
 
 
 def _product_sale_kit_line_price_deduction(
@@ -918,6 +1026,7 @@ def sync_operational_payroll_postings(db: Session) -> None:
             ).all()
         )
         post_work_accruals(db, work.id, staff, work.created_by_user_id)
+        backfill_work_accruals_if_missing(db, work)
 
     for exp in db.scalars(select(StudioExpense).where(StudioExpense.is_voided.is_(False))).all():
         if not has_unreversed_studio_expense_posting(db, exp.id):
