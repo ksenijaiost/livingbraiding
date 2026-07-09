@@ -42,6 +42,9 @@ from app.payroll_fund import (
     studio_fund_balance,
     sum_ledger_amounts_by_source,
     sum_visit_ledger_by_visit_id,
+    sum_work_master_payroll_by_work_id,
+    sum_work_studio_payroll_by_work_id,
+    visit_ids_visible_to_master_clause,
 )
 from app.master_schedule import schedule_filled_until
 from app.techspec_home import collect_techspec_home_stats
@@ -132,7 +135,7 @@ def home(
             )
         )
         if current_user.role == UserRole.MASTER:
-            v_stmt = v_stmt.where(Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == current_user.id)))
+            v_stmt = v_stmt.where(visit_ids_visible_to_master_clause(current_user.id))
         visit_rows = list(db.execute(v_stmt).all())
         visit_ids = [int(vid) for vid, _ in visit_rows if vid is not None]
         for _, dt0 in visit_rows:
@@ -249,11 +252,9 @@ def home(
 
         if work_ids:
             if current_user.role == UserRole.MASTER:
-                work_master_by_id = sum_ledger_amounts_by_source(
+                work_master_by_id = sum_work_master_payroll_by_work_id(
                     db,
-                    side=PayrollFundSide.MASTER,
-                    source_kind=PayrollFundSourceKind.WORK,
-                    source_ids=work_ids,
+                    work_ids=work_ids,
                     user_id=current_user.id,
                 )
                 for wid, perf_dt, created_dt in work_rows:
@@ -264,13 +265,7 @@ def home(
                         )
 
             if show_studio:
-                work_studio_by_id = sum_ledger_amounts_by_source(
-                    db,
-                    side=PayrollFundSide.STUDIO,
-                    source_kind=PayrollFundSourceKind.WORK,
-                    source_ids=work_ids,
-                    user_id=None,
-                )
+                work_studio_by_id = sum_work_studio_payroll_by_work_id(db, work_ids=work_ids)
                 for wid, perf_dt, created_dt in work_rows:
                     dt0 = perf_dt if isinstance(perf_dt, datetime) else created_dt
                     if isinstance(dt0, datetime):
@@ -348,6 +343,8 @@ def home(
             for dt0, amt in db.execute(other_stmt).all():
                 if isinstance(dt0, datetime):
                     payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(amt or 0.0)
+
+        db.commit()
 
         period_ctx: dict[str, Any] | None = None
         if show_studio:

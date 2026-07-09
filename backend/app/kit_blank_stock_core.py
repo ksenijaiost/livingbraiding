@@ -389,6 +389,35 @@ def build_usage_breakdown_keyed(
     return {k: int(v) for k, v in dist.items() if int(v) > 0}
 
 
+def ensure_blank_stock_from_composition(
+    db: Session,
+    kit: Kit,
+    *,
+    quantities: dict[str, int] | None = None,
+) -> bool:
+    """Завести kit_blank_stock из состава, если строк ещё нет (создание комплекта мастером/админом)."""
+    if kit.id is None:
+        return False
+    if kit_inventory_is_keyed(db, int(kit.id)):
+        return False
+    comp = parse_composition_totals(kit)
+    if not comp:
+        return False
+    if int(kit.pieces_available or 0) <= 0 and int(kit.pieces_total or 0) <= 0:
+        return False
+    blank_qty = {str(k): int(v) for k, v in (quantities or comp).items() if int(v) > 0}
+    if not blank_qty:
+        return False
+    _, meta, _ = load_catalog_kit_maps(db)
+    allowed = set(composition_keys_intersection_catalog(comp, meta)) if comp else set()
+    if not allowed and comp:
+        allowed = set(comp.keys())
+    if not allowed:
+        allowed = set(blank_qty.keys())
+    replace_blank_stock_for_kit(db, kit, quantities=blank_qty, allowed_keys=allowed)
+    return True
+
+
 def require_composition_stock_rows_or_scalar_ok(db: Session, kit: Kit) -> None:
     """
     Если в составе есть ключи и на складе есть заготовки, но строк kit_blank_stock нет —
@@ -399,6 +428,10 @@ def require_composition_stock_rows_or_scalar_ok(db: Session, kit: Kit) -> None:
         return
     if int(kit.pieces_available or 0) <= 0:
         return
+    if kit_inventory_is_keyed(db, int(kit.id)):
+        return
+    ensure_blank_stock_from_composition(db, kit)
+    db.flush()
     if kit_inventory_is_keyed(db, int(kit.id)):
         return
     raise ValueError(

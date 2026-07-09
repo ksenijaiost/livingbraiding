@@ -67,6 +67,7 @@ from app.kit_blank_stock_core import (
     build_usage_breakdown_keyed,
     composition_keys_intersection_catalog,
     consume_blank_stock_for_reserve,
+    ensure_blank_stock_from_composition,
     kit_inventory_is_keyed,
     catalog_kit_key_hint_rows,
     load_catalog_kit_maps,
@@ -465,6 +466,7 @@ async def admin_kit_new_post(
         db.add(kit)
         db.flush()
         sync_kit_authors(db, kit, form)
+        ensure_blank_stock_from_composition(db, kit)
         db.commit()
         return RedirectResponse(url=f"/kits/{kit.id}?msg=created", status_code=303)
     except ValueError as exc:

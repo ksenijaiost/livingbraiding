@@ -54,6 +54,7 @@ from app.db.session import get_db
 from app.user_roles import select_users_with_role, user_has_role
 from app.kit_blank_stock_core import (
     composition_keys_intersection_catalog,
+    ensure_blank_stock_from_composition,
     infer_kit_blanks_condition_from_totals,
     load_catalog_kit_maps,
     replace_blank_stock_for_kit,
@@ -1532,6 +1533,9 @@ async def work_new_post(
             db.add(kit)
             db.flush()
             work.created_kit_id = kit.id
+            ensure_blank_stock_from_composition(
+                db, kit, quantities=inventory_totals_by_key(composition_lines)
+            )
             seen_uid: set[int] = set()
             so = 0
             for uid in kit_staff_ids:
@@ -1627,6 +1631,7 @@ async def work_new_post(
                 select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == work.id)
             ).all()
         )
+        db.flush()
         post_work_accruals(db, work.id, staff_saved, current_user.id)
         db.commit()
         if bid_for_auto_complete is not None:
