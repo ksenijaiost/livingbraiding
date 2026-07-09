@@ -34,6 +34,7 @@ from app.form_validation_log import log_user_validation_error
 from app.ui_visit_display import (
     build_service_human_display,
     build_visit_master_pay_rows,
+    build_visit_masters_lines,
     kit_usages_empty_explanation,
     ru_mix_complexity,
     ru_mix_source,
@@ -240,6 +241,7 @@ def admin_visit_detail(
     visit_closed_period = is_in_closed_payroll_period(db, visit.created_at)
     visit_super_priv = UserRole.ADMIN_SUPER in current_user.roles or UserRole.TECHSPEC in current_user.roles
     visit_master_pay_rows = build_visit_master_pay_rows(visit, db)
+    visit_masters_lines = build_visit_masters_lines(visit, db)
 
     return templates.TemplateResponse(
         "admin_visit_detail.html",
@@ -268,6 +270,7 @@ def admin_visit_detail(
             visit_closed_period=visit_closed_period,
             visit_super_priv=visit_super_priv,
             visit_master_pay_rows=visit_master_pay_rows,
+            visit_masters_lines=visit_masters_lines,
         ),
     )
 

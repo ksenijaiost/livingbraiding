@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 
 from app.db.models import VisitMastersScope
-from app.ui_visit_display import build_service_human_display, build_visit_master_pay_rows
+from app.ui_visit_display import build_service_human_display, build_visit_master_pay_rows, build_visit_masters_lines
 
 
 def test_build_service_human_display_shows_custom_correction_amount() -> None:
@@ -99,3 +99,71 @@ def test_build_visit_master_pay_rows_per_service_and_mix_bonus() -> None:
     assert by_id[2].total == 300.0
     assert by_id[2].pool_share == 200.0
     assert by_id[2].mix_bonus == 100.0
+
+
+def test_build_visit_masters_lines_per_service() -> None:
+    visit = SimpleNamespace(
+        masters_scope=VisitMastersScope.PER_SERVICE,
+        masters=[],
+        services=[
+            SimpleNamespace(
+                is_cancelled=False,
+                sort_order=0,
+                id=10,
+                masters=[
+                    SimpleNamespace(
+                        master_id=1,
+                        id=1,
+                        percent=50.0,
+                        master=SimpleNamespace(display_name="Ira", username="ira"),
+                    ),
+                    SimpleNamespace(
+                        master_id=2,
+                        id=2,
+                        percent=50.0,
+                        master=SimpleNamespace(display_name="Yulya", username="yulya"),
+                    ),
+                ],
+            ),
+            SimpleNamespace(
+                is_cancelled=False,
+                sort_order=1,
+                id=11,
+                masters=[
+                    SimpleNamespace(
+                        master_id=1,
+                        id=3,
+                        percent=100.0,
+                        master=SimpleNamespace(display_name="Ira", username="ira"),
+                    ),
+                ],
+            ),
+        ],
+    )
+    lines = build_visit_masters_lines(visit)
+    assert len(lines) == 2
+    assert lines[0].service_number == 1
+    assert "Ira (50%)" in lines[0].masters_text
+    assert "Yulya (50%)" in lines[0].masters_text
+    assert lines[1].service_number == 2
+    assert lines[1].masters_text == "Ira (100%)"
+
+
+def test_build_visit_masters_lines_visit_scope() -> None:
+    visit = SimpleNamespace(
+        masters_scope=VisitMastersScope.VISIT,
+        masters=[
+            SimpleNamespace(
+                master_id=1,
+                id=1,
+                percent=100.0,
+                master=SimpleNamespace(display_name="Ira", username="ira"),
+            ),
+        ],
+        services=[
+            SimpleNamespace(is_cancelled=False, sort_order=0, id=10, masters=[]),
+        ],
+    )
+    lines = build_visit_masters_lines(visit)
+    assert len(lines) == 1
+    assert lines[0].masters_text == "Ira (100%)"

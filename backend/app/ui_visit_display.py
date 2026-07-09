@@ -396,3 +396,50 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
             )
         )
     return rows
+
+
+@dataclass(frozen=True)
+class VisitServiceMastersLine:
+    service_number: int
+    masters_text: str
+
+
+def _format_master_percent(pct: float) -> str:
+    p = float(pct or 0)
+    if abs(p - round(p)) < 1e-9:
+        return str(int(round(p)))
+    s = f"{p:.2f}".rstrip("0").rstrip(".")
+    return s
+
+
+def build_visit_masters_lines(visit: Visit, db: Session | None = None) -> list[VisitServiceMastersLine]:
+    """Строки «номер услуги — мастер (доля %)» для карточки визита."""
+    active = sorted(
+        [vs for vs in (visit.services or []) if not vs.is_cancelled],
+        key=lambda s: (int(s.sort_order or 0), int(s.id or 0)),
+    )
+
+    def format_master_rows(master_rows: list) -> str:
+        parts: list[str] = []
+        for m in sorted(master_rows, key=lambda x: (int(x.master_id or 0), int(getattr(x, "id", 0) or 0))):
+            name = _master_display_name(getattr(m, "master", None), int(m.master_id), db)
+            parts.append(f"{name} ({_format_master_percent(float(m.percent or 0))}%)")
+        return ", ".join(parts)
+
+    lines: list[VisitServiceMastersLine] = []
+    if active:
+        for idx, vs in enumerate(active, start=1):
+            if visit.masters_scope == VisitMastersScope.PER_SERVICE:
+                master_rows = list(vs.masters or [])
+            else:
+                master_rows = list(visit.masters or [])
+            text = format_master_rows(master_rows)
+            if text:
+                lines.append(VisitServiceMastersLine(service_number=idx, masters_text=text))
+        return lines
+
+    if visit.masters:
+        text = format_master_rows(list(visit.masters))
+        if text:
+            lines.append(VisitServiceMastersLine(service_number=1, masters_text=text))
+    return lines
