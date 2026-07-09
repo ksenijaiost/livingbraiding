@@ -1402,6 +1402,7 @@ def update_visit_with_services(
                 select(VisitServiceMaster).where(VisitServiceMaster.visit_service_id == vs.id)
             ).all():
                 db.delete(vsm)
+            db.flush()
 
             computed = compute_visit_service_line(
                 db,
