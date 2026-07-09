@@ -5,9 +5,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
-from app.db.models import MixComplexity, MixSource, Visit, VisitClientType, VisitPriceType, VisitService
+from sqlalchemy.orm import Session
+
+from app.db.models import MixComplexity, MixSource, User, Visit, VisitClientType, VisitMastersScope, VisitPriceType, VisitService
+from app.payroll_fund import money_q2
 
 
 def ru_client_type(ct: VisitClientType | str) -> str:
@@ -309,3 +313,86 @@ def visit_services_catalog_line(visit: Visit) -> str:
     return "; ".join(
         f"{vs.category_name} / {vs.subcategory_name} / {vs.service_name}" for vs in svcs
     )
+
+
+@dataclass(frozen=True)
+class VisitMasterPayRow:
+    master_id: int
+    master_name: str
+    pool_share: float
+    mix_bonus: float
+    total: float
+
+
+def _master_display_name(user: User | None, master_id: int, db: Session | None) -> str:
+    if user is not None:
+        label = (user.display_name or user.username or "").strip()
+        if label:
+            return label
+    if db is not None:
+        u = db.get(User, master_id)
+        if u is not None:
+            label = (u.display_name or u.username or "").strip()
+            if label:
+                return label
+    return f"ID {master_id}"
+
+
+def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list[VisitMasterPayRow]:
+    """ЗП каждого мастера по визиту: доля пула + бонус за смешку (как в payroll_fund)."""
+    active_services = [vs for vs in (visit.services or []) if not vs.is_cancelled]
+    pool_by_master: dict[int, float] = {}
+    bonus_by_master: dict[int, float] = {}
+    names: dict[int, str] = {}
+
+    def add_pool(mid: int, amount: float, user: User | None) -> None:
+        if amount <= 0:
+            return
+        pool_by_master[mid] = money_q2(pool_by_master.get(mid, 0.0) + amount)
+        names.setdefault(mid, _master_display_name(user, mid, db))
+
+    def add_bonus(mid: int, amount: float, user: User | None = None) -> None:
+        if amount <= 0:
+            return
+        bonus_by_master[mid] = money_q2(bonus_by_master.get(mid, 0.0) + amount)
+        names.setdefault(mid, _master_display_name(user, mid, db))
+
+    if active_services:
+        for vs in active_services:
+            pool = float(vs.masters_pool or 0)
+            if visit.masters_scope == VisitMastersScope.PER_SERVICE:
+                master_rows = vs.masters or []
+            else:
+                master_rows = visit.masters or []
+            for m in master_rows:
+                mid = int(m.master_id)
+                share = money_q2(pool * float(m.percent or 0) / 100.0)
+                add_pool(mid, share, getattr(m, "master", None))
+            if vs.mix_bonus_master_id and float(vs.mix_bonus_amount or 0) > 0:
+                mid = int(vs.mix_bonus_master_id)
+                add_bonus(mid, float(vs.mix_bonus_amount or 0))
+    else:
+        pool = float(visit.masters_pool or 0)
+        for m in visit.masters or []:
+            mid = int(m.master_id)
+            share = money_q2(pool * float(m.percent or 0) / 100.0)
+            add_pool(mid, share, getattr(m, "master", None))
+        if visit.mix_bonus_master_id and float(visit.mix_bonus_amount or 0) > 0:
+            mid = int(visit.mix_bonus_master_id)
+            add_bonus(mid, float(visit.mix_bonus_amount or 0))
+
+    master_ids = sorted(set(pool_by_master) | set(bonus_by_master))
+    rows: list[VisitMasterPayRow] = []
+    for mid in master_ids:
+        pool_share = pool_by_master.get(mid, 0.0)
+        mix_bonus = bonus_by_master.get(mid, 0.0)
+        rows.append(
+            VisitMasterPayRow(
+                master_id=mid,
+                master_name=names.get(mid, _master_display_name(None, mid, db)),
+                pool_share=pool_share,
+                mix_bonus=mix_bonus,
+                total=money_q2(pool_share + mix_bonus),
+            )
+        )
+    return rows

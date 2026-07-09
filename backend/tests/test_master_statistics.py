@@ -159,6 +159,74 @@ def test_build_master_statistics_visit_and_fund(memory_db) -> None:
     assert stats.visits[0].payment_display == "нал"
     assert stats.visits[0].discount_display == "5"
     assert stats.visits[0].master_payroll > 0
+    assert stats.visits[0].masters_pay_total == stats.visits[0].master_payroll
     assert stats.payroll_accrued >= 100.0
     assert stats.payouts_total == 50.0
     assert stats.fund_balance_end == stats.fund_balance_start + stats.payroll_accrued - stats.payouts_total
+
+
+def test_visit_statistics_splits_total_and_selected_master_pay(memory_db) -> None:
+    db = memory_db
+    master_id, svc_id, client_id = _seed_master(db)
+    master_b = User(
+        username="m2",
+        password_hash="x",
+        display_name="Мастер 2",
+        role=UserRole.MASTER,
+        is_active=True,
+    )
+    db.add(master_b)
+    db.flush()
+    db.add(UserRoleAssignment(user_id=master_b.id, role=UserRole.MASTER))
+    performed = date.today()
+
+    save_visit_with_services(
+        db,
+        master_id,
+        MultiServiceVisitInput(
+            header=VisitHeaderInput(
+                client_mode="existing",
+                existing_client_id=client_id,
+                draft_name="",
+                draft_phone="",
+                draft_telegram="",
+                draft_vk="",
+                draft_instagram="",
+                draft_other_contact="",
+                client_type=VisitClientType.RETURNING,
+                performed_date=performed,
+                duration_minutes=60,
+                masters_scope=VisitMastersScope.VISIT,
+                same_master_shares_all_services=False,
+                visit_master_allocations=[(master_id, 50), (master_b.id, 50)],
+            ),
+            lines=[
+                VisitServiceLineInput(
+                    service_id=svc_id,
+                    client_discount_percent=0,
+                    amount_from_client=10000,
+                    kanekalon_grams=0,
+                    kudri_grams=0,
+                    mix_source=MixSource.NO_MIX,
+                    mix_complexity=None,
+                    mix_bonus_master_id=None,
+                    amortization_level=None,
+                    kit_kind="STOCK",
+                )
+            ],
+        ),
+    )
+    db.commit()
+
+    d0 = date.today().replace(day=1)
+    d1 = date.today()
+    stats_a = build_master_statistics(db, master_id, d0, d1)
+    stats_b = build_master_statistics(db, master_b.id, d0, d1)
+    assert stats_a is not None and stats_b is not None
+    assert len(stats_a.visits) == 1
+    row_a = stats_a.visits[0]
+    row_b = stats_b.visits[0]
+    assert row_a.masters_pay_total == row_b.masters_pay_total
+    assert row_a.masters_pay_total > row_a.master_payroll
+    assert row_a.master_payroll == row_b.master_payroll
+    assert row_a.masters_pay_total == pytest.approx(row_a.master_payroll + row_b.master_payroll)

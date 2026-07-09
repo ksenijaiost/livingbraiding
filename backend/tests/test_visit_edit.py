@@ -32,6 +32,7 @@ from app.db.models import (
     VisitMaster,
     VisitMastersScope,
     VisitService,
+    VisitServiceMaster,
 )
 from app.payroll_fund import sum_visit_ledger_by_visit_id
 from app.setting_keys import EDIT_WINDOW_DAYS
@@ -589,3 +590,79 @@ def test_update_visit_adds_second_service_without_dropping_first(memory_db):
     assert active[0].id == vs0.id
     assert float(active[0].amount_from_client or 0) == 3000.0
     assert float(active[1].amount_from_client or 0) == 2000.0
+
+
+def test_update_per_service_masters_replaces_existing_rows(memory_db):
+    """Повторное сохранение PER_SERVICE не должно дублировать visit_service_masters."""
+    db = memory_db
+    master_a, master_b, _admin, svc_ids = _seed_users_and_services(db)
+    client = db.scalar(select(Client).limit(1))
+
+    header = VisitHeaderInput(
+        client_mode="existing",
+        existing_client_id=client.id,
+        draft_name="",
+        draft_phone="",
+        draft_telegram="",
+        draft_vk="",
+        draft_instagram="",
+        draft_other_contact="",
+        client_type=VisitClientType.RETURNING,
+        performed_date=datetime.utcnow().date(),
+        duration_minutes=60,
+        masters_scope=VisitMastersScope.PER_SERVICE,
+        same_master_shares_all_services=False,
+        visit_master_allocations=[],
+    )
+    line = VisitServiceLineInput(
+        service_id=svc_ids[0],
+        amount_from_client=3000.0,
+        client_discount_percent=0,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_source=MixSource.NO_MIX,
+        mix_complexity=None,
+        mix_bonus_master_id=None,
+        amortization_level=None,
+        kit_kind="STOCK",
+        service_master_allocations=[(master_a.id, 100)],
+    )
+    visit = save_visit_with_services(db, master_a.id, MultiServiceVisitInput(header=header, lines=[line]))
+    vs = db.scalar(select(VisitService).where(VisitService.visit_id == visit.id))
+    assert vs is not None
+
+    update_visit_with_services(
+        db,
+        visit.id,
+        master_a.id,
+        MultiServiceVisitInput(
+            header=header,
+            lines=[
+                VisitServiceLineInput(
+                    service_id=svc_ids[0],
+                    amount_from_client=3000.0,
+                    client_discount_percent=0,
+                    kanekalon_grams=0,
+                    kudri_grams=0,
+                    mix_source=MixSource.NO_MIX,
+                    mix_complexity=None,
+                    mix_bonus_master_id=None,
+                    amortization_level=None,
+                    kit_kind="STOCK",
+                    visit_service_id=vs.id,
+                    service_master_allocations=[(master_a.id, 50), (master_b.id, 50)],
+                ),
+            ],
+        ),
+    )
+
+    masters = db.scalars(
+        select(VisitServiceMaster)
+        .where(VisitServiceMaster.visit_service_id == vs.id)
+        .order_by(VisitServiceMaster.master_id.asc())
+    ).all()
+    assert len(masters) == 2
+    assert [(int(m.master_id), int(m.percent or 0)) for m in masters] == [
+        (master_a.id, 50),
+        (master_b.id, 50),
+    ]

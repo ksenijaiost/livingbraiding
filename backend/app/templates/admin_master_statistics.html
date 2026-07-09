@@ -141,7 +141,8 @@
                 <th>От клиента</th>
                 <th>Скидка, %</th>
                 <th>Себестоимость</th>
-                <th>ЗП мастера</th>
+                <th>Сумма ЗП мастеров</th>
+                <th>ЗП выбранного мастера</th>
                 <th>ЗП студии</th>
               </tr>
             </thead>
@@ -160,6 +161,7 @@
                   </td>
                   <td>{{ row.discount_display }}</td>
                   <td>{{ "%.2f"|format(row.cost_total) }}</td>
+                  <td>{{ "%.2f"|format(row.masters_pay_total) }}</td>
                   <td>{{ "%.2f"|format(row.master_payroll) }}</td>
                   <td>{{ "%.2f"|format(row.studio_payroll) }}</td>
                 </tr>

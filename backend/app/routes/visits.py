@@ -33,6 +33,7 @@ from app.forms_parse import parse_bool, parse_int
 from app.form_validation_log import log_user_validation_error
 from app.ui_visit_display import (
     build_service_human_display,
+    build_visit_master_pay_rows,
     kit_usages_empty_explanation,
     ru_mix_complexity,
     ru_mix_source,
@@ -192,7 +193,9 @@ def admin_visit_detail(
         select(Visit)
         .options(
             selectinload(Visit.client),
-            selectinload(Visit.services),
+            selectinload(Visit.services)
+            .selectinload(VisitService.masters)
+            .selectinload(VisitServiceMaster.master),
             selectinload(Visit.kit_usages).selectinload(VisitKitUsage.kit),
             selectinload(Visit.masters).selectinload(VisitMaster.master),
         )
@@ -236,6 +239,7 @@ def admin_visit_detail(
     v_policy = visit_edit_policy(visit, current_user, db)
     visit_closed_period = is_in_closed_payroll_period(db, visit.created_at)
     visit_super_priv = UserRole.ADMIN_SUPER in current_user.roles or UserRole.TECHSPEC in current_user.roles
+    visit_master_pay_rows = build_visit_master_pay_rows(visit, db)
 
     return templates.TemplateResponse(
         "admin_visit_detail.html",
@@ -263,6 +267,7 @@ def admin_visit_detail(
             visit_client_change_confirm_required=False,
             visit_closed_period=visit_closed_period,
             visit_super_priv=visit_super_priv,
+            visit_master_pay_rows=visit_master_pay_rows,
         ),
     )
 
