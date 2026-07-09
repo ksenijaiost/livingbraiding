@@ -134,13 +134,13 @@ def api_master_schedule_month(
 @router.get("/api/schedule/month")
 def api_schedule_month_stats(
     m: str,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     """Статистика для админ-календаря в брони: working мастера + брони на день."""
     from sqlalchemy import func
 
-    from app.db.models import Booking, BookingKind, BookingStatus
+    from app.db.models import Booking, BookingKind, BookingStatus, WorkPlan, WorkPlanStatus
     from app.display_time import get_display_timezone
     from zoneinfo import ZoneInfo
 
@@ -163,6 +163,22 @@ def api_schedule_month_stats(
     )
     bookings_by_day: dict[date, int] = {}
     for (dt0,) in booking_rows:
+        if not isinstance(dt0, datetime):
+            continue
+        d0 = dt0.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz).date()
+        bookings_by_day[d0] = int(bookings_by_day.get(d0, 0) + 1)
+
+    wp_stmt = (
+        select(WorkPlan.planned_date)
+        .where(
+            WorkPlan.status == WorkPlanStatus.PLANNED,
+            WorkPlan.planned_date >= start_utc,
+            WorkPlan.planned_date < end_utc,
+        )
+    )
+    if current_user.role == UserRole.MASTER:
+        wp_stmt = wp_stmt.where(WorkPlan.master_id == current_user.id)
+    for (dt0,) in db.execute(wp_stmt).all():
         if not isinstance(dt0, datetime):
             continue
         d0 = dt0.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz).date()

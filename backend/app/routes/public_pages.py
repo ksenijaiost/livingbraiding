@@ -192,6 +192,22 @@ def home(
             if isinstance(dt0, datetime):
                 bookings_by_day[_utc_naive_to_local_date(dt0)] += 1
 
+        from app.db.models import WorkPlan, WorkPlanStatus
+
+        wp_stmt = (
+            select(WorkPlan.planned_date)
+            .where(
+                WorkPlan.status == WorkPlanStatus.PLANNED,
+                WorkPlan.planned_date >= month_start_utc,
+                WorkPlan.planned_date < month_end_utc,
+            )
+        )
+        if current_user.role == UserRole.MASTER:
+            wp_stmt = wp_stmt.where(WorkPlan.master_id == current_user.id)
+        for (dt0,) in db.execute(wp_stmt).all():
+            if isinstance(dt0, datetime):
+                bookings_by_day[_utc_naive_to_local_date(dt0)] += 1
+
         from app.visit_draft import draft_counts_by_day
 
         month_end_date = next_month_local_start.date()

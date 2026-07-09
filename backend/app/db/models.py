@@ -1125,6 +1125,7 @@ class WorkForInventory(Base):
     )
 
     booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True)
+    work_plan_id: Mapped[int | None] = mapped_column(ForeignKey("work_plans.id"), nullable=True)
     client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
     amount_from_client: Mapped[int | None] = mapped_column(Integer, nullable=True)
     client_payment_kind: Mapped[ClientPaymentKind | None] = mapped_column(
@@ -1157,6 +1158,7 @@ class WorkForInventory(Base):
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
     voided_by_user: Mapped["User | None"] = relationship(foreign_keys=[voided_by_user_id])
     booking: Mapped["Booking | None"] = relationship(foreign_keys=[booking_id])
+    work_plan: Mapped["WorkPlan | None"] = relationship(foreign_keys=[work_plan_id])
     client: Mapped["Client | None"] = relationship()
     created_kit: Mapped["Kit | None"] = relationship(foreign_keys=[created_kit_id])
     staff_rows: Mapped[list["WorkForInventoryStaff"]] = relationship(
@@ -1756,3 +1758,56 @@ class VisitKitUsage(Base):
     visit: Mapped[Visit] = relationship(back_populates="kit_usages")
     visit_service: Mapped["VisitService | None"] = relationship(back_populates="kit_usages")
     kit: Mapped[Kit] = relationship()
+
+
+class WorkPlanType(str, enum.Enum):
+    WORK_PRODUCT = "WORK_PRODUCT"
+    HOURLY = "HOURLY"
+
+
+class WorkPlanStatus(str, enum.Enum):
+    PLANNED = "PLANNED"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class WorkPlan(Base):
+    """План работы (без клиента): будущая работа с товаром или почасовая."""
+
+    __tablename__ = "work_plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    planned_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+
+    master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    plan_type: Mapped[WorkPlanType] = mapped_column(
+        Enum(WorkPlanType, native_enum=False, length=24),
+        nullable=False,
+        default=WorkPlanType.WORK_PRODUCT,
+    )
+    work_kind: Mapped[WorkKind | None] = mapped_column(
+        Enum(WorkKind, native_enum=False, length=32),
+        nullable=True,
+    )
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    status: Mapped[WorkPlanStatus] = mapped_column(
+        Enum(WorkPlanStatus, native_enum=False, length=16),
+        nullable=False,
+        default=WorkPlanStatus.PLANNED,
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    cancelled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    master: Mapped["User"] = relationship(foreign_keys=[master_id])
+    cancelled_by_user: Mapped["User | None"] = relationship(foreign_keys=[cancelled_by_user_id])

@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card lb-card-max-980">
+    <p class="muted" style="margin-top:0;"><a href="/work-plans">← План работ</a></p>
+    <h2 style="margin-top:0;">Запланировать работу</h2>
+
+    <div class="card" style="margin: 12px 0; background:#f8fafc;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div>
+          <div class="muted" style="font-size:12px;">График мастеров (месяц)</div>
+          <div id="lbWpSchedMonthLabel" style="font-weight:700;">—</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="secondary" onclick="window.lbWpSchedShift(-1)">←</button>
+          <button type="button" class="secondary" onclick="window.lbWpSchedShift(1)">→</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto; margin-top:10px;">
+        <table style="table-layout:fixed; width:100%;">
+          <thead>
+            <tr>
+              <th style="width:14.28%;">Пн</th><th style="width:14.28%;">Вт</th><th style="width:14.28%;">Ср</th>
+              <th style="width:14.28%;">Чт</th><th style="width:14.28%;">Пт</th><th style="width:14.28%;">Сб</th><th style="width:14.28%;">Вс</th>
+            </tr>
+          </thead>
+          <tbody id="lbWpSchedTbody">
+            <tr><td colspan="7" class="muted" style="padding:10px;">Загрузка…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="muted" style="margin-top:8px; font-size:12px;">Клик по дню — занятость. Планы работ учитываются в бронях.</div>
+    </div>
+
+    {% if error %}
+      <p style="background:#fee2e2;border:1px solid #fecaca;color:#991b1b;padding:10px 12px;border-radius:8px;">{{ error }}</p>
+    {% endif %}
+
+    <form method="post" action="/work-plans/new" id="wp_form">
+      <div class="row" style="align-items:flex-end;">
+        <div>
+          <label for="planned_date">Дата *</label>
+          <input type="date" name="planned_date" id="planned_date" required value="{{ fp.get('planned_date','') }}" />
+        </div>
+        <div>
+          <label for="planned_time">Время начала *</label>
+          <input type="time" name="planned_time" id="planned_time" step="60" required value="{{ fp.get('planned_time','') }}" />
+        </div>
+        <div>
+          <label>Длительность *</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="number" name="duration_h" min="0" step="1" style="width:4rem;" value="{{ fp.get('duration_h','1') }}" />
+            <span class="muted">ч</span>
+            <input type="number" name="duration_m" min="0" max="59" step="1" style="width:4rem;" value="{{ fp.get('duration_m','0') }}" />
+            <span class="muted">мин</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px; background:#f8fafc;">
+        <div style="font-weight:600; margin-bottom:8px;">Мастер *</div>
+        {% if is_admin %}
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            {% for m in masters %}
+              <label style="display:flex; align-items:center; gap:8px;">
+                <input type="radio" name="master_id" value="{{ m.id }}" class="wp-master-radio"
+                  {% if fp.get('master_id')|string == m.id|string %}checked{% endif %} />
+                <span>{{ m.display_name or m.username }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        {% else %}
+          <input type="hidden" name="master_id" id="wp_master_id" value="{{ fp.get('master_id', current_user.id) }}" />
+          <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+            <input type="checkbox" name="pick_other_master" value="1" id="pick_other_master"
+              {% if fp.get('pick_other_master') == '1' %}checked{% endif %} />
+            <span>Выбрать другого мастера</span>
+          </label>
+          <div id="wp_self_master_note" style="margin-bottom:8px;">
+            <span class="muted">Вы: </span><strong>{{ current_user.display_name or current_user.username }}</strong>
+            <span id="wp_self_avail" class="muted" style="margin-left:8px;"></span>
+          </div>
+          <div id="wp_masters_list" style="display:none; flex-direction:column; gap:8px;">
+            {% for m in masters %}
+              <label style="display:flex; align-items:center; gap:8px;">
+                <input type="radio" name="master_id_pick" value="{{ m.id }}" class="wp-master-radio"
+                  data-master-id="{{ m.id }}"
+                  {% if fp.get('master_id')|string == m.id|string %}checked{% endif %}
+                  disabled />
+                <span>{{ m.display_name or m.username }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="card" style="margin-top:14px;">
+        <div style="font-weight:600; margin-bottom:8px;">На что план *</div>
+        <label style="display:block; margin-bottom:6px;">
+          <input type="radio" name="plan_type" value="WORK_PRODUCT" checked onchange="wpSyncPlanType()" /> Работа с товаром
+        </label>
+        <div id="wp_work_kind_wrap" style="margin:8px 0 12px 24px;">
+          <label for="work_kind">Вид работы</label>
+          <select name="work_kind" id="work_kind" style="max-width:100%; width:24rem;">
+            {% for k in kinds %}
+              <option value="{{ k.value }}" {% if fp.get('work_kind') == k.value %}selected{% endif %}>{{ k.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <label style="display:block; opacity:0.55;">
+          <input type="radio" name="plan_type" value="HOURLY" disabled onchange="wpSyncPlanType()" /> Почасовая работа
+          <span class="muted" style="font-size:12px;"> — в разработке, будет добавлено позже</span>
+        </label>
+      </div>
+
+      <div style="margin-top:14px;">
+        <label for="comment">Комментарий</label>
+        <textarea name="comment" id="comment" rows="3" style="width:100%; box-sizing:border-box;">{{ fp.get('comment','') }}</textarea>
+      </div>
+
+      <p style="margin-top:16px;">
+        <button type="submit">Сохранить план</button>
+        <a href="/work-plans" class="secondary" style="margin-left:8px;">Отмена</a>
+      </p>
+    </form>
+  </div>
+
+  <div id="lbWpOccBackdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:1200;"></div>
+  <div id="lbWpOccModal" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:1201; background:#fff; border-radius:12px; padding:16px; max-width:96vw; max-height:90vh; overflow:auto; width:min(1100px,96vw); box-shadow:0 12px 40px rgba(0,0,0,0.2);">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+      <div><div class="muted" style="font-size:12px;">Занятость</div><h3 id="lbWpOccTitle" style="margin:0;">—</h3></div>
+      <button type="button" class="secondary" onclick="window.lbWpOccClose()">Закрыть</button>
+    </div>
+    <div id="lbWpOccBody" style="margin-top:12px;"></div>
+  </div>
+
+  <script src="/static/calendar_occupancy_grid.js"></script>
+  <script>
+    (function () {
+      function esc(s) {
+        return String(s || '').replace(/\x26/g, '\x26amp;').replace(/\x3c/g, '\x26lt;').replace(/\x3e/g, '\x3egt;').replace(/\x22/g, '\x26quot;');
+      }
+      function durationMinutes() {
+        var h = parseInt(document.querySelector('input[name="duration_h"]').value || '0') || 0;
+        var m = parseInt(document.querySelector('input[name="duration_m"]').value || '0') || 0;
+        return Math.max(1, h * 60 + m);
+      }
+      function schedParams() {
+        var d = document.getElementById('planned_date');
+        var t = document.getElementById('planned_time');
+        return { day: d ? d.value : '', time: t ? (t.value || '').slice(0, 5) : '', dur: durationMinutes() };
+      }
+      async function refreshMasters() {
+        var p = schedParams();
+        if (!p.day || !p.time) return;
+        try {
+          var res = await fetch('/api/work-plan/available-masters?d=' + encodeURIComponent(p.day) + '&t=' + encodeURIComponent(p.time) + '&duration_minutes=' + encodeURIComponent(String(p.dur)));
+          if (!res.ok) return;
+          var data = await res.json();
+          var ids = (data.available_master_ids || []).map(String);
+          document.querySelectorAll('.wp-master-radio').forEach(function (cb) {
+            var id = String(cb.value || cb.getAttribute('data-master-id') || '');
+            var ok = ids.indexOf(id) >= 0;
+            cb.disabled = !ok;
+            var lbl = cb.closest('label');
+            if (lbl) lbl.style.opacity = ok ? '1' : '0.45';
+          });
+        } catch (e) { console.error(e); }
+      }
+      async function refreshSelfAvail() {
+        var el = document.getElementById('wp_self_avail');
+        var pick = document.getElementById('pick_other_master');
+        if (!el || (pick && pick.checked)) return;
+        var p = schedParams();
+        var mid = document.getElementById('wp_master_id');
+        if (!p.day || !p.time || !mid) return;
+        try {
+          var res = await fetch('/api/work-plan/master-availability?d=' + encodeURIComponent(p.day) + '&t=' + encodeURIComponent(p.time) + '&master_id=' + encodeURIComponent(mid.value) + '&duration_minutes=' + encodeURIComponent(String(p.dur)));
+          var data = await res.json();
+          el.textContent = data.available ? 'время доступно' : 'время не доступно';
+          el.style.color = data.available ? '#047857' : '#b91c1c';
+        } catch (e) { el.textContent = ''; }
+      }
+      function wpSyncMasterUi() {
+        var pick = document.getElementById('pick_other_master');
+        var list = document.getElementById('wp_masters_list');
+        var note = document.getElementById('wp_self_master_note');
+        var hidden = document.getElementById('wp_master_id');
+        if (!pick || !list) return;
+        var on = pick.checked;
+        list.style.display = on ? 'flex' : 'none';
+        if (note) note.style.display = on ? 'none' : 'block';
+        if (on) {
+          list.querySelectorAll('input[name="master_id_pick"]').forEach(function (r) { r.disabled = false; r.name = 'master_id'; });
+          if (hidden) hidden.name = 'master_id_unused';
+        } else {
+          list.querySelectorAll('input[name="master_id"]').forEach(function (r) { r.disabled = true; r.name = 'master_id_pick'; });
+          if (hidden) { hidden.name = 'master_id'; hidden.value = '{{ current_user.id }}'; }
+        }
+        refreshMasters();
+        refreshSelfAvail();
+      }
+      window.wpSyncPlanType = function () {};
+      var pick = document.getElementById('pick_other_master');
+      if (pick) pick.addEventListener('change', wpSyncMasterUi);
+      ['planned_date', 'planned_time', 'duration_h', 'duration_m'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', function () { refreshMasters(); refreshSelfAvail(); });
+        if (el) el.addEventListener('input', function () { refreshMasters(); refreshSelfAvail(); });
+      });
+      wpSyncMasterUi();
+
+      // Month calendar (reuse booking schedule API)
+      function ymFromDate(dt) { return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0'); }
+      function addMonths(ym, delta) {
+        var dt = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1);
+        dt.setMonth(dt.getMonth() + delta);
+        return ymFromDate(dt);
+      }
+      function isoFromYMD(y, m0, d) { return y + '-' + String(m0 + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
+      var plannedDate = document.getElementById('planned_date');
+      var baseIso = (plannedDate && plannedDate.value) ? plannedDate.value : isoFromYMD(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+      var curYm = ymFromDate(new Date(baseIso + 'T00:00:00'));
+      var label = document.getElementById('lbWpSchedMonthLabel');
+      var tbody = document.getElementById('lbWpSchedTbody');
+      window.lbWpOccClose = function () {
+        document.getElementById('lbWpOccBackdrop').style.display = 'none';
+        document.getElementById('lbWpOccModal').style.display = 'none';
+        document.body.style.overflow = '';
+      };
+      window.lbWpOccOpen = async function (isoDay) {
+        var bd = document.getElementById('lbWpOccBackdrop');
+        var md = document.getElementById('lbWpOccModal');
+        document.getElementById('lbWpOccTitle').textContent = isoDay;
+        document.getElementById('lbWpOccBody').innerHTML = '<div class="muted">Загрузка…</div>';
+        bd.style.display = 'block'; md.style.display = 'block';
+        document.body.style.overflow = 'hidden';
+        try {
+          var res = await fetch('/api/calendar/day?d=' + encodeURIComponent(isoDay) + '&view=occupancy');
+          var data = await res.json();
+          var rendered = window.lbRenderOccupancyGrid(data.occupancy || {}, esc);
+          document.getElementById('lbWpOccBody').innerHTML = rendered.empty ? '<div class="muted">Нет данных.</div>' : rendered.html;
+        } catch (e) {
+          document.getElementById('lbWpOccBody').innerHTML = '<div class="muted">Ошибка загрузки.</div>';
+        }
+      };
+      function renderMonth(days) {
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        if (label) label.textContent = curYm;
+        var year = Number(curYm.slice(0, 4));
+        var monthIndex = Number(curYm.slice(5, 7)) - 1;
+        var firstWeekday = (new Date(year, monthIndex, 1).getDay() + 6) % 7;
+        var daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+        var dayMap = {};
+        (days || []).forEach(function (d) { dayMap[d.date] = d; });
+        var totalCells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+        for (var cell = 0; cell < totalCells; cell++) {
+          if (cell % 7 === 0) tbody.appendChild(document.createElement('tr'));
+          var td = document.createElement('td');
+          td.style.verticalAlign = 'top'; td.style.padding = '8px 10px'; td.style.border = '1px solid #f1f5f9';
+          var dayNum = cell - firstWeekday + 1;
+          if (dayNum < 1 || dayNum > daysInMonth) { td.style.opacity = '0.45'; td.innerHTML = '<div style="height:40px;"></div>'; }
+          else {
+            var iso = isoFromYMD(year, monthIndex, dayNum);
+            var it = dayMap[iso] || {};
+            td.style.cursor = 'pointer';
+            td.innerHTML = '<div style="font-weight:700;">' + dayNum + '</div><div class="muted" style="font-size:12px;margin-top:6px;">Брони: <strong>' + esc(it.bookings || 0) + '</strong></div>';
+            td.addEventListener('click', function (isoDay) { return function () {
+              if (plannedDate) plannedDate.value = isoDay;
+              refreshMasters(); refreshSelfAvail();
+              window.lbWpOccOpen(isoDay);
+            }; }(iso));
+          }
+          tbody.lastChild.appendChild(td);
+        }
+      }
+      async function loadMonth() {
+        try {
+          var res = await fetch('/api/schedule/month?m=' + encodeURIComponent(curYm));
+          var data = await res.json();
+          renderMonth(data.days || []);
+        } catch (e) { if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="muted">Ошибка</td></tr>'; }
+      }
+      window.lbWpSchedShift = function (delta) { curYm = addMonths(curYm, delta); loadMonth(); };
+      loadMonth();
+    })();
+  </script>
+{% endblock %}

@@ -20,6 +20,8 @@ from app.db.models import (
     ServiceSubcategory,
     User,
     UserRole,
+    WorkPlan,
+    WorkPlanStatus,
 )
 from app.display_time import get_display_timezone
 from app.planned_service_time import planned_start_local_datetime
@@ -44,7 +46,6 @@ def occupancy_color_for_status(status: BookingStatus | str) -> str:
 
 @dataclass(frozen=True)
 class OccupancySegment:
-    booking_id: int
     master_id: int
     start_minutes: int
     end_minutes: int
@@ -53,10 +54,11 @@ class OccupancySegment:
     url: str
     client_name: str
     service_label: str
+    booking_id: int | None = None
+    work_plan_id: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "booking_id": self.booking_id,
+        out: dict[str, Any] = {
             "master_id": self.master_id,
             "start_minutes": self.start_minutes,
             "end_minutes": self.end_minutes,
@@ -66,6 +68,11 @@ class OccupancySegment:
             "client_name": self.client_name,
             "service_label": self.service_label,
         }
+        if self.booking_id is not None:
+            out["booking_id"] = self.booking_id
+        if self.work_plan_id is not None:
+            out["work_plan_id"] = self.work_plan_id
+        return out
 
 
 @dataclass(frozen=True)
@@ -152,6 +159,7 @@ def build_occupancy_for_day(
     hour_from: int,
     hour_to: int,
     bookings: list[Booking] | None = None,
+    exclude_work_plan_id: int | None = None,
 ) -> dict[str, Any]:
     tz = get_display_timezone(db)
     day_start_utc = datetime.combine(day, datetime.min.time())
@@ -288,6 +296,40 @@ def build_occupancy_for_day(
                     service_label=_segment_service_label(b, svc),
                 )
             )
+
+    from app.work_plan import planned_end_utc, work_plan_type_display
+
+    wp_stmt = (
+        select(WorkPlan)
+        .where(
+            WorkPlan.status == WorkPlanStatus.PLANNED,
+            WorkPlan.planned_date >= day_start_utc,
+            WorkPlan.planned_date < day_end_utc,
+        )
+        .order_by(WorkPlan.planned_date.asc(), WorkPlan.id.asc())
+    )
+    if exclude_work_plan_id:
+        wp_stmt = wp_stmt.where(WorkPlan.id != exclude_work_plan_id)
+    for wp in db.scalars(wp_stmt).all():
+        start_local = _utc_naive_to_local(wp.planned_date, tz)
+        start_m = _minutes_on_day(start_local, day)
+        end_local = _utc_naive_to_local(planned_end_utc(wp), tz)
+        end_m = _minutes_on_day(end_local, day)
+        if end_m <= grid_start or start_m >= grid_end:
+            continue
+        segments.append(
+            OccupancySegment(
+                work_plan_id=int(wp.id),
+                master_id=int(wp.master_id),
+                start_minutes=max(start_m, grid_start),
+                end_minutes=min(end_m, grid_end),
+                status=WorkPlanStatus.PLANNED.value,
+                color=COLOR_OCCUPANCY_PENDING,
+                url=f"/work-plans/{int(wp.id)}",
+                client_name="",
+                service_label=work_plan_type_display(wp),
+            )
+        )
 
     masters = list_calendar_masters(db)
     master_ids = [int(m["id"]) for m in masters]

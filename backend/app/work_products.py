@@ -100,6 +100,7 @@ from app.time_utils import utcnow_naive
 
 _WORK_NEW_FP_KEYS = frozenset({
     "booking_id",
+    "work_plan_id",
     "client_id",
     "performed_date",
     "scope",
@@ -1431,6 +1432,15 @@ async def work_new_post(
         if bid_i > 0:
             work.booking_id = bid_i
             bid_for_auto_complete = bid_i
+        wp_raw = (_g_str(form, "work_plan_id", "") or "").strip()
+        wp_id_for_complete: int | None = None
+        try:
+            wp_i = parse_int(wp_raw, min=1, field_name="work_plan_id") if wp_raw else 0
+        except ValueError:
+            wp_i = 0
+        if wp_i > 0:
+            work.work_plan_id = wp_i
+            wp_id_for_complete = wp_i
         db.add(work)
         db.flush()
 
@@ -1623,6 +1633,11 @@ async def work_new_post(
             from app.routes.bookings import try_auto_complete_booking
 
             try_auto_complete_booking(db, bid_for_auto_complete)
+            db.commit()
+        if wp_id_for_complete is not None:
+            from app.work_plan import complete_work_plan_from_work
+
+            complete_work_plan_from_work(db, wp_id_for_complete, work.id)
             db.commit()
         return RedirectResponse(url=f"/sales/work/{work.id}?msg=created", status_code=303)
     except ValueError as exc:

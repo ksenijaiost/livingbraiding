@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <p><a href="/work-plans">← План работ</a></p>
+    <h2 style="margin-top:0;">План #{{ plan.id }}</h2>
+
+    {% if msg == 'created' %}<div class="ok">План сохранён.</div>{% endif %}
+    {% if msg == 'updated' %}<div class="ok">Время плана обновлено.</div>{% endif %}
+    {% if msg == 'cancelled' %}<div class="ok">План отменён.</div>{% endif %}
+    {% if msg == 'already_closed' %}<div class="error">План уже закрыт.</div>{% endif %}
+    {% if err %}<div class="error">{{ err }}</div>{% endif %}
+
+    <table style="margin-top:12px;">
+      <tr><td class="muted" style="width:12rem;">Дата и время</td>
+        <td>
+          {% if edit_time_mode and can_edit_time %}
+            <form method="post" action="/work-plans/{{ plan.id }}/edit-time" class="row" style="align-items:flex-end; gap:12px; flex-wrap:wrap;">
+              <div><label>Дата</label><input type="date" name="planned_date" required value="{{ local_start.date().isoformat() }}" /></div>
+              <div><label>Время</label><input type="time" name="planned_time" step="60" required value="{{ local_start.strftime('%H:%M') }}" /></div>
+              <div><label>Длительность</label>
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <input type="number" name="duration_h" min="0" style="width:4rem;" value="{{ duration_h }}" />
+                  <span class="muted">ч</span>
+                  <input type="number" name="duration_m" min="0" max="59" style="width:4rem;" value="{{ duration_m }}" />
+                  <span class="muted">мин</span>
+                </div>
+              </div>
+              <div><button type="submit">Сохранить время</button></div>
+            </form>
+          {% else %}
+            <strong>{{ local_start.strftime('%d.%m.%Y %H:%M') }}</strong>
+          {% endif %}
+        </td>
+      </tr>
+      <tr><td class="muted">Окончание</td><td>{{ local_end.strftime('%d.%m.%Y %H:%M') }} <span class="muted">({{ duration_h }} ч {{ duration_m }} мин)</span></td></tr>
+      <tr><td class="muted">Мастер</td><td>{{ plan.master.display_name or plan.master.username }}</td></tr>
+      <tr><td class="muted">Тип</td><td>{{ work_plan_type_display(plan) }}</td></tr>
+      <tr><td class="muted">Комментарий</td><td>{{ plan.comment or '—' }}</td></tr>
+      <tr><td class="muted">Статус</td><td><strong>{{ work_plan_status_label(plan.status) }}</strong></td></tr>
+      <tr><td class="muted">Создание</td><td>{{ plan.created_at.strftime('%d.%m.%Y %H:%M') }} · {{ plan.created_by_user.display_name or plan.created_by_user.username }}</td></tr>
+      {% if linked_work %}
+        <tr><td class="muted">Работа</td><td><a href="/sales/work/{{ linked_work.id }}">№{{ linked_work.id }}</a></td></tr>
+      {% endif %}
+      {% if plan.cancelled_at %}
+        <tr><td class="muted">Отмена</td><td>{{ plan.cancelled_at.strftime('%d.%m.%Y %H:%M') }}{% if plan.cancelled_by_user %} · {{ plan.cancelled_by_user.display_name or plan.cancelled_by_user.username }}{% endif %}</td></tr>
+      {% endif %}
+    </table>
+
+    {% if plan.status.value == 'PLANNED' %}
+      <div style="margin-top:16px; display:flex; flex-wrap:wrap; gap:10px;">
+        <form method="post" action="/work-plans/{{ plan.id }}/cancel" onsubmit="return confirm('Отменить план?');">
+          <button type="submit" class="secondary">Отменить</button>
+        </form>
+        {% if can_create_work and work_new_url %}
+          <a href="{{ work_new_url }}"><button type="button">Создать работу</button></a>
+        {% endif %}
+        {% if can_edit_time and not edit_time_mode %}
+          <a href="/work-plans/{{ plan.id }}?edit_time=1"><button type="button" class="secondary">Редактировать время</button></a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
