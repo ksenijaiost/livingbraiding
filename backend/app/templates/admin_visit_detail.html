@@ -105,11 +105,13 @@
     {% endif %}
 
     <h4 style="margin: 16px 0 6px; font-size: 1rem;">Мастера</h4>
-    <p style="margin: 4px 0;">
-      {% for vm in visit.masters %}
-        {{ vm.master.display_name }} ({{ vm.percent|round(2) }}%){% if not loop.last %}, {% endif %}
-      {% else %}—{% endfor %}
-    </p>
+    {% if visit_masters_lines %}
+      {% for line in visit_masters_lines %}
+        <p style="margin: 4px 0;">{{ line.service_number }} — {{ line.masters_text }}</p>
+      {% endfor %}
+    {% else %}
+      <p style="margin: 4px 0;" class="muted">—</p>
+    {% endif %}
 
     <h4 style="margin: 16px 0 6px; font-size: 1rem;">Длительность</h4>
     <p style="margin: 4px 0;">{{ duration_h }} ч {{ duration_m }} мин</p>
