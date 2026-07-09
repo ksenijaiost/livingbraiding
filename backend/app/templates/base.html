@@ -231,6 +231,7 @@
               <summary>Товары</summary>
               <div class="dd">
                 <a href="/sales/products">Продажа товаров</a>
+                <a href="/work-plans">План работ</a>
                 <a href="/sales/work">Работа с товарами</a>
                 {% if current_user.role.value == "MASTER" %}
                   <a href="/sales/work/new">Новая работа</a>
@@ -335,6 +336,7 @@
         <details>
           <summary><strong>Товары</strong></summary>
           <a class="md-link" href="/sales/products" onclick="window.lbToggleMobileNav(false)">Продажа товаров</a>
+          <a class="md-link" href="/work-plans" onclick="window.lbToggleMobileNav(false)">План работ</a>
           <a class="md-link" href="/sales/work" onclick="window.lbToggleMobileNav(false)">Работа с товарами</a>
           {% if current_user.role.value == "MASTER" %}
             <a class="md-link" href="/sales/work/new" onclick="window.lbToggleMobileNav(false)">Новая работа</a>

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <div class="lb-flex-between-center">
+      <h2 class="lb-mt-0">План работ</h2>
+      <a href="/work-plans/new"><button type="button">Запланировать</button></a>
+    </div>
+
+    {% set _show = 'all' if show_mode == 'all' else 'active' %}
+    {% set _mine = '1' if mine_only else '0' %}
+    {% set _sort = 'desc' if sort_date_mode == 'desc' else 'asc' %}
+    {% set _q_suffix = ('&q=' ~ (list_search_q|urlencode)) if list_search_q else '' %}
+    <p style="margin:12px 0 14px;font-size:13px;">
+      {% if _show == 'active' %}
+        <strong>Только активные</strong>
+        <span class="muted">·</span>
+        <a href="/work-plans?show=all&mine={{ _mine }}&sort_date={{ _sort }}{{ _q_suffix }}">Все планы</a>
+      {% else %}
+        <strong>Все планы</strong>
+        <span class="muted">·</span>
+        <a href="/work-plans?show=active&mine={{ _mine }}&sort_date={{ _sort }}{{ _q_suffix }}">Только активные</a>
+      {% endif %}
+      <span class="muted" style="margin:0 6px;">·</span><span class="muted">|</span><span class="muted" style="margin:0 6px;">·</span>
+      {% if _mine == '1' %}
+        <strong>Мои</strong>
+        <span class="muted">·</span>
+        <a href="/work-plans?show={{ _show }}&mine=0&sort_date={{ _sort }}{{ _q_suffix }}">Все</a>
+      {% else %}
+        <strong>Все</strong>
+        <span class="muted">·</span>
+        <a href="/work-plans?show={{ _show }}&mine=1&sort_date={{ _sort }}{{ _q_suffix }}">Мои</a>
+      {% endif %}
+      <span class="muted" style="margin:0 6px;">·</span><span class="muted">|</span><span class="muted" style="margin:0 6px;">·</span>
+      {% if _sort == 'asc' %}
+        <strong>Дата ↑</strong>
+        <span class="muted">·</span>
+        <a href="/work-plans?show={{ _show }}&mine={{ _mine }}&sort_date=desc{{ _q_suffix }}">Дата ↓</a>
+      {% else %}
+        <strong>Дата ↓</strong>
+        <span class="muted">·</span>
+        <a href="/work-plans?show={{ _show }}&mine={{ _mine }}&sort_date=asc{{ _q_suffix }}">Дата ↑</a>
+      {% endif %}
+    </p>
+
+    {% with search_action='/work-plans', list_search_q=list_search_q, search_clear_url='/work-plans?show=' ~ _show ~ '&mine=' ~ _mine ~ '&sort_date=' ~ _sort, search_input_id='work_plans_search_q', search_hidden_fields=[{'name':'show','value':_show},{'name':'mine','value':_mine},{'name':'sort_date','value':_sort}] %}
+      {% include "partials/list_id_search_form.html" %}
+    {% endwith %}
+
+    {% if not rows %}
+      <p class="muted">{% if search_id is not none %}План №{{ search_id }} не найден{% if mine_only %} среди ваших{% endif %}.{% else %}Пока нет планов работ.{% endif %}</p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Дата</th>
+            <th>Тип</th>
+            <th>Мастер</th>
+            <th>Статус</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in rows %}
+            <tr>
+              <td><a href="/work-plans/{{ p.id }}">#{{ p.id }}</a></td>
+              <td style="font-size:13px; line-height:1.35;">
+                <a href="/work-plans/{{ p.id }}">
+                  <span style="display:block;">{{ format_naive_utc_datetime(p.planned_date, display_tz, '%d.%m.%Y') }}</span>
+                  <span class="muted" style="display:block;">{{ format_naive_utc_datetime(p.planned_date, display_tz, '%H:%M') }}</span>
+                </a>
+              </td>
+              <td>{{ work_plan_type_display(p) }}</td>
+              <td>{{ p.master.display_name or p.master.username }}</td>
+              <td><strong>{{ work_plan_status_label(p.status) }}</strong></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+{% endblock %}

@@ -14,6 +14,7 @@
 
     <form method="post" action="/sales/work/new" id="work_products_form">
       <input type="hidden" name="booking_id" value="{{ fp.booking_id or '' }}" />
+      <input type="hidden" name="work_plan_id" value="{{ fp.work_plan_id or '' }}" />
       <div class="row">
         <div>
           <label>Режим</label>

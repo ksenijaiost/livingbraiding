@@ -84,6 +84,13 @@
     var cBlock = occColors.block || '#cfcfcf';
 
     function occupancySegTitle(seg) {
+      if (seg.work_plan_id) {
+        var planParts = ['План #' + String(seg.work_plan_id || '')];
+        var planTr = occTimeRange(seg);
+        if (planTr) planParts.push(planTr);
+        if (seg.service_label) planParts.push(String(seg.service_label));
+        return planParts.join(' · ');
+      }
       var parts = ['Бронь #' + String(seg.booking_id || '')];
       var tr = occTimeRange(seg);
       if (tr) parts.push(tr);
@@ -95,6 +102,17 @@
     function occupancySegBody(seg) {
       var timeR = occTimeRange(seg);
       var h = '<div style="line-height:1.3;">';
+      if (seg.work_plan_id) {
+        h += '<div style="font-weight:700;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">';
+        h += 'План #' + esc(seg.work_plan_id);
+        if (timeR) h += ' <span style="font-weight:600;opacity:0.88;">' + esc(timeR) + '</span>';
+        h += '</div>';
+        if (seg.service_label) {
+          h += '<div style="font-size:9px;opacity:0.92;line-height:1.2;margin-top:1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;">' + esc(seg.service_label) + '</div>';
+        }
+        h += '</div>';
+        return h;
+      }
       h += '<div style="font-weight:700;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">';
       h += '#' + esc(seg.booking_id);
       if (timeR) h += ' <span style="font-weight:600;opacity:0.88;">' + esc(timeR) + '</span>';

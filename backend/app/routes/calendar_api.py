@@ -34,6 +34,8 @@ from app.db.models import (
     WorkForInventory,
     WorkForInventoryStaff,
     WorkKind,
+    WorkPlan,
+    WorkPlanStatus,
     WorkScope,
 )
 from app.db.session import get_db
@@ -165,6 +167,39 @@ def api_calendar_day(
                 "url": f"/bookings/{int(b.id)}",
                 "payout_sum": 0.0,
                 "studio_sum": 0.0,
+            }
+        )
+
+    wp_stmt = (
+        select(WorkPlan)
+        .options(selectinload(WorkPlan.master))
+        .where(
+            WorkPlan.planned_date >= day_start,
+            WorkPlan.planned_date < day_end,
+            WorkPlan.status == WorkPlanStatus.PLANNED,
+        )
+        .order_by(WorkPlan.planned_date.asc(), WorkPlan.id.asc())
+    )
+    if is_master:
+        wp_stmt = wp_stmt.where(WorkPlan.master_id == current_user.id)
+    from app.work_plan import work_plan_status_label, work_plan_type_display
+
+    for wp in db.scalars(wp_stmt).all():
+        time_l = format_naive_utc_datetime(wp.planned_date, tz)
+        type_l = work_plan_type_display(wp)
+        booking_items.append(
+            {
+                "id": int(wp.id),
+                "client": type_l,
+                "kind": "План работ",
+                "label": f"План работ · {time_l}",
+                "service_label": type_l,
+                "status": work_plan_status_label(wp.status),
+                "time": time_l,
+                "url": f"/work-plans/{int(wp.id)}",
+                "payout_sum": 0.0,
+                "studio_sum": 0.0,
+                "is_work_plan": True,
             }
         )
 
@@ -464,4 +499,75 @@ def api_booking_available_masters(
             available.append(mid)
 
     return JSONResponse({"available_master_ids": available})
+
+
+@router.get("/api/work-plan/available-masters")
+def api_work_plan_available_masters(
+    d: str,
+    t: str,
+    duration_minutes: int = Query(60),
+    exclude_plan_id: int | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    from app.work_plan import is_master_available_for_work_plan, list_masters_for_work_plan_form
+
+    try:
+        day = date.fromisoformat((d or "").strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="bad date")
+    time_raw = (t or "").strip()
+    try:
+        parts = time_raw.replace(".", ":").split(":")
+        hh = int(parts[0])
+        mm = int(parts[1]) if len(parts) > 1 else 0
+        tm = time(hour=hh % 24, minute=min(max(mm, 0), 59))
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="bad time")
+    dur = max(1, int(duration_minutes or 60))
+    start_dt = datetime.combine(day, tm)
+    end_dt = start_dt + timedelta(minutes=dur)
+    available: list[int] = []
+    for m in list_masters_for_work_plan_form(db):
+        mid = int(m.id)
+        if is_master_available_for_work_plan(
+            db,
+            master_id=mid,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            exclude_plan_id=exclude_plan_id,
+        ):
+            available.append(mid)
+    return JSONResponse({"available_master_ids": available})
+
+
+@router.get("/api/work-plan/master-availability")
+def api_work_plan_master_availability(
+    d: str,
+    t: str,
+    master_id: int,
+    duration_minutes: int = Query(60),
+    exclude_plan_id: int | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    from app.work_plan import is_master_available_for_work_plan
+
+    try:
+        day = date.fromisoformat((d or "").strip())
+        parts = (t or "").strip().replace(".", ":").split(":")
+        tm = time(hour=int(parts[0]), minute=int(parts[1]) if len(parts) > 1 else 0)
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="bad datetime")
+    dur = max(1, int(duration_minutes or 60))
+    start_dt = datetime.combine(day, tm)
+    end_dt = start_dt + timedelta(minutes=dur)
+    ok = is_master_available_for_work_plan(
+        db,
+        master_id=int(master_id),
+        start_dt=start_dt,
+        end_dt=end_dt,
+        exclude_plan_id=exclude_plan_id,
+    )
+    return JSONResponse({"available": ok})
 
