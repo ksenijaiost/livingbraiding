@@ -40,6 +40,7 @@ class MasterStatsVisitRow:
     payment_display: str
     discount_display: str
     cost_total: float
+    masters_pay_total: float
     master_payroll: float
     studio_payroll: float
 
@@ -185,6 +186,16 @@ def _visit_studio_pay(vs: VisitService) -> float:
     return money_q2(float(vs.salon_profit or 0) + float(vs.studio_fund_amount or 0))
 
 
+def _visit_masters_pay_total(visit: Visit) -> float:
+    """Суммарная ЗП всех мастеров по визиту: пул + бонусы за смешку."""
+    total = 0.0
+    for vs in visit.services or []:
+        if vs.is_cancelled:
+            continue
+        total = money_q2(total + float(vs.masters_pool or 0) + float(vs.mix_bonus_amount or 0))
+    return total
+
+
 def _kit_studio_margin_from_visit_usage(db: Session, kit: Kit, usage: VisitKitUsage) -> float:
     total_pieces = max(int(kit.pieces_total or 0), 1)
     k = float(usage.pieces_used or 0) / float(total_pieces)
@@ -298,6 +309,7 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
                 ),
                 discount_display=format_discounts([int(vs.client_discount_percent or 0) for vs in svc_lines]),
                 cost_total=money_q2(sum(float(vs.cost_total or 0) for vs in svc_lines)),
+                masters_pay_total=_visit_masters_pay_total(visit),
                 master_payroll=money_q2(
                     sum(_master_visit_service_pay(visit, vs, master_id) for vs in svc_lines)
                 ),
