@@ -96,6 +96,12 @@ from app.work_products_detail_view import (
     rubber_type_label,
     work_profit_explanation,
 )
+from app.work_kit_edit import (
+    apply_kit_work_edit,
+    read_staff_profits_from_form,
+    replace_work_staff_rows,
+    work_kit_edit_template_extras,
+)
 from app.work_rate_keys import CUSTOM_ORDER_BONUS_MULTIPLIER, STUDIO_SHARE
 from app.time_utils import utcnow_naive
 
@@ -202,6 +208,60 @@ def _ctx(request: Request, current_user: AuthUser, **kwargs):
     return {"request": request, "current_user": current_user, **kwargs}
 
 
+def _work_edit_template_ctx(
+    request: Request,
+    current_user: AuthUser,
+    work: WorkForInventory | None,
+    *,
+    err: str | None,
+    db: Session,
+) -> dict[str, Any]:
+    ctx: dict[str, Any] = {
+        "request": request,
+        "current_user": current_user,
+        "row": work,
+        "err": err,
+        "is_kit_work": False,
+        "masters": [],
+        "profit_master_uids": [],
+        "staff_profit_by_uid": {},
+    }
+    if not work:
+        return ctx
+    masters = _list_masters_for_work_form(db)
+    staff_profit_by_uid = {
+        int(s.user_id): float(s.master_profit_amount or 0.0) for s in (work.staff_rows or [])
+    }
+    profit_master_uids = list(staff_profit_by_uid.keys())
+    ctx.update(
+        masters=masters,
+        staff_profit_by_uid=staff_profit_by_uid,
+        profit_master_uids=profit_master_uids,
+        use_per_master_profit=bool(profit_master_uids),
+    )
+    if work.kind == WorkKind.KIT and work.created_kit_id:
+        def _kit_state_builder(*, masters: list[User], initial_lines: list[dict[str, Any]]):
+            return _kit_table_state_json(
+                current_user,
+                masters,
+                {},
+                db,
+                initial_lines=initial_lines,
+            )
+
+        ctx.update(
+            work_kit_edit_template_extras(
+                db,
+                work,
+                kit_table_state_json_builder=_kit_state_builder,
+                list_masters=_list_masters_for_work_form,
+            )
+        )
+        ctx["use_per_master_profit"] = True
+        ctx["profit_master_uids"] = ctx.get("profit_master_uids") or ctx.get("kit_master_on_ids") or []
+    return ctx
+
+
 def _work_edit_allowed(db: Session, work: WorkForInventory) -> tuple[bool, str]:
     if getattr(work, "is_voided", False):
         return False, "Работа аннулирована — редактирование запрещено."
@@ -302,6 +362,8 @@ def _kit_table_state_json(
     masters: list[User],
     kit_qty_prefill: dict[str, str],
     db: Session,
+    *,
+    initial_lines: list[dict[str, Any]] | None = None,
 ) -> str:
     kpg, kudpg = _material_prices_per_gram(db)
     return json.dumps(
@@ -311,7 +373,7 @@ def _kit_table_state_json(
             "seItems": [{"key": k, "label": lbl} for k, lbl in _kit_se_items()],
             "deItems": [{"key": k, "label": lbl} for k, lbl in _kit_de_items()],
             "blankCatalog": kit_composition_catalog_items(db),
-            "initialLines": [],
+            "initialLines": initial_lines or [],
             "prefill": kit_qty_prefill,
             "kitWorkPayByKey": _kit_work_pay_map_from_catalog(db),
             "kitPriceByKey": _kit_price_map_from_catalog(db),
@@ -1979,19 +2041,19 @@ def work_edit_form(
     if not w:
         return templates.TemplateResponse(
             "work_products_edit.html",
-            _ctx(request, current_user=current_user, row=None, err="Работа не найдена."),
+            _work_edit_template_ctx(request, current_user, None, err="Работа не найдена.", db=db),
             status_code=404,
         )
     edit_allowed, edit_block_msg = _work_edit_allowed(db, w)
     if not edit_allowed:
         return templates.TemplateResponse(
             "work_products_edit.html",
-            _ctx(request, current_user=current_user, row=w, err=edit_block_msg),
+            _work_edit_template_ctx(request, current_user, w, err=edit_block_msg, db=db),
             status_code=403,
         )
     return templates.TemplateResponse(
         "work_products_edit.html",
-        _ctx(request, current_user=current_user, row=w, err=None),
+        _work_edit_template_ctx(request, current_user, w, err=None, db=db),
     )
 
 
@@ -2017,7 +2079,7 @@ async def work_edit_save(
     if not edit_allowed:
         return templates.TemplateResponse(
             "work_products_edit.html",
-            _ctx(request, current_user=current_user, row=w, err=edit_block_msg),
+            _work_edit_template_ctx(request, current_user, w, err=edit_block_msg, db=db),
             status_code=403,
         )
     form = await request.form()
@@ -2032,6 +2094,8 @@ async def work_edit_save(
         )
     )
     prev_scope = getattr(w, "scope", None)
+    kit_edit_applied = False
+    new_kit_staff_ids: list[int] = []
 
     def _p_float(name: str, default: float) -> float:
         try:
@@ -2064,6 +2128,7 @@ async def work_edit_save(
             master_profit_amount=w.master_profit_amount,
             studio_profit_amount=w.studio_profit_amount,
             profit_total_amount=w.profit_total_amount,
+            details_json=w.details_json,
         )
         # base fields
         w.amount_from_client = _p_int_opt("amount_from_client")
@@ -2080,9 +2145,36 @@ async def work_edit_save(
         w.extra_costs_amount = max(0.0, _p_float("extra_costs_amount", float(w.extra_costs_amount or 0.0)))
         w.cost_total_amount = max(0.0, _p_float("cost_total_amount", float(w.cost_total_amount or 0.0)))
 
-        w.master_profit_amount = max(0.0, _p_float("master_profit_amount", float(w.master_profit_amount or 0.0)))
         w.studio_profit_amount = max(0.0, _p_float("studio_profit_amount", float(w.studio_profit_amount or 0.0)))
-        w.profit_total_amount = max(0.0, _p_float("profit_total_amount", float(w.profit_total_amount or 0.0)))
+
+        if w.kind == WorkKind.KIT and w.created_kit_id:
+            kit_result = apply_kit_work_edit(
+                db,
+                w,
+                form,
+                extra_costs_amount=float(w.extra_costs_amount or 0.0),
+                cost_total_amount=float(w.cost_total_amount or 0.0),
+                alloc_equal_shares_for_masters=_alloc_equal_shares_for_masters,
+                kit_stock_price_snapshot_text=_kit_stock_price_snapshot_text,
+                kit_cost_snapshot_text=_kit_cost_snapshot_text,
+            )
+            w.master_profit_amount = float(kit_result.master_total)
+            new_kit_staff_ids = list(kit_result.kit_staff_ids)
+            kit_edit_applied = True
+        elif w.staff_rows:
+            active_uids = [int(s.user_id) for s in w.staff_rows]
+            staff_profits = read_staff_profits_from_form(form, active_uids)
+            w.master_profit_amount = float(sum(staff_profits.values()))
+            for s in w.staff_rows:
+                s.master_profit_amount = float(staff_profits.get(int(s.user_id), 0.0))
+        else:
+            w.master_profit_amount = max(0.0, _p_float("master_profit_amount", float(w.master_profit_amount or 0.0)))
+
+        profit_raw = (_g_str(form, "profit_total_amount", "") or "").strip()
+        if profit_raw:
+            w.profit_total_amount = max(0.0, _p_float("profit_total_amount", float(w.profit_total_amount or 0.0)))
+        else:
+            w.profit_total_amount = float(w.master_profit_amount or 0.0) + float(w.studio_profit_amount or 0.0)
     except ValueError as exc:
         log_user_validation_error(
             _logger,
@@ -2095,12 +2187,38 @@ async def work_edit_save(
             context="work",
             extra={"work_id": work_id},
         )
+        w_reload = db.scalar(
+            select(WorkForInventory)
+            .options(
+                selectinload(WorkForInventory.client),
+                selectinload(WorkForInventory.staff_rows).selectinload(WorkForInventoryStaff.user),
+            )
+            .where(WorkForInventory.id == work_id)
+        )
         return templates.TemplateResponse(
             "work_products_edit.html",
-            _ctx(request, current_user=current_user, row=w, err=str(exc)),
+            _work_edit_template_ctx(request, current_user, w_reload or w, err=str(exc), db=db),
             status_code=400,
         )
 
+    audit_changes = diff_fields(
+        before,
+        w,
+        (
+            "amount_from_client",
+            "client_payment_kind",
+            "comment",
+            "kanekalon_grams",
+            "kudri_grams",
+            "materials_cost_total",
+            "extra_costs_amount",
+            "cost_total_amount",
+            "master_profit_amount",
+            "studio_profit_amount",
+            "profit_total_amount",
+            "details_json",
+        ),
+    )
     w.updated_at = utcnow_naive()
     w.updated_by_user_id = current_user.id
     write_audit_rows(
@@ -2109,27 +2227,20 @@ async def work_edit_save(
         entity_field="work_id",
         entity_id=w.id,
         changed_by_user_id=current_user.id,
-        changes=diff_fields(
-            before,
+        changes=audit_changes,
+    )
+    if kit_edit_applied:
+        staff_rows = replace_work_staff_rows(
+            db,
             w,
-            (
-                "amount_from_client",
-                "client_payment_kind",
-                "comment",
-                "kanekalon_grams",
-                "kudri_grams",
-                "materials_cost_total",
-                "extra_costs_amount",
-                "cost_total_amount",
-                "master_profit_amount",
-                "studio_profit_amount",
-                "profit_total_amount",
-            ),
-        ),
-    )
-    staff_rows = list(
-        db.scalars(select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == w.id)).all()
-    )
+            new_kit_staff_ids,
+            kit_result.staff_profits,
+            _alloc_equal_shares_for_masters,
+        )
+    else:
+        staff_rows = list(
+            db.scalars(select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == w.id)).all()
+        )
     new_staff_sig = tuple(
         sorted(
             ((int(s.user_id), round(float(s.master_profit_amount or 0.0), 2)) for s in staff_rows),

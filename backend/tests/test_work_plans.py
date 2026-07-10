@@ -119,10 +119,14 @@ def test_occupancy_includes_work_plan(memory_db, monkeypatch) -> None:
     db.commit()
     monkeypatch.setattr("app.calendar_occupancy.get_display_timezone", lambda _db: "UTC")
     monkeypatch.setattr("app.calendar_occupancy.list_calendar_masters", lambda _db: [{"id": master.id, "name": master.display_name}])
+    from app.calendar_occupancy import COLOR_OCCUPANCY_WORK_PLAN
+
     occ = build_occupancy_for_day(db, day=date(2026, 7, 10), hour_from=9, hour_to=18)
     wp_segs = [s for s in occ["segments"] if s.get("work_plan_id")]
     assert len(wp_segs) == 1
     assert wp_segs[0]["master_id"] == master.id
+    assert wp_segs[0]["color"] == COLOR_OCCUPANCY_WORK_PLAN
+    assert occ["colors"]["work_plan"] == COLOR_OCCUPANCY_WORK_PLAN
     assert "Работа с товаром" in wp_segs[0]["service_label"]
 
 

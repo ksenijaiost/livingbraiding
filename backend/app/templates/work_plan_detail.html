@@ -10,23 +10,39 @@
     {% if msg == 'already_closed' %}<div class="error">План уже закрыт.</div>{% endif %}
     {% if err %}<div class="error">{{ err }}</div>{% endif %}
 
-    <table style="margin-top:12px;">
-      <tr><td class="muted" style="width:12rem;">Дата и время</td>
+    {% if edit_time_mode and can_edit_time %}
+      <form method="post" action="/work-plans/{{ plan.id }}/edit-time" style="margin:12px 0; padding:12px; background:#f8fafc; border-radius:8px;">
+        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+          <div>
+            <label>Дата</label>
+            <input type="date" name="planned_date" required value="{{ local_start.date().isoformat() }}" />
+          </div>
+          <div>
+            <label>Время</label>
+            <input type="time" name="planned_time" step="60" required value="{{ local_start.strftime('%H:%M') }}" />
+          </div>
+          <div>
+            <label>Длительность</label>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input type="number" name="duration_h" min="0" style="width:4rem;" value="{{ duration_h }}" />
+              <span class="muted">ч</span>
+              <input type="number" name="duration_m" min="0" max="59" style="width:4rem;" value="{{ duration_m }}" />
+              <span class="muted">мин</span>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="submit">Сохранить время</button>
+            <a href="/work-plans/{{ plan.id }}"><button type="button" class="secondary">Отмена</button></a>
+          </div>
+        </div>
+      </form>
+    {% endif %}
+
+    <table style="margin-top:12px; width:100%;">
+      <tr><td class="muted" style="width:12rem; vertical-align:top;">Дата и время</td>
         <td>
           {% if edit_time_mode and can_edit_time %}
-            <form method="post" action="/work-plans/{{ plan.id }}/edit-time" class="row" style="align-items:flex-end; gap:12px; flex-wrap:wrap;">
-              <div><label>Дата</label><input type="date" name="planned_date" required value="{{ local_start.date().isoformat() }}" /></div>
-              <div><label>Время</label><input type="time" name="planned_time" step="60" required value="{{ local_start.strftime('%H:%M') }}" /></div>
-              <div><label>Длительность</label>
-                <div style="display:flex; gap:6px; align-items:center;">
-                  <input type="number" name="duration_h" min="0" style="width:4rem;" value="{{ duration_h }}" />
-                  <span class="muted">ч</span>
-                  <input type="number" name="duration_m" min="0" max="59" style="width:4rem;" value="{{ duration_m }}" />
-                  <span class="muted">мин</span>
-                </div>
-              </div>
-              <div><button type="submit">Сохранить время</button></div>
-            </form>
+            <span class="muted">Измените в форме выше</span>
           {% else %}
             <strong>{{ local_start.strftime('%d.%m.%Y %H:%M') }}</strong>
           {% endif %}
@@ -46,15 +62,15 @@
       {% endif %}
     </table>
 
-    {% if plan.status.value == 'PLANNED' %}
+    {% if plan.status.value == 'PLANNED' and not edit_time_mode %}
       <div style="margin-top:16px; display:flex; flex-wrap:wrap; gap:10px;">
-        <form method="post" action="/work-plans/{{ plan.id }}/cancel" onsubmit="return confirm('Отменить план?');">
-          <button type="submit" class="secondary">Отменить</button>
+        <form method="post" action="/work-plans/{{ plan.id }}/cancel" onsubmit="return confirm('Отменить (закрыть) план?');">
+          <button type="submit" class="secondary">Отменить (закрыть) план</button>
         </form>
         {% if can_create_work and work_new_url %}
           <a href="{{ work_new_url }}"><button type="button">Создать работу</button></a>
         {% endif %}
-        {% if can_edit_time and not edit_time_mode %}
+        {% if can_edit_time %}
           <a href="/work-plans/{{ plan.id }}?edit_time=1"><button type="button" class="secondary">Редактировать время</button></a>
         {% endif %}
       </div>

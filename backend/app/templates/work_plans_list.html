@@ -49,33 +49,42 @@
     {% if not rows %}
       <p class="muted">{% if search_id is not none %}План №{{ search_id }} не найден{% if mine_only %} среди ваших{% endif %}.{% else %}Пока нет планов работ.{% endif %}</p>
     {% else %}
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Дата</th>
-            <th>Тип</th>
-            <th>Мастер</th>
-            <th>Статус</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for p in rows %}
+      <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+        <table style="width:100%; min-width:32rem; table-layout:fixed;">
+          <colgroup>
+            <col style="width:3.5rem;" />
+            <col style="width:6.5rem;" />
+            <col />
+            <col style="width:5.5rem;" />
+            <col style="width:6.5rem;" />
+          </colgroup>
+          <thead>
             <tr>
-              <td><a href="/work-plans/{{ p.id }}">#{{ p.id }}</a></td>
-              <td style="font-size:13px; line-height:1.35;">
-                <a href="/work-plans/{{ p.id }}">
-                  <span style="display:block;">{{ format_naive_utc_datetime(p.planned_date, display_tz, '%d.%m.%Y') }}</span>
-                  <span class="muted" style="display:block;">{{ format_naive_utc_datetime(p.planned_date, display_tz, '%H:%M') }}</span>
-                </a>
-              </td>
-              <td>{{ work_plan_type_display(p) }}</td>
-              <td>{{ p.master.display_name or p.master.username }}</td>
-              <td><strong>{{ work_plan_status_label(p.status) }}</strong></td>
+              <th>ID</th>
+              <th>Дата</th>
+              <th>Тип</th>
+              <th>Мастер</th>
+              <th>Статус</th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for p in rows %}
+              <tr>
+                <td><a href="/work-plans/{{ p.id }}">#{{ p.id }}</a></td>
+                <td style="font-size:13px; line-height:1.35;">
+                  <a href="/work-plans/{{ p.id }}">
+                    <span style="display:block;">{{ format_naive_utc_datetime(p.planned_date, display_tz, '%d.%m.%Y') }}</span>
+                    <span class="muted" style="display:block;">{{ format_naive_utc_datetime(p.planned_date, display_tz, '%H:%M') }}</span>
+                  </a>
+                </td>
+                <td style="word-break:break-word;">{{ work_plan_type_display(p) }}</td>
+                <td style="word-break:break-word;">{{ p.master.display_name or p.master.username }}</td>
+                <td><strong>{{ work_plan_status_label(p.status) }}</strong></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     {% endif %}
   </div>
 {% endblock %}
