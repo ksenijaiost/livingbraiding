@@ -109,7 +109,16 @@
         {% endif %}
 
         <div class="card" style="background:#f8fafc; margin-top: 12px;">
-          <strong>Профит</strong>
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <strong>Профит</strong>
+            {% if is_kit_work %}
+              <button type="button" id="recalc_kit_profit_btn" class="secondary">Пересчитать</button>
+              <span class="muted" style="font-size:12px;">по заготовкам в таблице и ставкам прайса</span>
+            {% endif %}
+          </div>
+          {% if is_kit_work %}
+            <script type="application/json" id="work_edit_profit_meta">{{ work_edit_profit_meta_json | safe }}</script>
+          {% endif %}
           {% if use_per_master_profit %}
             <p class="muted" style="font-size:12px; margin: 8px 0 0;">
               ЗП по каждому мастеру из таблицы заготовок. Остальные мастера не участвуют в работе.
@@ -245,6 +254,103 @@
       });
       var disp = document.getElementById('master_profit_total_display');
       if (disp) disp.value = Math.round(total * 100) / 100;
+      return total;
+    }
+
+    function money2(x) {
+      return Math.round((parseFloat(x) || 0) * 100) / 100;
+    }
+
+    function readFieldFloat(name) {
+      var el = document.querySelector('input[name="' + name + '"]');
+      if (!el) return 0;
+      var v = String(el.value || '').replace(',', '.');
+      var n = parseFloat(v);
+      return isNaN(n) ? 0 : Math.max(0, n);
+    }
+
+    function recalculateKitProfit() {
+      var stateEl = document.getElementById('kit_table_state');
+      var metaEl = document.getElementById('work_edit_profit_meta');
+      var st = {};
+      var meta = {};
+      try { if (stateEl && stateEl.textContent) st = JSON.parse(stateEl.textContent); } catch (e) {}
+      try { if (metaEl && metaEl.textContent) meta = JSON.parse(metaEl.textContent); } catch (e) {}
+
+      syncProfitMasterActive();
+
+      var payRates = st.kitWorkPayByKey || {};
+      var priceMap = st.kitPriceByKey || {};
+      var compLines = (typeof window.kitCompositionCollectLines === 'function')
+        ? window.kitCompositionCollectLines() : [];
+      var ids = getKitColumnMasterIds();
+      var masterPays = {};
+      ids.forEach(function (uid) { masterPays[uid] = 0; });
+
+      var clientTotal = 0;
+      var extra = readFieldFloat('extra_costs_amount');
+      compLines.forEach(function (ln) {
+        var key = ln.key || '';
+        var qty = 0;
+        for (var mid in (ln.by_staff || {})) qty += parseInt(ln.by_staff[mid], 10) || 0;
+        var baseP = parseFloat(priceMap[key]) || 0;
+        if (baseP > 0 && qty > 0) {
+          if (ln.is_used) {
+            var pct = parseInt(ln.used_pct, 10) || 100;
+            clientTotal += baseP * (pct / 100.0) * qty;
+          } else {
+            clientTotal += baseP * qty;
+          }
+        }
+        if (ln.is_used) return;
+        ids.forEach(function (uid) {
+          var q2 = parseInt((ln.by_staff || {})[uid] || (ln.by_staff || {})[String(uid)] || 0, 10) || 0;
+          if (q2 > 0) masterPays[uid] = (masterPays[uid] || 0) + (parseFloat(payRates[key]) || 0) * q2;
+        });
+      });
+      clientTotal += extra;
+
+      var kan = readFieldFloat('kanekalon_grams');
+      var kud = readFieldFloat('kudri_grams');
+      var gramsTotal = kan + kud;
+      var mixSrc = meta.mixSource || 'NO_MIX';
+      var mixComp = meta.mixComplexity || 'STANDARD';
+      var mixRates = meta.mixRates || {};
+      var mixRate = parseFloat(mixRates[mixComp]) || 0;
+      var mixBonusTotal = (gramsTotal > 0 && mixSrc === 'SELF_MIXED') ? (gramsTotal * mixRate) : 0;
+      var mixCreator = parseInt(meta.mixCreatorUserId, 10) || 0;
+      if (mixBonusTotal > 0) {
+        if (mixCreator > 0 && Object.prototype.hasOwnProperty.call(masterPays, mixCreator)) {
+          masterPays[mixCreator] += mixBonusTotal;
+        } else if (ids.length) {
+          var share = mixBonusTotal / ids.length;
+          ids.forEach(function (uid) { masterPays[uid] = (masterPays[uid] || 0) + share; });
+        }
+      }
+
+      ids.forEach(function (uid) {
+        var inp = document.querySelector('input[name="staff_profit_' + uid + '"]');
+        if (inp && !inp.disabled) inp.value = money2(masterPays[uid] || 0);
+      });
+      var masterSum = syncMasterProfitTotal();
+
+      var scope = meta.scope || 'CUSTOM_ORDER';
+      var costKit = readFieldFloat('cost_total_amount');
+      var studioSum = 0;
+      if (scope !== 'IN_STOCK') {
+        var priceForProfit = clientTotal;
+        if (scope === 'CUSTOM_ORDER') {
+          var afcRaw = String((document.querySelector('input[name="amount_from_client"]') || {}).value || '').trim();
+          var afcVal = afcRaw ? (parseInt(afcRaw, 10) || 0) : 0;
+          if (afcVal > 0) priceForProfit = afcVal;
+        }
+        studioSum = priceForProfit - costKit - masterSum;
+      }
+
+      var studioInp = document.querySelector('input[name="studio_profit_amount"]');
+      if (studioInp) studioInp.value = money2(studioSum);
+      var totalInp = document.querySelector('input[name="profit_total_amount"]');
+      if (totalInp) totalInp.value = money2(masterSum + studioSum);
     }
 
     if (multi) multi.addEventListener('change', function () {
@@ -265,6 +371,9 @@
     window.kitCompositionOnChange = function () {
       syncProfitMasterActive();
     };
+
+    var recalcBtn = document.getElementById('recalc_kit_profit_btn');
+    if (recalcBtn) recalcBtn.addEventListener('click', recalculateKitProfit);
 
     syncKitMasterPicker();
     syncProfitMasterActive();

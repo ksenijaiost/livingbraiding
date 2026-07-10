@@ -208,6 +208,21 @@ def _ctx(request: Request, current_user: AuthUser, **kwargs):
     return {"request": request, "current_user": current_user, **kwargs}
 
 
+def _work_edit_profit_meta_json(db: Session, work: WorkForInventory) -> str:
+    details = _details_obj(work.details_json)
+    mix_c = details.get("mix_complexity")
+    return json.dumps(
+        {
+            "scope": work.scope.value if work.scope else WorkScope.CUSTOM_ORDER.value,
+            "mixSource": work.mix_source.value if work.mix_source else MixSource.NO_MIX.value,
+            "mixComplexity": str(mix_c) if mix_c else None,
+            "mixRates": mix_rates_meta_json_dict(db),
+            "mixCreatorUserId": int(work.created_by_user_id or 0),
+        },
+        ensure_ascii=False,
+    )
+
+
 def _work_edit_template_ctx(
     request: Request,
     current_user: AuthUser,
@@ -257,6 +272,7 @@ def _work_edit_template_ctx(
                 list_masters=_list_masters_for_work_form,
             )
         )
+        ctx["work_edit_profit_meta_json"] = _work_edit_profit_meta_json(db, work)
         ctx["use_per_master_profit"] = True
         ctx["profit_master_uids"] = ctx.get("profit_master_uids") or ctx.get("kit_master_on_ids") or []
     return ctx
