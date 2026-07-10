@@ -32,6 +32,7 @@ from app.user_roles import select_users_with_role
 
 COLOR_OCCUPANCY_ACTIVE = "#69d186"
 COLOR_OCCUPANCY_PENDING = "#f7d368"
+COLOR_OCCUPANCY_WORK_PLAN = "#D8BFD8"
 COLOR_OCCUPANCY_DAY_OFF = "#fc8580"
 COLOR_OCCUPANCY_UNAVAILABLE = "#cfcfcf"
 COLOR_OCCUPANCY_NO_DATA = "#ffffff"
@@ -324,7 +325,7 @@ def build_occupancy_for_day(
                 start_minutes=max(start_m, grid_start),
                 end_minutes=min(end_m, grid_end),
                 status=WorkPlanStatus.PLANNED.value,
-                color=COLOR_OCCUPANCY_PENDING,
+                color=COLOR_OCCUPANCY_WORK_PLAN,
                 url=f"/work-plans/{int(wp.id)}",
                 client_name="",
                 service_label=work_plan_type_display(wp),
@@ -382,5 +383,6 @@ def build_occupancy_for_day(
             "unavailable": COLOR_OCCUPANCY_UNAVAILABLE,
             "no_data": COLOR_OCCUPANCY_NO_DATA,
             "block": COLOR_TIME_BLOCK,
+            "work_plan": COLOR_OCCUPANCY_WORK_PLAN,
         },
     }
