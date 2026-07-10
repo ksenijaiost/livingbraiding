@@ -16,7 +16,7 @@
     {% if not row %}
       <p class="muted">Нет данных.</p>
     {% else %}
-      <form method="post" action="/sales/work/{{ row.id }}/edit">
+      <form method="post" action="/sales/work/{{ row.id }}/edit" id="work_edit_form">
         <div class="row">
           <div>
             <label>Сумма от клиента, ₽</label>
@@ -61,29 +61,225 @@
           </div>
         </div>
 
+        {% if is_kit_work %}
+        <div id="kit_block" class="card" style="background:#f8fafc; margin-top: 12px;">
+          <h3 style="margin-top:0;">Комплект / заготовки</h3>
+          {% if kit %}
+            <p class="muted" style="margin-top:-6px; font-size:13px;">
+              Связанный комплект: <strong>{{ kit.sku }}</strong> — {{ kit.title }}
+            </p>
+          {% endif %}
+
+          <div class="row">
+            <div>
+              <label>Тип заготовок</label>
+              <label><input type="checkbox" name="kit_type_se" {% if kit_type_se %}checked{% endif %} /> SE</label>
+              <label><input type="checkbox" name="kit_type_de" {% if kit_type_de %}checked{% endif %} /> DE</label>
+            </div>
+          </div>
+
+          <div style="margin-top: 12px;">
+            <label>
+              <input type="checkbox" name="kit_use_multi_masters" id="kit_use_multi_masters" {% if kit_use_multi_masters %}checked{% endif %} />
+              Несколько мастеров (комплект)
+            </label>
+          </div>
+
+          <div id="kit_master_picker" style="margin-top: 10px; {% if not kit_use_multi_masters %}display:none;{% endif %}">
+            <strong style="display:block; margin-bottom: 8px;">Мастера для таблицы заготовок</strong>
+            {% for u in masters %}
+              <label style="display:block; margin-bottom: 6px;">
+                <input
+                  type="checkbox"
+                  name="kit_master_on"
+                  value="{{ u.id }}"
+                  class="kit-master-cb"
+                  {% if u.id in kit_master_on_ids %}checked{% endif %}
+                />
+                {{ u.display_name }}
+              </label>
+            {% endfor %}
+          </div>
+
+          <input type="hidden" name="kit_single_master_id" id="kit_single_master_id" value="{{ kit_single_master_id or '' }}" />
+
+          {% include "partials/kit_composition_lines_table.html" %}
+        </div>
+        <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
+        {% endif %}
+
         <div class="card" style="background:#f8fafc; margin-top: 12px;">
           <strong>Профит</strong>
-          <div class="row" style="margin-top: 8px;">
-            <div>
-              <label>Мастер, ₽</label>
-              <input name="master_profit_amount" type="number" step="0.01" min="0" value="{{ row.master_profit_amount or 0 }}" />
+          {% if use_per_master_profit %}
+            <p class="muted" style="font-size:12px; margin: 8px 0 0;">
+              ЗП по каждому мастеру из таблицы заготовок. Остальные мастера не участвуют в работе.
+            </p>
+            <div style="margin-top: 10px;">
+              {% for u in masters %}
+                {% set active = u.id in profit_master_uids %}
+                <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-bottom:8px;">
+                  <label style="min-width:10rem; {% if not active %}opacity:0.55;{% endif %}">{{ u.display_name }}</label>
+                  <input
+                    name="staff_profit_{{ u.id }}"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value="{{ staff_profit_by_uid.get(u.id, 0) }}"
+                    style="max-width:8rem;"
+                    {% if not active %}disabled{% endif %}
+                    class="staff-profit-input"
+                    data-master-id="{{ u.id }}"
+                    data-active="{{ '1' if active else '0' }}"
+                  />
+                  <span class="muted" style="font-size:12px;">₽</span>
+                </div>
+              {% endfor %}
             </div>
+            <div style="margin-top: 8px;">
+              <label>Мастера всего, ₽</label>
+              <input id="master_profit_total_display" type="number" step="0.01" min="0" value="{{ row.master_profit_amount or 0 }}" readonly style="max-width:8rem; background:#eef2f7;" />
+            </div>
+          {% else %}
+            <div class="row" style="margin-top: 8px;">
+              <div>
+                <label>Мастер, ₽</label>
+                <input name="master_profit_amount" type="number" step="0.01" min="0" value="{{ row.master_profit_amount or 0 }}" />
+              </div>
+            </div>
+          {% endif %}
+          <div class="row" style="margin-top: 8px;">
             <div>
               <label>Студия, ₽</label>
               <input name="studio_profit_amount" type="number" step="0.01" min="0" value="{{ row.studio_profit_amount or 0 }}" />
             </div>
-          </div>
-          <div style="margin-top: 8px;">
-            <label>Всего, ₽</label>
-            <input name="profit_total_amount" type="number" step="0.01" min="0" value="{{ row.profit_total_amount or 0 }}" />
+            <div>
+              <label>Всего, ₽</label>
+              <input name="profit_total_amount" type="number" step="0.01" min="0" value="{{ row.profit_total_amount or 0 }}" />
+            </div>
           </div>
         </div>
 
         <p style="margin-top: 12px;">
           <button type="submit">Сохранить</button>
+          <a href="/sales/work/{{ row.id }}" style="margin-left: 10px;">Отмена</a>
         </p>
       </form>
     {% endif %}
   </div>
-{% endblock %}
 
+  {% if is_kit_work %}
+  <script>
+  (function () {
+    var multi = document.getElementById('kit_use_multi_masters');
+    var picker = document.getElementById('kit_master_picker');
+    var singleEl = document.getElementById('kit_single_master_id');
+
+    function syncKitMasterPicker() {
+      if (!multi || !picker) return;
+      picker.style.display = multi.checked ? 'block' : 'none';
+      if (!multi.checked && singleEl) {
+        var sid = parseInt(singleEl.value, 10);
+        if (!sid || isNaN(sid)) {
+          var first = document.querySelector('input[name="kit_master_on"]:checked');
+          if (first) sid = parseInt(first.value, 10);
+        }
+        if (sid > 0) singleEl.value = String(sid);
+      }
+    }
+
+    function getKitColumnMasterIds() {
+      var stateEl = document.getElementById('kit_table_state');
+      var st = {};
+      try { if (stateEl && stateEl.textContent) st = JSON.parse(stateEl.textContent); } catch (e) {}
+      if (!multi || !multi.checked) {
+        var sid = singleEl ? parseInt(singleEl.value, 10) : 0;
+        if (sid > 0) return [sid];
+        return [st.currentUserId || 0];
+      }
+      var ids = [];
+      document.querySelectorAll('input[name="kit_master_on"]:checked').forEach(function (cb) {
+        var v = parseInt(cb.value, 10);
+        if (!isNaN(v) && v > 0) ids.push(v);
+      });
+      return ids.length ? ids : [st.currentUserId || 0];
+    }
+    window.getKitColumnMasterIds = getKitColumnMasterIds;
+
+    function syncProfitMasterActive() {
+      var activeIds = getKitColumnMasterIds();
+      var activeMap = {};
+      activeIds.forEach(function (id) { activeMap[id] = true; });
+      document.querySelectorAll('.staff-profit-input').forEach(function (inp) {
+        var mid = parseInt(inp.getAttribute('data-master-id'), 10);
+        var on = !!activeMap[mid];
+        inp.disabled = !on;
+        inp.setAttribute('data-active', on ? '1' : '0');
+        var row = inp.closest('div');
+        if (row) row.style.opacity = on ? '1' : '0.55';
+        if (!on) inp.value = '0';
+      });
+      syncMasterProfitTotal();
+    }
+
+    function syncMasterProfitTotal() {
+      var total = 0;
+      document.querySelectorAll('.staff-profit-input').forEach(function (inp) {
+        if (inp.disabled) return;
+        total += parseFloat(String(inp.value || '').replace(',', '.')) || 0;
+      });
+      var disp = document.getElementById('master_profit_total_display');
+      if (disp) disp.value = Math.round(total * 100) / 100;
+    }
+
+    if (multi) multi.addEventListener('change', function () {
+      syncKitMasterPicker();
+      if (typeof window.rebuildKitCompositionTable === 'function') window.rebuildKitCompositionTable();
+      syncProfitMasterActive();
+    });
+    document.querySelectorAll('.kit-master-cb').forEach(function (el) {
+      el.addEventListener('change', function () {
+        if (typeof window.rebuildKitCompositionTable === 'function') window.rebuildKitCompositionTable();
+        syncProfitMasterActive();
+      });
+    });
+    document.querySelectorAll('.staff-profit-input').forEach(function (el) {
+      el.addEventListener('input', syncMasterProfitTotal);
+    });
+
+    window.kitCompositionOnChange = function () {
+      syncProfitMasterActive();
+    };
+
+    syncKitMasterPicker();
+    syncProfitMasterActive();
+
+    var form = document.getElementById('work_edit_form');
+    if (form) {
+      form.addEventListener('submit', function () {
+        document.querySelectorAll('.staff-profit-input[disabled]').forEach(function (inp) {
+          inp.disabled = false;
+          inp.value = '0';
+        });
+      });
+    }
+  })();
+  </script>
+  {% elif use_per_master_profit %}
+  <script>
+  (function () {
+    function syncMasterProfitTotal() {
+      var total = 0;
+      document.querySelectorAll('.staff-profit-input').forEach(function (inp) {
+        total += parseFloat(String(inp.value || '').replace(',', '.')) || 0;
+      });
+      var disp = document.getElementById('master_profit_total_display');
+      if (disp) disp.value = Math.round(total * 100) / 100;
+    }
+    document.querySelectorAll('.staff-profit-input').forEach(function (el) {
+      el.addEventListener('input', syncMasterProfitTotal);
+    });
+    syncMasterProfitTotal();
+  })();
+  </script>
+  {% endif %}
+{% endblock %}
