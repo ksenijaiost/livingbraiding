@@ -210,6 +210,8 @@
     var masterIds = getMasterIds(state);
     var idToName = {};
     (state.masters || []).forEach(function (m) {
+      var mid = parseInt(m.id, 10);
+      if (!isNaN(mid)) idToName[mid] = m.name;
       idToName[m.id] = m.name;
     });
 
@@ -218,7 +220,8 @@
       headHtml += '<th title="Использованные (б/у)">б/у</th><th>% цены</th>';
     }
     masterIds.forEach(function (id) {
-      headHtml += '<th>' + esc(idToName[id] || 'ID ' + id) + '</th>';
+      var mid = parseInt(id, 10);
+      headHtml += '<th>' + esc(idToName[mid] || idToName[id] || 'ID ' + id) + '</th>';
     });
     headHtml += '</tr>';
     thead.innerHTML = headHtml;
