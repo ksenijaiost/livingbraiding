@@ -500,6 +500,54 @@ def load_kit_for_stock_ops(db: Session, kit_id: int) -> Kit | None:
     )
 
 
+def planned_kit_stock_revert_pieces(
+    db: Session,
+    kit: Kit,
+    pieces: int,
+    breakdown: dict[str, int] | None,
+) -> tuple[int, dict[str, int] | None]:
+    """Сколько штук реально вернуть на склад при откате списания визита.
+
+    Если остаток уже восстановлен (рассинхрон с VisitKitUsage), возвращаем 0 —
+    запись списания удаляется без повторного зачисления на склад.
+    """
+    pieces = int(pieces or 0)
+    if pieces <= 0:
+        return 0, breakdown
+
+    if kit_inventory_is_keyed(db, int(kit.id)):
+        stock_map = blank_stock_qty_map(db, int(kit.id))
+        stock_sum = int(sum(int(v) for v in stock_map.values()))
+        comp = parse_composition_totals(kit)
+        comp_sum = int(sum(int(v) for v in comp.values())) if comp else int(kit.pieces_total or 0)
+        if comp_sum <= 0:
+            comp_sum = int(kit.pieces_total or 0)
+        if comp_sum > 0 and stock_sum >= comp_sum:
+            return 0, breakdown
+        if comp_sum > 0:
+            max_return = comp_sum - stock_sum
+            if max_return <= 0:
+                return 0, breakdown
+            if pieces > max_return:
+                pieces = max_return
+                if breakdown:
+                    bd_sum = sum(int(v) for v in breakdown.values())
+                    if bd_sum > 0 and pieces < bd_sum:
+                        breakdown = distribute_integer_by_weights(
+                            {k: int(v) for k, v in breakdown.items() if int(v) > 0},
+                            pieces,
+                        )
+                else:
+                    breakdown = None
+        return pieces, breakdown
+
+    avail = int(kit.pieces_available or 0)
+    total = int(kit.pieces_total or 0)
+    if total >= 0 and avail + pieces > total:
+        return 0, breakdown
+    return pieces, breakdown
+
+
 def return_stock_to_kit(
     db: Session,
     *,

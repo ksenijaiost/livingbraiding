@@ -7,6 +7,7 @@ from datetime import date, datetime
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+import json
 
 from app.admin_service_catalog import _parse_estimated_duration
 from app.calendar_occupancy import (
@@ -324,3 +325,42 @@ def test_build_occupancy_uses_individual_master_start(memory_db) -> None:
     assert len(segs) == 2
     assert segs[0]["master_id"] == m1.id and segs[0]["start_minutes"] == 10 * 60 and segs[0]["end_minutes"] == 14 * 60
     assert segs[1]["master_id"] == m2.id and segs[1]["start_minutes"] == 11 * 60 and segs[1]["end_minutes"] == 14 * 60
+
+
+def test_build_occupancy_includes_consultation_booking(memory_db) -> None:
+    db = memory_db
+    db.add(Setting(key=DISPLAY_TIMEZONE, value="Europe/Moscow"))
+    master = User(username="m_cons", password_hash="x", display_name="Мастер", role=UserRole.MASTER, is_active=True)
+    admin = User(username="a_cons", password_hash="x", display_name="Admin", role=UserRole.ADMIN, is_active=True)
+    client = Client(name="Клиент", is_confirmed=True)
+    db.add_all([master, admin, client])
+    db.flush()
+
+    # 16:15 Moscow = 13:15 UTC (naive stored as UTC in app)
+    planned = datetime(2026, 7, 10, 13, 15, 0)
+    booking = Booking(
+        created_by_user_id=admin.id,
+        client_id=client.id,
+        planned_date=planned,
+        kind=BookingKind.CONSULTATION,
+        status=BookingStatus.PENDING_CONFIRMATION,
+        details_json=json.dumps({"consultation_duration_minutes": 45}, ensure_ascii=False),
+    )
+    db.add(booking)
+    db.flush()
+    db.add(BookingMaster(booking_id=booking.id, master_id=master.id))
+    db.commit()
+    db.refresh(booking)
+    booking.masters = list(db.query(BookingMaster).filter_by(booking_id=booking.id).all())
+
+    day = date(2026, 7, 10)
+    occ = build_occupancy_for_day(db, day=day, hour_from=9, hour_to=21, bookings=[booking])
+    segs = occ["segments"]
+    assert len(segs) == 1
+    seg = segs[0]
+    assert seg["booking_id"] == booking.id
+    assert seg["master_id"] == master.id
+    assert seg["start_minutes"] == 16 * 60 + 15
+    assert seg["end_minutes"] == 17 * 60
+    assert seg["color"] == COLOR_OCCUPANCY_PENDING
+    assert seg["service_label"] == "Консультация"

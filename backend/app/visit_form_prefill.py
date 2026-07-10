@@ -54,8 +54,11 @@ def _stock_lines_from_usages(db: Session, usages: list[VisitKitUsage]) -> list[d
                 bd = None
         kit = db.get(Kit, u.kit_id)
         use_entire = False
-        if kit and int(kit.pieces_available or 0) == 0 and int(u.pieces_used or 0) > 0:
-            use_entire = int(u.pieces_used or 0) >= int(kit.pieces_total or 0)
+        if kit and int(u.pieces_used or 0) > 0:
+            used = int(u.pieces_used or 0)
+            total = int(kit.pieces_total or 0)
+            avail = int(kit.pieces_available or 0)
+            use_entire = used >= total or (total > 0 and avail + used >= total)
         lines.append(
             {
                 "kit_id": int(u.kit_id),

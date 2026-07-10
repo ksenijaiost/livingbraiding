@@ -414,12 +414,12 @@
             <div class="vsk-selected-box card" style="margin-top:10px;background:#f8fafc;{% if not line.kit_id %}display:none;{% endif %}">
               <p class="vsk-selected-line" style="margin:0;"></p>
               <p class="vsk-selected-reserve" style="margin:8px 0 0; padding:8px 10px; background:#fffbeb; border:1px solid #fbbf24; border-radius:8px; font-size:13px; color:#92400e; display:none;"></p>
-            </div>
-            <label style="display:block;margin-top:8px;"><input type="checkbox" class="vsk-use-entire lb-kit-use-entire" {% if line.use_entire %}checked{% endif %} /> Весь комплект (все доступные заготовки)</label>
-            <div data-lb-kit-pick-after-selected="1">
-              <div data-lb-kit-simple-wrap class="lb-kit-blanks-simple-wrap" style="margin-top:8px;">
-                <label>Или заготовок списать</label>
-                <input type="number" class="vsk-blanks-used lb-kit-blanks-simple" min="0" value="{% if line.blanks_used %}{{ line.blanks_used }}{% endif %}" style="max-width:8rem;" />
+              <div data-lb-kit-pick-after-selected="1">
+                <label style="display:block;margin-top:8px;"><input type="checkbox" class="vsk-use-entire lb-kit-use-entire" {% if line.use_entire %}checked{% endif %} /> Весь комплект (все доступные заготовки)</label>
+                <div data-lb-kit-simple-wrap class="lb-kit-blanks-simple-wrap" style="margin-top:8px;">
+                  <label>Или заготовок списать</label>
+                  <input type="number" class="vsk-blanks-used lb-kit-blanks-simple" min="0" value="{% if line.blanks_used %}{{ line.blanks_used }}{% endif %}" style="max-width:8rem;" />
+                </div>
               </div>
             </div>
           </div>
@@ -990,6 +990,7 @@
         var initBd = null;
         if (bdRaw.trim()) { try { initBd = JSON.parse(bdRaw); } catch (e) { initBd = null; } }
         LbKitStockPick.renderBreakdownTable(row, k, initBd);
+        LbKitStockPick.syncEntireUi(row);
       }
       const skLegacy = document.getElementById('stock_kit_id');
       if (skLegacy) skLegacy.value = String(k.id);
@@ -1323,7 +1324,9 @@
         if (k && typeof k === 'object' && k.id) {
           selectStockKitForRow(row, k);
         }
+        syncVisitStockRowEntireUi(row);
       });
+      syncVisitStockEntireUi();
     })();
 
     function money2(x) { return Math.round((parseFloat(x) || 0) * 100) / 100; }
@@ -2540,6 +2543,9 @@
           }
         }
         LbKitStockPick.initStockKitWrap(stockWrap, Object.assign({}, kitPickOpts(), { initialLines: lines }));
+        stockWrap.querySelectorAll('.lb-kit-stock-row, .visit-stock-kit-row').forEach(function (kitRow) {
+          if (window.LbKitStockPick) LbKitStockPick.syncEntireUi(kitRow);
+        });
         var addBtn = row.querySelector('[data-line-add-stock-kit="' + idx + '"]');
         if (addBtn) addBtn.addEventListener('click', function () {
           LbKitStockPick.addStockKitRow(stockWrap, kitPickOpts());

@@ -36,6 +36,7 @@ COLOR_OCCUPANCY_WORK_PLAN = "#D8BFD8"
 COLOR_OCCUPANCY_DAY_OFF = "#fc8580"
 COLOR_OCCUPANCY_UNAVAILABLE = "#cfcfcf"
 COLOR_OCCUPANCY_NO_DATA = "#ffffff"
+CONSULTATION_DEFAULT_DURATION_MINUTES = 60
 
 
 def occupancy_color_for_status(status: BookingStatus | str) -> str:
@@ -174,7 +175,7 @@ def build_occupancy_for_day(
                     Booking.planned_date >= day_start_utc,
                     Booking.planned_date < day_end_utc,
                     Booking.status != BookingStatus.CANCELLED,
-                    Booking.kind == BookingKind.VISIT,
+                    Booking.kind.in_((BookingKind.VISIT, BookingKind.CONSULTATION)),
                 )
                 .options(*_booking_load_options())
                 .order_by(Booking.planned_date.asc(), Booking.id.asc())
@@ -186,7 +187,7 @@ def build_occupancy_for_day(
     segments: list[OccupancySegment] = []
 
     for b in bookings:
-        if b.kind != BookingKind.VISIT or b.status == BookingStatus.CANCELLED:
+        if b.kind not in (BookingKind.VISIT, BookingKind.CONSULTATION) or b.status == BookingStatus.CANCELLED:
             continue
         status = b.status
         color = occupancy_color_for_status(status)
@@ -195,19 +196,47 @@ def build_occupancy_for_day(
         booking_master_ids = [int(m.master_id) for m in (b.masters or []) if m.master_id]
         client_name = _booking_client_name(b)
 
-        # Fix 43: длительность может быть переопределена прямо в брони
-        # (visit_custom_duration_minutes в details_json). Если задана — используем её.
+        # Длительность может быть переопределена в details_json.
+        # Для VISIT: visit_custom_duration_minutes
+        # Для CONSULTATION: consultation_duration_minutes (по умолчанию 60 мин).
         dur_override: int = 0
         raw_details = getattr(b, "details_json", None)
         if raw_details:
             try:
                 d0 = json.loads(raw_details)
                 if isinstance(d0, dict):
-                    dur_override = int(d0.get("visit_custom_duration_minutes") or 0)
+                    if b.kind == BookingKind.CONSULTATION:
+                        dur_override = int(
+                            d0.get("consultation_duration_minutes") or CONSULTATION_DEFAULT_DURATION_MINUTES
+                        )
+                    else:
+                        dur_override = int(d0.get("visit_custom_duration_minutes") or 0)
             except Exception:
                 dur_override = 0
         if dur_override < 0:
             dur_override = 0
+        if b.kind == BookingKind.CONSULTATION:
+            dur = dur_override or CONSULTATION_DEFAULT_DURATION_MINUTES
+            start_local = _utc_naive_to_local(b.planned_date, tz)
+            start_m = _minutes_on_day(start_local, day)
+            end_m = start_m + dur
+            for mid in booking_master_ids:
+                if end_m <= grid_start or start_m >= grid_end:
+                    continue
+                segments.append(
+                    OccupancySegment(
+                        booking_id=int(b.id),
+                        master_id=mid,
+                        start_minutes=max(start_m, grid_start),
+                        end_minutes=min(end_m, grid_end),
+                        status=status_s,
+                        color=color,
+                        url=url,
+                        client_name=client_name,
+                        service_label="Консультация",
+                    )
+                )
+            continue
 
         lines = list(b.planned_services or [])
         if lines:
