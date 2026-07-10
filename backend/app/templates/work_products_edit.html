@@ -103,9 +103,9 @@
 
           <input type="hidden" name="kit_single_master_id" id="kit_single_master_id" value="{{ kit_single_master_id or '' }}" />
 
+          <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
           {% include "partials/kit_composition_lines_table.html" %}
         </div>
-        <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
         {% endif %}
 
         <div class="card" style="background:#f8fafc; margin-top: 12px;">
@@ -204,6 +204,22 @@
       return ids.length ? ids : [st.currentUserId || 0];
     }
     window.getKitColumnMasterIds = getKitColumnMasterIds;
+
+    var stateEl = document.getElementById('kit_table_state');
+    if (stateEl && stateEl.textContent && typeof window.kitCompositionInit === 'function') {
+      try {
+        window.kitCompositionInit(JSON.parse(stateEl.textContent), {
+          mountId: 'kit',
+          linePrefix: 'kit_line',
+          theadId: 'kit_composition_thead',
+          tbodyId: 'kit_composition_tbody',
+          usedOnly: false,
+          seTypeSelector: 'input[name="kit_type_se"]',
+          deTypeSelector: 'input[name="kit_type_de"]',
+          typeFilterRoot: '#kit_block',
+        });
+      } catch (e) {}
+    }
 
     function syncProfitMasterActive() {
       var activeIds = getKitColumnMasterIds();

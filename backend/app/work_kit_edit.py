@@ -36,6 +36,7 @@ from app.kit_composition_lines import (
     kit_by_staff_from_lines,
     lines_dicts_for_details,
     lines_from_form,
+    lines_from_json,
     lines_to_json,
     lines_to_legacy_totals,
 )
@@ -398,6 +399,10 @@ def work_kit_edit_template_extras(
     }
     kit = db.get(Kit, int(work.created_kit_id)) if work.created_kit_id else None
     initial_lines = details_lines_to_initial_lines(kit_detail.get("lines"))
+    if not initial_lines and kit and kit.composition_json:
+        initial_lines = details_lines_to_initial_lines(
+            lines_dicts_for_details(lines_from_json(kit.composition_json))
+        )
     single_master_id = kit_master_on_ids[0] if len(kit_master_on_ids) == 1 else 0
     return {
         "is_kit_work": True,

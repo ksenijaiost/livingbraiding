@@ -32,6 +32,7 @@ from app.work_kit_edit import (
     details_lines_to_initial_lines,
     kit_master_ids_from_work,
     replace_work_staff_rows,
+    work_kit_edit_template_extras,
 )
 from app.work_products import (
     _alloc_equal_shares_for_masters,
@@ -299,6 +300,54 @@ def _auth_admin() -> "AuthUser":
         roles=(UserRole.ADMIN_SUPER,),
         master_level=MasterLevel.MIDDLE,
     )
+
+
+def test_work_kit_edit_template_extras_initial_lines(memory_db) -> None:
+    m1, m2 = _seed_two_masters_and_catalog(memory_db)
+    work, kit = _seed_kit_work(memory_db, m1, m2)
+    memory_db.refresh(work)
+    work.staff_rows = list(
+        memory_db.scalars(
+            select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == work.id)
+        ).all()
+    )
+
+    def _builder(*, masters, initial_lines):
+        return json.dumps({"initialLines": initial_lines, "masters": [{"id": u.id, "name": u.display_name} for u in masters]})
+
+    extras = work_kit_edit_template_extras(
+        memory_db,
+        work,
+        kit_table_state_json_builder=_builder,
+        list_masters=lambda db: [m1, m2],
+    )
+    state = json.loads(extras["kit_table_state_json"])
+    assert len(state["initialLines"]) == 1
+    assert state["initialLines"][0]["key"] == "DE_THERMO_CURL"
+    by_staff = state["initialLines"][0]["by_staff"]
+    assert by_staff.get(m1.id) == 10 or by_staff.get(str(m1.id)) == 10
+    assert by_staff.get(m2.id) == 17 or by_staff.get(str(m2.id)) == 17
+    assert {m["id"] for m in state["masters"]} == {m1.id, m2.id}
+
+
+def test_work_kit_edit_template_extras_fallback_from_kit_composition(memory_db) -> None:
+    m1, m2 = _seed_two_masters_and_catalog(memory_db)
+    work, kit = _seed_kit_work(memory_db, m1, m2)
+    work.details_json = json.dumps({"kit": {"blank_type_de": True, "lines": []}})
+    memory_db.commit()
+
+    def _builder(*, masters, initial_lines):
+        return json.dumps({"initialLines": initial_lines})
+
+    extras = work_kit_edit_template_extras(
+        memory_db,
+        work,
+        kit_table_state_json_builder=_builder,
+        list_masters=lambda db: [m1, m2],
+    )
+    state = json.loads(extras["kit_table_state_json"])
+    by_staff = state["initialLines"][0]["by_staff"]
+    assert by_staff.get(m1.id) == 10 or by_staff.get(str(m1.id)) == 10
 
 
 def test_work_edit_save_kit_integration(memory_db) -> None:
