@@ -96,7 +96,9 @@
       <div class="card" style="margin-top:14px;">
         <div style="font-weight:600; margin-bottom:8px;">На что план *</div>
         <label style="display:block; margin-bottom:6px;">
-          <input type="radio" name="plan_type" value="WORK_PRODUCT" checked onchange="wpSyncPlanType()" /> Работа с товаром
+          <input type="radio" name="plan_type" value="WORK_PRODUCT"
+            {% if fp.get('plan_type', 'WORK_PRODUCT') == 'WORK_PRODUCT' %}checked{% endif %}
+            onchange="wpSyncPlanType()" /> Работа с товаром
         </label>
         <div id="wp_work_kind_wrap" style="margin:8px 0 12px 24px;">
           <label for="work_kind">Вид работы</label>
@@ -106,9 +108,10 @@
             {% endfor %}
           </select>
         </div>
-        <label style="display:block; opacity:0.55;">
-          <input type="radio" name="plan_type" value="HOURLY" disabled onchange="wpSyncPlanType()" /> Почасовая работа
-          <span class="muted" style="font-size:12px;"> — в разработке, будет добавлено позже</span>
+        <label style="display:block;">
+          <input type="radio" name="plan_type" value="HOURLY"
+            {% if fp.get('plan_type') == 'HOURLY' %}checked{% endif %}
+            onchange="wpSyncPlanType()" /> Почасовая работа
         </label>
       </div>
 
@@ -199,7 +202,14 @@
         refreshMasters();
         refreshSelfAvail();
       }
-      window.wpSyncPlanType = function () {};
+      window.wpSyncPlanType = function () {
+        var hourly = document.querySelector('input[name="plan_type"][value="HOURLY"]');
+        var wrap = document.getElementById('wp_work_kind_wrap');
+        var kind = document.getElementById('work_kind');
+        var isHourly = hourly && hourly.checked;
+        if (wrap) wrap.style.display = isHourly ? 'none' : 'block';
+        if (kind) kind.disabled = !!isHourly;
+      };
       var pick = document.getElementById('pick_other_master');
       if (pick) pick.addEventListener('change', wpSyncMasterUi);
       ['planned_date', 'planned_time', 'duration_h', 'duration_m'].forEach(function (id) {
@@ -208,6 +218,7 @@
         if (el) el.addEventListener('input', function () { refreshMasters(); refreshSelfAvail(); });
       });
       wpSyncMasterUi();
+      window.wpSyncPlanType();
 
       // Month calendar (reuse booking schedule API)
       function ymFromDate(dt) { return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0'); }

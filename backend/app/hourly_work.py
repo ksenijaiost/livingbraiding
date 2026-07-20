@@ -14,6 +14,7 @@ from app.hourly_help import format_hourly_help_duration
 from app.payroll_fund import post_hourly_work_accruals
 from app.user_roles import select_users_with_role, user_has_role
 from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
+from app.work_plan import complete_work_plan_from_hourly_work, validate_work_plan_for_hourly_entry
 
 
 def list_masters_for_hourly_work_form(db: Session) -> list[User]:
@@ -78,12 +79,21 @@ def parse_hourly_work_form(
 
     comment = _form_str(form, "comment") or None
 
+    work_plan_id: int | None = None
+    wp_raw = _form_str(form, "work_plan_id")
+    if wp_raw:
+        try:
+            work_plan_id = parse_int(wp_raw, min=1, field_name="work_plan_id")
+        except ValueError:
+            return None, "Некорректный план работ."
+
     entry = HourlyWorkEntry(
         performed_date=datetime.combine(performed_day, datetime.min.time()),
         duration_minutes=int(duration_minutes),
         amount=float(amount),
         comment=comment,
         master_user_id=int(master_id),
+        work_plan_id=work_plan_id,
     )
     return entry, None
 
@@ -107,10 +117,20 @@ def create_hourly_work_entry(
     err = validate_hourly_work_master(db, int(entry.master_user_id))
     if err:
         raise ValueError(err)
+    if entry.work_plan_id is not None:
+        wp_err = validate_work_plan_for_hourly_entry(
+            db,
+            plan_id=int(entry.work_plan_id),
+            master_user_id=int(entry.master_user_id),
+        )
+        if wp_err:
+            raise ValueError(wp_err)
     entry.created_by_user_id = int(created_by_user_id)
     db.add(entry)
     db.flush()
     post_hourly_work_accruals(db, entry, created_by_user_id)
+    if entry.work_plan_id is not None:
+        complete_work_plan_from_hourly_work(db, int(entry.work_plan_id), int(entry.id))
     db.commit()
     db.refresh(entry)
     return entry

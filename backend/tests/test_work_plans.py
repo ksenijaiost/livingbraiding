@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.calendar_occupancy import build_occupancy_for_day
 from app.db.models import (
+    HourlyWorkEntry,
     User,
     UserRole,
     WorkForInventory,
@@ -19,8 +20,11 @@ from app.db.models import (
     WorkScope,
 )
 from app.work_plan import (
+    complete_work_plan_from_hourly_work,
     complete_work_plan_from_work,
+    linked_hourly_work_for_plan,
     master_has_work_plan_conflict,
+    work_plan_hourly_new_query_params,
     work_plan_is_open,
     work_plan_status_emoji,
     work_plan_status_label,
@@ -74,6 +78,78 @@ def test_work_plan_type_display(memory_db) -> None:
     )
     assert "Работа с товаром" in work_plan_type_display(plan)
     assert "Комплект" in work_plan_type_display(plan)
+
+
+def test_work_plan_type_display_hourly(memory_db) -> None:
+    db = memory_db
+    master = _add_master(db)
+    plan = WorkPlan(
+        created_by_user_id=master.id,
+        planned_date=datetime(2026, 7, 10, 9, 0),
+        duration_minutes=60,
+        master_id=master.id,
+        plan_type=WorkPlanType.HOURLY,
+        work_kind=None,
+        status=WorkPlanStatus.PLANNED,
+    )
+    assert work_plan_type_display(plan) == "Почасовая работа"
+
+
+def test_work_plan_hourly_new_query_params(memory_db, monkeypatch) -> None:
+    db = memory_db
+    master = _add_master(db)
+    plan = WorkPlan(
+        created_by_user_id=master.id,
+        planned_date=datetime(2026, 7, 10, 8, 30),
+        duration_minutes=75,
+        master_id=master.id,
+        plan_type=WorkPlanType.HOURLY,
+        work_kind=None,
+        comment="уборка",
+        status=WorkPlanStatus.PLANNED,
+    )
+    db.add(plan)
+    db.commit()
+    monkeypatch.setattr("app.work_plan.get_display_timezone", lambda _db: "UTC")
+    q = work_plan_hourly_new_query_params(db, plan)
+    assert q["work_plan_id"] == str(plan.id)
+    assert q["performed_date"] == "2026-07-10"
+    assert q["duration_h"] == "1"
+    assert q["duration_m"] == "15"
+    assert q["master_id"] == str(master.id)
+    assert "план работ" in q["comment"]
+
+
+def test_complete_work_plan_from_hourly_work(memory_db) -> None:
+    db = memory_db
+    master = _add_master(db)
+    plan = WorkPlan(
+        created_by_user_id=master.id,
+        planned_date=datetime(2026, 7, 10, 14, 0),
+        duration_minutes=60,
+        master_id=master.id,
+        plan_type=WorkPlanType.HOURLY,
+        work_kind=None,
+        status=WorkPlanStatus.PLANNED,
+    )
+    db.add(plan)
+    db.flush()
+    entry = HourlyWorkEntry(
+        performed_date=datetime(2026, 7, 10, 14, 0),
+        duration_minutes=60,
+        amount=500.0,
+        master_user_id=master.id,
+    )
+    db.add(entry)
+    db.flush()
+    complete_work_plan_from_hourly_work(db, plan.id, entry.id)
+    db.commit()
+    db.refresh(plan)
+    db.refresh(entry)
+    assert plan.status == WorkPlanStatus.COMPLETED
+    assert entry.work_plan_id == plan.id
+    assert linked_hourly_work_for_plan(db, plan.id) is not None
+    assert not work_plan_is_open(plan)
 
 
 def test_work_plan_conflict_same_master(memory_db) -> None:

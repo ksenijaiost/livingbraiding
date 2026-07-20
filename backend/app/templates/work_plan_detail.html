@@ -5,6 +5,7 @@
     <h2 style="margin-top:0;">План #{{ plan.id }}</h2>
 
     {% if msg == 'created' %}<div class="ok">План сохранён.</div>{% endif %}
+    {% if msg == 'hourly_created' %}<div class="ok">Почасовая работа создана, план выполнен.</div>{% endif %}
     {% if msg == 'updated' %}<div class="ok">Время плана обновлено.</div>{% endif %}
     {% if msg == 'cancelled' %}<div class="ok">План отменён.</div>{% endif %}
     {% if msg == 'already_closed' %}<div class="error">План уже закрыт.</div>{% endif %}
@@ -57,6 +58,9 @@
       {% if linked_work %}
         <tr><td class="muted">Работа</td><td><a href="/sales/work/{{ linked_work.id }}">№{{ linked_work.id }}</a></td></tr>
       {% endif %}
+      {% if linked_hourly %}
+        <tr><td class="muted">Почасовая работа</td><td><a href="/hourly-work">№{{ linked_hourly.id }}</a></td></tr>
+      {% endif %}
       {% if plan.cancelled_at %}
         <tr><td class="muted">Отмена</td><td>{{ plan.cancelled_at.strftime('%d.%m.%Y %H:%M') }}{% if plan.cancelled_by_user %} · {{ plan.cancelled_by_user.display_name or plan.cancelled_by_user.username }}{% endif %}</td></tr>
       {% endif %}
@@ -64,11 +68,16 @@
 
     {% if plan.status.value == 'PLANNED' and not edit_time_mode %}
       <div style="margin-top:16px; display:flex; flex-wrap:wrap; gap:10px;">
-        <form method="post" action="/work-plans/{{ plan.id }}/cancel" onsubmit="return confirm('Отменить (закрыть) план?');">
-          <button type="submit" class="secondary">Отменить (закрыть) план</button>
-        </form>
+        {% if can_cancel %}
+          <form method="post" action="/work-plans/{{ plan.id }}/cancel" onsubmit="return confirm('Отменить (закрыть) план?');">
+            <button type="submit" class="secondary">Отменить (закрыть) план</button>
+          </form>
+        {% endif %}
         {% if can_create_work and work_new_url %}
           <a href="{{ work_new_url }}"><button type="button">Создать работу</button></a>
+        {% endif %}
+        {% if can_create_hourly and hourly_new_url %}
+          <a href="{{ hourly_new_url }}"><button type="button">Создать почасовую работу</button></a>
         {% endif %}
         {% if can_edit_time %}
           <a href="/work-plans/{{ plan.id }}?edit_time=1"><button type="button" class="secondary">Редактировать время</button></a>

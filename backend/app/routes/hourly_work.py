@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -65,12 +65,28 @@ def hourly_work_list(
 @router.get("/new", response_class=HTMLResponse)
 def hourly_work_new_get(
     request: Request,
+    work_plan_id: str | None = Query(None),
+    performed_date: str | None = Query(None),
+    duration_h: str | None = Query(None),
+    duration_m: str | None = Query(None),
+    master_id: str | None = Query(None),
+    comment: str | None = Query(None),
     current_user: AuthUser = _ACCESS,
     db: Session = Depends(get_db),
 ):
     is_admin = _is_admin_user(current_user)
-    fp = {"performed_date": date.today().isoformat(), "duration_h": "0", "duration_m": "0"}
-    if not is_admin:
+    fp = {
+        "performed_date": (performed_date or "").strip() or date.today().isoformat(),
+        "duration_h": (duration_h or "").strip() or "0",
+        "duration_m": (duration_m or "").strip() or "0",
+        "comment": (comment or "").strip(),
+    }
+    if work_plan_id:
+        fp["work_plan_id"] = work_plan_id.strip()
+    if is_admin:
+        if master_id:
+            fp["master_id"] = master_id.strip()
+    else:
         fp["master_id"] = str(current_user.id)
     return templates.TemplateResponse(
         "hourly_work_form.html",
@@ -81,6 +97,7 @@ def hourly_work_new_get(
             masters=list_masters_for_hourly_work_form(db),
             is_admin=is_admin,
             error=None,
+            from_work_plan=bool(fp.get("work_plan_id")),
         ),
     )
 
@@ -109,12 +126,13 @@ async def hourly_work_new_post(
                 masters=list_masters_for_hourly_work_form(db),
                 is_admin=is_admin,
                 error=err,
+                from_work_plan=bool(fp.get("work_plan_id")),
             ),
             status_code=400,
         )
     assert entry is not None
     try:
-        create_hourly_work_entry(db, entry, created_by_user_id=int(current_user.id))
+        saved = create_hourly_work_entry(db, entry, created_by_user_id=int(current_user.id))
     except ValueError as exc:
         return templates.TemplateResponse(
             "hourly_work_form.html",
@@ -125,7 +143,11 @@ async def hourly_work_new_post(
                 masters=list_masters_for_hourly_work_form(db),
                 is_admin=is_admin,
                 error=str(exc),
+                from_work_plan=bool(fp.get("work_plan_id")),
             ),
             status_code=400,
         )
-    return RedirectResponse(url="/hourly-work?msg=created", status_code=303)
+    redirect_url = "/hourly-work?msg=created"
+    if saved.work_plan_id:
+        redirect_url = f"/work-plans/{int(saved.work_plan_id)}?msg=hourly_created"
+    return RedirectResponse(url=redirect_url, status_code=303)

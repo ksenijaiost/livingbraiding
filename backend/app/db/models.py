@@ -1305,9 +1305,11 @@ class HourlyWorkEntry(Base):
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     master_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    work_plan_id: Mapped[int | None] = mapped_column(ForeignKey("work_plans.id"), nullable=True)
 
     created_by_user: Mapped["User | None"] = relationship(foreign_keys=[created_by_user_id])
     master_user: Mapped["User"] = relationship(foreign_keys=[master_user_id])
+    work_plan: Mapped["WorkPlan | None"] = relationship(foreign_keys=[work_plan_id])
 
 
 class Visit(Base):

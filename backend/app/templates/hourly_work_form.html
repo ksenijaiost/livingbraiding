@@ -3,12 +3,18 @@
   <div class="card lb-card-max-980">
     <p class="muted" style="margin-top:0;"><a href="/hourly-work">← Почасовая работа</a></p>
     <h2 style="margin-top:0;">Новая почасовая работа</h2>
+    {% if from_work_plan and fp.get('work_plan_id') %}
+      <p class="muted" style="margin-top:0;">По плану работ <a href="/work-plans/{{ fp.get('work_plan_id') }}">#{{ fp.get('work_plan_id') }}</a></p>
+    {% endif %}
 
     {% if error %}
       <p style="background:#fee2e2;border:1px solid #fecaca;color:#991b1b;padding:10px 12px;border-radius:8px;">{{ error }}</p>
     {% endif %}
 
     <form method="post" action="/hourly-work/new">
+      {% if fp.get('work_plan_id') %}
+        <input type="hidden" name="work_plan_id" value="{{ fp.get('work_plan_id') }}" />
+      {% endif %}
       <div class="row" style="align-items:flex-end;">
         <div>
           <label for="performed_date">Дата *</label>
