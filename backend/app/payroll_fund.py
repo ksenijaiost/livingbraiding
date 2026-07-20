@@ -72,6 +72,12 @@ def visit_ids_visible_to_master_clause(master_id: int):
             )
         ),
         Visit.id.in_(
+            select(VisitService.visit_id).where(
+                VisitService.is_cancelled.is_(False),
+                VisitService.correction_master_id == mid,
+            )
+        ),
+        Visit.id.in_(
             select(VisitService.visit_id)
             .join(VisitServiceMaster, VisitServiceMaster.visit_service_id == VisitService.id)
             .where(
@@ -80,6 +86,7 @@ def visit_ids_visible_to_master_clause(master_id: int):
             )
         ),
         Visit.mix_bonus_master_id == mid,
+        Visit.correction_master_id == mid,
     )
 
 
@@ -388,6 +395,20 @@ def append_visit_service_master_pool_and_mix_bonus_ledgers(
             side=PayrollFundSide.MASTER,
             user_id=int(bonus_mid),
             amount=bonus_amt,
+            source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+            source_id=visit_service.id,
+            created_by_user_id=created_by_user_id,
+        )
+
+    corr_mid = visit_service.correction_master_id
+    corr_amt = money_q2(float(visit_service.correction_master_amount or 0))
+    if corr_mid and corr_amt > 0:
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=int(corr_mid),
+            amount=corr_amt,
             source_kind=PayrollFundSourceKind.VISIT_SERVICE,
             source_id=visit_service.id,
             created_by_user_id=created_by_user_id,

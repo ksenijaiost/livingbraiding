@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
 from app.client_payment import parse_client_payment_kind
-from app.work_products_compute import compute_correction_extra_costs
+from app.work_products_compute import compute_correction_catalog_pays, compute_correction_extra_costs
 from app.client_validation import client_has_any_contact, strip_or_none
 from app.db.models import (
     AmortizationLevel,
@@ -141,6 +141,7 @@ class VisitServiceLineInput:
     own_corr_use_custom_amount: bool = False
     own_corr_custom_amount: float = 0.0
     own_corr_client_payment_kind: ClientPaymentKind = ClientPaymentKind.CASH
+    own_corr_master_id: int | None = None
     service_master_allocations: list[tuple[int, int]] = field(default_factory=list)
     questionnaire_raw: dict[str, str] = field(default_factory=dict)
     addon_sales_amount: float = 0.0
@@ -198,6 +199,8 @@ class VisitServiceLineComputed:
     mix_cost_amount: float
     mix_bonus_master_id: int | None
     mix_bonus_amount: float
+    correction_master_id: int | None
+    correction_master_amount: float
     kanekalon_price_per_gram_at_time: float | None
     kudri_price_per_gram_at_time: float | None
     materials_cost_total: float
@@ -223,6 +226,23 @@ def _validate_mix_bonus_master(db: Session, master_id: int | None) -> None:
         raise ValueError("Мастер для бонуса смешки не найден или отключён.")
     if not user_has_role(db, master_id, UserRole.MASTER):
         raise ValueError("Бонус смешки может получить только активный мастер.")
+
+
+def _validate_correction_master(db: Session, master_id: int | None) -> None:
+    _validate_mix_bonus_master(db, master_id)
+
+
+def _resolve_correction_master_id(
+    db: Session,
+    line: VisitServiceLineInput,
+    *,
+    default_filler_id: int | None,
+) -> int | None:
+    if line.own_corr_master_id:
+        return int(line.own_corr_master_id)
+    if default_filler_id and user_has_role(db, int(default_filler_id), UserRole.MASTER):
+        return int(default_filler_id)
+    return None
 
 
 def _line_kit_inlay_adapter(line: VisitServiceLineInput, header: VisitHeaderInput) -> KitInlayFormInput:
@@ -277,6 +297,7 @@ def _line_kit_inlay_adapter(line: VisitServiceLineInput, header: VisitHeaderInpu
         own_corr_use_custom_amount=line.own_corr_use_custom_amount,
         own_corr_custom_amount=line.own_corr_custom_amount,
         own_corr_client_payment_kind=line.own_corr_client_payment_kind,
+        own_corr_master_id=line.own_corr_master_id,
         visit_master_allocations=line.service_master_allocations,
         questionnaire_raw=line.questionnaire_raw,
         addon_sales_amount=line.addon_sales_amount,
@@ -397,27 +418,67 @@ def compute_visit_service_line(
     base_amount_from_client = float(line.amount_from_client or 0)
     amount_from_client = base_amount_from_client
     client_payment_kind = line.client_payment_kind
-    if line.own_correction and line.own_corr_use_custom_amount:
-        cost_total += compute_correction_extra_costs(
+    correction_master_id: int | None = None
+    correction_master_amount = 0.0
+
+    if line.own_correction:
+        correction_master_id = _resolve_correction_master_id(
             db,
-            corr_trim_qty=int(line.own_corr_trim_qty or 0),
-            corr_hourly_hours=float(line.own_corr_hourly_hours or 0),
-            corr_hourly_avg=False,
-            corr_wash=bool(line.own_corr_wash),
-            corr_circle=bool(line.own_corr_circle),
-            corr_steam=bool(line.own_corr_steam),
+            line,
+            default_filler_id=default_mix_bonus_master_id,
         )
-        corr_amount = float(line.own_corr_custom_amount or 0)
-        amount_from_client = base_amount_from_client + corr_amount
-        if base_amount_from_client <= 0:
-            client_payment_kind = line.own_corr_client_payment_kind
-        if corr_amount <= 0:
-            raise ValueError("Укажите сумму с клиента для коррекции («Своя сумма»).")
-    profit_before = amount_from_client - cost_total
-    if line.own_correction and line.own_corr_use_custom_amount and profit_before < -0.01:
-        raise ValueError("Сумма с клиента меньше себестоимости коррекции.")
-    salon_profit = profit_before * salon_pct
-    masters_pool = profit_before - salon_profit
+        if not correction_master_id:
+            raise ValueError("Выберите мастера коррекции из списка.")
+        _validate_correction_master(db, correction_master_id)
+
+        if line.own_corr_use_custom_amount:
+            corr_fx = compute_correction_extra_costs(
+                db,
+                corr_trim_qty=int(line.own_corr_trim_qty or 0),
+                corr_hourly_hours=float(line.own_corr_hourly_hours or 0),
+                corr_hourly_avg=False,
+                corr_wash=bool(line.own_corr_wash),
+                corr_circle=bool(line.own_corr_circle),
+                corr_steam=bool(line.own_corr_steam),
+            )
+            cost_total += corr_fx
+            corr_amount = float(line.own_corr_custom_amount or 0)
+            amount_from_client = base_amount_from_client + corr_amount
+            if base_amount_from_client <= 0:
+                client_payment_kind = line.own_corr_client_payment_kind
+            if corr_amount <= 0:
+                raise ValueError("Укажите сумму с клиента для коррекции («Своя сумма»).")
+            base_cost = cost_total - corr_fx
+            base_profit = base_amount_from_client - base_cost
+            corr_profit = corr_amount - corr_fx
+            if corr_profit < -0.01:
+                raise ValueError("Сумма с клиента меньше себестоимости коррекции.")
+            base_salon = base_profit * salon_pct
+            base_masters_pool = base_profit - base_salon
+            corr_salon = corr_profit * salon_pct
+            correction_master_amount = corr_profit - corr_salon
+            profit_before = base_profit + corr_profit
+            salon_profit = base_salon + corr_salon
+            masters_pool = base_masters_pool
+        else:
+            catalog_mp, catalog_sp, _catalog_fx = compute_correction_catalog_pays(
+                db,
+                corr_trim_qty=int(line.own_corr_trim_qty or 0),
+                corr_hourly_hours=float(line.own_corr_hourly_hours or 0),
+                corr_hourly_avg=False,
+                corr_wash=bool(line.own_corr_wash),
+                corr_circle=bool(line.own_corr_circle),
+                corr_steam=bool(line.own_corr_steam),
+            )
+            correction_master_amount = catalog_mp
+            base_profit = amount_from_client - cost_total
+            salon_profit = base_profit * salon_pct + catalog_sp
+            masters_pool = base_profit - base_profit * salon_pct
+            profit_before = base_profit
+    else:
+        profit_before = amount_from_client - cost_total
+        salon_profit = profit_before * salon_pct
+        masters_pool = profit_before - salon_profit
 
     return VisitServiceLineComputed(
         amount_from_client=amount_from_client,
@@ -430,6 +491,8 @@ def compute_visit_service_line(
         mix_cost_amount=mix_cost,
         mix_bonus_master_id=mix_bonus_master_id,
         mix_bonus_amount=mix_bonus_amount,
+        correction_master_id=correction_master_id,
+        correction_master_amount=correction_master_amount,
         kanekalon_price_per_gram_at_time=k_snap,
         kudri_price_per_gram_at_time=ku_snap,
         materials_cost_total=mat_cost,
@@ -458,6 +521,7 @@ def recalc_visit_totals(visit: Visit) -> None:
             "kudri_grams",
             "mix_cost_amount",
             "mix_bonus_amount",
+            "correction_master_amount",
             "materials_cost_total",
             "addons_total",
             "amortization_amount",
@@ -471,6 +535,8 @@ def recalc_visit_totals(visit: Visit) -> None:
         visit.mix_source = None
         visit.mix_complexity = None
         visit.mix_bonus_master_id = None
+        visit.correction_master_id = None
+        visit.correction_master_amount = 0.0
         visit.amortization_level = None
         visit.kanekalon_price_per_gram_at_time = None
         visit.kudri_price_per_gram_at_time = None
@@ -484,6 +550,7 @@ def recalc_visit_totals(visit: Visit) -> None:
     visit.kudri_grams = sum(float(s.kudri_grams or 0) for s in active)
     visit.mix_cost_amount = sum(float(s.mix_cost_amount or 0) for s in active)
     visit.mix_bonus_amount = sum(float(s.mix_bonus_amount or 0) for s in active)
+    visit.correction_master_amount = sum(float(s.correction_master_amount or 0) for s in active)
     visit.materials_cost_total = sum(float(s.materials_cost_total or 0) for s in active)
     visit.addons_total = sum(float(s.addons_total or 0) for s in active)
     visit.amortization_amount = sum(float(s.amortization_amount or 0) for s in active)
@@ -501,6 +568,7 @@ def recalc_visit_totals(visit: Visit) -> None:
     visit.mix_source = first.mix_source
     visit.mix_complexity = first.mix_complexity
     visit.mix_bonus_master_id = first.mix_bonus_master_id
+    visit.correction_master_id = first.correction_master_id
     visit.amortization_level = first.amortization_level
 
 
@@ -644,6 +712,8 @@ def save_visit_with_services(
             mix_cost_amount=computed.mix_cost_amount,
             mix_bonus_master_id=computed.mix_bonus_master_id,
             mix_bonus_amount=computed.mix_bonus_amount,
+            correction_master_id=computed.correction_master_id,
+            correction_master_amount=computed.correction_master_amount,
             kanekalon_price_per_gram_at_time=computed.kanekalon_price_per_gram_at_time,
             kudri_price_per_gram_at_time=computed.kudri_price_per_gram_at_time,
             materials_cost_total=computed.materials_cost_total,
@@ -738,6 +808,7 @@ def kit_inlay_to_multi(inp: KitInlayFormInput, *, booking_id: int | None = None)
         own_corr_use_custom_amount=inp.own_corr_use_custom_amount,
         own_corr_custom_amount=inp.own_corr_custom_amount,
         own_corr_client_payment_kind=inp.own_corr_client_payment_kind,
+        own_corr_master_id=inp.own_corr_master_id,
         service_master_allocations=inp.visit_master_allocations,
         questionnaire_raw=inp.questionnaire_raw,
         addon_sales_amount=inp.addon_sales_amount,
@@ -942,6 +1013,10 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
     if g_bool("own_correction") and not own_corr_use_custom and own_corr_custom > 0:
         own_corr_use_custom = True
     own_corr_pk = parse_client_payment_kind(g("own_corr_client_payment_kind", ""))
+    own_corr_master_raw = g("own_corr_master_id", "").strip()
+    own_corr_master_id = (
+        int(own_corr_master_raw) if own_corr_master_raw.isdigit() and int(own_corr_master_raw) > 0 else None
+    )
     line_amount = g_float("amount_from_client", 0)
     line_pk = parse_client_payment_kind(g("client_payment_kind", ""))
     if own_corr_use_custom and line_amount <= 0:
@@ -991,6 +1066,7 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
         own_corr_use_custom_amount=own_corr_use_custom,
         own_corr_custom_amount=own_corr_custom,
         own_corr_client_payment_kind=own_corr_pk,
+        own_corr_master_id=own_corr_master_id,
         service_master_allocations=_parse_service_master_allocations_from_form(form, idx),
         questionnaire_raw=q_raw,
         addon_sales_amount=max(0.0, g_float("addon_sales_amount", 0)),
@@ -1169,6 +1245,8 @@ def _visit_service_financial_signature(
         round(float(vs.masters_pool or 0), 2),
         int(vs.mix_bonus_master_id or 0),
         round(float(vs.mix_bonus_amount or 0), 2),
+        int(vs.correction_master_id or 0),
+        round(float(vs.correction_master_amount or 0), 2),
         masters,
     )
 
@@ -1184,6 +1262,8 @@ def _apply_computed_to_visit_service(vs: VisitService, computed: VisitServiceLin
     vs.mix_cost_amount = computed.mix_cost_amount
     vs.mix_bonus_master_id = computed.mix_bonus_master_id
     vs.mix_bonus_amount = computed.mix_bonus_amount
+    vs.correction_master_id = computed.correction_master_id
+    vs.correction_master_amount = computed.correction_master_amount
     vs.kanekalon_price_per_gram_at_time = computed.kanekalon_price_per_gram_at_time
     vs.kudri_price_per_gram_at_time = computed.kudri_price_per_gram_at_time
     vs.materials_cost_total = computed.materials_cost_total

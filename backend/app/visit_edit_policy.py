@@ -105,6 +105,16 @@ def user_participates_in_visit(db: Session, visit_id: int, user_id: int) -> bool
         ).limit(1)
     ):
         return True
+    if visit and visit.correction_master_id == user_id:
+        return True
+    if db.scalar(
+        select(VisitService.id).where(
+            VisitService.visit_id == visit_id,
+            VisitService.is_cancelled.is_(False),
+            VisitService.correction_master_id == user_id,
+        ).limit(1)
+    ):
+        return True
     return False
 
 

@@ -1323,6 +1323,8 @@ class Visit(Base):
     mix_cost_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     mix_bonus_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     mix_bonus_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    correction_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    correction_master_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     kanekalon_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     kudri_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -1697,6 +1699,8 @@ class VisitService(Base):
     mix_cost_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     mix_bonus_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     mix_bonus_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    correction_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    correction_master_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     kanekalon_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     kudri_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     materials_cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)

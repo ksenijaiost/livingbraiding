@@ -109,6 +109,8 @@ def extract_participant_master_ids(inp: MultiServiceVisitInput) -> list[int]:
                 ids.add(int(mid))
         if line.mix_bonus_master_id and int(line.mix_bonus_master_id) > 0:
             ids.add(int(line.mix_bonus_master_id))
+        if line.own_corr_master_id and int(line.own_corr_master_id) > 0:
+            ids.add(int(line.own_corr_master_id))
     return sorted(ids)
 
 

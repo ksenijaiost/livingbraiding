@@ -757,6 +757,10 @@ def parse_kit_inlay_form(
     own_corr_custom_amt = max(0.0, g_float("own_corr_custom_amount", 0))
     if g_bool("own_correction") and not own_corr_use_custom and own_corr_custom_amt > 0:
         own_corr_use_custom = True
+    own_corr_master_raw = g("own_corr_master_id", "").strip()
+    own_corr_master_id = (
+        int(own_corr_master_raw) if own_corr_master_raw.isdigit() and int(own_corr_master_raw) > 0 else None
+    )
     visit_amount = g_float("amount_from_client", 0)
 
     return KitInlayFormInput(
@@ -819,6 +823,7 @@ def parse_kit_inlay_form(
         own_corr_use_custom_amount=own_corr_use_custom,
         own_corr_custom_amount=own_corr_custom_amt,
         own_corr_client_payment_kind=parse_client_payment_kind(g("own_corr_client_payment_kind", "")),
+        own_corr_master_id=own_corr_master_id,
         client_payment_kind=parse_client_payment_kind(g("client_payment_kind", "")),
         visit_master_allocations=visit_master_allocations,
         questionnaire_raw=extract_questionnaire_raw_from_form(form),
@@ -888,6 +893,7 @@ class KitInlayFormInput:
     own_corr_use_custom_amount: bool = False
     own_corr_custom_amount: float = 0.0
     own_corr_client_payment_kind: ClientPaymentKind = ClientPaymentKind.CASH
+    own_corr_master_id: int | None = None
     client_payment_kind: ClientPaymentKind = ClientPaymentKind.CASH
 
 
@@ -973,6 +979,7 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
                     if inp.own_corr_use_custom_amount and float(inp.own_corr_custom_amount or 0) > 0
                     else None
                 ),
+                master_id=inp.own_corr_master_id,
             )
         extra: KitOwnExtra | None = None
         if inp.own_extra_blanks:

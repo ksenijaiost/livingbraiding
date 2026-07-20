@@ -488,6 +488,15 @@
           {% with prefix='own_corr_', fp=fp %}
             {% include "partials/correction_custom_amount_block.html" %}
           {% endwith %}
+          <div style="margin-top: 10px;">
+            <label>Мастер коррекции (ЗП)</label>
+            <select name="own_corr_master_id" style="max-width:320px;">
+              {% for m in masters_for_visit %}
+                <option value="{{ m.id }}" {% if (fp.get('own_corr_master_id') or (current_user.id if current_user_can_be_visit_master else ''))|string == m.id|string %}selected{% endif %}>{{ m.display_name or m.username }}</option>
+              {% endfor %}
+            </select>
+            <p class="muted" style="font-size:12px; margin-top:4px;">По умолчанию выбран заполняющий визит. ЗП за коррекцию начисляется выбранному мастеру.</p>
+          </div>
         </div>
 
         <label><input type="checkbox" name="own_extra_blanks" id="own_extra_blanks" onchange="ownExtra()" {% if fp.get('own_extra_blanks') == 'on' %}checked{% endif %} /> Доп. заготовки</label>
@@ -1317,6 +1326,11 @@
     const visitMasterLevel = {{ (current_user.master_level.value if current_user.master_level else None) | tojson }};
     const visitMasterLevelRu = {{ visit_master_level_ru|tojson }};
     const serviceCatalog = {{ service_catalog|tojson }};
+    const mastersForVisitList = [
+      {% for m in masters_for_visit %}
+      { id: {{ m.id }}, label: {{ (m.display_name or m.username)|tojson }} }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ];
     const currentUserCanBeVisitMaster = {{ (current_user_can_be_visit_master if current_user_can_be_visit_master is defined else true) | tojson }};
     const forceVisitMultiMasters = {{ (force_visit_multi_masters if force_visit_multi_masters is defined else false) | tojson }};
     const currentUserId = {{ current_user.id|int }};
@@ -2196,6 +2210,18 @@
       return out;
     }
 
+    function lineFeatureCorrMasterOptions(selected) {
+      const defaultId = currentUserCanBeVisitMaster ? String(currentUserId || '') : '';
+      const cur = String(selected || defaultId || '');
+      let out = '';
+      (mastersForVisitList || []).forEach(function (m) {
+        const id = String(m.id || '');
+        const lbl = String(m.label || ('ID ' + id));
+        out += '<option value="' + escapeHtml(id) + '"' + (cur === id ? ' selected' : '') + '>' + escapeHtml(lbl) + '</option>';
+      });
+      return out;
+    }
+
     function serviceFeatureMixHtml(idx) {
       const pf = function (name, def) { return lineFeaturePrefill(idx, name, def); };
       return '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
@@ -2282,6 +2308,13 @@
                   '</div>' +
                   '<button type="button" class="secondary lb-corr-custom-amount-cancel" style="margin-top:8px;">Убрать свою сумму</button>' +
                 '</div>' +
+              '</div>' +
+              '<div style="margin-top:8px;">' +
+                '<label>Мастер коррекции (ЗП)</label>' +
+                '<select name="line_' + String(idx) + '_own_corr_master_id" style="max-width:320px;">' +
+                  lineFeatureCorrMasterOptions(pf('own_corr_master_id', '')) +
+                '</select>' +
+                '<p class="muted" style="font-size:12px; margin-top:4px;">По умолчанию — заполняющий визит.</p>' +
               '</div>' +
             '</div>' +
             '<label style="display:block; margin-top:6px;"><input type="checkbox" name="line_' + String(idx) + '_own_extra_blanks"' + checkedAttr('own_extra_blanks') + ' /> Нужны доп. заготовки</label>' +

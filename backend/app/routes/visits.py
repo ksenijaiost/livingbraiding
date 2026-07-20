@@ -127,6 +127,12 @@ def admin_visits(
                     )
                 ),
                 Visit.id.in_(
+                    select(VisitService.visit_id).where(
+                        VisitService.is_cancelled.is_(False),
+                        VisitService.correction_master_id == current_user.id,
+                    )
+                ),
+                Visit.id.in_(
                     select(VisitService.visit_id)
                     .join(VisitServiceMaster, VisitServiceMaster.visit_service_id == VisitService.id)
                     .where(
@@ -135,6 +141,7 @@ def admin_visits(
                     )
                 ),
                 Visit.mix_bonus_master_id == current_user.id,
+                Visit.correction_master_id == current_user.id,
             )
         )
     if search_id is not None:
