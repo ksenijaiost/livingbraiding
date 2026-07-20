@@ -108,17 +108,23 @@ def _visit_header(client_id: int) -> VisitHeaderInput:
 
 
 def _seed_correction_catalog(
-    db, *, fixed: float = 10.0, master_pay: float = 50.0, studio_pay: float = 20.0
+    db,
+    *,
+    fixed: float = 10.0,
+    master_pay: float = 50.0,
+    price: float = 100.0,
+    studio_pay: float | None = None,
 ) -> None:
+    meta: dict[str, float] = {"master_pay": master_pay, "fixed_expense": fixed}
+    if studio_pay is not None:
+        meta["studio_pay"] = studio_pay
     db.add(
         CatalogProduct(
             category_name="Заказ",
             subcategory_name="Коррекция комплекта",
             name=CORR_SVC_TRIM,
-            price=100.0,
-            meta_json=json.dumps(
-                {"master_pay": master_pay, "studio_pay": studio_pay, "fixed_expense": fixed}
-            ),
+            price=price,
+            meta_json=json.dumps(meta),
             is_active=True,
         )
     )
@@ -304,7 +310,7 @@ def test_visit_correction_catalog_master_pay(memory_db) -> None:
     svc, client = _seed_visit_service_context(db)
     filler = _seed_master(db, username="filler")
     other = _seed_master(db, username="other")
-    _seed_correction_catalog(db, master_pay=80.0, studio_pay=30.0)
+    _seed_correction_catalog(db, master_pay=80.0, price=100.0, fixed=10.0, studio_pay=30.0)
 
     line = VisitServiceLineInput(
         service_id=int(svc.id),
@@ -332,11 +338,11 @@ def test_visit_correction_catalog_master_pay(memory_db) -> None:
     assert computed.correction_master_id == int(other.id)
     assert computed.correction_master_amount == pytest.approx(80.0)
     assert computed.masters_pool == pytest.approx(2000.0)
-    assert computed.salon_profit == pytest.approx(2030.0)
+    assert computed.salon_profit == pytest.approx(2010.0)
 
 
 def test_compute_correction_catalog_pays(memory_db) -> None:
-    _seed_correction_catalog(memory_db, master_pay=55.0, studio_pay=22.0, fixed=12.0)
+    _seed_correction_catalog(memory_db, master_pay=55.0, price=100.0, fixed=12.0, studio_pay=22.0)
     mp, sp, fx = compute_correction_catalog_pays(
         memory_db,
         corr_trim_qty=2,
@@ -347,7 +353,7 @@ def test_compute_correction_catalog_pays(memory_db) -> None:
         corr_steam=False,
     )
     assert mp == pytest.approx(110.0)
-    assert sp == pytest.approx(44.0)
+    assert sp == pytest.approx(66.0)
     assert fx == pytest.approx(24.0)
 
 

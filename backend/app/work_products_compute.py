@@ -67,7 +67,10 @@ def compute_correction_catalog_pays(
     corr_steam: bool,
     bonus_multiplier: float = 1.0,
 ) -> tuple[float, float, float]:
-    """ЗП мастера, доля студии и fixed_expense по прайсу «Коррекция комплекта»."""
+    """ЗП мастера, доля студии и fixed_expense по прайсу «Коррекция комплекта».
+
+    Студия = Цена − Работа − Расход (не studio_pay из meta).
+    """
     from app.work_products import _zakaz_subcategory_services_map  # noqa: WPS433
 
     corr_map = _zakaz_subcategory_services_map(db, "Коррекция комплекта")
@@ -79,8 +82,9 @@ def compute_correction_catalog_pays(
         row = corr_map.get(name) or {}
         u = max(0.0, float(units))
         mp = float(row.get("master_pay") or 0.0) * u
-        sp = float(row.get("studio_pay") or 0.0) * u
         fx = float(row.get("fixed_expense") or 0.0) * u
+        price = float(row.get("client_price") or 0.0) * u
+        sp = max(0.0, price - mp - fx)
         return mp, sp, fx
 
     mp_total = 0.0
