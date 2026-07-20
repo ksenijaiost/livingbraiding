@@ -86,7 +86,6 @@ from app.kit_inlay_visit import _materials_cost_and_snapshot
 from app.work_products_compute import (
     compute_work_financials,
     kit_studio_profit_amount,
-    resolve_kit_client_price,
     split_profit_from_client_amount,
 )
 from app.forms_parse import parse_bool, parse_date_iso, parse_float, parse_int
@@ -1461,15 +1460,9 @@ async def work_new_post(
         if kind == WorkKind.KIT:
             studio_total = kit_studio_profit_amount(
                 scope=scope,
-                client_price=resolve_kit_client_price(
-                    scope=scope,
-                    catalog_client_price=float(kit_catalog_client_price),
-                    amount_from_client=float(amount_from_client)
-                    if amount_from_client is not None
-                    else None,
-                ),
                 cost_total=float(cost_total_amount),
                 master_total=master_total,
+                amount_from_client=float(amount_from_client) if amount_from_client is not None else None,
             )
         elif corr_custom_studio_total is not None:
             studio_total = corr_custom_studio_total
@@ -2161,7 +2154,7 @@ async def work_edit_save(
         w.extra_costs_amount = max(0.0, _p_float("extra_costs_amount", float(w.extra_costs_amount or 0.0)))
         w.cost_total_amount = max(0.0, _p_float("cost_total_amount", float(w.cost_total_amount or 0.0)))
 
-        w.studio_profit_amount = max(0.0, _p_float("studio_profit_amount", float(w.studio_profit_amount or 0.0)))
+        w.studio_profit_amount = _p_float("studio_profit_amount", float(w.studio_profit_amount or 0.0))
 
         if w.kind == WorkKind.KIT and w.created_kit_id:
             kit_result = apply_kit_work_edit(
@@ -2188,7 +2181,7 @@ async def work_edit_save(
 
         profit_raw = (_g_str(form, "profit_total_amount", "") or "").strip()
         if profit_raw:
-            w.profit_total_amount = max(0.0, _p_float("profit_total_amount", float(w.profit_total_amount or 0.0)))
+            w.profit_total_amount = _p_float("profit_total_amount", float(w.profit_total_amount or 0.0))
         else:
             w.profit_total_amount = float(w.master_profit_amount or 0.0) + float(w.studio_profit_amount or 0.0)
     except ValueError as exc:

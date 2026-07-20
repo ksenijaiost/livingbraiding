@@ -556,7 +556,7 @@ def _append_work_accruals(
     w = db.get(WorkForInventory, int(work_id))
     if w and w.scope == WorkScope.CUSTOM_ORDER:
         studio_amt = money_q2(float(w.studio_profit_amount or 0))
-        if studio_amt > 0:
+        if studio_amt != 0:
             append_ledger(
                 db,
                 entry_kind=PayrollFundEntryKind.ACCRUAL,
@@ -615,7 +615,7 @@ def backfill_work_accruals_if_missing(db: Session, work: WorkForInventory) -> No
     needs = False
     if exp_master > 0 and abs(net_master - exp_master) > 0.02:
         needs = True
-    if exp_studio > 0 and abs(net_studio - exp_studio) > 0.02:
+    if abs(exp_studio) > 0.001 and abs(net_studio - exp_studio) > 0.02:
         needs = True
     if needs:
         replace_work_accruals(db, int(work.id), staff, work.created_by_user_id)
@@ -691,7 +691,7 @@ def sum_work_studio_payroll_by_work_id(
         if w.scope != WorkScope.CUSTOM_ORDER:
             continue
         amt = money_q2(float(w.studio_profit_amount or 0))
-        if amt > 0:
+        if abs(amt) > 0.001:
             out[int(w.id)] = amt
             if backfill:
                 backfill_work_accruals_if_missing(db, w)

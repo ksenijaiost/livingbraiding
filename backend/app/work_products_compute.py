@@ -89,14 +89,21 @@ def resolve_kit_client_price(
 def kit_studio_profit_amount(
     *,
     scope: WorkScope,
-    client_price: float,
     cost_total: float,
     master_total: float,
+    amount_from_client: float | None = None,
 ) -> float:
-    """ЗП студии по комплекту: цена − себестоимость − ЗП мастера."""
-    if scope == WorkScope.IN_STOCK:
-        return 0.0
-    return float(client_price) - float(cost_total) - float(master_total)
+    """ЗП студии по комплекту.
+
+    Если есть сумма с клиента — студия = сумма − себестоимость − ЗП мастеров.
+    Если суммы с клиента нет (в т.ч. работы «в наличие») — студия = −ЗП мастеров
+    (ЗП мастеров идёт из фонда студии).
+    """
+    _ = scope
+    afc = float(amount_from_client) if amount_from_client is not None else 0.0
+    if afc > 0:
+        return afc - float(cost_total) - float(master_total)
+    return -float(master_total)
 
 
 def split_profit_from_client_amount(
@@ -295,16 +302,11 @@ def compute_work_financials(
     cost_total_amount = float(mat_cost) + float(extra_costs_amount)
     studio_share = _studio_share_snapshot(db)
     if kind == WorkKind.KIT:
-        price = resolve_kit_client_price(
-            scope=scope,
-            catalog_client_price=float(kit_client_price or 0.0),
-            amount_from_client=amount_from_client,
-        )
         studio_total = kit_studio_profit_amount(
             scope=scope,
-            client_price=price,
             cost_total=cost_total_amount,
             master_total=master_total,
+            amount_from_client=amount_from_client,
         )
     elif kind not in (WorkKind.RUBBER, WorkKind.KIT_CORRECTION):
         studio_total = 0.0

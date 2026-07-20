@@ -638,8 +638,19 @@
           if (m) masterSum += parseFloat(String(m[1]).replace(/\s/g, '').replace(',', '.')) || 0;
         }
         if (getScopeValue() !== 'IN_STOCK') {
-          var studioSum = priceForProfit - costKit - masterSum;
+          var studioSum;
+          var afcRaw = String((document.querySelector('input[name="amount_from_client"]') || {}).value || '').trim();
+          var afcVal = afcRaw ? (parseInt(afcRaw, 10) || 0) : 0;
+          if (getScopeValue() === 'CUSTOM_ORDER' && afcVal > 0) {
+            studioSum = afcVal - costKit - masterSum;
+          } else if (getScopeValue() === 'CUSTOM_ORDER') {
+            studioSum = -masterSum;
+          } else {
+            studioSum = priceForProfit - costKit - masterSum;
+          }
           payLines.push('Студия: ' + money2(studioSum) + ' ₽');
+        } else {
+          payLines.push('Студия: ' + money2(-masterSum) + ' ₽');
         }
         setPayLines(payLines);
         setCost(
