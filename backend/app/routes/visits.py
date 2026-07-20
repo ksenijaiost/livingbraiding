@@ -411,7 +411,13 @@ async def admin_visit_edit_post(
 
     form = await request.form()
     try:
-        multi = parse_multi_service_visit_form(form, booking_id=visit.booking_id)
+        multi = parse_multi_service_visit_form(
+            form,
+            booking_id=visit.booking_id,
+            # На редактировании «себя» подставлять нельзя: админ без роли мастера
+            # обязан явно выбрать мастеров; мастер тоже сохраняет отмеченных из формы.
+            single_master_default_id=None,
+        )
         update_visit_with_services(db, visit_id, current_user.id, multi)
         visit = db.get(Visit, visit_id)
         assert visit is not None

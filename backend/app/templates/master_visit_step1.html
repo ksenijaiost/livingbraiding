@@ -169,19 +169,28 @@
       </div>
       <div class="card" style="margin-top: 12px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Мастера на визит</div>
+        {% set _force_multi = force_visit_multi_masters or (fp.get('visit_use_multi_masters') == 'on') %}
         <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
           <input type="checkbox" name="visit_use_multi_masters" id="visit_use_multi_masters"
-            {% if fp.get('visit_use_multi_masters') == 'on' %}checked{% endif %}
+            {% if _force_multi %}checked{% endif %}
+            {% if force_visit_multi_masters %}disabled{% endif %}
             onchange="visitMastersModeSync()" />
+          {% if force_visit_multi_masters %}
+            <input type="hidden" name="visit_use_multi_masters" value="on" />
+          {% endif %}
           <span>Выбрать несколько мастеров</span>
         </label>
-        <p id="visit_masters_single_note" class="muted" style="font-size: 12px; margin: -4px 0 10px;">
+        <p id="visit_masters_single_note" class="muted" style="font-size: 12px; margin: -4px 0 10px; {% if force_visit_multi_masters or _force_multi %}display:none;{% endif %}">
           Сейчас в пул идёт только вы, 100%. Включите галочку выше, чтобы распределить доли между мастерами.
         </p>
-        <p id="visit_masters_multi_note" class="muted" style="font-size: 12px; margin: -4px 0 10px; display: none;">
-          Отметьте мастеров и укажите доли целыми процентами; сумма по отмеченным — ровно 100. Если отмечен один мастер, долю можно не заполнять (100%).
+        <p id="visit_masters_multi_note" class="muted" style="font-size: 12px; margin: -4px 0 10px; {% if force_visit_multi_masters or _force_multi %}display:block;{% else %}display:none;{% endif %}">
+          {% if force_visit_multi_masters %}
+            У вашей учётной записи нет роли «мастер» — отметьте мастеров из списка и укажите доли (сумма 100%). Сохранить без выбора нельзя.
+          {% else %}
+            Отметьте мастеров и укажите доли целыми процентами; сумма по отмеченным — ровно 100. Если отмечен один мастер, долю можно не заполнять (100%).
+          {% endif %}
         </p>
-        <div id="visit_masters_multi_block" style="display: none; flex-direction: column; gap: 10px;">
+        <div id="visit_masters_multi_block" style="{% if force_visit_multi_masters or _force_multi %}display:flex;{% else %}display:none;{% endif %} flex-direction: column; gap: 10px;">
           {% for m in masters_for_visit %}
             <div class="row" style="align-items: center; flex-wrap: wrap; gap: 10px 16px;">
               <label style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 12rem;">
@@ -684,7 +693,10 @@
     function visitMastersModeSync() {
       const cb = document.getElementById('visit_use_multi_masters');
       if (!cb) return;
-      const m = cb.checked;
+      if (forceVisitMultiMasters) {
+        cb.checked = true;
+      }
+      const m = cb.checked || forceVisitMultiMasters;
       const blk = document.getElementById('visit_masters_multi_block');
       const sn = document.getElementById('visit_masters_single_note');
       const mn = document.getElementById('visit_masters_multi_note');
@@ -1305,6 +1317,8 @@
     const visitMasterLevel = {{ (current_user.master_level.value if current_user.master_level else None) | tojson }};
     const visitMasterLevelRu = {{ visit_master_level_ru|tojson }};
     const serviceCatalog = {{ service_catalog|tojson }};
+    const currentUserCanBeVisitMaster = {{ (current_user_can_be_visit_master if current_user_can_be_visit_master is defined else true) | tojson }};
+    const forceVisitMultiMasters = {{ (force_visit_multi_masters if force_visit_multi_masters is defined else false) | tojson }};
     const currentUserId = {{ current_user.id|int }};
     const salonCutPct = {{ salon_cut_pct|float }};
     const materialPricePerGram = {{ (material_price_per_gram_json or '{}') | safe }};
@@ -1384,7 +1398,7 @@
     }
     function readAllocationsForPreview() {
       const ids = Array.from(document.querySelectorAll('input[name="visit_master_on"]:checked')).map((x) => parseInt(x.value, 10)).filter((x) => x > 0);
-      if (!ids.length && !(document.getElementById('visit_use_multi_masters') || {}).checked && currentUserId) {
+      if (!ids.length && !(document.getElementById('visit_use_multi_masters') || {}).checked && currentUserCanBeVisitMaster && currentUserId) {
         return [{ mid: currentUserId, pct: 100 }];
       }
       return readMasterAllocRows(ids, 'visit_master_pct_');

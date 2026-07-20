@@ -749,6 +749,8 @@ def parse_kit_inlay_form(
     if single_master_default_id is not None and not g_bool("visit_use_multi_masters"):
         visit_master_allocations = [(single_master_default_id, 100)]
     else:
+        # Без single_master_default (админ без роли мастера / редактирование) —
+        # только явный выбор из списка.
         visit_master_allocations = _parse_visit_master_allocations_from_form(form)
 
     own_corr_use_custom = g_bool("own_corr_use_custom_amount")
