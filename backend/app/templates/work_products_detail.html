@@ -119,6 +119,19 @@
       </div>
 
       <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
+        <strong>Помощь</strong>
+        {% if hourly_help_rows %}
+          {% for row in hourly_help_rows %}
+            <div class="muted" style="font-size: 12px; margin-top: 6px;">
+              {{ row.master_name }} — {{ row.duration_text }} — {{ "%.0f"|format(row.amount) }} ₽
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="muted" style="margin-top: 6px;">отсутствует</div>
+        {% endif %}
+      </div>
+
+      <div class="card" style="background:#f8fafc; margin-bottom: 12px;">
         <strong>Мастера</strong>
         {% if row.staff_rows %}
           {% for s in row.staff_rows %}

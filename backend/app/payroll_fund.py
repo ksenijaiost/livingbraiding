@@ -10,6 +10,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.time_utils import utcnow_naive
+
+HOURLY_HELP_LEDGER_COMMENT = "Почасовая помощь"
 from app.kit_blank_stock_core import (
     apply_discount_capped,
     keyed_client_price_selected,
@@ -321,6 +323,7 @@ def replace_visit_accruals(
     if services:
         for vs in services:
             replace_visit_service_accruals(db, vs, visit, created_by_user_id)
+        replace_visit_hourly_help_accruals(db, visit, created_by_user_id)
         return
     append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
     studio_amt = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
@@ -335,6 +338,7 @@ def replace_visit_accruals(
             source_id=visit.id,
             created_by_user_id=created_by_user_id,
         )
+    replace_visit_hourly_help_accruals(db, visit, created_by_user_id)
 
 
 def post_visit_service_accruals(
@@ -428,25 +432,118 @@ def post_visit_accruals(db: Session, visit: Visit, created_by_user_id: int | Non
     if services:
         for vs in services:
             post_visit_service_accruals(db, vs, visit, created_by_user_id)
-        return
+    else:
+        if not _has_accruals_for_source(db, PayrollFundSourceKind.VISIT, visit.id):
+            studio_amt = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
+            if studio_amt > 0:
+                append_ledger(
+                    db,
+                    entry_kind=PayrollFundEntryKind.ACCRUAL,
+                    side=PayrollFundSide.STUDIO,
+                    user_id=None,
+                    amount=studio_amt,
+                    source_kind=PayrollFundSourceKind.VISIT,
+                    source_id=visit.id,
+                    created_by_user_id=created_by_user_id,
+                )
 
-    if _has_accruals_for_source(db, PayrollFundSourceKind.VISIT, visit.id):
-        return
+            append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
 
-    studio_amt = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
-    if studio_amt > 0:
+    post_visit_hourly_help_accruals(db, visit, created_by_user_id)
+
+
+def _has_visit_hourly_help_accruals(db: Session, visit_id: int) -> bool:
+    return (
+        db.scalar(
+            select(PayrollFundLedger.id)
+            .where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == visit_id,
+                PayrollFundLedger.comment == HOURLY_HELP_LEDGER_COMMENT,
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+                PayrollFundLedger.storno_of_id.is_(None),
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
+def append_visit_hourly_help_ledgers(db: Session, visit: Visit, created_by_user_id: int | None) -> None:
+    from app.hourly_help import hourly_help_rows_from_visit
+
+    for row in hourly_help_rows_from_visit(visit):
+        amt = money_q2(float(row.amount or 0))
+        if amt <= 0:
+            continue
         append_ledger(
             db,
             entry_kind=PayrollFundEntryKind.ACCRUAL,
-            side=PayrollFundSide.STUDIO,
-            user_id=None,
-            amount=studio_amt,
+            side=PayrollFundSide.MASTER,
+            user_id=int(row.master_id),
+            amount=amt,
             source_kind=PayrollFundSourceKind.VISIT,
             source_id=visit.id,
             created_by_user_id=created_by_user_id,
+            comment=HOURLY_HELP_LEDGER_COMMENT,
         )
 
-    append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
+
+def post_visit_hourly_help_accruals(db: Session, visit: Visit, created_by_user_id: int | None) -> None:
+    if visit.is_cancelled:
+        return
+    if _has_visit_hourly_help_accruals(db, int(visit.id)):
+        return
+    append_visit_hourly_help_ledgers(db, visit, created_by_user_id)
+
+
+def storno_visit_hourly_help_accruals(
+    db: Session,
+    visit_id: int,
+    created_by_user_id: int | None,
+) -> None:
+    accruals = list(
+        db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == visit_id,
+                PayrollFundLedger.comment == HOURLY_HELP_LEDGER_COMMENT,
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+                PayrollFundLedger.storno_of_id.is_(None),
+            )
+        ).all()
+    )
+    for acc in accruals:
+        already = db.scalar(
+            select(PayrollFundLedger.id)
+            .where(PayrollFundLedger.storno_of_id == acc.id)
+            .limit(1)
+        )
+        if already is not None:
+            continue
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.STORNO,
+            side=acc.side,
+            user_id=acc.user_id,
+            amount=-money_q2(float(acc.amount or 0)),
+            source_kind=acc.source_kind,
+            source_id=acc.source_id,
+            created_by_user_id=created_by_user_id,
+            storno_of_id=acc.id,
+            comment=HOURLY_HELP_LEDGER_COMMENT,
+        )
+
+
+def replace_visit_hourly_help_accruals(
+    db: Session,
+    visit: Visit,
+    created_by_user_id: int | None,
+) -> None:
+    storno_visit_hourly_help_accruals(db, int(visit.id), created_by_user_id)
+    if visit.is_cancelled:
+        return
+    append_visit_hourly_help_ledgers(db, visit, created_by_user_id)
 
 
 def append_visit_master_pool_and_mix_bonus_ledgers(

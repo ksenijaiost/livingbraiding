@@ -1,0 +1,37 @@
+{% set hh_fp = form_prefill if form_prefill is defined else fp %}
+<div style="margin: 12px 0;">
+  <button type="button" class="secondary" id="hourly_help_toggle_btn">Почасовая помощь</button>
+</div>
+<div id="hourly_help_block" class="card" style="display: {% if hh_fp.get('hourly_help_open') %}block{% else %}none{% endif %}; margin: 12px 0; border: 1px solid #e2e8f0; background: #f8fafc;">
+  <h3 style="margin-top: 0;">Почасовая помощь</h3>
+  <p class="muted" style="font-size: 12px; margin-top: 0;">Время — для истории. Сумма — ЗП мастера-помощника (вычитается из пула ЗП участников визита/работы).</p>
+  <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+    <thead>
+      <tr style="text-align: left; border-bottom: 1px solid #e2e8f0;">
+        <th style="padding: 6px 8px;">Мастер</th>
+        <th style="padding: 6px 8px; width: 5rem;">Часы</th>
+        <th style="padding: 6px 8px; width: 5rem;">Минуты</th>
+        <th style="padding: 6px 8px; width: 7rem;">Сумма, ₽</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in masters %}
+        <tr class="hourly-help-row" data-master-id="{{ u.id }}" style="border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 6px 8px;" class="hourly-help-master-name">{{ u.display_name or u.username }}</td>
+          <td style="padding: 6px 8px;">
+            <input type="number" name="hourly_help_hours_{{ u.id }}" min="0" step="1" class="hourly-help-field" style="width: 4.5rem;"
+              value="{{ hh_fp.get('hourly_help_hours_' ~ u.id, '')|e }}" />
+          </td>
+          <td style="padding: 6px 8px;">
+            <input type="number" name="hourly_help_minutes_{{ u.id }}" min="0" max="59" step="1" class="hourly-help-field" style="width: 4.5rem;"
+              value="{{ hh_fp.get('hourly_help_minutes_' ~ u.id, '')|e }}" />
+          </td>
+          <td style="padding: 6px 8px;">
+            <input type="number" name="hourly_help_amount_{{ u.id }}" min="0" step="1" class="hourly-help-field" style="width: 6rem;"
+              value="{{ hh_fp.get('hourly_help_amount_' ~ u.id, '')|e }}" />
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

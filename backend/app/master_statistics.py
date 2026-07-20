@@ -28,6 +28,7 @@ from app.db.models import (
     WorkScope,
 )
 from app.operational_report import period_bounds
+from app.hourly_help import master_hourly_help_pay_from_visit
 from app.payroll_fund import (
     employee_payroll_net_in_period,
     employee_payouts_in_period,
@@ -281,6 +282,7 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
                 masters_pay_total=_visit_masters_pay_total(visit),
                 master_payroll=money_q2(
                     sum(_master_visit_service_pay(visit, vs, master_id) for vs in svc_lines)
+                    + master_hourly_help_pay_from_visit(visit, master_id)
                 ),
                 studio_payroll=money_q2(sum(_visit_studio_pay(vs) for vs in svc_lines)),
             )

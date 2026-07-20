@@ -89,6 +89,14 @@ from app.work_products_compute import (
     split_profit_from_client_amount,
 )
 from app.forms_parse import parse_bool, parse_date_iso, parse_float, parse_int
+from app.hourly_help import (
+    apply_hourly_help_to_staff_profits,
+    build_hourly_help_display_rows,
+    hourly_help_rows_from_work_details,
+    hourly_help_rows_to_json,
+    parse_hourly_help_from_form,
+    validate_hourly_help_rows,
+)
 from app.work_products_detail_view import (
     build_composition_table_view,
     catalog_product_name,
@@ -1454,7 +1462,20 @@ async def work_new_post(
             staff_master_profit[current_user.id] = (
                 float(staff_master_profit.get(current_user.id, 0.0)) + corr_pay
             )
-        master_total = float(sum(staff_master_profit.values()))
+        help_rows = parse_hourly_help_from_form(form)
+        if kind == WorkKind.KIT and kit_staff_ids:
+            participant_ids = {int(x) for x in kit_staff_ids}
+        else:
+            participant_ids = {int(current_user.id)}
+        validate_hourly_help_rows(db, help_rows, participant_ids)
+        staff_master_profit, helper_profits = apply_hourly_help_to_staff_profits(
+            staff_master_profit,
+            participant_ids,
+            help_rows,
+        )
+        if help_rows:
+            details["hourly_help"] = json.loads(hourly_help_rows_to_json(help_rows) or "[]")
+        master_total = float(sum(staff_master_profit.values()) + sum(helper_profits.values()))
         cost_total_amount = fin.cost_total_amount
         extra_costs_amount = fin.extra_costs_amount
         if kind == WorkKind.KIT:
@@ -1523,6 +1544,19 @@ async def work_new_post(
                     user_id=uid,
                     share=share,
                     master_profit_amount=float(staff_master_profit.get(uid, 0.0)),
+                    details_json=None,
+                )
+            )
+        alloc_uids = {int(uid) for uid, _ in alloc}
+        for uid, amt in helper_profits.items():
+            if int(uid) in alloc_uids:
+                continue
+            db.add(
+                WorkForInventoryStaff(
+                    work_id=work.id,
+                    user_id=int(uid),
+                    share=0.0,
+                    master_profit_amount=float(amt),
                     details_json=None,
                 )
             )
@@ -1908,6 +1942,7 @@ def work_detail(
     rubber_detail = details.get("rubber") if isinstance(details.get("rubber"), dict) else None
     rubber_label = rubber_type_label(rubber_detail.get("type") if rubber_detail else None)
     profit_explanation = work_profit_explanation(w, details)
+    hourly_help_rows = build_hourly_help_display_rows(hourly_help_rows_from_work_details(details), db)
     if w.booking_id:
         from app.db.models import Booking
 
@@ -1954,6 +1989,7 @@ def work_detail(
             rubber_detail=rubber_detail,
             rubber_label=rubber_label,
             profit_explanation=profit_explanation,
+            hourly_help_rows=hourly_help_rows,
         ),
     )
 

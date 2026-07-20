@@ -38,6 +38,13 @@ from app.db.models import (
 )
 from app.audit import diff_fields, write_audit_rows
 from app.forms_parse import parse_bool, parse_date_iso, parse_float
+from app.hourly_help import (
+    HourlyHelpRow,
+    apply_hourly_help_to_visit,
+    collect_visit_participant_master_ids,
+    parse_hourly_help_from_form,
+    validate_hourly_help_rows,
+)
 from app.kit_inlay_visit import (
     AMORTIZATION_LEVEL_RUBLES,
     KitInlayFormInput,
@@ -62,6 +69,7 @@ from app.payroll_fund import (
     PayrollFundSourceKind,
     post_visit_accruals,
     post_visit_service_accruals,
+    replace_visit_hourly_help_accruals,
     replace_visit_service_accruals,
     storno_source_accruals,
 )
@@ -185,6 +193,7 @@ class VisitHeaderInput:
 class MultiServiceVisitInput:
     header: VisitHeaderInput
     lines: list[VisitServiceLineInput]
+    hourly_help: list[HourlyHelpRow] = field(default_factory=list)
 
 
 @dataclass
@@ -765,6 +774,7 @@ def save_visit_with_services(
     )
     assert visit is not None
     recalc_visit_totals(visit)
+    _apply_visit_hourly_help(db, visit, inp, line_master_rows, editor_user_id=master_id)
     post_visit_accruals(db, visit, visit.created_by_user_id)
     db.commit()
     db.refresh(visit)
@@ -1202,7 +1212,47 @@ def parse_multi_service_visit_form(
     )
 
     lines = [_parse_line_from_form(form, i) for i in indices]
-    return MultiServiceVisitInput(header=header, lines=lines)
+    hourly_help = parse_hourly_help_from_form(form)
+    return MultiServiceVisitInput(header=header, lines=lines, hourly_help=hourly_help)
+
+
+def _participant_master_ids_from_input(
+    inp: MultiServiceVisitInput,
+    line_master_rows: dict[int, list[tuple[int, float]]],
+    *,
+    editor_user_id: int | None = None,
+) -> set[int]:
+    mix_ids: set[int] = set()
+    corr_ids: set[int] = set()
+    for line in inp.lines:
+        if line.mix_bonus_master_id:
+            mix_ids.add(int(line.mix_bonus_master_id))
+        elif line.mix_source == MixSource.SELF_MIXED and editor_user_id:
+            mix_ids.add(int(editor_user_id))
+        if line.own_corr_master_id:
+            corr_ids.add(int(line.own_corr_master_id))
+    return collect_visit_participant_master_ids(
+        masters_scope=inp.header.masters_scope,
+        visit_master_allocations=inp.header.visit_master_allocations,
+        line_master_rows=line_master_rows,
+        mix_bonus_master_ids=mix_ids,
+        correction_master_ids=corr_ids,
+    )
+
+
+def _apply_visit_hourly_help(
+    db: Session,
+    visit: Visit,
+    inp: MultiServiceVisitInput,
+    line_master_rows: dict[int, list[tuple[int, float]]],
+    *,
+    editor_user_id: int | None = None,
+) -> None:
+    participant_ids = _participant_master_ids_from_input(
+        inp, line_master_rows, editor_user_id=editor_user_id
+    )
+    validate_hourly_help_rows(db, inp.hourly_help, participant_ids)
+    apply_hourly_help_to_visit(visit, inp.hourly_help)
 
 
 def _master_rows_for_line(
@@ -1547,6 +1597,9 @@ def update_visit_with_services(
     )
     assert visit is not None
     recalc_visit_totals(visit)
+    prev_help_json = visit.hourly_help_json
+    _apply_visit_hourly_help(db, visit, inp, line_master_rows, editor_user_id=editor_user_id)
+    help_changed = prev_help_json != visit.hourly_help_json
 
     after = {
         "client_id": visit.client_id,
@@ -1581,10 +1634,13 @@ def update_visit_with_services(
             continue
         new_sig = _visit_service_financial_signature(db, vs, visit)
         old_sig = sig_before.get(vs.id)
-        if old_sig is not None and new_sig != old_sig:
+        if help_changed or (old_sig is not None and new_sig != old_sig):
             replace_visit_service_accruals(db, vs, visit, editor_user_id)
         elif old_sig is None and vs.id not in sig_before:
             pass  # already posted for new lines
+
+    if help_changed:
+        replace_visit_hourly_help_accruals(db, visit, editor_user_id)
 
     db.commit()
     db.refresh(visit)

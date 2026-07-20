@@ -361,4 +361,8 @@ def visit_to_form_prefill(
     if len(active) > 1:
         _set(fp, "line_count", len(active) - 1)
 
+    from app.hourly_help import hourly_help_prefill_from_rows, hourly_help_rows_from_visit
+
+    fp.update(hourly_help_prefill_from_rows(hourly_help_rows_from_visit(visit)))
+
     return fp, vm_on_ids, vm_pct_str, extra_lines

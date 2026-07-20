@@ -1325,6 +1325,8 @@ class Visit(Base):
     mix_bonus_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     correction_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     correction_master_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    hourly_help_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hourly_help_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     kanekalon_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     kudri_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)

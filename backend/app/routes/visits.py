@@ -249,6 +249,9 @@ def admin_visit_detail(
     visit_super_priv = UserRole.ADMIN_SUPER in current_user.roles or UserRole.TECHSPEC in current_user.roles
     visit_master_pay_rows = build_visit_master_pay_rows(visit, db)
     visit_masters_lines = build_visit_masters_lines(visit, db)
+    from app.hourly_help import build_hourly_help_display_rows, hourly_help_rows_from_visit
+
+    hourly_help_rows = build_hourly_help_display_rows(hourly_help_rows_from_visit(visit), db)
 
     return templates.TemplateResponse(
         "admin_visit_detail.html",
@@ -278,6 +281,7 @@ def admin_visit_detail(
             visit_super_priv=visit_super_priv,
             visit_master_pay_rows=visit_master_pay_rows,
             visit_masters_lines=visit_masters_lines,
+            hourly_help_rows=hourly_help_rows,
         ),
     )
 

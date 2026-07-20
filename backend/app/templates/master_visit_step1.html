@@ -643,6 +643,8 @@
         </div>
       </div>
 
+      {% include "partials/hourly_help_form.html" %}
+
       <div id="visit_preview_block" class="card" style="background:#fff; margin: 12px 0; border: 1px solid #e2e8f0;">
         <h3 style="margin-top:0;">Предварительный расчёт</h3>
         <div id="visit_preview_client_total" style="font-size: 14px; font-weight: 600; margin-top: 4px;">С клиента (итого): —</div>
@@ -1410,6 +1412,54 @@
       if (sum !== 100) return null;
       return rows;
     }
+    function collectVisitParticipantMasterIds() {
+      const ids = new Set();
+      const scope = (document.querySelector('input[name="masters_scope"]:checked') || {}).value || 'VISIT';
+      if (scope === 'PER_SERVICE') {
+        visitLineIndicesForPreview().forEach(function (idx) {
+          const alloc = readLineAllocationsForPreview(idx);
+          if (alloc) alloc.forEach(function (r) { ids.add(r.mid); });
+        });
+      } else {
+        const alloc = readAllocationsForPreview();
+        if (alloc) alloc.forEach(function (r) { ids.add(r.mid); });
+      }
+      visitLineIndicesForPreview().forEach(function (idx) {
+        const mix = lineMixCostAndBonus(idx);
+        if (mix.bonusMasterId) ids.add(mix.bonusMasterId);
+        const corrName = idx === 0 ? 'own_corr_master_id' : ('line_' + idx + '_own_corr_master_id');
+        const corrSel = document.querySelector('select[name="' + corrName + '"]');
+        if (corrSel && corrSel.value) {
+          const mid = parseInt(corrSel.value, 10);
+          if (mid > 0) ids.add(mid);
+        }
+      });
+      return ids;
+    }
+
+    function hourlyHelpTotal() {
+      let total = 0;
+      document.querySelectorAll('input[name^="hourly_help_amount_"]').forEach(function (inp) {
+        if (inp.disabled) return;
+        const v = parseFloat(String(inp.value || '').replace(',', '.')) || 0;
+        if (v > 0) total += v;
+      });
+      return total;
+    }
+
+    function syncHourlyHelpRowStates() {
+      const participantIds = collectVisitParticipantMasterIds();
+      document.querySelectorAll('.hourly-help-row').forEach(function (row) {
+        const mid = parseInt(row.getAttribute('data-master-id') || '0', 10);
+        const disabled = participantIds.has(mid);
+        row.style.opacity = disabled ? '0.45' : '1';
+        row.querySelectorAll('.hourly-help-field').forEach(function (inp) {
+          inp.disabled = disabled;
+          if (disabled) inp.value = '';
+        });
+      });
+    }
+
     function readAllocationsForPreview() {
       const ids = Array.from(document.querySelectorAll('input[name="visit_master_on"]:checked')).map((x) => parseInt(x.value, 10)).filter((x) => x > 0);
       if (!ids.length && !(document.getElementById('visit_use_multi_masters') || {}).checked && currentUserCanBeVisitMaster && currentUserId) {
@@ -1812,6 +1862,7 @@
       const costEl = document.getElementById('visit_preview_cost_line');
       const clientTotalEl = document.getElementById('visit_preview_client_total');
       if (!payEl || !costEl) return;
+      syncHourlyHelpRowStates();
 
       const addons = Math.max(0, numVal('input[name="addon_sales_amount"]'));
       let amountTotal = 0;
@@ -1886,6 +1937,30 @@
         });
       }
 
+      const helpTotal = hourlyHelpTotal();
+      if (helpTotal > 0) {
+        let baseSum = 0;
+        Object.keys(totalsByMaster).forEach(function (mid) {
+          baseSum += totalsByMaster[mid].base || 0;
+        });
+        if (baseSum > 0) {
+          const ratio = Math.max(0, (baseSum - helpTotal) / baseSum);
+          Object.keys(totalsByMaster).forEach(function (mid) {
+            totalsByMaster[mid].base = (totalsByMaster[mid].base || 0) * ratio;
+          });
+        }
+        document.querySelectorAll('input[name^="hourly_help_amount_"]').forEach(function (inp) {
+          if (inp.disabled) return;
+          const m = inp.name.match(/^hourly_help_amount_(\d+)$/);
+          if (!m) return;
+          const amt = parseFloat(String(inp.value || '').replace(',', '.')) || 0;
+          if (amt <= 0) return;
+          const mid = parseInt(m[1], 10);
+          if (!totalsByMaster[mid]) totalsByMaster[mid] = { base: 0, bonus: 0 };
+          totalsByMaster[mid].help = (totalsByMaster[mid].help || 0) + amt;
+        });
+      }
+
       const mids = Object.keys(totalsByMaster).map(function (x) { return parseInt(x, 10); }).filter(function (x) { return x > 0; }).sort(function (a, b) { return a - b; });
       if (!mids.length) {
         payEl.innerHTML = '—';
@@ -1893,7 +1968,7 @@
         const lines = [];
         for (const mid of mids) {
           const t = totalsByMaster[mid];
-          lines.push('ЗП «' + masterNameById(mid) + '»: ' + money2(t.base + t.bonus) + ' ₽');
+          lines.push('ЗП «' + masterNameById(mid) + '»: ' + money2((t.base || 0) + (t.bonus || 0) + (t.help || 0)) + ' ₽');
         }
         payEl.innerHTML = lines.map((l) => '<div>' + l + '</div>').join('');
       }
@@ -3092,6 +3167,23 @@
     updateMixBlockUI();
     syncAmountRequired();
     updateServiceDerivedUI();
+    syncHourlyHelpRowStates();
+    (function () {
+      const toggleBtn = document.getElementById('hourly_help_toggle_btn');
+      const block = document.getElementById('hourly_help_block');
+      if (toggleBtn && block) {
+        toggleBtn.addEventListener('click', function () {
+          block.style.display = block.style.display === 'none' ? 'block' : 'none';
+          syncHourlyHelpRowStates();
+          syncVisitPreview();
+        });
+        document.querySelectorAll('.hourly-help-field').forEach(function (inp) {
+          inp.addEventListener('input', function () { syncHourlyHelpRowStates(); syncVisitPreview(); });
+          inp.addEventListener('change', function () { syncHourlyHelpRowStates(); syncVisitPreview(); });
+        });
+      }
+    })();
+    syncVisitPreview();
   </script>
   <script src="/static/correction_custom_amount.js"></script>
 {% endblock %}

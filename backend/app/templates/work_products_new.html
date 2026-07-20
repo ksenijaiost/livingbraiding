@@ -346,6 +346,8 @@
         </div>
       </div>
 
+      {% include "partials/hourly_help_form.html" %}
+
       <div id="work_preview_block" class="card" style="background:#fff; margin: 12px 0; border: 1px solid #e2e8f0;">
         <h3 style="margin-top:0;">Предварительный расчёт</h3>
         <div id="work_preview_pieces_line" class="muted" style="font-size: 13px; display:none;">—</div>
@@ -548,6 +550,79 @@
       var payEl = document.getElementById('work_preview_master_lines');
       var costEl = document.getElementById('work_preview_cost_line');
       if (!piecesEl || !payEl || !costEl) return;
+      syncHourlyHelpRowStatesWork();
+
+      function collectWorkParticipantMasterIds() {
+        var ids = new Set();
+        var k = kind ? kind.value : '';
+        if (k === 'KIT') {
+          if (typeof window.getKitColumnMasterIds === 'function') {
+            window.getKitColumnMasterIds().forEach(function (uid) { ids.add(uid); });
+          }
+        } else {
+          var st0 = kitState();
+          if (st0 && st0.currentUserId) ids.add(st0.currentUserId);
+        }
+        return ids;
+      }
+      function hourlyHelpTotalWork() {
+        var total = 0;
+        document.querySelectorAll('input[name^="hourly_help_amount_"]').forEach(function (inp) {
+          if (inp.disabled) return;
+          var v = parseFloat(String(inp.value || '').replace(',', '.')) || 0;
+          if (v > 0) total += v;
+        });
+        return total;
+      }
+      function syncHourlyHelpRowStatesWork() {
+        var participantIds = collectWorkParticipantMasterIds();
+        document.querySelectorAll('.hourly-help-row').forEach(function (row) {
+          var mid = parseInt(row.getAttribute('data-master-id') || '0', 10);
+          var disabled = participantIds.has(mid);
+          row.style.opacity = disabled ? '0.45' : '1';
+          row.querySelectorAll('.hourly-help-field').forEach(function (inp) {
+            inp.disabled = disabled;
+            if (disabled) inp.value = '';
+          });
+        });
+      }
+      function applyHourlyHelpToPreviewLines(payLines, st) {
+        if (!payLines || !payLines.length) return payLines;
+        var helpTotal = hourlyHelpTotalWork();
+        var masterLines = [];
+        var otherLines = [];
+        payLines.forEach(function (line) {
+          if (line.indexOf('ЗП «') === 0) masterLines.push(line);
+          else otherLines.push(line);
+        });
+        if (!masterLines.length) return payLines;
+        var parsed = masterLines.map(function (line) {
+          var m = line.match(/^ЗП «([^»]+)»: ([\d\s.,]+) ₽/);
+          return {
+            name: m ? m[1] : '',
+            amt: m ? (parseFloat(String(m[2]).replace(/\s/g, '').replace(',', '.')) || 0) : 0,
+          };
+        });
+        var baseSum = parsed.reduce(function (s, x) { return s + x.amt; }, 0);
+        if (helpTotal > 0 && baseSum > 0) {
+          var ratio = Math.max(0, (baseSum - helpTotal) / baseSum);
+          parsed.forEach(function (x) { x.amt = x.amt * ratio; });
+        }
+        var out = parsed.map(function (x) {
+          return 'ЗП «' + x.name + '»: ' + money2(x.amt) + ' ₽';
+        });
+        document.querySelectorAll('input[name^="hourly_help_amount_"]').forEach(function (inp) {
+          if (inp.disabled) return;
+          var amt = parseFloat(String(inp.value || '').replace(',', '.')) || 0;
+          if (amt <= 0) return;
+          var mid = inp.name.match(/^hourly_help_amount_(\d+)$/);
+          if (!mid) return;
+          var uid = parseInt(mid[1], 10);
+          out.push('ЗП «' + nameByUserId(st, uid) + '»: ' + money2(amt) + ' ₽');
+        });
+        return out.concat(otherLines);
+      }
+      window.syncHourlyHelpRowStatesWork = syncHourlyHelpRowStatesWork;
 
       var k = kind ? kind.value : '';
       var meta = readWorkPriceMeta();
@@ -652,6 +727,7 @@
         } else {
           payLines.push('Студия: ' + money2(-masterSum) + ' ₽');
         }
+        payLines = applyHourlyHelpToPreviewLines(payLines, st);
         setPayLines(payLines);
         setCost(
           'С клиента (итого): ' + money2(clientTotal) + ' ₽ · Себестоимость: ' + money2(costKit) + ' ₽'
@@ -691,7 +767,7 @@
         var extra2 = fx * units;
         var cost = mat + extra2;
         var uid0 = st.currentUserId || 0;
-        setPayLines([('ЗП «' + nameByUserId(st, uid0) + '»: ' + money2(pay) + ' ₽')]);
+        setPayLines(applyHourlyHelpToPreviewLines([('ЗП «' + nameByUserId(st, uid0) + '»: ' + money2(pay) + ' ₽')], st));
         setCost('Себестоимость (итого): ' + money2(cost) + ' ₽ (материал + доп. расходы)');
         return;
       }
@@ -735,13 +811,13 @@
           var profitC = amtC - costCorr;
           var studioC = profitC * salonPct;
           var masterC = profitC - studioC;
-          setPayLines([
+          setPayLines(applyHourlyHelpToPreviewLines([
             ('ЗП «' + nameByUserId(st, uid1) + '»: ' + money2(Math.max(0, masterC)) + ' ₽'),
             ('Студия: ' + money2(Math.max(0, studioC)) + ' ₽')
-          ]);
+          ], st));
           setCost('Себестоимость: ' + money2(costCorr) + ' ₽ · с клиента ' + money2(amtC) + ' ₽');
         } else {
-          setPayLines([('ЗП «' + nameByUserId(st, uid1) + '»: ' + money2(payT * bonus) + ' ₽')]);
+          setPayLines(applyHourlyHelpToPreviewLines([('ЗП «' + nameByUserId(st, uid1) + '»: ' + money2(payT * bonus) + ' ₽')], st));
           setCost('Себестоимость (итого): ' + money2(costCorr) + ' ₽ (материал + доп. расходы)');
         }
         if (isCorrAddKitEnabled()) {
@@ -765,7 +841,7 @@
           if (rowOther.fixed_expense != null) fxO = parseFloat(rowOther.fixed_expense) || 0;
         }
         if (getScopeValue() === 'CUSTOM_ORDER') payO = payO * bonus;
-        setPayLines(payO > 0 ? [('ЗП «' + nameByUserId(st, uidO) + '»: ' + money2(payO) + ' ₽')] : []);
+        setPayLines(applyHourlyHelpToPreviewLines(payO > 0 ? [('ЗП «' + nameByUserId(st, uidO) + '»: ' + money2(payO) + ' ₽')] : [], st));
         setCost('Себестоимость (итого): ' + money2(mat + fxO) + ' ₽ (материал + доп. расходы)');
         return;
       }
@@ -777,7 +853,7 @@
         var rate = parseFloat(rm[mc]) || 0;
         var payM = gramsTotal > 0 ? gramsTotal * rate : 0;
         var uid2 = st.currentUserId || 0;
-        setPayLines([('ЗП «' + nameByUserId(st, uid2) + '»: ' + money2(payM) + ' ₽')]);
+        setPayLines(applyHourlyHelpToPreviewLines([('ЗП «' + nameByUserId(st, uid2) + '»: ' + money2(payM) + ' ₽')], st));
         setCost('Себестоимость (итого): ' + money2(mat) + ' ₽ (материал + доп. расходы)');
         return;
       }
@@ -1162,6 +1238,27 @@
       });
 
       syncKitMasterPicker();
+      (function () {
+        var toggleBtn = document.getElementById('hourly_help_toggle_btn');
+        var block = document.getElementById('hourly_help_block');
+        if (toggleBtn && block) {
+          toggleBtn.addEventListener('click', function () {
+            block.style.display = block.style.display === 'none' ? 'block' : 'none';
+            if (typeof window.syncHourlyHelpRowStatesWork === 'function') window.syncHourlyHelpRowStatesWork();
+            if (typeof syncWorkPreview === 'function') syncWorkPreview();
+          });
+          document.querySelectorAll('.hourly-help-field').forEach(function (inp) {
+            inp.addEventListener('input', function () {
+              if (typeof window.syncHourlyHelpRowStatesWork === 'function') window.syncHourlyHelpRowStatesWork();
+              if (typeof syncWorkPreview === 'function') syncWorkPreview();
+            });
+            inp.addEventListener('change', function () {
+              if (typeof window.syncHourlyHelpRowStatesWork === 'function') window.syncHourlyHelpRowStatesWork();
+              if (typeof syncWorkPreview === 'function') syncWorkPreview();
+            });
+          });
+        }
+      })();
       syncClientBlock();
       syncKitBlock();
       syncRubberBlock();
