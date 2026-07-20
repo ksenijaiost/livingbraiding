@@ -415,3 +415,71 @@ def build_occupancy_for_day(
             "work_plan": COLOR_OCCUPANCY_WORK_PLAN,
         },
     }
+
+
+def _merge_minute_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    cleaned = [(int(s), int(e)) for s, e in intervals if int(e) > int(s)]
+    if not cleaned:
+        return []
+    cleaned.sort(key=lambda x: x[0])
+    out = [cleaned[0]]
+    for s, e in cleaned[1:]:
+        ls, le = out[-1]
+        if s <= le:
+            out[-1] = (ls, max(le, e))
+        else:
+            out.append((s, e))
+    return out
+
+
+def _subtract_minute_intervals(span: tuple[int, int], blocks: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    s0, e0 = int(span[0]), int(span[1])
+    if e0 <= s0:
+        return []
+    result = [(s0, e0)]
+    for bs, be in _merge_minute_intervals(blocks):
+        new_result: list[tuple[int, int]] = []
+        for rs, re in result:
+            if be <= rs or bs >= re:
+                new_result.append((rs, re))
+            else:
+                if rs < bs:
+                    new_result.append((rs, bs))
+                if be < re:
+                    new_result.append((be, re))
+        result = new_result
+    return [(s, e) for s, e in result if e > s]
+
+
+def master_has_free_time_on_day(*, master_id: int, occupancy: dict[str, Any]) -> bool:
+    """Есть ли у мастера свободное время в рабочий день (не перерыв, не бронь/блок/план)."""
+    schedule = occupancy.get("schedule") or {}
+    sched = schedule.get(str(master_id)) or schedule.get(master_id)
+    if not sched or sched.get("column_state") != "working":
+        return False
+
+    hour_from = int(occupancy.get("hour_from") or 0)
+    hour_to = int(occupancy.get("hour_to") or 24)
+    grid_start = hour_from * 60
+    grid_end = hour_to * 60
+
+    unavailable = [
+        (int(u["start_minutes"]), int(u["end_minutes"]))
+        for u in (sched.get("unavailable") or [])
+    ]
+    working_spans = _subtract_minute_intervals((grid_start, grid_end), unavailable)
+
+    occupied: list[tuple[int, int]] = []
+    mid = int(master_id)
+    for seg in occupancy.get("segments") or []:
+        if int(seg.get("master_id") or 0) == mid:
+            occupied.append((int(seg["start_minutes"]), int(seg["end_minutes"])))
+    for seg in occupancy.get("block_segments") or []:
+        if int(seg.get("master_id") or 0) == mid:
+            occupied.append((int(seg["start_minutes"]), int(seg["end_minutes"])))
+
+    for ws, we in working_spans:
+        free = _subtract_minute_intervals((ws, we), occupied)
+        if any(e > s for s, e in free):
+            return True
+    return False

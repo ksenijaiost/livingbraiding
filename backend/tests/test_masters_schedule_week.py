@@ -82,4 +82,31 @@ def test_build_week_grid_states(db) -> None:
     cells = data["masters"][0]["cells"]
     assert cells[0]["state"] == "working"
     assert cells[0]["has_booking"] is True
+    assert cells[0]["has_free_time"] is True
     assert cells[1]["state"] in ("day_off", "no_data")
+
+
+def test_working_day_without_booking_has_free_time(db) -> None:
+    from datetime import time as dt_time
+
+    m = User(username="m2", display_name="Master Two", role=UserRole.MASTER, password_hash="x", is_active=True)
+    db.add(m)
+    db.flush()
+    db.add(UserRoleAssignment(user_id=m.id, role=UserRole.MASTER))
+    mon = date(2026, 7, 13)
+    db.add(
+        MasterScheduleDay(
+            master_id=m.id,
+            work_date=mon,
+            status=MasterScheduleStatus.WORKING,
+            time_from=dt_time(10, 0),
+            time_to=dt_time(18, 0),
+        )
+    )
+    db.commit()
+
+    data = build_masters_schedule_week(db, week_start=mon)
+    cells = data["masters"][0]["cells"]
+    assert cells[0]["state"] == "working"
+    assert cells[0]["has_booking"] is False
+    assert cells[0]["has_free_time"] is True
