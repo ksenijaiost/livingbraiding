@@ -302,8 +302,9 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
                     if nk.get("blanks_total") is not None:
                         blocks.append(("Количество доп. заготовок", _format_card_scalar(nk["blanks_total"])))
 
-    if float(vs.correction_master_amount or 0) > 0:
-        blocks.append(("Корр.: ЗП мастера", _format_card_scalar(vs.correction_master_amount) + " ₽"))
+    corr_amt = getattr(vs, "correction_master_amount", 0) or 0
+    if float(corr_amt) > 0:
+        blocks.append(("Корр.: ЗП мастера", _format_card_scalar(corr_amt) + " ₽"))
 
     catalog_line = f"{vs.category_name} / {vs.subcategory_name} / {vs.service_name}"
     detail_blocks = blocks[3:]
@@ -381,24 +382,24 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
                 mid = int(m.master_id)
                 share = money_q2(pool * float(m.percent or 0) / 100.0)
                 add_pool(mid, share, getattr(m, "master", None))
-            if vs.mix_bonus_master_id and float(vs.mix_bonus_amount or 0) > 0:
+            if getattr(vs, "mix_bonus_master_id", None) and float(getattr(vs, "mix_bonus_amount", 0) or 0) > 0:
                 mid = int(vs.mix_bonus_master_id)
-                add_bonus(mid, float(vs.mix_bonus_amount or 0))
-            if vs.correction_master_id and float(vs.correction_master_amount or 0) > 0:
+                add_bonus(mid, float(getattr(vs, "mix_bonus_amount", 0) or 0))
+            if getattr(vs, "correction_master_id", None) and float(getattr(vs, "correction_master_amount", 0) or 0) > 0:
                 mid = int(vs.correction_master_id)
-                add_correction(mid, float(vs.correction_master_amount or 0))
+                add_correction(mid, float(getattr(vs, "correction_master_amount", 0) or 0))
     else:
         pool = float(visit.masters_pool or 0)
         for m in visit.masters or []:
             mid = int(m.master_id)
             share = money_q2(pool * float(m.percent or 0) / 100.0)
             add_pool(mid, share, getattr(m, "master", None))
-        if visit.mix_bonus_master_id and float(visit.mix_bonus_amount or 0) > 0:
+        if getattr(visit, "mix_bonus_master_id", None) and float(getattr(visit, "mix_bonus_amount", 0) or 0) > 0:
             mid = int(visit.mix_bonus_master_id)
-            add_bonus(mid, float(visit.mix_bonus_amount or 0))
-        if visit.correction_master_id and float(visit.correction_master_amount or 0) > 0:
+            add_bonus(mid, float(getattr(visit, "mix_bonus_amount", 0) or 0))
+        if getattr(visit, "correction_master_id", None) and float(getattr(visit, "correction_master_amount", 0) or 0) > 0:
             mid = int(visit.correction_master_id)
-            add_correction(mid, float(visit.correction_master_amount or 0))
+            add_correction(mid, float(getattr(visit, "correction_master_amount", 0) or 0))
 
     master_ids = sorted(set(pool_by_master) | set(bonus_by_master) | set(correction_by_master))
     rows: list[VisitMasterPayRow] = []

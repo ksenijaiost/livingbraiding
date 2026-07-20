@@ -25,6 +25,7 @@ from app.db.models import (
     BookingKind,
     BookingStatus,
     Consultation,
+    HourlyWorkEntry,
     Kit,
     MaterialPriceCurrent,
     MaterialType,
@@ -1420,6 +1421,43 @@ def post_consultation_accrual(
         source_id=consultation_id,
         created_by_user_id=created_by_user_id,
         comment=f"Консультация #{consultation_id}, бронь #{b.id}, база {base} ₽",
+    )
+
+
+def post_hourly_work_accruals(
+    db: Session,
+    entry: HourlyWorkEntry,
+    created_by_user_id: int | None,
+) -> None:
+    """ЗП мастеру за почасовую работу; сумма списывается с фонда студии."""
+    if entry.id is None:
+        return
+    if _has_accruals_for_source(db, PayrollFundSourceKind.HOURLY_WORK, int(entry.id)):
+        return
+    amt = money_q2(float(entry.amount or 0))
+    if amt <= 0:
+        return
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.ACCRUAL,
+        side=PayrollFundSide.MASTER,
+        user_id=int(entry.master_user_id),
+        amount=amt,
+        source_kind=PayrollFundSourceKind.HOURLY_WORK,
+        source_id=int(entry.id),
+        created_by_user_id=created_by_user_id,
+        comment="Почасовая работа",
+    )
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.EXPENSE,
+        side=PayrollFundSide.STUDIO,
+        user_id=None,
+        amount=-amt,
+        source_kind=PayrollFundSourceKind.HOURLY_WORK,
+        source_id=int(entry.id),
+        created_by_user_id=created_by_user_id,
+        comment="Почасовая работа",
     )
 
 

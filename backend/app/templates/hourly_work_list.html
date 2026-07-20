@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card lb-card-max-980">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+      <h2 style="margin:0;">Почасовая работа</h2>
+      <a href="/hourly-work/new"><button type="button">Добавить</button></a>
+    </div>
+
+    {% if msg == 'created' %}
+      <div class="ok" style="margin-top:12px;">Запись сохранена, ЗП начислена.</div>
+    {% endif %}
+
+    {% if rows %}
+      <table style="width:100%; margin-top:16px; border-collapse:collapse; font-size:14px;">
+        <thead>
+          <tr style="text-align:left; border-bottom:1px solid #e2e8f0;">
+            <th style="padding:8px;">Дата</th>
+            <th style="padding:8px;">Мастер</th>
+            <th style="padding:8px;">Время</th>
+            <th style="padding:8px;">Сумма</th>
+            <th style="padding:8px;">Комментарий</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr style="border-bottom:1px solid #f1f5f9;">
+              <td style="padding:8px;">{{ row.performed_date.strftime('%d.%m.%Y') }}</td>
+              <td style="padding:8px;">{{ row.master_user.display_name or row.master_user.username }}</td>
+              <td style="padding:8px;">{{ duration_display(row.duration_minutes) }}</td>
+              <td style="padding:8px;">{{ "%.0f"|format(row.amount) }} ₽</td>
+              <td style="padding:8px;" class="muted">{{ row.comment or '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted" style="margin-top:16px;">Пока нет записей.</p>
+    {% endif %}
+  </div>
+{% endblock %}

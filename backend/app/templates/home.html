@@ -270,12 +270,6 @@
           <div class="card" style="background:#f8fafc;">
             <h4 style="margin:0 0 10px;">Записи</h4>
             <div style="display:flex; flex-wrap:wrap; gap:8px;">
-              {% if sections_ctx.is_master %}
-                <a href="/master/bookings"><button type="button" class="secondary">Мои записи</button></a>
-                <a href="/master/visit/new"><button type="button" class="secondary">Новый визит</button></a>
-                <a href="/master/visit/draft/new"><button type="button" class="secondary">Черновик визита</button></a>
-                <a href="/consultations/new"><button type="button" class="secondary">Новая консультация</button></a>
-              {% endif %}
               {% if sections_ctx.is_admin %}
                 <a href="/bookings/new"><button type="button" class="secondary">Новая бронь</button></a>
               {% endif %}
@@ -288,13 +282,29 @@
           </div>
 
           <div class="card" style="background:#f8fafc;">
+            <h4 style="margin:0 0 10px;">Работа</h4>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+              {% if sections_ctx.is_master %}
+                <a href="/master/bookings"><button type="button" class="secondary">Мои записи</button></a>
+                <a href="/master/visit/new"><button type="button" class="secondary">Новый визит</button></a>
+                <a href="/master/visit/draft/new"><button type="button" class="secondary">Черновик визита</button></a>
+                <a href="/consultations/new"><button type="button" class="secondary">Новая консультация</button></a>
+                <a href="/sales/work/new"><button type="button" class="secondary">Новая работа</button></a>
+              {% elif sections_ctx.is_admin %}
+                <!-- Админу недоступен «Новый визит», поэтому кнопка убрана из раздела «Работа». -->
+              {% endif %}
+              <a href="/work-plans"><button type="button" class="secondary">План работ</button></a>
+              {% if sections_ctx.is_master or sections_ctx.is_admin %}
+                <a href="/hourly-work"><button type="button" class="secondary">Почасовая работа</button></a>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="card" style="background:#f8fafc;">
             <h4 style="margin:0 0 10px;">Товары</h4>
             <div style="display:flex; flex-wrap:wrap; gap:8px;">
               <a href="/sales/products"><button type="button" class="secondary">Продажа</button></a>
-              <a href="/sales/work"><button type="button" class="secondary">Работа</button></a>
-              {% if sections_ctx.is_master %}
-                <a href="/sales/work/new"><button type="button" class="secondary">Новая работа</button></a>
-              {% endif %}
+              <a href="/sales/work"><button type="button" class="secondary">Работа с товарами</button></a>
               <a href="/products-calc"><button type="button" class="secondary">Калькулятор</button></a>
               <a href="/products-catalog"><button type="button" class="secondary">Прайс — товары</button></a>
             </div>

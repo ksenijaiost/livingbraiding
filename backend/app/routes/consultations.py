@@ -208,7 +208,7 @@ def consultation_new_get(
     request: Request,
     client_id: int | None = None,
     booking_id: int | None = None,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
     selected_client = db.get(Client, client_id) if client_id else None
@@ -269,7 +269,7 @@ def consultation_new_get(
 @router.post("/new")
 async def consultation_new_post(
     request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
     form_raw = await request.form()
