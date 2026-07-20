@@ -22,6 +22,7 @@ from app.work_plan import (
     complete_work_plan_from_work,
     master_has_work_plan_conflict,
     work_plan_is_open,
+    work_plan_status_emoji,
     work_plan_status_label,
     work_plan_type_display,
     work_plan_work_new_query_params,
@@ -54,6 +55,9 @@ def test_work_plan_labels() -> None:
     assert work_plan_status_label(WorkPlanStatus.PLANNED) == "Запланировано"
     assert work_plan_status_label(WorkPlanStatus.COMPLETED) == "Выполнено"
     assert work_plan_status_label(WorkPlanStatus.CANCELLED) == "Отменено"
+    assert work_plan_status_emoji(WorkPlanStatus.PLANNED) == "⌛"
+    assert work_plan_status_emoji(WorkPlanStatus.COMPLETED) == "✅"
+    assert work_plan_status_emoji(WorkPlanStatus.CANCELLED) == "❌"
 
 
 def test_work_plan_type_display(memory_db) -> None:

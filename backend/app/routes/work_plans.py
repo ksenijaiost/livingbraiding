@@ -29,6 +29,7 @@ from app.work_plan import (
     validate_work_plan_interval,
     work_kind_label,
     work_plan_is_open,
+    work_plan_status_emoji,
     work_plan_status_label,
     work_plan_type_display,
     work_plan_work_new_query_params,
@@ -100,6 +101,7 @@ def work_plans_list(
             search_id=search_id,
             display_tz=display_tz,
             work_plan_status_label=work_plan_status_label,
+            work_plan_status_emoji=work_plan_status_emoji,
             work_plan_type_display=work_plan_type_display,
         ),
     )

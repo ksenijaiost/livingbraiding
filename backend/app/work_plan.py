@@ -54,6 +54,16 @@ def work_plan_status_label(status: WorkPlanStatus | str) -> str:
     }.get(s, s)
 
 
+def work_plan_status_emoji(status: WorkPlanStatus | str) -> str:
+    """Короткий статус для узких экранов списка планов."""
+    s = status.value if isinstance(status, WorkPlanStatus) else str(status)
+    return {
+        WorkPlanStatus.PLANNED.value: "⌛",
+        WorkPlanStatus.COMPLETED.value: "✅",
+        WorkPlanStatus.CANCELLED.value: "❌",
+    }.get(s, "·")
+
+
 def work_plan_type_label(plan_type: WorkPlanType | str) -> str:
     t = plan_type.value if isinstance(plan_type, WorkPlanType) else str(plan_type)
     return {
