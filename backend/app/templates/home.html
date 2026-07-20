@@ -82,22 +82,47 @@
       {% set _paid = (payroll_home.paid_net or 0)|float %}
       {% set _show_studio = payroll_home.show_studio %}
       {% set _sb = (payroll_home.studio_balance or 0)|float %}
-      {% set _period_exp = ((payroll_home.period.expenses_sum if payroll_home.period else 0) or 0)|float %}
+      {% set _period = payroll_home.period %}
+      {% set _p_acc = ((_period.personal_accrued if _period else 0) or 0)|float %}
+      {% set _p_paid = ((_period.personal_paid if _period else 0) or 0)|float %}
+      {% set _p_bal = ((_period.personal_balance if _period else 0) or 0)|float %}
+      {% set _s_acc = ((_period.studio_accrued if _period else 0) or 0)|float %}
+      {% set _s_paid = ((_period.studio_paid if _period else 0) or 0)|float %}
+      {% set _s_bal = ((_period.studio_balance if _period else 0) or 0)|float %}
+      {% set _period_exp = ((_period.expenses_sum if _period else 0) or 0)|float %}
 
       {% set _pb_show = _pb|abs > 0.001 %}
       {% set _paid_show = _paid|abs > 0.001 %}
+      {% set _personal_period_show = _period and ((_p_acc|abs > 0.001) or (_p_paid|abs > 0.001) or _pb_show) %}
       {% set _sb_show = _show_studio and (_sb|abs > 0.001) %}
-      {% set _period_show = _show_studio and payroll_home.period and (_period_exp|abs > 0.001) %}
-      {% set _summary_show = _pb_show or _paid_show or _sb_show or _period_show %}
+      {% set _studio_period_show = _show_studio and _period and ((_s_acc|abs > 0.001) or (_s_paid|abs > 0.001) or (_s_bal|abs > 0.001) or (_period_exp|abs > 0.001) or _sb_show) %}
+      {% set _period_exp_show = _show_studio and _period and (_period_exp|abs > 0.001) %}
+      {% set _summary_show = _pb_show or _paid_show or _personal_period_show or _sb_show or _studio_period_show %}
 
       {% if _summary_show %}
         <div class="card" style="margin-bottom: 16px; background: #f8fafc;">
           <h3 style="margin-top: 0;">Сводка</h3>
           <div style="display:flex; flex-direction:column; gap:10px;">
-            {% if _pb_show %}
+            {% if _pb_show or _personal_period_show %}
               <div>
                 <div class="muted" style="font-size:12px;">Остаток личного фонда ЗП</div>
                 <div style="font-size: 1.15rem;"><strong>{{ "%.2f"|format(_pb) }} ₽</strong></div>
+                {% if _period and (_pb_show or _personal_period_show) %}
+                  <div class="muted" style="font-size:12px; margin-top:6px;">
+                    Текущий период с {{ _period.date_from.strftime("%d.%m.%Y") }}
+                  </div>
+                  <div style="font-size:13px; margin-top:2px;">
+                    ЗП за период: <strong>{{ "%.2f"|format(_p_acc) }} ₽</strong>
+                  </div>
+                  {% if (_p_bal - _p_acc)|abs > 0.001 %}
+                    <div style="font-size:13px; margin-top:2px;">
+                      Остаток за период: <strong>{{ "%.2f"|format(_p_bal) }} ₽</strong>
+                      {% if _p_paid|abs > 0.001 %}
+                        <span class="muted">(выплаты: {{ "%.2f"|format(_p_paid) }} ₽)</span>
+                      {% endif %}
+                    </div>
+                  {% endif %}
+                {% endif %}
               </div>
             {% endif %}
             {% if _paid_show %}
@@ -106,16 +131,32 @@
                 <div><strong>{{ "%.2f"|format(_paid) }} ₽</strong></div>
               </div>
             {% endif %}
-            {% if _sb_show %}
+            {% if _sb_show or _studio_period_show %}
               <div>
                 <div class="muted" style="font-size:12px;">Остаток фонда ЗП студии</div>
                 <div><strong>{{ "%.2f"|format(_sb) }} ₽</strong></div>
+                {% if _period %}
+                  <div class="muted" style="font-size:12px; margin-top:6px;">
+                    Текущий период с {{ _period.date_from.strftime("%d.%m.%Y") }}
+                  </div>
+                  <div style="font-size:13px; margin-top:2px;">
+                    Начисления за период: <strong>{{ "%.2f"|format(_s_acc) }} ₽</strong>
+                  </div>
+                  {% if (_s_bal - _s_acc)|abs > 0.001 %}
+                    <div style="font-size:13px; margin-top:2px;">
+                      Остаток за период: <strong>{{ "%.2f"|format(_s_bal) }} ₽</strong>
+                      {% if _s_paid|abs > 0.001 %}
+                        <span class="muted">(выплаты: {{ "%.2f"|format(_s_paid) }} ₽)</span>
+                      {% endif %}
+                    </div>
+                  {% endif %}
+                {% endif %}
               </div>
             {% endif %}
-            {% if _period_show %}
+            {% if _period_exp_show %}
               <div>
                 <div class="muted" style="font-size:12px;">
-                  Расходы за текущий период ({{ payroll_home.period.date_from.strftime("%d.%m.%Y") }}–{{ payroll_home.period.date_to.strftime("%d.%m.%Y") }})
+                  Расходы за текущий период ({{ _period.date_from.strftime("%d.%m.%Y") }}–{{ _period.date_to.strftime("%d.%m.%Y") }})
                 </div>
                 <div><strong>{{ "%.2f"|format(_period_exp) }} ₽</strong></div>
               </div>

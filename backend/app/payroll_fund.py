@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
-from typing import Sequence
+from datetime import date, datetime, time, timedelta
+from typing import Any, Sequence
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -31,6 +31,7 @@ from app.db.models import (
     PayrollFundPayoutPaymentKind,
     PayrollFundSide,
     PayrollFundSourceKind,
+    PayrollPeriod,
     ProductSale,
     ProductSaleKind,
     StudioExpense,
@@ -940,6 +941,172 @@ def employee_payout_total_net(db: Session, user_id: int) -> float:
         )
     )
     return money_q2(-float(v or 0))
+
+
+def resolve_current_payroll_period(
+    db: Session, today: date
+) -> tuple[PayrollPeriod | None, datetime, datetime]:
+    """Текущий (открытый или покрывающий сегодня) период и границы [start, end_excl) для журнала."""
+    from app.payroll_utils import payroll_period_day_end
+
+    p = db.scalar(
+        select(PayrollPeriod)
+        .where(PayrollPeriod.closed_at.is_(None))
+        .order_by(PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc())
+        .limit(1)
+    )
+    if p is None:
+        p = db.scalar(
+            select(PayrollPeriod)
+            .where(
+                PayrollPeriod.date_from <= datetime.combine(today, time.max),
+                PayrollPeriod.date_to >= datetime.combine(today, time.min),
+            )
+            .order_by(PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc())
+            .limit(1)
+        )
+    if p is None:
+        p = db.scalar(select(PayrollPeriod).order_by(PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc()).limit(1))
+    if p is None:
+        return None, datetime.combine(today, time.min), datetime.combine(today + timedelta(days=1), time.min)
+
+    period_end = p.date_to
+    if p.closed_at is None:
+        period_end = payroll_period_day_end(today)
+    start = datetime.combine(p.date_from.date(), time.min) if isinstance(p.date_from, datetime) else p.date_from
+    end_day = period_end.date() if isinstance(period_end, datetime) else period_end
+    end_excl = datetime.combine(end_day + timedelta(days=1), time.min)
+    return p, start, end_excl
+
+
+def employee_payroll_net_in_period(
+    db: Session,
+    user_id: int,
+    start: datetime,
+    end_excl: datetime,
+) -> float:
+    """Нетто начислений сотруднику за период (ACCRUAL + STORNO)."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.side == PayrollFundSide.MASTER,
+            PayrollFundLedger.user_id == user_id,
+            PayrollFundLedger.created_at >= start,
+            PayrollFundLedger.created_at < end_excl,
+            PayrollFundLedger.entry_kind.in_(
+                (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.STORNO)
+            ),
+        )
+    )
+    return money_q2(float(v or 0))
+
+
+def employee_payouts_in_period(
+    db: Session,
+    user_id: int,
+    start: datetime,
+    end_excl: datetime,
+) -> float:
+    """Сумма выплат сотруднику за период (положительное число)."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.entry_kind == PayrollFundEntryKind.PAYOUT,
+            PayrollFundLedger.user_id == user_id,
+            PayrollFundLedger.created_at >= start,
+            PayrollFundLedger.created_at < end_excl,
+        )
+    )
+    return money_q2(-float(v or 0))
+
+
+def studio_payroll_net_in_period(db: Session, start: datetime, end_excl: datetime) -> float:
+    """Нетто начислений в фонд студии за период (ACCRUAL + STORNO)."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.side == PayrollFundSide.STUDIO,
+            PayrollFundLedger.created_at >= start,
+            PayrollFundLedger.created_at < end_excl,
+            PayrollFundLedger.entry_kind.in_(
+                (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.STORNO)
+            ),
+        )
+    )
+    return money_q2(float(v or 0))
+
+
+def studio_payouts_in_period(db: Session, start: datetime, end_excl: datetime) -> float:
+    """Сумма выплат из фонда студии за период (положительное число)."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.side == PayrollFundSide.STUDIO,
+            PayrollFundLedger.entry_kind == PayrollFundEntryKind.PAYOUT,
+            PayrollFundLedger.created_at >= start,
+            PayrollFundLedger.created_at < end_excl,
+        )
+    )
+    return money_q2(-float(v or 0))
+
+
+def studio_fund_net_in_period(db: Session, start: datetime, end_excl: datetime) -> float:
+    """Изменение остатка фонда студии за период (все виды проводок)."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.side == PayrollFundSide.STUDIO,
+            PayrollFundLedger.created_at >= start,
+            PayrollFundLedger.created_at < end_excl,
+        )
+    )
+    return money_q2(float(v or 0))
+
+
+def build_home_payroll_period_ctx(
+    db: Session,
+    *,
+    today: date,
+    user_id: int,
+    include_studio: bool,
+) -> dict[str, Any] | None:
+    """Данные текущего периода ЗП для сводки на главной."""
+    p, start, end_excl = resolve_current_payroll_period(db, today)
+    if p is None:
+        return None
+
+    personal_accrued = employee_payroll_net_in_period(db, user_id, start, end_excl)
+    personal_paid = employee_payouts_in_period(db, user_id, start, end_excl)
+    personal_balance = money_q2(personal_accrued - personal_paid)
+
+    period_end = end_excl - timedelta(microseconds=1)
+    out: dict[str, Any] = {
+        "id": int(p.id),
+        "date_from": p.date_from,
+        "date_to": period_end,
+        "personal_accrued": personal_accrued,
+        "personal_paid": personal_paid,
+        "personal_balance": personal_balance,
+    }
+
+    if include_studio:
+        studio_accrued = studio_payroll_net_in_period(db, start, end_excl)
+        studio_paid = studio_payouts_in_period(db, start, end_excl)
+        studio_balance = studio_fund_net_in_period(db, start, end_excl)
+        expenses_sum = (
+            db.scalar(
+                select(func.coalesce(func.sum(StudioExpense.amount), 0.0)).where(
+                    StudioExpense.is_voided.is_(False),
+                    StudioExpense.date >= start,
+                    StudioExpense.date <= period_end,
+                )
+            )
+            or 0.0
+        )
+        out.update(
+            {
+                "studio_accrued": studio_accrued,
+                "studio_paid": studio_paid,
+                "studio_balance": studio_balance,
+                "expenses_sum": money_q2(float(expenses_sum)),
+            }
+        )
+    return out
 
 
 def replace_studio_expense_ledger(

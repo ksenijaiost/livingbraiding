@@ -13,7 +13,6 @@ from app.db.models import (
     Booking,
     Consultation,
     Kit,
-    PayrollFundEntryKind,
     PayrollFundLedger,
     PayrollFundSide,
     PayrollFundSourceKind,
@@ -29,7 +28,12 @@ from app.db.models import (
     WorkScope,
 )
 from app.operational_report import period_bounds
-from app.payroll_fund import money_q2, sum_ledger_amounts_by_source
+from app.payroll_fund import (
+    employee_payroll_net_in_period,
+    employee_payouts_in_period,
+    money_q2,
+    sum_ledger_amounts_by_source,
+)
 
 
 @dataclass
@@ -113,43 +117,6 @@ def employee_fund_balance_before(db: Session, user_id: int, before: datetime) ->
         )
     )
     return money_q2(float(v or 0))
-
-
-def employee_payroll_net_in_period(
-    db: Session,
-    user_id: int,
-    start: datetime,
-    end_excl: datetime,
-) -> float:
-    v = db.scalar(
-        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
-            PayrollFundLedger.side == PayrollFundSide.MASTER,
-            PayrollFundLedger.user_id == user_id,
-            PayrollFundLedger.created_at >= start,
-            PayrollFundLedger.created_at < end_excl,
-            PayrollFundLedger.entry_kind.in_(
-                (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.STORNO)
-            ),
-        )
-    )
-    return money_q2(float(v or 0))
-
-
-def employee_payouts_in_period(
-    db: Session,
-    user_id: int,
-    start: datetime,
-    end_excl: datetime,
-) -> float:
-    v = db.scalar(
-        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
-            PayrollFundLedger.entry_kind == PayrollFundEntryKind.PAYOUT,
-            PayrollFundLedger.user_id == user_id,
-            PayrollFundLedger.created_at >= start,
-            PayrollFundLedger.created_at < end_excl,
-        )
-    )
-    return money_q2(-float(v or 0))
 
 
 def _master_on_visit_service(visit: Visit, vs: VisitService, master_id: int) -> bool:
