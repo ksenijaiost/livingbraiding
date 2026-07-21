@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -163,9 +163,17 @@ def build_occupancy_for_day(
     bookings: list[Booking] | None = None,
     exclude_work_plan_id: int | None = None,
 ) -> dict[str, Any]:
-    tz = get_display_timezone(db)
-    day_start_utc = datetime.combine(day, datetime.min.time())
-    day_end_utc = day_start_utc + timedelta(days=1)
+    tz_name = get_display_timezone(db)
+    tz = ZoneInfo(tz_name)
+    # Локальный календарный день → окно naive-UTC (как хранятся planned_date).
+    day_start_utc = (
+        datetime.combine(day, time.min, tzinfo=tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    )
+    day_end_utc = (
+        datetime.combine(day + timedelta(days=1), time.min, tzinfo=tz)
+        .astimezone(ZoneInfo("UTC"))
+        .replace(tzinfo=None)
+    )
 
     if bookings is None:
         bookings = list(
@@ -217,7 +225,7 @@ def build_occupancy_for_day(
             dur_override = 0
         if b.kind == BookingKind.CONSULTATION:
             dur = dur_override or CONSULTATION_DEFAULT_DURATION_MINUTES
-            start_local = _utc_naive_to_local(b.planned_date, tz)
+            start_local = _utc_naive_to_local(b.planned_date, tz_name)
             start_m = _minutes_on_day(start_local, day)
             end_m = start_m + dur
             for mid in booking_master_ids:
@@ -260,10 +268,10 @@ def build_occupancy_for_day(
                     start_local = planned_start_local_datetime(
                         ps.planned_start_time,
                         booking_planned_date=b.planned_date,
-                        tz_name=tz,
-                    ) or _utc_naive_to_local(b.planned_date, tz)
+                        tz_name=tz_name,
+                    ) or _utc_naive_to_local(b.planned_date, tz_name)
                 else:
-                    start_local = _utc_naive_to_local(b.planned_date, tz)
+                    start_local = _utc_naive_to_local(b.planned_date, tz_name)
                 start_m = _minutes_on_day(start_local, day)
                 end_m = start_m + dur
                 masters_rows = list(ps.masters or [])
@@ -277,7 +285,7 @@ def build_occupancy_for_day(
                     m_local = planned_start_local_datetime(
                         m.planned_start_time,
                         booking_planned_date=b.planned_date,
-                        tz_name=tz,
+                        tz_name=tz_name,
                     )
                     if m_local is None:
                         continue
@@ -307,7 +315,7 @@ def build_occupancy_for_day(
         dur = dur_override if dur_override > 0 else int(svc.estimated_duration_minutes or 0)
         if dur <= 0:
             continue
-        start_local = _utc_naive_to_local(b.planned_date, tz)
+        start_local = _utc_naive_to_local(b.planned_date, tz_name)
         start_m = _minutes_on_day(start_local, day)
         end_m = start_m + dur
         for mid in booking_master_ids:
@@ -341,9 +349,9 @@ def build_occupancy_for_day(
     if exclude_work_plan_id:
         wp_stmt = wp_stmt.where(WorkPlan.id != exclude_work_plan_id)
     for wp in db.scalars(wp_stmt).all():
-        start_local = _utc_naive_to_local(wp.planned_date, tz)
+        start_local = _utc_naive_to_local(wp.planned_date, tz_name)
         start_m = _minutes_on_day(start_local, day)
-        end_local = _utc_naive_to_local(planned_end_utc(wp), tz)
+        end_local = _utc_naive_to_local(planned_end_utc(wp), tz_name)
         end_m = _minutes_on_day(end_local, day)
         if end_m <= grid_start or start_m >= grid_end:
             continue
@@ -451,11 +459,46 @@ def _subtract_minute_intervals(span: tuple[int, int], blocks: list[tuple[int, in
     return [(s, e) for s, e in result if e > s]
 
 
+def occupied_intervals_for_master(occupancy: dict[str, Any], master_id: int) -> list[tuple[int, int]]:
+    mid = int(master_id)
+    occupied: list[tuple[int, int]] = []
+    for seg in occupancy.get("segments") or []:
+        if int(seg.get("master_id") or 0) == mid:
+            occupied.append((int(seg["start_minutes"]), int(seg["end_minutes"])))
+    for seg in occupancy.get("block_segments") or []:
+        if int(seg.get("master_id") or 0) == mid:
+            occupied.append((int(seg["start_minutes"]), int(seg["end_minutes"])))
+    return occupied
+
+
+def master_shift_has_free_time(
+    *,
+    work_start_m: int,
+    work_end_m: int,
+    break_ranges: list[tuple[int, int]] | None = None,
+    occupied: list[tuple[int, int]] | None = None,
+) -> bool:
+    """Есть ли свободные минуты внутри рабочей смены (минус перерыв и занятость)."""
+    spans = _subtract_minute_intervals(
+        (int(work_start_m), int(work_end_m)),
+        list(break_ranges or []),
+    )
+    occ = list(occupied or [])
+    for ws, we in spans:
+        free = _subtract_minute_intervals((ws, we), occ)
+        if any(e > s for s, e in free):
+            return True
+    return False
+
+
 def master_has_free_time_on_day(*, master_id: int, occupancy: dict[str, Any]) -> bool:
     """Есть ли у мастера свободное время в рабочий день (не перерыв, не бронь/блок/план)."""
     schedule = occupancy.get("schedule") or {}
-    sched = schedule.get(str(master_id)) or schedule.get(master_id)
-    if not sched or sched.get("column_state") != "working":
+    mid = int(master_id)
+    sched = schedule.get(str(mid))
+    if sched is None:
+        sched = schedule.get(mid)
+    if not isinstance(sched, dict) or sched.get("column_state") != "working":
         return False
 
     hour_from = int(occupancy.get("hour_from") or 0)
@@ -463,23 +506,25 @@ def master_has_free_time_on_day(*, master_id: int, occupancy: dict[str, Any]) ->
     grid_start = hour_from * 60
     grid_end = hour_to * 60
 
-    unavailable = [
-        (int(u["start_minutes"]), int(u["end_minutes"]))
-        for u in (sched.get("unavailable") or [])
-    ]
+    unavailable = []
+    for u in sched.get("unavailable") or []:
+        if not isinstance(u, dict):
+            continue
+        try:
+            unavailable.append((int(u["start_minutes"]), int(u["end_minutes"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    # Свободное время считаем по пересечению сетки с сменой (grid − unavailable),
+    # а не только по «дырам» внутри сетки без привязки к смене.
     working_spans = _subtract_minute_intervals((grid_start, grid_end), unavailable)
-
-    occupied: list[tuple[int, int]] = []
-    mid = int(master_id)
-    for seg in occupancy.get("segments") or []:
-        if int(seg.get("master_id") or 0) == mid:
-            occupied.append((int(seg["start_minutes"]), int(seg["end_minutes"])))
-    for seg in occupancy.get("block_segments") or []:
-        if int(seg.get("master_id") or 0) == mid:
-            occupied.append((int(seg["start_minutes"]), int(seg["end_minutes"])))
-
+    occupied = occupied_intervals_for_master(occupancy, mid)
     for ws, we in working_spans:
-        free = _subtract_minute_intervals((ws, we), occupied)
-        if any(e > s for s, e in free):
+        if master_shift_has_free_time(
+            work_start_m=ws,
+            work_end_m=we,
+            break_ranges=[],
+            occupied=occupied,
+        ):
             return True
     return False
