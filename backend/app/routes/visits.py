@@ -127,6 +127,12 @@ def admin_visits(
                     )
                 ),
                 Visit.id.in_(
+                    select(VisitService.visit_id).where(
+                        VisitService.is_cancelled.is_(False),
+                        VisitService.correction_master_id == current_user.id,
+                    )
+                ),
+                Visit.id.in_(
                     select(VisitService.visit_id)
                     .join(VisitServiceMaster, VisitServiceMaster.visit_service_id == VisitService.id)
                     .where(
@@ -135,6 +141,7 @@ def admin_visits(
                     )
                 ),
                 Visit.mix_bonus_master_id == current_user.id,
+                Visit.correction_master_id == current_user.id,
             )
         )
     if search_id is not None:
@@ -242,6 +249,9 @@ def admin_visit_detail(
     visit_super_priv = UserRole.ADMIN_SUPER in current_user.roles or UserRole.TECHSPEC in current_user.roles
     visit_master_pay_rows = build_visit_master_pay_rows(visit, db)
     visit_masters_lines = build_visit_masters_lines(visit, db)
+    from app.hourly_help import build_hourly_help_display_rows, hourly_help_rows_from_visit
+
+    hourly_help_rows = build_hourly_help_display_rows(hourly_help_rows_from_visit(visit), db)
 
     return templates.TemplateResponse(
         "admin_visit_detail.html",
@@ -271,6 +281,7 @@ def admin_visit_detail(
             visit_super_priv=visit_super_priv,
             visit_master_pay_rows=visit_master_pay_rows,
             visit_masters_lines=visit_masters_lines,
+            hourly_help_rows=hourly_help_rows,
         ),
     )
 
@@ -411,7 +422,13 @@ async def admin_visit_edit_post(
 
     form = await request.form()
     try:
-        multi = parse_multi_service_visit_form(form, booking_id=visit.booking_id)
+        multi = parse_multi_service_visit_form(
+            form,
+            booking_id=visit.booking_id,
+            # На редактировании «себя» подставлять нельзя: админ без роли мастера
+            # обязан явно выбрать мастеров; мастер тоже сохраняет отмеченных из формы.
+            single_master_default_id=None,
+        )
         update_visit_with_services(db, visit_id, current_user.id, multi)
         visit = db.get(Visit, visit_id)
         assert visit is not None

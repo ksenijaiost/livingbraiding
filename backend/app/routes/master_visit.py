@@ -329,6 +329,10 @@ def _master_visit_step1_template_response(
     ex_raw = (form_prefill.get("own_extra_stock_kit_id") or "").strip()
     if ex_raw.isdigit():
         extra_stock_kit_preview = kit_suggest_dict_for_kit_id(db, int(ex_raw), for_client_id=cid_prev)
+    force_visit_multi_masters = UserRole.MASTER not in current_user.roles
+    if force_visit_multi_masters:
+        form_prefill = dict(form_prefill)
+        form_prefill["visit_use_multi_masters"] = "on"
     return templates.TemplateResponse(
         "master_visit_step1.html",
         _ctx(
@@ -356,6 +360,8 @@ def _master_visit_step1_template_response(
                 ensure_ascii=False,
             ),
             visit_master_level_ru=ru_master_level(current_user.master_level),
+            current_user_can_be_visit_master=UserRole.MASTER in current_user.roles,
+            force_visit_multi_masters=UserRole.MASTER not in current_user.roles,
             default_date=performed,
             form_prefill=form_prefill,
             selected_client=selected_client,
@@ -577,10 +583,13 @@ async def master_visit_new_post(
         booking_id_raw = (form.get("booking_id") or "").strip() if hasattr(form.get("booking_id"), "strip") else str(form.get("booking_id") or "").strip()
         booking_id_val = int(booking_id_raw) if booking_id_raw.isdigit() else None
         has_multi = form_uses_multi_service_lines(form)
+        single_master_default_id = (
+            current_user.id if UserRole.MASTER in current_user.roles else None
+        )
         if has_multi:
             multi = parse_multi_service_visit_form(
                 form,
-                single_master_default_id=current_user.id,
+                single_master_default_id=single_master_default_id,
                 booking_id=booking_id_val,
             )
             visit = save_visit_with_services(
@@ -590,7 +599,7 @@ async def master_visit_new_post(
                 created_by_label=format_created_by_label(current_user),
             )
         else:
-            inp = parse_kit_inlay_form(form, single_master_default_id=current_user.id)
+            inp = parse_kit_inlay_form(form, single_master_default_id=single_master_default_id)
             visit = save_kit_inlay_visit(
                 db,
                 current_user.id,

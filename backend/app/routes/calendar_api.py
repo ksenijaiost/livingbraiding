@@ -282,6 +282,8 @@ def api_calendar_day(
         for svc in active_services:
             if is_master:
                 show = svc.mix_bonus_master_id == current_user.id
+                if not show:
+                    show = svc.correction_master_id == current_user.id
                 if not show and v.masters_scope == VisitMastersScope.VISIT:
                     vm_ids = list(
                         db.scalars(select(VisitMaster.master_id).where(VisitMaster.visit_id == vid)).all()

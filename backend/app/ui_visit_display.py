@@ -274,6 +274,8 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
                 blocks.append(("Корр.: стирка", "Да" if cd.get("wash") else "Нет"))
                 blocks.append(("Корр.: отпаривание", "Да" if cd.get("steam") else "Нет"))
                 blocks.append(("Корр.: одевание на круг", "Да" if cd.get("circle") else "Нет"))
+                if cd.get("master_id"):
+                    blocks.append(("Корр.: мастер", f"ID {cd.get('master_id')}"))
                 if cd.get("dread_qty"):
                     blocks.append(("Корр.: (архив) дреды (шт)", _format_card_scalar(cd.get("dread_qty"))))
                 if cd.get("curl_qty"):
@@ -300,6 +302,10 @@ def build_service_human_display(vs: VisitService) -> dict[str, Any]:
                     if nk.get("blanks_total") is not None:
                         blocks.append(("Количество доп. заготовок", _format_card_scalar(nk["blanks_total"])))
 
+    corr_amt = getattr(vs, "correction_master_amount", 0) or 0
+    if float(corr_amt) > 0:
+        blocks.append(("Корр.: ЗП мастера", _format_card_scalar(corr_amt) + " ₽"))
+
     catalog_line = f"{vs.category_name} / {vs.subcategory_name} / {vs.service_name}"
     detail_blocks = blocks[3:]
     return {"blocks": blocks, "catalog_line": catalog_line, "detail_blocks": detail_blocks}
@@ -321,6 +327,7 @@ class VisitMasterPayRow:
     master_name: str
     pool_share: float
     mix_bonus: float
+    correction_bonus: float
     total: float
 
 
@@ -343,6 +350,7 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
     active_services = [vs for vs in (visit.services or []) if not vs.is_cancelled]
     pool_by_master: dict[int, float] = {}
     bonus_by_master: dict[int, float] = {}
+    correction_by_master: dict[int, float] = {}
     names: dict[int, str] = {}
 
     def add_pool(mid: int, amount: float, user: User | None) -> None:
@@ -357,6 +365,12 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
         bonus_by_master[mid] = money_q2(bonus_by_master.get(mid, 0.0) + amount)
         names.setdefault(mid, _master_display_name(user, mid, db))
 
+    def add_correction(mid: int, amount: float, user: User | None = None) -> None:
+        if amount <= 0:
+            return
+        correction_by_master[mid] = money_q2(correction_by_master.get(mid, 0.0) + amount)
+        names.setdefault(mid, _master_display_name(user, mid, db))
+
     if active_services:
         for vs in active_services:
             pool = float(vs.masters_pool or 0)
@@ -368,31 +382,39 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
                 mid = int(m.master_id)
                 share = money_q2(pool * float(m.percent or 0) / 100.0)
                 add_pool(mid, share, getattr(m, "master", None))
-            if vs.mix_bonus_master_id and float(vs.mix_bonus_amount or 0) > 0:
+            if getattr(vs, "mix_bonus_master_id", None) and float(getattr(vs, "mix_bonus_amount", 0) or 0) > 0:
                 mid = int(vs.mix_bonus_master_id)
-                add_bonus(mid, float(vs.mix_bonus_amount or 0))
+                add_bonus(mid, float(getattr(vs, "mix_bonus_amount", 0) or 0))
+            if getattr(vs, "correction_master_id", None) and float(getattr(vs, "correction_master_amount", 0) or 0) > 0:
+                mid = int(vs.correction_master_id)
+                add_correction(mid, float(getattr(vs, "correction_master_amount", 0) or 0))
     else:
         pool = float(visit.masters_pool or 0)
         for m in visit.masters or []:
             mid = int(m.master_id)
             share = money_q2(pool * float(m.percent or 0) / 100.0)
             add_pool(mid, share, getattr(m, "master", None))
-        if visit.mix_bonus_master_id and float(visit.mix_bonus_amount or 0) > 0:
+        if getattr(visit, "mix_bonus_master_id", None) and float(getattr(visit, "mix_bonus_amount", 0) or 0) > 0:
             mid = int(visit.mix_bonus_master_id)
-            add_bonus(mid, float(visit.mix_bonus_amount or 0))
+            add_bonus(mid, float(getattr(visit, "mix_bonus_amount", 0) or 0))
+        if getattr(visit, "correction_master_id", None) and float(getattr(visit, "correction_master_amount", 0) or 0) > 0:
+            mid = int(visit.correction_master_id)
+            add_correction(mid, float(getattr(visit, "correction_master_amount", 0) or 0))
 
-    master_ids = sorted(set(pool_by_master) | set(bonus_by_master))
+    master_ids = sorted(set(pool_by_master) | set(bonus_by_master) | set(correction_by_master))
     rows: list[VisitMasterPayRow] = []
     for mid in master_ids:
         pool_share = pool_by_master.get(mid, 0.0)
         mix_bonus = bonus_by_master.get(mid, 0.0)
+        correction_bonus = correction_by_master.get(mid, 0.0)
         rows.append(
             VisitMasterPayRow(
                 master_id=mid,
                 master_name=names.get(mid, _master_display_name(None, mid, db)),
                 pool_share=pool_share,
                 mix_bonus=mix_bonus,
-                total=money_q2(pool_share + mix_bonus),
+                correction_bonus=correction_bonus,
+                total=money_q2(pool_share + mix_bonus + correction_bonus),
             )
         )
     return rows

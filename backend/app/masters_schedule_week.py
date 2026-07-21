@@ -9,7 +9,12 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.calendar_occupancy import COLOR_OCCUPANCY_DAY_OFF, COLOR_OCCUPANCY_NO_DATA
+from app.calendar_occupancy import (
+    COLOR_OCCUPANCY_DAY_OFF,
+    COLOR_OCCUPANCY_NO_DATA,
+    build_occupancy_for_day,
+    master_has_free_time_on_day,
+)
 from app.db.models import (
     Booking,
     BookingKind,
@@ -21,11 +26,12 @@ from app.db.models import (
     UserRole,
 )
 from app.display_time import get_display_timezone
-from app.master_schedule import day_state
+from app.master_schedule import day_state, get_default_work_hours
 from app.user_roles import select_users_with_role
 
 COLOR_SCHEDULE_WORKING = "#bae6fd"
 COLOR_BOOKING_DOT = "#f97316"
+COLOR_FREE_TIME_DOT = "#22c55e"
 
 _WEEKDAY_SHORT = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
 
@@ -130,6 +136,12 @@ def build_masters_schedule_week(db: Session, *, week_start: date) -> dict[str, A
         db, week_start=week_start, week_end=week_end, tz=tz
     )
 
+    hour_from, hour_to = get_default_work_hours(db)
+    occupancy_by_day = {
+        d0: build_occupancy_for_day(db, day=d0, hour_from=hour_from, hour_to=hour_to)
+        for d0 in week_days
+    }
+
     days_out: list[dict[str, Any]] = []
     for i, d0 in enumerate(week_days):
         days_out.append(
@@ -156,6 +168,13 @@ def build_masters_schedule_week(db: Session, *, week_start: date) -> dict[str, A
             else:
                 cell = {"state": "no_data", "time_from": None, "time_to": None}
             cell["has_booking"] = (mid, d0) in booking_keys
+            cell["has_free_time"] = (
+                st == "working"
+                and master_has_free_time_on_day(
+                    master_id=mid,
+                    occupancy=occupancy_by_day[d0],
+                )
+            )
             cells.append(cell)
         masters_out.append(
             {
@@ -175,6 +194,7 @@ def build_masters_schedule_week(db: Session, *, week_start: date) -> dict[str, A
             "day_off": COLOR_OCCUPANCY_DAY_OFF,
             "working": COLOR_SCHEDULE_WORKING,
             "booking_dot": COLOR_BOOKING_DOT,
+            "free_time_dot": COLOR_FREE_TIME_DOT,
         },
         "days": days_out,
         "masters": masters_out,

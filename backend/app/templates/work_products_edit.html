@@ -118,6 +118,10 @@
           </div>
           {% if is_kit_work %}
             <script type="application/json" id="work_edit_profit_meta">{{ work_edit_profit_meta_json | safe }}</script>
+            <p class="muted" style="font-size:12px; margin: 8px 0 0;">
+              Студия при пересчёте: если указана сумма с клиента — сумма минус себестоимость и ЗП мастеров;
+              если суммы нет (в т.ч. «в наличие») — студия = минус ЗП мастеров, т.к. ЗП идёт из фонда студии.
+            </p>
           {% endif %}
           {% if use_per_master_profit %}
             <p class="muted" style="font-size:12px; margin: 8px 0 0;">
@@ -159,11 +163,11 @@
           <div class="row" style="margin-top: 8px;">
             <div>
               <label>Студия, ₽</label>
-              <input name="studio_profit_amount" type="number" step="0.01" min="0" value="{{ row.studio_profit_amount or 0 }}" />
+              <input name="studio_profit_amount" type="number" step="0.01" value="{{ row.studio_profit_amount or 0 }}" />
             </div>
             <div>
               <label>Всего, ₽</label>
-              <input name="profit_total_amount" type="number" step="0.01" min="0" value="{{ row.profit_total_amount or 0 }}" />
+              <input name="profit_total_amount" type="number" step="0.01" value="{{ row.profit_total_amount or 0 }}" />
             </div>
           </div>
         </div>
@@ -280,35 +284,20 @@
       syncProfitMasterActive();
 
       var payRates = st.kitWorkPayByKey || {};
-      var priceMap = st.kitPriceByKey || {};
       var compLines = (typeof window.kitCompositionCollectLines === 'function')
         ? window.kitCompositionCollectLines() : [];
       var ids = getKitColumnMasterIds();
       var masterPays = {};
       ids.forEach(function (uid) { masterPays[uid] = 0; });
 
-      var clientTotal = 0;
-      var extra = readFieldFloat('extra_costs_amount');
       compLines.forEach(function (ln) {
         var key = ln.key || '';
-        var qty = 0;
-        for (var mid in (ln.by_staff || {})) qty += parseInt(ln.by_staff[mid], 10) || 0;
-        var baseP = parseFloat(priceMap[key]) || 0;
-        if (baseP > 0 && qty > 0) {
-          if (ln.is_used) {
-            var pct = parseInt(ln.used_pct, 10) || 100;
-            clientTotal += baseP * (pct / 100.0) * qty;
-          } else {
-            clientTotal += baseP * qty;
-          }
-        }
         if (ln.is_used) return;
         ids.forEach(function (uid) {
           var q2 = parseInt((ln.by_staff || {})[uid] || (ln.by_staff || {})[String(uid)] || 0, 10) || 0;
           if (q2 > 0) masterPays[uid] = (masterPays[uid] || 0) + (parseFloat(payRates[key]) || 0) * q2;
         });
       });
-      clientTotal += extra;
 
       var kan = readFieldFloat('kanekalon_grams');
       var kud = readFieldFloat('kudri_grams');
@@ -334,17 +323,15 @@
       });
       var masterSum = syncMasterProfitTotal();
 
-      var scope = meta.scope || 'CUSTOM_ORDER';
       var costKit = readFieldFloat('cost_total_amount');
-      var studioSum = 0;
-      if (scope !== 'IN_STOCK') {
-        var priceForProfit = clientTotal;
-        if (scope === 'CUSTOM_ORDER') {
-          var afcRaw = String((document.querySelector('input[name="amount_from_client"]') || {}).value || '').trim();
-          var afcVal = afcRaw ? (parseInt(afcRaw, 10) || 0) : 0;
-          if (afcVal > 0) priceForProfit = afcVal;
-        }
-        studioSum = priceForProfit - costKit - masterSum;
+      var afcRaw = String((document.querySelector('input[name="amount_from_client"]') || {}).value || '').trim();
+      var afcVal = afcRaw ? (parseFloat(afcRaw.replace(',', '.')) || 0) : 0;
+      var studioSum;
+      if (afcVal > 0) {
+        studioSum = afcVal - costKit - masterSum;
+      } else {
+        // Нет суммы с клиента (в т.ч. «в наличие»): ЗП мастеров из фонда студии
+        studioSum = -masterSum;
       }
 
       var studioInp = document.querySelector('input[name="studio_profit_amount"]');

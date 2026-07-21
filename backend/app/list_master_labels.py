@@ -15,11 +15,15 @@ def _master_ids_from_visit(v: Visit) -> set[int]:
             ids.add(int(vm.master_id))
     if v.mix_bonus_master_id:
         ids.add(int(v.mix_bonus_master_id))
+    if v.correction_master_id:
+        ids.add(int(v.correction_master_id))
     for vs in v.services or []:
         if vs.is_cancelled:
             continue
         if vs.mix_bonus_master_id:
             ids.add(int(vs.mix_bonus_master_id))
+        if vs.correction_master_id:
+            ids.add(int(vs.correction_master_id))
         for psm in vs.masters or []:
             if psm.master_id:
                 ids.add(int(psm.master_id))

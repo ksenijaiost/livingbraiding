@@ -44,32 +44,84 @@ def compute_correction_extra_costs(
     corr_steam: bool,
 ) -> float:
     """Себестоимость коррекции: доп. расходы (fixed_expense) по прайсу «Коррекция комплекта»."""
+    _mp, _sp, fx_total = compute_correction_catalog_pays(
+        db,
+        corr_trim_qty=corr_trim_qty,
+        corr_hourly_hours=corr_hourly_hours,
+        corr_hourly_avg=corr_hourly_avg,
+        corr_wash=corr_wash,
+        corr_circle=corr_circle,
+        corr_steam=corr_steam,
+    )
+    return fx_total
+
+
+def compute_correction_catalog_pays(
+    db: Session,
+    *,
+    corr_trim_qty: int,
+    corr_hourly_hours: float,
+    corr_hourly_avg: bool,
+    corr_wash: bool,
+    corr_circle: bool,
+    corr_steam: bool,
+    bonus_multiplier: float = 1.0,
+) -> tuple[float, float, float]:
+    """ЗП мастера, доля студии и fixed_expense по прайсу «Коррекция комплекта».
+
+    Студия = Цена − Работа − Расход (не studio_pay из meta).
+    """
     from app.work_products import _zakaz_subcategory_services_map  # noqa: WPS433
 
     corr_map = _zakaz_subcategory_services_map(db, "Коррекция комплекта")
+    bonus = max(0.0, float(bonus_multiplier))
+    if bonus <= 0:
+        bonus = 1.0
 
-    def _fx_sum(name: str, units: float) -> float:
+    def _svc_sum(name: str, units: float) -> tuple[float, float, float]:
         row = corr_map.get(name) or {}
-        return float(row.get("fixed_expense") or 0.0) * max(0.0, float(units))
+        u = max(0.0, float(units))
+        mp = float(row.get("master_pay") or 0.0) * u
+        fx = float(row.get("fixed_expense") or 0.0) * u
+        price = float(row.get("client_price") or 0.0) * u
+        sp = max(0.0, price - mp - fx)
+        return mp, sp, fx
 
+    mp_total = 0.0
+    sp_total = 0.0
     fx_total = 0.0
     if corr_trim_qty > 0:
-        fx_total += _fx_sum(CORR_SVC_TRIM, float(corr_trim_qty))
+        mp, sp, fx = _svc_sum(CORR_SVC_TRIM, float(corr_trim_qty))
+        mp_total += mp
+        sp_total += sp
+        fx_total += fx
     hh_pay = corr_hourly_pay_units(hourly_hours=corr_hourly_hours, hourly_avg=corr_hourly_avg)
     if hh_pay > 0:
-        fx_total += _fx_sum(CORR_SVC_HOURLY, hh_pay)
+        mp, sp, fx = _svc_sum(CORR_SVC_HOURLY, hh_pay)
+        mp_total += mp
+        sp_total += sp
+        fx_total += fx
     if corr_circle:
-        fx_total += _fx_sum(CORR_SVC_CIRCLE, 1)
+        mp, sp, fx = _svc_sum(CORR_SVC_CIRCLE, 1)
+        mp_total += mp
+        sp_total += sp
+        fx_total += fx
     if corr_wash:
         wash_nm = corr_wash_catalog_name(
             trim_qty=int(corr_trim_qty),
             hourly_hours=float(corr_hourly_hours),
             hourly_avg=bool(corr_hourly_avg),
         )
-        fx_total += _fx_sum(wash_nm, 1)
+        mp, sp, fx = _svc_sum(wash_nm, 1)
+        mp_total += mp
+        sp_total += sp
+        fx_total += fx
     if corr_steam:
-        fx_total += _fx_sum(CORR_SVC_STEAM, 1)
-    return fx_total
+        mp, sp, fx = _svc_sum(CORR_SVC_STEAM, 1)
+        mp_total += mp
+        sp_total += sp
+        fx_total += fx
+    return mp_total * bonus, sp_total * bonus, fx_total
 
 
 def resolve_kit_client_price(
@@ -89,14 +141,21 @@ def resolve_kit_client_price(
 def kit_studio_profit_amount(
     *,
     scope: WorkScope,
-    client_price: float,
     cost_total: float,
     master_total: float,
+    amount_from_client: float | None = None,
 ) -> float:
-    """ЗП студии по комплекту: цена − себестоимость − ЗП мастера."""
-    if scope == WorkScope.IN_STOCK:
-        return 0.0
-    return float(client_price) - float(cost_total) - float(master_total)
+    """ЗП студии по комплекту.
+
+    Если есть сумма с клиента — студия = сумма − себестоимость − ЗП мастеров.
+    Если суммы с клиента нет (в т.ч. работы «в наличие») — студия = −ЗП мастеров
+    (ЗП мастеров идёт из фонда студии).
+    """
+    _ = scope
+    afc = float(amount_from_client) if amount_from_client is not None else 0.0
+    if afc > 0:
+        return afc - float(cost_total) - float(master_total)
+    return -float(master_total)
 
 
 def split_profit_from_client_amount(
@@ -211,58 +270,23 @@ def compute_work_financials(
         extra_costs_amount = float(fx) * float(units)
 
     elif kind == WorkKind.KIT_CORRECTION:
-        corr_map = _zakaz_subcategory_services_map(db, "Коррекция комплекта")
         bonus = 1.0
         if scope == WorkScope.CUSTOM_ORDER:
             bonus = max(0.0, _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0))
             if bonus <= 0:
                 bonus = 1.0
-
-        def _svc_sum(name: str, units: float) -> tuple[float, float, float]:
-            row = corr_map.get(name) or {}
-            u = max(0.0, float(units))
-            mp = float(row.get("master_pay") or 0.0) * u
-            sp = float(row.get("studio_pay") or 0.0) * u
-            fx = float(row.get("fixed_expense") or 0.0) * u
-            return mp, sp, fx
-
-        mp_total = 0.0
-        sp_total = 0.0
-        fx_total = 0.0
-        if corr_trim_qty > 0:
-            mp, sp, fx = _svc_sum(CORR_SVC_TRIM, float(corr_trim_qty))
-            mp_total += mp
-            sp_total += sp
-            fx_total += fx
-        hh_pay = corr_hourly_pay_units(hourly_hours=corr_hourly_hours, hourly_avg=corr_hourly_avg)
-        if hh_pay > 0:
-            mp, sp, fx = _svc_sum(CORR_SVC_HOURLY, hh_pay)
-            mp_total += mp
-            sp_total += sp
-            fx_total += fx
-        if corr_circle:
-            mp, sp, fx = _svc_sum(CORR_SVC_CIRCLE, 1)
-            mp_total += mp
-            sp_total += sp
-            fx_total += fx
-        if corr_wash:
-            wash_nm = corr_wash_catalog_name(
-                trim_qty=int(corr_trim_qty),
-                hourly_hours=float(corr_hourly_hours),
-                hourly_avg=bool(corr_hourly_avg),
-            )
-            mp, sp, fx = _svc_sum(wash_nm, 1)
-            mp_total += mp
-            sp_total += sp
-            fx_total += fx
-        if corr_steam:
-            mp, sp, fx = _svc_sum(CORR_SVC_STEAM, 1)
-            mp_total += mp
-            sp_total += sp
-            fx_total += fx
-
-        staff_master_profit[current_user_id] = mp_total * bonus
-        studio_total = sp_total * bonus
+        mp_total, sp_total, fx_total = compute_correction_catalog_pays(
+            db,
+            corr_trim_qty=int(corr_trim_qty),
+            corr_hourly_hours=float(corr_hourly_hours),
+            corr_hourly_avg=bool(corr_hourly_avg),
+            corr_wash=bool(corr_wash),
+            corr_circle=bool(corr_circle),
+            corr_steam=bool(corr_steam),
+            bonus_multiplier=bonus,
+        )
+        staff_master_profit[current_user_id] = mp_total
+        studio_total = sp_total
         extra_costs_amount = fx_total
 
     elif kind == WorkKind.MIX:
@@ -295,16 +319,11 @@ def compute_work_financials(
     cost_total_amount = float(mat_cost) + float(extra_costs_amount)
     studio_share = _studio_share_snapshot(db)
     if kind == WorkKind.KIT:
-        price = resolve_kit_client_price(
-            scope=scope,
-            catalog_client_price=float(kit_client_price or 0.0),
-            amount_from_client=amount_from_client,
-        )
         studio_total = kit_studio_profit_amount(
             scope=scope,
-            client_price=price,
             cost_total=cost_total_amount,
             master_total=master_total,
+            amount_from_client=amount_from_client,
         )
     elif kind not in (WorkKind.RUBBER, WorkKind.KIT_CORRECTION):
         studio_total = 0.0

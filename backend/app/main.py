@@ -71,6 +71,8 @@ from app.routes.master_statistics import router as master_statistics_router  # n
 app.include_router(master_statistics_router)
 from app.routes.work_plans import router as work_plans_router  # noqa: E402
 app.include_router(work_plans_router)
+from app.routes.hourly_work import router as hourly_work_router  # noqa: E402
+app.include_router(hourly_work_router)
 from app.routes.payroll import router as payroll_router  # noqa: E402
 app.include_router(payroll_router)
 from app.routes.staff import router as staff_router  # noqa: E402

@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.db.models import WorkForInventory, WorkKind, WorkPlan, WorkPlanStatus, WorkPlanType, User, UserRole
+from app.db.models import HourlyWorkEntry, WorkForInventory, WorkKind, WorkPlan, WorkPlanStatus, WorkPlanType, User, UserRole
 from app.display_time import get_display_timezone
 from app.master_schedule import TimeRangeMinutes, _interval_overlaps, is_master_available_for_interval
 from app.time_utils import utcnow_naive
@@ -52,6 +52,16 @@ def work_plan_status_label(status: WorkPlanStatus | str) -> str:
         WorkPlanStatus.COMPLETED.value: "Выполнено",
         WorkPlanStatus.CANCELLED.value: "Отменено",
     }.get(s, s)
+
+
+def work_plan_status_emoji(status: WorkPlanStatus | str) -> str:
+    """Короткий статус для узких экранов списка планов."""
+    s = status.value if isinstance(status, WorkPlanStatus) else str(status)
+    return {
+        WorkPlanStatus.PLANNED.value: "⌛",
+        WorkPlanStatus.COMPLETED.value: "✅",
+        WorkPlanStatus.CANCELLED.value: "❌",
+    }.get(s, "·")
 
 
 def work_plan_type_label(plan_type: WorkPlanType | str) -> str:
@@ -259,6 +269,38 @@ def complete_work_plan_from_work(db: Session, plan_id: int, work_id: int) -> Non
     plan.updated_at = utcnow_naive()
 
 
+def complete_work_plan_from_hourly_work(db: Session, plan_id: int, entry_id: int) -> None:
+    plan = db.get(WorkPlan, plan_id)
+    if plan is None or not work_plan_is_open(plan):
+        return
+    entry = db.get(HourlyWorkEntry, entry_id)
+    if entry is not None and entry.work_plan_id is None:
+        entry.work_plan_id = plan.id
+    plan.status = WorkPlanStatus.COMPLETED
+    plan.completed_at = utcnow_naive()
+    plan.updated_at = utcnow_naive()
+
+
+def validate_work_plan_for_hourly_entry(
+    db: Session,
+    *,
+    plan_id: int,
+    master_user_id: int,
+) -> str | None:
+    plan = db.get(WorkPlan, int(plan_id))
+    if plan is None:
+        return "План работ не найден."
+    if not work_plan_is_open(plan):
+        return "План работ уже закрыт."
+    if plan.plan_type != WorkPlanType.HOURLY:
+        return "План не предназначен для почасовой работы."
+    if int(plan.master_id) != int(master_user_id):
+        return "Почасовую работу можно создать только для мастера плана."
+    if linked_hourly_work_for_plan(db, plan.id) is not None:
+        return "По этому плану уже создана почасовая работа."
+    return None
+
+
 def work_plan_work_new_query_params(db: Session, plan: WorkPlan) -> dict[str, str]:
     tz = get_display_timezone(db)
     q: dict[str, str] = {"work_plan_id": str(plan.id)}
@@ -273,10 +315,34 @@ def work_plan_work_new_query_params(db: Session, plan: WorkPlan) -> dict[str, st
     return q
 
 
+def work_plan_hourly_new_query_params(db: Session, plan: WorkPlan) -> dict[str, str]:
+    tz = get_display_timezone(db)
+    q: dict[str, str] = {"work_plan_id": str(plan.id)}
+    local = planned_local_datetime(plan, tz)
+    q["performed_date"] = local.date().isoformat()
+    q["duration_h"] = str(plan.duration_minutes // 60)
+    q["duration_m"] = str(plan.duration_minutes % 60)
+    q["master_id"] = str(plan.master_id)
+    parts = [f"план работ #{plan.id}"]
+    if plan.comment:
+        parts.append(str(plan.comment).strip()[:400])
+    q["comment"] = "\n".join(parts)[:900]
+    return q
+
+
 def linked_work_for_plan(db: Session, plan_id: int) -> WorkForInventory | None:
     return db.scalar(
         select(WorkForInventory)
         .where(WorkForInventory.work_plan_id == plan_id, WorkForInventory.is_voided.is_(False))
         .order_by(WorkForInventory.id.desc())
+        .limit(1)
+    )
+
+
+def linked_hourly_work_for_plan(db: Session, plan_id: int) -> HourlyWorkEntry | None:
+    return db.scalar(
+        select(HourlyWorkEntry)
+        .where(HourlyWorkEntry.work_plan_id == plan_id)
+        .order_by(HourlyWorkEntry.id.desc())
         .limit(1)
     )

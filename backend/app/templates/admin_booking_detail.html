@@ -85,7 +85,7 @@
     <table class="lb-table-compact lb-max-720" style="margin-top:8px;">
       <tbody>
         <tr class="lb-table-compact-row">
-          <td class="lb-td-pad-left0 lb-va-mid lb-nowrap"><strong>Консультация, на которую бронь</strong></td>
+          <td class="lb-td-pad-left0 lb-va-mid lb-booking-consult-label"><strong>Консультация,<br>на которую бронь</strong></td>
           <td class="lb-td-pad-mid lb-va-mid">
             {% if consultation_for_booking %}
               <a href="/consultations/{{ consultation_for_booking.id }}">№{{ consultation_for_booking.id }}</a>
@@ -112,7 +112,7 @@
           </td>
         </tr>
         <tr>
-          <td class="lb-td-pad-left0 lb-va-mid lb-nowrap"><strong>Консультация, после которой бронь</strong></td>
+          <td class="lb-td-pad-left0 lb-va-mid lb-booking-consult-label"><strong>Консультация,<br>после которой бронь</strong></td>
           <td class="lb-td-pad-mid lb-va-mid" colspan="2">
             {% if linked_consultation %}
               <a href="/consultations/{{ linked_consultation.id }}">№{{ linked_consultation.id }}</a>

@@ -38,6 +38,41 @@
 .lb-card-ok { border-color: #bbf7d0; background: #f0fdf4; }
 .lb-nowrap { white-space: nowrap; }
 
+.lb-booking-consult-label {
+  white-space: normal;
+  line-height: 1.25;
+  max-width: 11rem;
+}
+
+.lb-work-plans-status-emoji { display: none; }
+.lb-work-plans-status-text { display: inline; }
+
+@media (max-width: 600px) {
+  .lb-booking-consult-label {
+    max-width: 8.5rem;
+    font-size: 13px;
+  }
+
+  .lb-work-plans-table {
+    min-width: 0 !important;
+  }
+
+  .lb-work-plans-status-col {
+    width: 2.75rem !important;
+  }
+
+  .lb-work-plans-status {
+    text-align: center;
+  }
+
+  .lb-work-plans-status-text { display: none; }
+  .lb-work-plans-status-emoji {
+    display: inline;
+    font-size: 1.05rem;
+    font-weight: 400;
+  }
+}
+
 .lb-role-chip {
   display: inline-block;
   margin: 2px 4px 2px 0;

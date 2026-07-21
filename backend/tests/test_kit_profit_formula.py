@@ -25,19 +25,44 @@ def test_resolve_kit_client_price_custom_order_override() -> None:
     ) == 5000.0
 
 
-def test_kit_studio_profit_amount_formula() -> None:
-    # цена 8750, себестоимость 1600, мастер 1450 (+ смешка) -> студия 5700
+def test_kit_studio_profit_amount_with_client_amount() -> None:
+    # сумма 8750, себестоимость 1600, мастер 1450 -> студия 5700
     studio = kit_studio_profit_amount(
         scope=WorkScope.CUSTOM_ORDER,
-        client_price=8750.0,
         cost_total=1600.0,
         master_total=1450.0,
+        amount_from_client=8750.0,
     )
     assert studio == 5700.0
 
+
+def test_kit_studio_profit_amount_without_client_amount() -> None:
+    # без суммы с клиента студия = −ЗП мастеров
     assert kit_studio_profit_amount(
-        scope=WorkScope.IN_STOCK,
-        client_price=8750.0,
+        scope=WorkScope.CUSTOM_ORDER,
         cost_total=1600.0,
         master_total=1450.0,
-    ) == 0.0
+        amount_from_client=None,
+    ) == -1450.0
+    assert kit_studio_profit_amount(
+        scope=WorkScope.CUSTOM_ORDER,
+        cost_total=1600.0,
+        master_total=1450.0,
+        amount_from_client=0,
+    ) == -1450.0
+
+
+def test_kit_studio_profit_amount_in_stock_is_minus_masters() -> None:
+    assert kit_studio_profit_amount(
+        scope=WorkScope.IN_STOCK,
+        cost_total=1600.0,
+        master_total=1450.0,
+        amount_from_client=None,
+    ) == -1450.0
+    # Даже если случайно указана сумма — считаем по ней (редкий кейс)
+    assert kit_studio_profit_amount(
+        scope=WorkScope.IN_STOCK,
+        cost_total=1600.0,
+        master_total=1450.0,
+        amount_from_client=8750.0,
+    ) == 5700.0

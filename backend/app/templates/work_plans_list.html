@@ -49,14 +49,14 @@
     {% if not rows %}
       <p class="muted">{% if search_id is not none %}План №{{ search_id }} не найден{% if mine_only %} среди ваших{% endif %}.{% else %}Пока нет планов работ.{% endif %}</p>
     {% else %}
-      <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
-        <table style="width:100%; min-width:32rem; table-layout:fixed;">
+      <div class="lb-work-plans-table-wrap" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+        <table class="lb-work-plans-table" style="width:100%; min-width:32rem; table-layout:fixed;">
           <colgroup>
             <col style="width:3.5rem;" />
             <col style="width:6.5rem;" />
             <col />
             <col style="width:5.5rem;" />
-            <col style="width:6.5rem;" />
+            <col class="lb-work-plans-status-col" style="width:6.5rem;" />
           </colgroup>
           <thead>
             <tr>
@@ -79,7 +79,11 @@
                 </td>
                 <td style="word-break:break-word;">{{ work_plan_type_display(p) }}</td>
                 <td style="word-break:break-word;">{{ p.master.display_name or p.master.username }}</td>
-                <td><strong>{{ work_plan_status_label(p.status) }}</strong></td>
+                <td class="lb-work-plans-status">
+                  {% set st_label = work_plan_status_label(p.status) %}
+                  <strong class="lb-work-plans-status-text">{{ st_label }}</strong>
+                  <strong class="lb-work-plans-status-emoji" title="{{ st_label }}">{{ work_plan_status_emoji(p.status) }}</strong>
+                </td>
               </tr>
             {% endfor %}
           </tbody>

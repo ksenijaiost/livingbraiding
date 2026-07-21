@@ -20,6 +20,7 @@ from app.time_utils import utcnow_naive
 from app.webui import ctx as _ctx, templates
 from app.work_plan import (
     is_master_available_for_work_plan,
+    linked_hourly_work_for_plan,
     linked_work_for_plan,
     list_masters_for_work_plan_form,
     parse_duration_minutes,
@@ -28,7 +29,9 @@ from app.work_plan import (
     planned_local_datetime,
     validate_work_plan_interval,
     work_kind_label,
+    work_plan_hourly_new_query_params,
     work_plan_is_open,
+    work_plan_status_emoji,
     work_plan_status_label,
     work_plan_type_display,
     work_plan_work_new_query_params,
@@ -100,6 +103,7 @@ def work_plans_list(
             search_id=search_id,
             display_tz=display_tz,
             work_plan_status_label=work_plan_status_label,
+            work_plan_status_emoji=work_plan_status_emoji,
             work_plan_type_display=work_plan_type_display,
         ),
     )
@@ -158,12 +162,14 @@ async def work_plan_new_post(
         )
         plan_type_raw = (fp.get("plan_type") or WorkPlanType.WORK_PRODUCT.value).strip().upper()
         if plan_type_raw == WorkPlanType.HOURLY.value:
-            raise ValueError("Почасовая работа пока в разработке.")
-        plan_type = WorkPlanType.WORK_PRODUCT
-        kind_raw = (fp.get("work_kind") or "").strip().upper()
-        if not kind_raw:
-            raise ValueError("Выберите вид работы.")
-        work_kind = WorkKind(kind_raw)
+            plan_type = WorkPlanType.HOURLY
+            work_kind = None
+        else:
+            plan_type = WorkPlanType.WORK_PRODUCT
+            kind_raw = (fp.get("work_kind") or "").strip().upper()
+            if not kind_raw:
+                raise ValueError("Выберите вид работы.")
+            work_kind = WorkKind(kind_raw)
         if is_admin or parse_bool(fp.get("pick_other_master", "")):
             mid = parse_int(fp.get("master_id", "0"), min=1, field_name="master_id")
         else:
@@ -233,14 +239,30 @@ def work_plan_detail(
     local_start = planned_local_datetime(plan, tz)
     local_end = planned_end_local(plan, tz)
     linked_work = linked_work_for_plan(db, plan.id)
+    linked_hourly = linked_hourly_work_for_plan(db, plan.id)
     is_assigned_master = int(plan.master_id) == current_user.id
-    can_create_work = work_plan_is_open(plan) and is_assigned_master
+    is_admin = _is_admin(current_user)
+    can_cancel = work_plan_is_open(plan) and (is_assigned_master or is_admin)
+    can_create_work = (
+        work_plan_is_open(plan)
+        and is_assigned_master
+        and plan.plan_type == WorkPlanType.WORK_PRODUCT
+    )
+    can_create_hourly = (
+        work_plan_is_open(plan)
+        and is_assigned_master
+        and plan.plan_type == WorkPlanType.HOURLY
+        and linked_hourly is None
+    )
     can_edit_time = work_plan_is_open(plan) and (
-        is_assigned_master or _is_admin(current_user) or int(plan.created_by_user_id) == current_user.id
+        is_assigned_master or is_admin or int(plan.created_by_user_id) == current_user.id
     )
     work_new_url = None
+    hourly_new_url = None
     if can_create_work:
         work_new_url = "/sales/work/new?" + urlencode(work_plan_work_new_query_params(db, plan))
+    if can_create_hourly:
+        hourly_new_url = "/hourly-work/new?" + urlencode(work_plan_hourly_new_query_params(db, plan))
     return templates.TemplateResponse(
         "work_plan_detail.html",
         _ctx(
@@ -257,10 +279,14 @@ def work_plan_detail(
             work_plan_status_label=work_plan_status_label,
             work_plan_type_display=work_plan_type_display,
             linked_work=linked_work,
+            linked_hourly=linked_hourly,
+            can_cancel=can_cancel,
             can_create_work=can_create_work,
+            can_create_hourly=can_create_hourly,
             can_edit_time=can_edit_time,
             edit_time_mode=edit_time == "1",
             work_new_url=work_new_url,
+            hourly_new_url=hourly_new_url,
         ),
     )
 
@@ -276,6 +302,9 @@ async def work_plan_cancel(
         raise HTTPException(status_code=404, detail="План не найден")
     if not work_plan_is_open(plan):
         return RedirectResponse(url=f"/work-plans/{plan_id}?msg=already_closed", status_code=303)
+    is_assigned = int(plan.master_id) == current_user.id
+    if not (is_assigned or _is_admin(current_user)):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
     plan.status = WorkPlanStatus.CANCELLED
     plan.cancelled_at = utcnow_naive()
     plan.cancelled_by_user_id = current_user.id

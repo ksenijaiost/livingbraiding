@@ -13,7 +13,6 @@ from app.db.models import (
     Booking,
     Consultation,
     Kit,
-    PayrollFundEntryKind,
     PayrollFundLedger,
     PayrollFundSide,
     PayrollFundSourceKind,
@@ -29,7 +28,13 @@ from app.db.models import (
     WorkScope,
 )
 from app.operational_report import period_bounds
-from app.payroll_fund import money_q2, sum_ledger_amounts_by_source
+from app.hourly_help import master_hourly_help_pay_from_visit
+from app.payroll_fund import (
+    employee_payroll_net_in_period,
+    employee_payouts_in_period,
+    money_q2,
+    sum_ledger_amounts_by_source,
+)
 
 
 @dataclass
@@ -115,43 +120,6 @@ def employee_fund_balance_before(db: Session, user_id: int, before: datetime) ->
     return money_q2(float(v or 0))
 
 
-def employee_payroll_net_in_period(
-    db: Session,
-    user_id: int,
-    start: datetime,
-    end_excl: datetime,
-) -> float:
-    v = db.scalar(
-        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
-            PayrollFundLedger.side == PayrollFundSide.MASTER,
-            PayrollFundLedger.user_id == user_id,
-            PayrollFundLedger.created_at >= start,
-            PayrollFundLedger.created_at < end_excl,
-            PayrollFundLedger.entry_kind.in_(
-                (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.STORNO)
-            ),
-        )
-    )
-    return money_q2(float(v or 0))
-
-
-def employee_payouts_in_period(
-    db: Session,
-    user_id: int,
-    start: datetime,
-    end_excl: datetime,
-) -> float:
-    v = db.scalar(
-        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
-            PayrollFundLedger.entry_kind == PayrollFundEntryKind.PAYOUT,
-            PayrollFundLedger.user_id == user_id,
-            PayrollFundLedger.created_at >= start,
-            PayrollFundLedger.created_at < end_excl,
-        )
-    )
-    return money_q2(-float(v or 0))
-
-
 def _master_on_visit_service(visit: Visit, vs: VisitService, master_id: int) -> bool:
     if visit.masters_scope == VisitMastersScope.PER_SERVICE:
         return any(int(m.master_id) == master_id for m in vs.masters)
@@ -179,6 +147,8 @@ def _master_visit_service_pay(visit: Visit, vs: VisitService, master_id: int) ->
                 amt = money_q2(amt + pool * float(m.percent or 0) / 100.0)
     if vs.mix_bonus_master_id and int(vs.mix_bonus_master_id) == master_id:
         amt = money_q2(amt + float(vs.mix_bonus_amount or 0))
+    if vs.correction_master_id and int(vs.correction_master_id) == master_id:
+        amt = money_q2(amt + float(vs.correction_master_amount or 0))
     return amt
 
 
@@ -192,7 +162,7 @@ def _visit_masters_pay_total(visit: Visit) -> float:
     for vs in visit.services or []:
         if vs.is_cancelled:
             continue
-        total = money_q2(total + float(vs.masters_pool or 0) + float(vs.mix_bonus_amount or 0))
+        total = money_q2(total + float(vs.masters_pool or 0) + float(vs.mix_bonus_amount or 0) + float(vs.correction_master_amount or 0))
     return total
 
 
@@ -312,6 +282,7 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
                 masters_pay_total=_visit_masters_pay_total(visit),
                 master_payroll=money_q2(
                     sum(_master_visit_service_pay(visit, vs, master_id) for vs in svc_lines)
+                    + master_hourly_help_pay_from_visit(visit, master_id)
                 ),
                 studio_payroll=money_q2(sum(_visit_studio_pay(vs) for vs in svc_lines)),
             )

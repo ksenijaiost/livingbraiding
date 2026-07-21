@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
-from typing import Sequence
+from datetime import date, datetime, time, timedelta
+from typing import Any, Sequence
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.time_utils import utcnow_naive
+
+HOURLY_HELP_LEDGER_COMMENT = "Почасовая помощь"
 from app.kit_blank_stock_core import (
     apply_discount_capped,
     keyed_client_price_selected,
@@ -23,6 +25,7 @@ from app.db.models import (
     BookingKind,
     BookingStatus,
     Consultation,
+    HourlyWorkEntry,
     Kit,
     MaterialPriceCurrent,
     MaterialType,
@@ -31,6 +34,7 @@ from app.db.models import (
     PayrollFundPayoutPaymentKind,
     PayrollFundSide,
     PayrollFundSourceKind,
+    PayrollPeriod,
     ProductSale,
     ProductSaleKind,
     StudioExpense,
@@ -71,6 +75,12 @@ def visit_ids_visible_to_master_clause(master_id: int):
             )
         ),
         Visit.id.in_(
+            select(VisitService.visit_id).where(
+                VisitService.is_cancelled.is_(False),
+                VisitService.correction_master_id == mid,
+            )
+        ),
+        Visit.id.in_(
             select(VisitService.visit_id)
             .join(VisitServiceMaster, VisitServiceMaster.visit_service_id == VisitService.id)
             .where(
@@ -79,6 +89,7 @@ def visit_ids_visible_to_master_clause(master_id: int):
             )
         ),
         Visit.mix_bonus_master_id == mid,
+        Visit.correction_master_id == mid,
     )
 
 
@@ -313,6 +324,7 @@ def replace_visit_accruals(
     if services:
         for vs in services:
             replace_visit_service_accruals(db, vs, visit, created_by_user_id)
+        replace_visit_hourly_help_accruals(db, visit, created_by_user_id)
         return
     append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
     studio_amt = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
@@ -327,6 +339,7 @@ def replace_visit_accruals(
             source_id=visit.id,
             created_by_user_id=created_by_user_id,
         )
+    replace_visit_hourly_help_accruals(db, visit, created_by_user_id)
 
 
 def post_visit_service_accruals(
@@ -392,6 +405,20 @@ def append_visit_service_master_pool_and_mix_bonus_ledgers(
             created_by_user_id=created_by_user_id,
         )
 
+    corr_mid = visit_service.correction_master_id
+    corr_amt = money_q2(float(visit_service.correction_master_amount or 0))
+    if corr_mid and corr_amt > 0:
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=int(corr_mid),
+            amount=corr_amt,
+            source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+            source_id=visit_service.id,
+            created_by_user_id=created_by_user_id,
+        )
+
 
 def post_visit_accruals(db: Session, visit: Visit, created_by_user_id: int | None) -> None:
     if visit.is_cancelled:
@@ -406,25 +433,118 @@ def post_visit_accruals(db: Session, visit: Visit, created_by_user_id: int | Non
     if services:
         for vs in services:
             post_visit_service_accruals(db, vs, visit, created_by_user_id)
-        return
+    else:
+        if not _has_accruals_for_source(db, PayrollFundSourceKind.VISIT, visit.id):
+            studio_amt = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
+            if studio_amt > 0:
+                append_ledger(
+                    db,
+                    entry_kind=PayrollFundEntryKind.ACCRUAL,
+                    side=PayrollFundSide.STUDIO,
+                    user_id=None,
+                    amount=studio_amt,
+                    source_kind=PayrollFundSourceKind.VISIT,
+                    source_id=visit.id,
+                    created_by_user_id=created_by_user_id,
+                )
 
-    if _has_accruals_for_source(db, PayrollFundSourceKind.VISIT, visit.id):
-        return
+            append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
 
-    studio_amt = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
-    if studio_amt > 0:
+    post_visit_hourly_help_accruals(db, visit, created_by_user_id)
+
+
+def _has_visit_hourly_help_accruals(db: Session, visit_id: int) -> bool:
+    return (
+        db.scalar(
+            select(PayrollFundLedger.id)
+            .where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == visit_id,
+                PayrollFundLedger.comment == HOURLY_HELP_LEDGER_COMMENT,
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+                PayrollFundLedger.storno_of_id.is_(None),
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
+def append_visit_hourly_help_ledgers(db: Session, visit: Visit, created_by_user_id: int | None) -> None:
+    from app.hourly_help import hourly_help_rows_from_visit
+
+    for row in hourly_help_rows_from_visit(visit):
+        amt = money_q2(float(row.amount or 0))
+        if amt <= 0:
+            continue
         append_ledger(
             db,
             entry_kind=PayrollFundEntryKind.ACCRUAL,
-            side=PayrollFundSide.STUDIO,
-            user_id=None,
-            amount=studio_amt,
+            side=PayrollFundSide.MASTER,
+            user_id=int(row.master_id),
+            amount=amt,
             source_kind=PayrollFundSourceKind.VISIT,
             source_id=visit.id,
             created_by_user_id=created_by_user_id,
+            comment=HOURLY_HELP_LEDGER_COMMENT,
         )
 
-    append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
+
+def post_visit_hourly_help_accruals(db: Session, visit: Visit, created_by_user_id: int | None) -> None:
+    if visit.is_cancelled:
+        return
+    if _has_visit_hourly_help_accruals(db, int(visit.id)):
+        return
+    append_visit_hourly_help_ledgers(db, visit, created_by_user_id)
+
+
+def storno_visit_hourly_help_accruals(
+    db: Session,
+    visit_id: int,
+    created_by_user_id: int | None,
+) -> None:
+    accruals = list(
+        db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == visit_id,
+                PayrollFundLedger.comment == HOURLY_HELP_LEDGER_COMMENT,
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+                PayrollFundLedger.storno_of_id.is_(None),
+            )
+        ).all()
+    )
+    for acc in accruals:
+        already = db.scalar(
+            select(PayrollFundLedger.id)
+            .where(PayrollFundLedger.storno_of_id == acc.id)
+            .limit(1)
+        )
+        if already is not None:
+            continue
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.STORNO,
+            side=acc.side,
+            user_id=acc.user_id,
+            amount=-money_q2(float(acc.amount or 0)),
+            source_kind=acc.source_kind,
+            source_id=acc.source_id,
+            created_by_user_id=created_by_user_id,
+            storno_of_id=acc.id,
+            comment=HOURLY_HELP_LEDGER_COMMENT,
+        )
+
+
+def replace_visit_hourly_help_accruals(
+    db: Session,
+    visit: Visit,
+    created_by_user_id: int | None,
+) -> None:
+    storno_visit_hourly_help_accruals(db, int(visit.id), created_by_user_id)
+    if visit.is_cancelled:
+        return
+    append_visit_hourly_help_ledgers(db, visit, created_by_user_id)
 
 
 def append_visit_master_pool_and_mix_bonus_ledgers(
@@ -555,7 +675,7 @@ def _append_work_accruals(
     w = db.get(WorkForInventory, int(work_id))
     if w and w.scope == WorkScope.CUSTOM_ORDER:
         studio_amt = money_q2(float(w.studio_profit_amount or 0))
-        if studio_amt > 0:
+        if studio_amt != 0:
             append_ledger(
                 db,
                 entry_kind=PayrollFundEntryKind.ACCRUAL,
@@ -614,7 +734,7 @@ def backfill_work_accruals_if_missing(db: Session, work: WorkForInventory) -> No
     needs = False
     if exp_master > 0 and abs(net_master - exp_master) > 0.02:
         needs = True
-    if exp_studio > 0 and abs(net_studio - exp_studio) > 0.02:
+    if abs(exp_studio) > 0.001 and abs(net_studio - exp_studio) > 0.02:
         needs = True
     if needs:
         replace_work_accruals(db, int(work.id), staff, work.created_by_user_id)
@@ -690,7 +810,7 @@ def sum_work_studio_payroll_by_work_id(
         if w.scope != WorkScope.CUSTOM_ORDER:
             continue
         amt = money_q2(float(w.studio_profit_amount or 0))
-        if amt > 0:
+        if abs(amt) > 0.001:
             out[int(w.id)] = amt
             if backfill:
                 backfill_work_accruals_if_missing(db, w)
@@ -942,6 +1062,172 @@ def employee_payout_total_net(db: Session, user_id: int) -> float:
     return money_q2(-float(v or 0))
 
 
+def resolve_current_payroll_period(
+    db: Session, today: date
+) -> tuple[PayrollPeriod | None, datetime, datetime]:
+    """Текущий (открытый или покрывающий сегодня) период и границы [start, end_excl) для журнала."""
+    from app.payroll_utils import payroll_period_day_end
+
+    p = db.scalar(
+        select(PayrollPeriod)
+        .where(PayrollPeriod.closed_at.is_(None))
+        .order_by(PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc())
+        .limit(1)
+    )
+    if p is None:
+        p = db.scalar(
+            select(PayrollPeriod)
+            .where(
+                PayrollPeriod.date_from <= datetime.combine(today, time.max),
+                PayrollPeriod.date_to >= datetime.combine(today, time.min),
+            )
+            .order_by(PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc())
+            .limit(1)
+        )
+    if p is None:
+        p = db.scalar(select(PayrollPeriod).order_by(PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc()).limit(1))
+    if p is None:
+        return None, datetime.combine(today, time.min), datetime.combine(today + timedelta(days=1), time.min)
+
+    period_end = p.date_to
+    if p.closed_at is None:
+        period_end = payroll_period_day_end(today)
+    start = datetime.combine(p.date_from.date(), time.min) if isinstance(p.date_from, datetime) else p.date_from
+    end_day = period_end.date() if isinstance(period_end, datetime) else period_end
+    end_excl = datetime.combine(end_day + timedelta(days=1), time.min)
+    return p, start, end_excl
+
+
+def employee_payroll_net_in_period(
+    db: Session,
+    user_id: int,
+    start: datetime,
+    end_excl: datetime,
+) -> float:
+    """Нетто начислений сотруднику за период (ACCRUAL + STORNO)."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.side == PayrollFundSide.MASTER,
+            PayrollFundLedger.user_id == user_id,
+            PayrollFundLedger.created_at >= start,
+            PayrollFundLedger.created_at < end_excl,
+            PayrollFundLedger.entry_kind.in_(
+                (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.STORNO)
+            ),
+        )
+    )
+    return money_q2(float(v or 0))
+
+
+def employee_payouts_in_period(
+    db: Session,
+    user_id: int,
+    start: datetime,
+    end_excl: datetime,
+) -> float:
+    """Сумма выплат сотруднику за период (положительное число)."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.entry_kind == PayrollFundEntryKind.PAYOUT,
+            PayrollFundLedger.user_id == user_id,
+            PayrollFundLedger.created_at >= start,
+            PayrollFundLedger.created_at < end_excl,
+        )
+    )
+    return money_q2(-float(v or 0))
+
+
+def studio_payroll_net_in_period(db: Session, start: datetime, end_excl: datetime) -> float:
+    """Нетто начислений в фонд студии за период (ACCRUAL + STORNO)."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.side == PayrollFundSide.STUDIO,
+            PayrollFundLedger.created_at >= start,
+            PayrollFundLedger.created_at < end_excl,
+            PayrollFundLedger.entry_kind.in_(
+                (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.STORNO)
+            ),
+        )
+    )
+    return money_q2(float(v or 0))
+
+
+def studio_payouts_in_period(db: Session, start: datetime, end_excl: datetime) -> float:
+    """Сумма выплат из фонда студии за период (положительное число)."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.side == PayrollFundSide.STUDIO,
+            PayrollFundLedger.entry_kind == PayrollFundEntryKind.PAYOUT,
+            PayrollFundLedger.created_at >= start,
+            PayrollFundLedger.created_at < end_excl,
+        )
+    )
+    return money_q2(-float(v or 0))
+
+
+def studio_fund_net_in_period(db: Session, start: datetime, end_excl: datetime) -> float:
+    """Изменение остатка фонда студии за период (все виды проводок)."""
+    v = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
+            PayrollFundLedger.side == PayrollFundSide.STUDIO,
+            PayrollFundLedger.created_at >= start,
+            PayrollFundLedger.created_at < end_excl,
+        )
+    )
+    return money_q2(float(v or 0))
+
+
+def build_home_payroll_period_ctx(
+    db: Session,
+    *,
+    today: date,
+    user_id: int,
+    include_studio: bool,
+) -> dict[str, Any] | None:
+    """Данные текущего периода ЗП для сводки на главной."""
+    p, start, end_excl = resolve_current_payroll_period(db, today)
+    if p is None:
+        return None
+
+    personal_accrued = employee_payroll_net_in_period(db, user_id, start, end_excl)
+    personal_paid = employee_payouts_in_period(db, user_id, start, end_excl)
+    personal_balance = money_q2(personal_accrued - personal_paid)
+
+    period_end = end_excl - timedelta(microseconds=1)
+    out: dict[str, Any] = {
+        "id": int(p.id),
+        "date_from": p.date_from,
+        "date_to": period_end,
+        "personal_accrued": personal_accrued,
+        "personal_paid": personal_paid,
+        "personal_balance": personal_balance,
+    }
+
+    if include_studio:
+        studio_accrued = studio_payroll_net_in_period(db, start, end_excl)
+        studio_paid = studio_payouts_in_period(db, start, end_excl)
+        studio_balance = studio_fund_net_in_period(db, start, end_excl)
+        expenses_sum = (
+            db.scalar(
+                select(func.coalesce(func.sum(StudioExpense.amount), 0.0)).where(
+                    StudioExpense.is_voided.is_(False),
+                    StudioExpense.date >= start,
+                    StudioExpense.date <= period_end,
+                )
+            )
+            or 0.0
+        )
+        out.update(
+            {
+                "studio_accrued": studio_accrued,
+                "studio_paid": studio_paid,
+                "studio_balance": studio_balance,
+                "expenses_sum": money_q2(float(expenses_sum)),
+            }
+        )
+    return out
+
+
 def replace_studio_expense_ledger(
     db: Session,
     expense: StudioExpense,
@@ -1135,6 +1421,43 @@ def post_consultation_accrual(
         source_id=consultation_id,
         created_by_user_id=created_by_user_id,
         comment=f"Консультация #{consultation_id}, бронь #{b.id}, база {base} ₽",
+    )
+
+
+def post_hourly_work_accruals(
+    db: Session,
+    entry: HourlyWorkEntry,
+    created_by_user_id: int | None,
+) -> None:
+    """ЗП мастеру за почасовую работу; сумма списывается с фонда студии."""
+    if entry.id is None:
+        return
+    if _has_accruals_for_source(db, PayrollFundSourceKind.HOURLY_WORK, int(entry.id)):
+        return
+    amt = money_q2(float(entry.amount or 0))
+    if amt <= 0:
+        return
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.ACCRUAL,
+        side=PayrollFundSide.MASTER,
+        user_id=int(entry.master_user_id),
+        amount=amt,
+        source_kind=PayrollFundSourceKind.HOURLY_WORK,
+        source_id=int(entry.id),
+        created_by_user_id=created_by_user_id,
+        comment="Почасовая работа",
+    )
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.EXPENSE,
+        side=PayrollFundSide.STUDIO,
+        user_id=None,
+        amount=-amt,
+        source_kind=PayrollFundSourceKind.HOURLY_WORK,
+        source_id=int(entry.id),
+        created_by_user_id=created_by_user_id,
+        comment="Почасовая работа",
     )
 
 

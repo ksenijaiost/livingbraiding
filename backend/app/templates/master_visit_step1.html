@@ -169,19 +169,28 @@
       </div>
       <div class="card" style="margin-top: 12px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Мастера на визит</div>
+        {% set _force_multi = force_visit_multi_masters or (fp.get('visit_use_multi_masters') == 'on') %}
         <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
           <input type="checkbox" name="visit_use_multi_masters" id="visit_use_multi_masters"
-            {% if fp.get('visit_use_multi_masters') == 'on' %}checked{% endif %}
+            {% if _force_multi %}checked{% endif %}
+            {% if force_visit_multi_masters %}disabled{% endif %}
             onchange="visitMastersModeSync()" />
+          {% if force_visit_multi_masters %}
+            <input type="hidden" name="visit_use_multi_masters" value="on" />
+          {% endif %}
           <span>Выбрать несколько мастеров</span>
         </label>
-        <p id="visit_masters_single_note" class="muted" style="font-size: 12px; margin: -4px 0 10px;">
+        <p id="visit_masters_single_note" class="muted" style="font-size: 12px; margin: -4px 0 10px; {% if force_visit_multi_masters or _force_multi %}display:none;{% endif %}">
           Сейчас в пул идёт только вы, 100%. Включите галочку выше, чтобы распределить доли между мастерами.
         </p>
-        <p id="visit_masters_multi_note" class="muted" style="font-size: 12px; margin: -4px 0 10px; display: none;">
-          Отметьте мастеров и укажите доли целыми процентами; сумма по отмеченным — ровно 100. Если отмечен один мастер, долю можно не заполнять (100%).
+        <p id="visit_masters_multi_note" class="muted" style="font-size: 12px; margin: -4px 0 10px; {% if force_visit_multi_masters or _force_multi %}display:block;{% else %}display:none;{% endif %}">
+          {% if force_visit_multi_masters %}
+            У вашей учётной записи нет роли «мастер» — отметьте мастеров из списка и укажите доли (сумма 100%). Сохранить без выбора нельзя.
+          {% else %}
+            Отметьте мастеров и укажите доли целыми процентами; сумма по отмеченным — ровно 100. Если отмечен один мастер, долю можно не заполнять (100%).
+          {% endif %}
         </p>
-        <div id="visit_masters_multi_block" style="display: none; flex-direction: column; gap: 10px;">
+        <div id="visit_masters_multi_block" style="{% if force_visit_multi_masters or _force_multi %}display:flex;{% else %}display:none;{% endif %} flex-direction: column; gap: 10px;">
           {% for m in masters_for_visit %}
             <div class="row" style="align-items: center; flex-wrap: wrap; gap: 10px 16px;">
               <label style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 12rem;">
@@ -479,6 +488,15 @@
           {% with prefix='own_corr_', fp=fp %}
             {% include "partials/correction_custom_amount_block.html" %}
           {% endwith %}
+          <div style="margin-top: 10px;">
+            <label>Мастер коррекции (ЗП)</label>
+            <select name="own_corr_master_id" style="max-width:320px;">
+              {% for m in masters_for_visit %}
+                <option value="{{ m.id }}" {% if (fp.get('own_corr_master_id') or (current_user.id if current_user_can_be_visit_master else ''))|string == m.id|string %}selected{% endif %}>{{ m.display_name or m.username }}</option>
+              {% endfor %}
+            </select>
+            <p class="muted" style="font-size:12px; margin-top:4px;">По умолчанию выбран заполняющий визит. ЗП за коррекцию начисляется выбранному мастеру.</p>
+          </div>
         </div>
 
         <label><input type="checkbox" name="own_extra_blanks" id="own_extra_blanks" onchange="ownExtra()" {% if fp.get('own_extra_blanks') == 'on' %}checked{% endif %} /> Доп. заготовки</label>
@@ -625,6 +643,8 @@
         </div>
       </div>
 
+      {% include "partials/hourly_help_form.html" %}
+
       <div id="visit_preview_block" class="card" style="background:#fff; margin: 12px 0; border: 1px solid #e2e8f0;">
         <h3 style="margin-top:0;">Предварительный расчёт</h3>
         <div id="visit_preview_client_total" style="font-size: 14px; font-weight: 600; margin-top: 4px;">С клиента (итого): —</div>
@@ -684,7 +704,10 @@
     function visitMastersModeSync() {
       const cb = document.getElementById('visit_use_multi_masters');
       if (!cb) return;
-      const m = cb.checked;
+      if (forceVisitMultiMasters) {
+        cb.checked = true;
+      }
+      const m = cb.checked || forceVisitMultiMasters;
       const blk = document.getElementById('visit_masters_multi_block');
       const sn = document.getElementById('visit_masters_single_note');
       const mn = document.getElementById('visit_masters_multi_note');
@@ -1305,6 +1328,13 @@
     const visitMasterLevel = {{ (current_user.master_level.value if current_user.master_level else None) | tojson }};
     const visitMasterLevelRu = {{ visit_master_level_ru|tojson }};
     const serviceCatalog = {{ service_catalog|tojson }};
+    const mastersForVisitList = [
+      {% for m in masters_for_visit %}
+      { id: {{ m.id }}, label: {{ (m.display_name or m.username)|tojson }} }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ];
+    const currentUserCanBeVisitMaster = {{ (current_user_can_be_visit_master if current_user_can_be_visit_master is defined else true) | tojson }};
+    const forceVisitMultiMasters = {{ (force_visit_multi_masters if force_visit_multi_masters is defined else false) | tojson }};
     const currentUserId = {{ current_user.id|int }};
     const salonCutPct = {{ salon_cut_pct|float }};
     const materialPricePerGram = {{ (material_price_per_gram_json or '{}') | safe }};
@@ -1382,9 +1412,57 @@
       if (sum !== 100) return null;
       return rows;
     }
+    function collectVisitParticipantMasterIds() {
+      const ids = new Set();
+      const scope = (document.querySelector('input[name="masters_scope"]:checked') || {}).value || 'VISIT';
+      if (scope === 'PER_SERVICE') {
+        visitLineIndicesForPreview().forEach(function (idx) {
+          const alloc = readLineAllocationsForPreview(idx);
+          if (alloc) alloc.forEach(function (r) { ids.add(r.mid); });
+        });
+      } else {
+        const alloc = readAllocationsForPreview();
+        if (alloc) alloc.forEach(function (r) { ids.add(r.mid); });
+      }
+      visitLineIndicesForPreview().forEach(function (idx) {
+        const mix = lineMixCostAndBonus(idx);
+        if (mix.bonusMasterId) ids.add(mix.bonusMasterId);
+        const corrName = idx === 0 ? 'own_corr_master_id' : ('line_' + idx + '_own_corr_master_id');
+        const corrSel = document.querySelector('select[name="' + corrName + '"]');
+        if (corrSel && corrSel.value) {
+          const mid = parseInt(corrSel.value, 10);
+          if (mid > 0) ids.add(mid);
+        }
+      });
+      return ids;
+    }
+
+    function hourlyHelpTotal() {
+      let total = 0;
+      document.querySelectorAll('input[name^="hourly_help_amount_"]').forEach(function (inp) {
+        if (inp.disabled) return;
+        const v = parseFloat(String(inp.value || '').replace(',', '.')) || 0;
+        if (v > 0) total += v;
+      });
+      return total;
+    }
+
+    function syncHourlyHelpRowStates() {
+      const participantIds = collectVisitParticipantMasterIds();
+      document.querySelectorAll('.hourly-help-row').forEach(function (row) {
+        const mid = parseInt(row.getAttribute('data-master-id') || '0', 10);
+        const disabled = participantIds.has(mid);
+        row.style.opacity = disabled ? '0.45' : '1';
+        row.querySelectorAll('.hourly-help-field').forEach(function (inp) {
+          inp.disabled = disabled;
+          if (disabled) inp.value = '';
+        });
+      });
+    }
+
     function readAllocationsForPreview() {
       const ids = Array.from(document.querySelectorAll('input[name="visit_master_on"]:checked')).map((x) => parseInt(x.value, 10)).filter((x) => x > 0);
-      if (!ids.length && !(document.getElementById('visit_use_multi_masters') || {}).checked && currentUserId) {
+      if (!ids.length && !(document.getElementById('visit_use_multi_masters') || {}).checked && currentUserCanBeVisitMaster && currentUserId) {
         return [{ mid: currentUserId, pct: 100 }];
       }
       return readMasterAllocRows(ids, 'visit_master_pct_');
@@ -1784,6 +1862,7 @@
       const costEl = document.getElementById('visit_preview_cost_line');
       const clientTotalEl = document.getElementById('visit_preview_client_total');
       if (!payEl || !costEl) return;
+      syncHourlyHelpRowStates();
 
       const addons = Math.max(0, numVal('input[name="addon_sales_amount"]'));
       let amountTotal = 0;
@@ -1858,6 +1937,30 @@
         });
       }
 
+      const helpTotal = hourlyHelpTotal();
+      if (helpTotal > 0) {
+        let baseSum = 0;
+        Object.keys(totalsByMaster).forEach(function (mid) {
+          baseSum += totalsByMaster[mid].base || 0;
+        });
+        if (baseSum > 0) {
+          const ratio = Math.max(0, (baseSum - helpTotal) / baseSum);
+          Object.keys(totalsByMaster).forEach(function (mid) {
+            totalsByMaster[mid].base = (totalsByMaster[mid].base || 0) * ratio;
+          });
+        }
+        document.querySelectorAll('input[name^="hourly_help_amount_"]').forEach(function (inp) {
+          if (inp.disabled) return;
+          const m = inp.name.match(/^hourly_help_amount_(\d+)$/);
+          if (!m) return;
+          const amt = parseFloat(String(inp.value || '').replace(',', '.')) || 0;
+          if (amt <= 0) return;
+          const mid = parseInt(m[1], 10);
+          if (!totalsByMaster[mid]) totalsByMaster[mid] = { base: 0, bonus: 0 };
+          totalsByMaster[mid].help = (totalsByMaster[mid].help || 0) + amt;
+        });
+      }
+
       const mids = Object.keys(totalsByMaster).map(function (x) { return parseInt(x, 10); }).filter(function (x) { return x > 0; }).sort(function (a, b) { return a - b; });
       if (!mids.length) {
         payEl.innerHTML = '—';
@@ -1865,7 +1968,7 @@
         const lines = [];
         for (const mid of mids) {
           const t = totalsByMaster[mid];
-          lines.push('ЗП «' + masterNameById(mid) + '»: ' + money2(t.base + t.bonus) + ' ₽');
+          lines.push('ЗП «' + masterNameById(mid) + '»: ' + money2((t.base || 0) + (t.bonus || 0) + (t.help || 0)) + ' ₽');
         }
         payEl.innerHTML = lines.map((l) => '<div>' + l + '</div>').join('');
       }
@@ -2182,6 +2285,18 @@
       return out;
     }
 
+    function lineFeatureCorrMasterOptions(selected) {
+      const defaultId = currentUserCanBeVisitMaster ? String(currentUserId || '') : '';
+      const cur = String(selected || defaultId || '');
+      let out = '';
+      (mastersForVisitList || []).forEach(function (m) {
+        const id = String(m.id || '');
+        const lbl = String(m.label || ('ID ' + id));
+        out += '<option value="' + escapeHtml(id) + '"' + (cur === id ? ' selected' : '') + '>' + escapeHtml(lbl) + '</option>';
+      });
+      return out;
+    }
+
     function serviceFeatureMixHtml(idx) {
       const pf = function (name, def) { return lineFeaturePrefill(idx, name, def); };
       return '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
@@ -2268,6 +2383,13 @@
                   '</div>' +
                   '<button type="button" class="secondary lb-corr-custom-amount-cancel" style="margin-top:8px;">Убрать свою сумму</button>' +
                 '</div>' +
+              '</div>' +
+              '<div style="margin-top:8px;">' +
+                '<label>Мастер коррекции (ЗП)</label>' +
+                '<select name="line_' + String(idx) + '_own_corr_master_id" style="max-width:320px;">' +
+                  lineFeatureCorrMasterOptions(pf('own_corr_master_id', '')) +
+                '</select>' +
+                '<p class="muted" style="font-size:12px; margin-top:4px;">По умолчанию — заполняющий визит.</p>' +
               '</div>' +
             '</div>' +
             '<label style="display:block; margin-top:6px;"><input type="checkbox" name="line_' + String(idx) + '_own_extra_blanks"' + checkedAttr('own_extra_blanks') + ' /> Нужны доп. заготовки</label>' +
@@ -3045,6 +3167,23 @@
     updateMixBlockUI();
     syncAmountRequired();
     updateServiceDerivedUI();
+    syncHourlyHelpRowStates();
+    (function () {
+      const toggleBtn = document.getElementById('hourly_help_toggle_btn');
+      const block = document.getElementById('hourly_help_block');
+      if (toggleBtn && block) {
+        toggleBtn.addEventListener('click', function () {
+          block.style.display = block.style.display === 'none' ? 'block' : 'none';
+          syncHourlyHelpRowStates();
+          syncVisitPreview();
+        });
+        document.querySelectorAll('.hourly-help-field').forEach(function (inp) {
+          inp.addEventListener('input', function () { syncHourlyHelpRowStates(); syncVisitPreview(); });
+          inp.addEventListener('change', function () { syncHourlyHelpRowStates(); syncVisitPreview(); });
+        });
+      }
+    })();
+    syncVisitPreview();
   </script>
   <script src="/static/correction_custom_amount.js"></script>
 {% endblock %}

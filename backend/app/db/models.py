@@ -1236,6 +1236,7 @@ class PayrollFundSourceKind(str, enum.Enum):
     WORK = "WORK"
     PRODUCT_SALE = "PRODUCT_SALE"
     CONSULTATION = "CONSULTATION"
+    HOURLY_WORK = "HOURLY_WORK"
     STUDIO_EXPENSE = "STUDIO_EXPENSE"
     MANUAL = "MANUAL"
 
@@ -1289,6 +1290,28 @@ class PayrollFundLedger(Base):
     user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
 
 
+class HourlyWorkEntry(Base):
+    """Почасовая работа мастера (отдельно от визита/работы с товарами)."""
+
+    __tablename__ = "hourly_work_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    master_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    work_plan_id: Mapped[int | None] = mapped_column(ForeignKey("work_plans.id"), nullable=True)
+
+    created_by_user: Mapped["User | None"] = relationship(foreign_keys=[created_by_user_id])
+    master_user: Mapped["User"] = relationship(foreign_keys=[master_user_id])
+    work_plan: Mapped["WorkPlan | None"] = relationship(foreign_keys=[work_plan_id])
+
+
 class Visit(Base):
     __tablename__ = "visits"
 
@@ -1323,6 +1346,10 @@ class Visit(Base):
     mix_cost_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     mix_bonus_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     mix_bonus_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    correction_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    correction_master_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    hourly_help_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hourly_help_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     kanekalon_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     kudri_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -1697,6 +1724,8 @@ class VisitService(Base):
     mix_cost_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     mix_bonus_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     mix_bonus_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    correction_master_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    correction_master_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     kanekalon_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     kudri_price_per_gram_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     materials_cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)

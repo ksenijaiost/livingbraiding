@@ -153,25 +153,45 @@ def test_parse_per_service_master_allocations() -> None:
     assert multi.lines[1].service_master_allocations == [(10, 100)]
 
 
-def test_parse_per_service_single_master_without_pct() -> None:
-    """Один мастер на услугу без процента в POST (disabled поле) — 100%."""
-    items = [
-        ("service_id", "5"),
-        ("amount_from_client", "3000"),
-        ("masters_scope", "PER_SERVICE"),
-        ("line_0_service_master_on", "10"),
-        ("line_1_service_id", "7"),
-        ("line_1_amount_from_client", "2000"),
-        ("line_1_service_master_on", "11"),
-        ("line_1_kit_kind", "STOCK"),
-        ("line_1_mix_source", "NO_MIX"),
-        ("client_mode", "existing"),
-        ("existing_client_id", "1"),
-        ("performed_date", "2026-05-24"),
-        ("kit_kind", "STOCK"),
-        ("mix_source", "NO_MIX"),
-    ]
-    form = FormData(items)
-    multi = parse_multi_service_visit_form(form)
-    assert multi.lines[0].service_master_allocations == [(10, 100)]
-    assert multi.lines[1].service_master_allocations == [(11, 100)]
+def test_parse_requires_explicit_masters_without_single_default() -> None:
+    """Без single_master_default нельзя сохранить «только себя» — нужен выбор из списка."""
+    form = _form(
+        {
+            "service_id": "10",
+            "amount_from_client": "4000",
+            "client_mode": "existing",
+            "existing_client_id": "2",
+            "performed_date": "2026-05-24",
+            "amortization_level": "MIN",
+            "kanekalon_grams": "0",
+            "kudri_grams": "0",
+            "mix_source": "NO_MIX",
+            "kit_kind": "STOCK",
+        }
+    )
+    import pytest
+
+    with pytest.raises(ValueError, match="мастера"):
+        parse_multi_service_visit_form(form, single_master_default_id=None)
+
+
+def test_parse_explicit_masters_with_multi_flag() -> None:
+    form = FormData(
+        [
+            ("service_id", "10"),
+            ("amount_from_client", "4000"),
+            ("client_mode", "existing"),
+            ("existing_client_id", "2"),
+            ("performed_date", "2026-05-24"),
+            ("amortization_level", "MIN"),
+            ("kanekalon_grams", "0"),
+            ("kudri_grams", "0"),
+            ("mix_source", "NO_MIX"),
+            ("kit_kind", "STOCK"),
+            ("visit_use_multi_masters", "on"),
+            ("visit_master_on", "3"),
+            ("visit_master_pct_3", "100"),
+        ]
+    )
+    multi = parse_multi_service_visit_form(form, single_master_default_id=None)
+    assert multi.header.visit_master_allocations == [(3, 100)]

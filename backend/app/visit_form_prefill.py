@@ -146,6 +146,8 @@ def _apply_kit_to_line_fp(
                 fp[f"{p}own_corr_use_custom_amount"] = "1"
                 if cd.custom_amount is not None:
                     _set(fp, f"{p}own_corr_custom_amount", cd.custom_amount)
+            if getattr(cd, "master_id", None):
+                _set(fp, f"{p}own_corr_master_id", cd.master_id)
         if own.extra_blanks and own.extra:
             fp[f"{p}own_extra_blanks"] = "on"
             if own.extra.source == "STOCK":
@@ -239,6 +241,8 @@ def _apply_service_line_to_fp(
         _set(fp, f"{p}mix_complexity", vs.mix_complexity.value)
     if vs.mix_bonus_master_id:
         _set(fp, f"{p}mix_bonus_master_id", vs.mix_bonus_master_id)
+    if vs.correction_master_id:
+        _set(fp, f"{p}own_corr_master_id", vs.correction_master_id)
     if vs.amortization_level:
         _set(fp, f"{p}amortization_level", vs.amortization_level.value)
     elif idx == 0:
@@ -263,6 +267,8 @@ def _apply_service_line_to_fp(
             _set(fp, "mix_complexity", vs.mix_complexity.value)
         if vs.mix_bonus_master_id:
             _set(fp, "mix_bonus_master_id", vs.mix_bonus_master_id)
+        if vs.correction_master_id:
+            _set(fp, "own_corr_master_id", vs.correction_master_id)
         if vs.amortization_level:
             _set(fp, "amortization_level", vs.amortization_level.value)
 
@@ -354,5 +360,9 @@ def visit_to_form_prefill(
 
     if len(active) > 1:
         _set(fp, "line_count", len(active) - 1)
+
+    from app.hourly_help import hourly_help_prefill_from_rows, hourly_help_rows_from_visit
+
+    fp.update(hourly_help_prefill_from_rows(hourly_help_rows_from_visit(visit)))
 
     return fp, vm_on_ids, vm_pct_str, extra_lines

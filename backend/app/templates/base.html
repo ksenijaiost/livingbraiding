@@ -212,11 +212,6 @@
             <details class="nav-dd">
               <summary>Записи</summary>
               <div class="dd">
-                {% if current_user.role.value == "MASTER" %}
-                  <a href="/master/bookings">Мои записи</a>
-                  <a href="/master/visit/new">Новый визит</a>
-                  <a href="/consultations/new">Новая консультация</a>
-                {% endif %}
                 <a href="/visits">Визиты</a>
                 <a href="/consultations">Консультации</a>
                 <a href="/bookings">Брони</a>
@@ -228,14 +223,26 @@
             </details>
 
             <details class="nav-dd">
+              <summary>Работа</summary>
+              <div class="dd">
+                {% if current_user.role.value == "MASTER" %}
+                  <a href="/master/bookings">Мои записи</a>
+                  <a href="/master/visit/new">Новый визит</a>
+                  <a href="/consultations/new">Новая консультация</a>
+                  <a href="/sales/work/new">Новая работа</a>
+                {% endif %}
+                <a href="/work-plans">План работ</a>
+                {% if current_user.role.value in ("MASTER", "ADMIN", "ADMIN_SUPER") %}
+                  <a href="/hourly-work">Почасовая работа</a>
+                {% endif %}
+              </div>
+            </details>
+
+            <details class="nav-dd">
               <summary>Товары</summary>
               <div class="dd">
                 <a href="/sales/products">Продажа товаров</a>
-                <a href="/work-plans">План работ</a>
                 <a href="/sales/work">Работа с товарами</a>
-                {% if current_user.role.value == "MASTER" %}
-                  <a href="/sales/work/new">Новая работа</a>
-                {% endif %}
                 <a href="/products-calc">Калькулятор</a>
                 <a href="/products-catalog">Прайс — товары</a>
               </div>
@@ -319,11 +326,6 @@
 
         <details>
           <summary><strong>Записи</strong></summary>
-          {% if current_user.role.value == "MASTER" %}
-            <a class="md-link" href="/master/bookings" onclick="window.lbToggleMobileNav(false)">Мои записи</a>
-            <a class="md-link" href="/master/visit/new" onclick="window.lbToggleMobileNav(false)">Новый визит</a>
-            <a class="md-link" href="/consultations/new" onclick="window.lbToggleMobileNav(false)">Новая консультация</a>
-          {% endif %}
           <a class="md-link" href="/visits" onclick="window.lbToggleMobileNav(false)">Визиты</a>
           <a class="md-link" href="/consultations" onclick="window.lbToggleMobileNav(false)">Консультации</a>
           <a class="md-link" href="/bookings" onclick="window.lbToggleMobileNav(false)">Брони</a>
@@ -334,13 +336,23 @@
         </details>
 
         <details>
-          <summary><strong>Товары</strong></summary>
-          <a class="md-link" href="/sales/products" onclick="window.lbToggleMobileNav(false)">Продажа товаров</a>
-          <a class="md-link" href="/work-plans" onclick="window.lbToggleMobileNav(false)">План работ</a>
-          <a class="md-link" href="/sales/work" onclick="window.lbToggleMobileNav(false)">Работа с товарами</a>
+          <summary><strong>Работа</strong></summary>
           {% if current_user.role.value == "MASTER" %}
+            <a class="md-link" href="/master/bookings" onclick="window.lbToggleMobileNav(false)">Мои записи</a>
+            <a class="md-link" href="/master/visit/new" onclick="window.lbToggleMobileNav(false)">Новый визит</a>
+            <a class="md-link" href="/consultations/new" onclick="window.lbToggleMobileNav(false)">Новая консультация</a>
             <a class="md-link" href="/sales/work/new" onclick="window.lbToggleMobileNav(false)">Новая работа</a>
           {% endif %}
+          <a class="md-link" href="/work-plans" onclick="window.lbToggleMobileNav(false)">План работ</a>
+          {% if current_user.role.value in ("MASTER", "ADMIN", "ADMIN_SUPER") %}
+            <a class="md-link" href="/hourly-work" onclick="window.lbToggleMobileNav(false)">Почасовая работа</a>
+          {% endif %}
+        </details>
+
+        <details>
+          <summary><strong>Товары</strong></summary>
+          <a class="md-link" href="/sales/products" onclick="window.lbToggleMobileNav(false)">Продажа товаров</a>
+          <a class="md-link" href="/sales/work" onclick="window.lbToggleMobileNav(false)">Работа с товарами</a>
           <a class="md-link" href="/products-calc" onclick="window.lbToggleMobileNav(false)">Калькулятор</a>
           <a class="md-link" href="/products-catalog" onclick="window.lbToggleMobileNav(false)">Прайс — товары</a>
         </details>

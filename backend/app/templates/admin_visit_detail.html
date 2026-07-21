@@ -146,6 +146,15 @@
       <div style="margin: 2px 0;">Цены на момент визита (₽/г): канек {% if visit.kanekalon_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kanekalon_price_per_gram_at_time) }}{% else %}—{% endif %}, кудри {% if visit.kudri_price_per_gram_at_time is not none %}{{ "%.2f"|format(visit.kudri_price_per_gram_at_time) }}{% else %}—{% endif %}</div>
     </div>
 
+    <h4 style="margin: 16px 0 6px; font-size: 1rem;">Помощь</h4>
+    {% if hourly_help_rows %}
+      {% for row in hourly_help_rows %}
+        <p style="margin: 4px 0;">{{ row.master_name }} — {{ row.duration_text }} — {{ "%.0f"|format(row.amount) }} ₽</p>
+      {% endfor %}
+    {% else %}
+      <p class="muted" style="margin: 4px 0;">отсутствует</p>
+    {% endif %}
+
     <h3>Деньги</h3>
     <table>
       <tr><td>Выручка (с клиента)</td><td>{{ "%.0f"|format(visit.amount_from_client) }} ₽</td></tr>
@@ -162,8 +171,8 @@
             <td style="padding-left: 1.25rem; color: #6b7280;">{{ row.master_name }}</td>
             <td>
               {{ "%.0f"|format(row.total) }} ₽
-              {% if row.mix_bonus > 0 %}
-                <span class="muted" style="font-size: 12px;"> (пул {{ "%.0f"|format(row.pool_share) }} + бонус {{ "%.0f"|format(row.mix_bonus) }})</span>
+              {% if row.mix_bonus > 0 or row.correction_bonus > 0 %}
+                <span class="muted" style="font-size: 12px;"> (пул {{ "%.0f"|format(row.pool_share) }}{% if row.mix_bonus > 0 %} + бонус {{ "%.0f"|format(row.mix_bonus) }}{% endif %}{% if row.correction_bonus > 0 %} + корр. {{ "%.0f"|format(row.correction_bonus) }}{% endif %})</span>
               {% endif %}
             </td>
           </tr>

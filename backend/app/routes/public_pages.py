@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, get_current_user, require_role
@@ -21,12 +21,10 @@ from app.db.models import (
     PayrollFundLedger,
     PayrollFundSide,
     PayrollFundSourceKind,
-    PayrollPeriod,
     ProductSale,
     Service,
     ServiceCategory,
     ServiceSubcategory,
-    StudioExpense,
     UserRole,
     Visit,
     VisitMaster,
@@ -37,6 +35,7 @@ from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.time_utils import utcnow_naive
 from app.payroll_fund import (
+    build_home_payroll_period_ctx,
     employee_fund_balance,
     employee_payout_total_net,
     studio_fund_balance,
@@ -346,34 +345,12 @@ def home(
 
         db.commit()
 
-        period_ctx: dict[str, Any] | None = None
-        if show_studio:
-            today = now_local.date()
-            p = db.scalar(
-                select(PayrollPeriod)
-                .where(PayrollPeriod.date_from <= datetime.combine(today, time.max), PayrollPeriod.date_to >= datetime.combine(today, time.min))
-                .order_by(case((PayrollPeriod.closed_at.is_(None), 0), else_=1), PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc())
-                .limit(1)
-            )
-            if p is None:
-                p = db.scalar(select(PayrollPeriod).order_by(PayrollPeriod.date_from.desc(), PayrollPeriod.id.desc()).limit(1))
-            if p is not None:
-                period_end = p.date_to
-                if p.closed_at is None:
-                    from app.payroll_utils import payroll_period_day_end
-
-                    period_end = payroll_period_day_end(today)
-                expenses_sum = (
-                    db.scalar(
-                        select(func.coalesce(func.sum(StudioExpense.amount), 0.0)).where(
-                            StudioExpense.is_voided.is_(False),
-                            StudioExpense.date >= p.date_from,
-                            StudioExpense.date <= period_end,
-                        )
-                    )
-                    or 0.0
-                )
-                period_ctx = {"id": p.id, "date_from": p.date_from, "date_to": period_end, "expenses_sum": _money0(expenses_sum)}
+        period_ctx = build_home_payroll_period_ctx(
+            db,
+            today=now_local.date(),
+            user_id=current_user.id,
+            include_studio=show_studio,
+        )
         payroll_home["period"] = period_ctx
 
         cal = calendar.Calendar(firstweekday=0)  # Mon

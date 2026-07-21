@@ -37,6 +37,7 @@ from app.visit_multi_service import (
 )
 from app.work_products_compute import (
     CORR_SVC_TRIM,
+    compute_correction_catalog_pays,
     compute_correction_extra_costs,
     split_profit_from_client_amount,
 )
@@ -51,14 +52,79 @@ def memory_db():
         yield db
 
 
-def _seed_correction_catalog(db, *, fixed: float = 10.0) -> None:
+def _seed_master(db, *, username: str = "m1", user_id: int | None = None) -> User:
+    master = User(
+        id=user_id,
+        username=username,
+        password_hash="x",
+        display_name=f"Master {username}",
+        role=UserRole.MASTER,
+        is_active=True,
+    )
+    db.add(master)
+    db.flush()
+    db.add(UserRoleAssignment(user_id=master.id, role=UserRole.MASTER))
+    db.commit()
+    return master
+
+
+def _seed_visit_service_context(db):
+    cat = ServiceCategory(name="Cat")
+    sub = ServiceSubcategory(name="Sub", category_id=None, show_kit_section=True)
+    db.add(cat)
+    db.flush()
+    sub.category_id = cat.id
+    db.add(sub)
+    db.flush()
+    svc = Service(
+        subcategory_id=sub.id,
+        name="Вплетение",
+        estimated_duration_minutes=60,
+        is_active=True,
+    )
+    client = Client(name="Клиент", is_confirmed=True)
+    db.add_all([svc, client])
+    db.flush()
+    return svc, client
+
+
+def _visit_header(client_id: int) -> VisitHeaderInput:
+    return VisitHeaderInput(
+        client_mode="existing",
+        existing_client_id=int(client_id),
+        draft_name="",
+        draft_phone="",
+        draft_telegram="",
+        draft_vk="",
+        draft_instagram="",
+        draft_other_contact="",
+        client_type=VisitClientType.RETURNING,
+        performed_date=datetime(2025, 6, 1).date(),
+        duration_minutes=60,
+        masters_scope=VisitMastersScope.VISIT,
+        same_master_shares_all_services=False,
+        visit_master_allocations=[],
+    )
+
+
+def _seed_correction_catalog(
+    db,
+    *,
+    fixed: float = 10.0,
+    master_pay: float = 50.0,
+    price: float = 100.0,
+    studio_pay: float | None = None,
+) -> None:
+    meta: dict[str, float] = {"master_pay": master_pay, "fixed_expense": fixed}
+    if studio_pay is not None:
+        meta["studio_pay"] = studio_pay
     db.add(
         CatalogProduct(
             category_name="Заказ",
             subcategory_name="Коррекция комплекта",
             name=CORR_SVC_TRIM,
-            price=100.0,
-            meta_json=json.dumps({"master_pay": 50.0, "studio_pay": 20.0, "fixed_expense": fixed}),
+            price=price,
+            meta_json=json.dumps(meta),
             is_active=True,
         )
     )
@@ -163,22 +229,8 @@ def test_post_work_kit_correction_custom_amount(memory_db) -> None:
 
 def test_visit_correction_custom_amount(memory_db) -> None:
     db = memory_db
-    cat = ServiceCategory(name="Cat")
-    sub = ServiceSubcategory(name="Sub", category_id=None, show_kit_section=True)
-    db.add(cat)
-    db.flush()
-    sub.category_id = cat.id
-    db.add(sub)
-    db.flush()
-    svc = Service(
-        subcategory_id=sub.id,
-        name="Вплетение",
-        estimated_duration_minutes=60,
-        is_active=True,
-    )
-    client = Client(name="Клиент", is_confirmed=True)
-    db.add_all([svc, client])
-    db.flush()
+    svc, client = _seed_visit_service_context(db)
+    filler = _seed_master(db, username="filler")
     _seed_correction_catalog(db, fixed=20.0)
 
     line = VisitServiceLineInput(
@@ -199,27 +251,110 @@ def test_visit_correction_custom_amount(memory_db) -> None:
         kit_kind="OWN",
         own_origin="FOREIGN",
     )
-    header = VisitHeaderInput(
-        client_mode="existing",
-        existing_client_id=int(client.id),
-        draft_name="",
-        draft_phone="",
-        draft_telegram="",
-        draft_vk="",
-        draft_instagram="",
-        draft_other_contact="",
-        client_type=VisitClientType.RETURNING,
-        performed_date=datetime(2025, 6, 1).date(),
-        duration_minutes=60,
-        masters_scope=VisitMastersScope.VISIT,
-        same_master_shares_all_services=False,
-        visit_master_allocations=[],
+    header = _visit_header(int(client.id))
+    computed = compute_visit_service_line(
+        db, line, header, default_mix_bonus_master_id=int(filler.id), apply_kit_stock=False
     )
-    computed = compute_visit_service_line(db, line, header, default_mix_bonus_master_id=None, apply_kit_stock=False)
     assert computed.amount_from_client == 3000.0
     assert computed.client_payment_kind == ClientPaymentKind.CASH
     assert computed.cost_total >= 20.0
-    assert computed.masters_pool + computed.salon_profit == pytest.approx(computed.profit_before_split)
+    assert computed.correction_master_id == int(filler.id)
+    assert computed.correction_master_amount == pytest.approx(1490.0)
+    assert computed.masters_pool == pytest.approx(0.0)
+    assert (
+        computed.masters_pool + computed.salon_profit + computed.correction_master_amount
+        == pytest.approx(computed.profit_before_split)
+    )
+
+
+def test_visit_correction_custom_amount_selected_master(memory_db) -> None:
+    db = memory_db
+    svc, client = _seed_visit_service_context(db)
+    filler = _seed_master(db, username="filler")
+    other = _seed_master(db, username="other")
+    _seed_correction_catalog(db, fixed=10.0)
+
+    line = VisitServiceLineInput(
+        service_id=int(svc.id),
+        amount_from_client=5000,
+        client_discount_percent=0,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_source=None,
+        mix_complexity=None,
+        mix_bonus_master_id=None,
+        amortization_level=None,
+        own_correction=True,
+        own_corr_trim_qty=1,
+        own_corr_use_custom_amount=True,
+        own_corr_custom_amount=2000.0,
+        own_corr_client_payment_kind=ClientPaymentKind.CASH,
+        own_corr_master_id=int(other.id),
+        kit_kind="OWN",
+        own_origin="FOREIGN",
+    )
+    computed = compute_visit_service_line(
+        db,
+        line,
+        _visit_header(int(client.id)),
+        default_mix_bonus_master_id=int(filler.id),
+        apply_kit_stock=False,
+    )
+    assert computed.correction_master_id == int(other.id)
+    assert computed.correction_master_amount == pytest.approx(995.0)
+    assert computed.masters_pool == pytest.approx(2500.0)
+
+
+def test_visit_correction_catalog_master_pay(memory_db) -> None:
+    db = memory_db
+    svc, client = _seed_visit_service_context(db)
+    filler = _seed_master(db, username="filler")
+    other = _seed_master(db, username="other")
+    _seed_correction_catalog(db, master_pay=80.0, price=100.0, fixed=10.0, studio_pay=30.0)
+
+    line = VisitServiceLineInput(
+        service_id=int(svc.id),
+        amount_from_client=4000,
+        client_discount_percent=0,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_source=None,
+        mix_complexity=None,
+        mix_bonus_master_id=None,
+        amortization_level=None,
+        own_correction=True,
+        own_corr_trim_qty=1,
+        own_corr_master_id=int(other.id),
+        kit_kind="OWN",
+        own_origin="FOREIGN",
+    )
+    computed = compute_visit_service_line(
+        db,
+        line,
+        _visit_header(int(client.id)),
+        default_mix_bonus_master_id=int(filler.id),
+        apply_kit_stock=False,
+    )
+    assert computed.correction_master_id == int(other.id)
+    assert computed.correction_master_amount == pytest.approx(80.0)
+    assert computed.masters_pool == pytest.approx(2000.0)
+    assert computed.salon_profit == pytest.approx(2010.0)
+
+
+def test_compute_correction_catalog_pays(memory_db) -> None:
+    _seed_correction_catalog(memory_db, master_pay=55.0, price=100.0, fixed=12.0, studio_pay=22.0)
+    mp, sp, fx = compute_correction_catalog_pays(
+        memory_db,
+        corr_trim_qty=2,
+        corr_hourly_hours=0.0,
+        corr_hourly_avg=False,
+        corr_wash=False,
+        corr_circle=False,
+        corr_steam=False,
+    )
+    assert mp == pytest.approx(110.0)
+    assert sp == pytest.approx(66.0)
+    assert fx == pytest.approx(24.0)
 
 
 def test_effective_amount_from_client_custom_correction() -> None:
@@ -292,6 +427,7 @@ def test_visit_correction_custom_amount_adds_to_service_sum(memory_db) -> None:
     client = Client(name="Клиент 2", is_confirmed=True)
     db.add_all([svc, client])
     db.flush()
+    master = _seed_master(db, username="corr2")
     _seed_correction_catalog(db, fixed=20.0)
 
     line = VisitServiceLineInput(
@@ -328,7 +464,9 @@ def test_visit_correction_custom_amount_adds_to_service_sum(memory_db) -> None:
         same_master_shares_all_services=False,
         visit_master_allocations=[],
     )
-    computed = compute_visit_service_line(db, line, header, default_mix_bonus_master_id=None, apply_kit_stock=False)
+    computed = compute_visit_service_line(
+        db, line, header, default_mix_bonus_master_id=int(master.id), apply_kit_stock=False
+    )
     assert computed.amount_from_client == 8000.0
     assert computed.cost_total >= 20.0
 

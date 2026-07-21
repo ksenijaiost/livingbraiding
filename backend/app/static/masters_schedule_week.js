@@ -8,7 +8,7 @@
   }
 
   var weekStart = String(cfg.weekStart || '');
-  var colors = { no_data: '#ffffff', day_off: '#fc8580', working: '#bae6fd', booking_dot: '#f97316' };
+  var colors = { no_data: '#ffffff', day_off: '#fc8580', working: '#bae6fd', booking_dot: '#f97316', free_time_dot: '#22c55e' };
 
   function esc(s) {
     return String(s || '')
@@ -98,7 +98,10 @@
         h += '<td class="lb-msw-cell" data-day="' + esc(dayIso) + '" style="' + tdStyle + '">';
         h += cellContent(cell);
         if (cell.has_booking) {
-          h += '<span style="position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:' + esc(colors.booking_dot || '#f97316') + ';"></span>';
+          h += '<span style="position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:' + esc(colors.booking_dot || '#f97316') + ';" title="Есть брони"></span>';
+        }
+        if (cell.has_free_time) {
+          h += '<span style="position:absolute;top:4px;left:4px;width:8px;height:8px;border-radius:50%;background:' + esc(colors.free_time_dot || '#22c55e') + ';" title="Есть свободное время"></span>';
         }
         h += '</td>';
       }
