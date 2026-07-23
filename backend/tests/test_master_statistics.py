@@ -163,6 +163,31 @@ def test_build_master_statistics_visit_and_fund(memory_db) -> None:
     assert stats.payroll_accrued >= 100.0
     assert stats.payouts_total == 50.0
     assert stats.fund_balance_end == stats.fund_balance_start + stats.payroll_accrued - stats.payouts_total
+    assert stats.hourly_works == []
+
+
+def test_build_master_statistics_hourly_work(memory_db) -> None:
+    db = memory_db
+    master_id, _svc_id, _client_id = _seed_master(db)
+    from app.db.models import HourlyWorkEntry
+
+    entry = HourlyWorkEntry(
+        performed_date=datetime.combine(date.today(), datetime.min.time()),
+        duration_minutes=90,
+        amount=300.0,
+        comment="тест",
+        master_user_id=master_id,
+        created_by_user_id=master_id,
+    )
+    db.add(entry)
+    db.commit()
+    d0 = date.today().replace(day=1)
+    d1 = date.today()
+    stats = build_master_statistics(db, master_id, d0, d1)
+    assert stats is not None
+    assert len(stats.hourly_works) == 1
+    assert stats.hourly_works[0].master_payroll == 300.0
+    assert stats.hourly_works[0].duration_minutes == 90
 
 
 def test_visit_statistics_splits_total_and_selected_master_pay(memory_db) -> None:

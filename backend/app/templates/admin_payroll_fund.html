@@ -292,7 +292,7 @@
             <option value="">— все —</option>
             <option value="studio" {% if form_whom == 'studio' %}selected{% endif %}>Студия (без сотрудника)</option>
             {% for o in payout_user_options %}
-              <option value="{{ o.user.id }}" {% if form_whom == (o.user.id|string) %}selected{% endif %}>{{ o.user.display_name }}{{ o.roles_ru }}</option>
+              <option value="{{ o.user.id }}" {% if form_whom == (o.user.id|string) %}selected{% endif %}>{{ o.user.display_name }} ({{ o.roles_ru }})</option>
             {% endfor %}
           </select>
         </div>

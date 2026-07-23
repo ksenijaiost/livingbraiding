@@ -4,6 +4,12 @@
   <div class="card" {% if draft_readonly %}style="pointer-events: none; opacity: 0.92;"{% endif %}>
     <h2 style="margin-top: 0;">{% if is_edit %}Редактирование визита #{{ edit_visit_id }}{% elif is_draft %}{% if draft_id %}Черновик визита #{{ draft_id }}{% else %}Новый черновик визита{% endif %}{% else %}Новый визит{% endif %}</h2>
     <p class="muted">Клиент, работа, услуга, материал и анкета по услуге на одной странице. Блок «Комплект» показывается, если это включено для услуги в каталоге.{% if is_draft %} Склад и финальный визит — только при «Сохранить визит».{% elif is_edit %} При сохранении склад и проводки ЗП пересчитываются при изменении комплектов или финансов.{% endif %}</p>
+    {% if closed_period_confirm_required %}
+      <div class="card" style="border-color:#f59e0b; background:#fffbeb; margin-bottom: 14px;">
+        <strong>Закрытый период ЗП.</strong>
+        Сохранение доступно только техспецу. Потребуется двойное подтверждение; проводки ЗП будут пересобраны заново.
+      </div>
+    {% endif %}
     {% if lock_banner %}
       <div style="margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid #fca5a5; background: #fef2f2; color: #b91c1c; pointer-events: auto;">
         <strong>Только просмотр.</strong> Сейчас редактирует: {{ lock_banner.display_name }} ({{ lock_banner.role }}).
@@ -34,7 +40,11 @@
     {% endif %}
     <form method="post"
       action="{% if is_edit %}/visits/{{ edit_visit_id }}/edit{% elif is_draft %}{% if draft_id %}/master/visit/draft/{{ draft_id }}{% else %}/master/visit/draft{% endif %}{% else %}/master/visit/new{% endif %}"
-      id="visit-form" enctype="multipart/form-data">
+      id="visit-form" enctype="multipart/form-data"
+      {% if closed_period_confirm_required %}class="js-closed-period-form" data-closed-action="Сохранение визита"{% endif %}>
+      {% if closed_period_confirm_required %}
+        <input type="hidden" name="closed_period_ack" value="" />
+      {% endif %}
       <input type="hidden" name="booking_id" value="{{ fp.get('booking_id', '') }}" />
       {% if is_edit and fp.get('visit_service_id') %}
         <input type="hidden" name="visit_service_id" value="{{ fp.get('visit_service_id', '') }}" />
@@ -3186,4 +3196,7 @@
     syncVisitPreview();
   </script>
   <script src="/static/correction_custom_amount.js"></script>
+  {% if closed_period_confirm_required %}
+    {% include "_closed_period_confirm.html" %}
+  {% endif %}
 {% endblock %}

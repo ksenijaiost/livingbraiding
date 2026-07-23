@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -14,6 +15,25 @@ from app.auth import AuthUser
 from app.db.models import PayrollPeriod, Setting, UserRole, Visit, VisitMaster, VisitService, VisitServiceMaster
 from app.display_time import get_display_timezone
 from app.setting_keys import EDIT_WINDOW_DAYS
+
+# Скрытое поле формы после двойного confirm в UI (правка закрытого периода).
+CLOSED_PERIOD_ACK_VALUE = "CONFIRM_CLOSED_PERIOD"
+
+
+def user_may_edit_closed_payroll_period(user: AuthUser) -> bool:
+    """Только техспец может менять денежные сущности в закрытом периоде ЗП."""
+    return UserRole.TECHSPEC in user.roles
+
+
+def closed_period_ack_ok(raw: Any) -> bool:
+    return str(raw or "").strip() == CLOSED_PERIOD_ACK_VALUE
+
+
+def require_closed_period_ack(*, needed: bool, form_ack: Any) -> None:
+    if needed and not closed_period_ack_ok(form_ack):
+        raise ValueError(
+            "Для изменения в закрытом периоде ЗП нужно двойное подтверждение (только техспец)."
+        )
 
 
 def edit_window_days(db: Session) -> int:
@@ -60,13 +80,18 @@ def _today_local_date(db: Session):
     return now_utc.astimezone(tz).date()
 
 
-def ensure_event_date_in_open_payroll_period(db: Session, event_at: datetime) -> None:
+def ensure_event_date_in_open_payroll_period(
+    db: Session,
+    event_at: datetime,
+    *,
+    allow_closed: bool = False,
+) -> None:
     """
     Запрещаем создание/перенос денежных событий в закрытый период ЗП и в будущее.
 
     Правило:
     - день события не позже «сегодня» в TZ студии
-    - если дата попадает в закрытый период → ошибка
+    - если дата попадает в закрытый период → ошибка (кроме allow_closed — техспец)
     - иначе должна быть не раньше текущего открытого периода (от date_from и дальше)
     """
     if _event_local_date(db, event_at) > _today_local_date(db):
@@ -80,6 +105,8 @@ def ensure_event_date_in_open_payroll_period(db: Session, event_at: datetime) ->
         )
     )
     if closed is not None:
+        if allow_closed:
+            return
         raise ValueError("Дата попадает в закрытый период ЗП, создание невозможно.")
 
     open_p = db.scalar(
@@ -162,9 +189,12 @@ def visit_edit_policy(visit: Visit, user: AuthUser, db: Session) -> VisitEditPol
     if visit.is_cancelled:
         return VisitEditPolicy(False, "Визит отменён — редактирование запрещено.")
     if is_in_closed_payroll_period(db, visit.performed_date):
+        if user_may_edit_closed_payroll_period(user):
+            return VisitEditPolicy(True, "")
         return VisitEditPolicy(
             False,
-            "Визит относится к закрытому периоду ЗП — редактирование и аннулирование запрещено.",
+            "Визит относится к закрытому периоду ЗП — редактирование и аннулирование запрещено "
+            "(исключение: техспец с двойным подтверждением).",
         )
 
     if UserRole.ADMIN_SUPER in user.roles or UserRole.TECHSPEC in user.roles:

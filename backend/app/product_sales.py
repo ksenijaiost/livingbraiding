@@ -71,6 +71,8 @@ from app.visit_edit_policy import (
     edit_window_days,
     ensure_event_date_in_open_payroll_period,
     is_in_closed_payroll_period,
+    require_closed_period_ack,
+    user_may_edit_closed_payroll_period,
     within_edit_window,
 )
 from app.forms_parse import parse_date_iso, parse_float, parse_int, parse_optional_float
@@ -133,11 +135,16 @@ def _ctx(request: Request, current_user: AuthUser, **kwargs):
     return {"request": request, "current_user": current_user, **kwargs}
 
 
-def _sale_edit_allowed(db: Session, sale: ProductSale) -> tuple[bool, str]:
+def _sale_edit_allowed(db: Session, sale: ProductSale, user: AuthUser | None = None) -> tuple[bool, str]:
     if sale.is_voided:
         return False, "Продажа аннулирована — редактирование запрещено."
     if is_in_closed_payroll_period(db, sale.performed_date):
-        return False, "Продажа относится к закрытому периоду ЗП — редактирование запрещено."
+        if user is not None and user_may_edit_closed_payroll_period(user):
+            return True, ""
+        return False, (
+            "Продажа относится к закрытому периоду ЗП — редактирование запрещено "
+            "(исключение: техспец с двойным подтверждением)."
+        )
     days = edit_window_days(db)
     if not within_edit_window(sale, days):
         return False, (
@@ -1003,8 +1010,13 @@ def product_sale_detail(
             ),
             status_code=404,
         )
-    edit_allowed, edit_block_msg = _sale_edit_allowed(db, sale)
-    can_edit = current_user.role == UserRole.ADMIN_SUPER
+    edit_allowed, edit_block_msg = _sale_edit_allowed(db, sale, current_user)
+    can_edit = UserRole.ADMIN_SUPER in current_user.roles or UserRole.TECHSPEC in current_user.roles
+    closed_period_confirm_required = bool(
+        edit_allowed
+        and is_in_closed_payroll_period(db, sale.performed_date)
+        and user_may_edit_closed_payroll_period(current_user)
+    )
     audit_rows = list(
         db.scalars(
             select(ProductSaleAuditLog)
@@ -1048,6 +1060,7 @@ def product_sale_detail(
             can_edit=can_edit,
             edit_allowed=edit_allowed,
             edit_block_msg=edit_block_msg,
+            closed_period_confirm_required=closed_period_confirm_required,
             ru_kind=_ru_kind(sale.kind),
             material_mix_complexity_ru=ru_mix_complexity(
                 getattr(sale, "material_mix_complexity", None)
@@ -1099,7 +1112,7 @@ def product_sale_edit_form(
             ),
             status_code=404,
         )
-    ok, msg = _sale_edit_allowed(db, sale)
+    ok, msg = _sale_edit_allowed(db, sale, current_user)
     if not ok:
         ms403 = _prodazha_materiala_services(db)
         sub403, cascade403 = _material_services_cascade(ms403)
@@ -1163,6 +1176,10 @@ def product_sale_edit_form(
         "other_cost": "" if getattr(sale, "other_cost", None) is None else str(sale.other_cost),
     }
     sale_kit_lines_initial = _product_sale_kit_lines_initial(db, fp, sale=sale)
+    closed_period_confirm_required = bool(
+        is_in_closed_payroll_period(db, sale.performed_date)
+        and user_may_edit_closed_payroll_period(current_user)
+    )
     return templates.TemplateResponse(
         "product_sale_edit.html",
         _ctx(
@@ -1178,6 +1195,7 @@ def product_sale_edit_form(
             material_subcategories=material_subcategories,
             material_services_cascade_json=material_services_cascade_json,
             sale_kit_lines_initial=sale_kit_lines_initial,
+            closed_period_confirm_required=closed_period_confirm_required,
         ),
     )
 
@@ -1193,7 +1211,7 @@ async def product_sale_edit_save(
     sale = db.get(ProductSale, sale_id)
     if not sale:
         return RedirectResponse(url="/sales/products?msg=not_found", status_code=303)
-    ok, msg = _sale_edit_allowed(db, sale)
+    ok, msg = _sale_edit_allowed(db, sale, current_user)
     if not ok:
         return RedirectResponse(url=f"/sales/products/{sale_id}?msg=edit_blocked", status_code=303)
 
@@ -1229,6 +1247,14 @@ async def product_sale_edit_save(
     )})
 
     form = await request.form()
+    closed_needed = bool(
+        is_in_closed_payroll_period(db, sale.performed_date)
+        and user_may_edit_closed_payroll_period(current_user)
+    )
+    try:
+        require_closed_period_ack(needed=closed_needed, form_ack=form.get("closed_period_ack"))
+    except ValueError:
+        return RedirectResponse(url=f"/sales/products/{sale_id}?msg=edit_blocked", status_code=303)
     material_services = _prodazha_materiala_services(db)
     allowed_material_ids = {s.id for s in material_services}
 
@@ -1249,7 +1275,7 @@ async def product_sale_edit_save(
     except ValueError:
         return _render_new(request, current_user, db, error="Некорректная дата.", fp={})
     try:
-        ensure_event_date_in_open_payroll_period(db, performed)
+        ensure_event_date_in_open_payroll_period(db, performed, allow_closed=closed_needed)
     except ValueError as e:
         return _render_new(request, current_user, db, error=str(e), fp={})
 
@@ -1472,7 +1498,7 @@ async def product_sale_void(
     sale = db.get(ProductSale, sale_id)
     if not sale:
         return RedirectResponse(url="/sales/products?msg=not_found", status_code=303)
-    ok, _ = _sale_edit_allowed(db, sale)
+    ok, _ = _sale_edit_allowed(db, sale, current_user)
     if not ok:
         return RedirectResponse(url=f"/sales/products/{sale_id}?msg=void_blocked", status_code=303)
 

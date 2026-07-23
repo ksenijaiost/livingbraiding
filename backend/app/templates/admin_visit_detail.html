@@ -23,6 +23,12 @@
         {% if visit.cancelled_by_user %} ({{ visit.cancelled_by_user.display_name }}){% endif %}
       </div>
     {% endif %}
+    {% if visit_techspec_closed_override %}
+      <div class="card" style="border-color:#f59e0b; background:#fffbeb; margin:12px 0;">
+        <strong>Закрытый период ЗП.</strong>
+        Редактирование доступно только техспецу. При сохранении потребуется двойное подтверждение; проводки ЗП будут пересобраны.
+      </div>
+    {% endif %}
     {% if msg %}
       {% if msg == 'created' %}
         <div class="ok" style="margin:12px 0;">Визит сохранён.</div>
@@ -32,6 +38,10 @@
         <div class="error" style="margin:12px 0;">Визит уже отменён.</div>
       {% elif msg == 'cancel_conflict' %}
         <div class="error" style="margin:12px 0;">Нельзя отменить: конфликт при возврате заготовок на склад (проверьте движения по комплекту).</div>
+      {% elif msg == 'cancel_closed_period' %}
+        <div class="error" style="margin:12px 0;">Визит в закрытом периоде ЗП — отмена запрещена (кроме техспеца).</div>
+      {% elif msg == 'cancel_closed_ack' %}
+        <div class="error" style="margin:12px 0;">Нужно двойное подтверждение для действия в закрытом периоде.</div>
       {% elif msg == 'updated' %}
         <div class="ok" style="margin:12px 0;">Визит обновлён.</div>
       {% elif msg == 'client_changed' %}
@@ -88,9 +98,12 @@
               <p class="muted" style="margin:4px 0 0;font-size:13px;">{{ vs.category_name }} → {{ vs.subcategory_name }}</p>
               <p style="margin:6px 0 0;">С клиента: <strong>{{ vs.amount_from_client|round(0) }} ₽</strong> <span class="muted">({{ client_payment_kind_label(vs.client_payment_kind) }})</span></p>
             </div>
-            {% if visit_super_priv and not visit.is_cancelled and not vs.is_cancelled and not visit_closed_period %}
-              <form method="post" action="/visits/{{ visit.id }}/services/{{ vs.id }}/cancel" style="margin:0;">
-                <button type="submit" class="secondary" onclick="return confirm('Отменить эту услугу в визите?');">Отменить услугу</button>
+            {% if visit_super_priv and not visit.is_cancelled and not vs.is_cancelled and (not visit_closed_period or visit_techspec_closed_override) %}
+              <form method="post" action="/visits/{{ visit.id }}/services/{{ vs.id }}/cancel" style="margin:0;" class="{% if visit_techspec_closed_override %}js-closed-period-form{% endif %}">
+                {% if visit_techspec_closed_override %}
+                  <input type="hidden" name="closed_period_ack" value="" />
+                {% endif %}
+                <button type="submit" class="secondary">Отменить услугу</button>
               </form>
             {% endif %}
           </div>
@@ -198,16 +211,20 @@
       <p class="muted">{{ kit_usages_note }}</p>
     {% endif %}
 
-    {% if current_user and visit_super_priv and not visit.is_cancelled and not visit_closed_period %}
+    {% if current_user and visit_super_priv and not visit.is_cancelled and (not visit_closed_period or visit_techspec_closed_override) %}
       <div class="card" style="margin-top: 14px; border-color:#fecaca; background:#fff1f2;">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
           <strong>Аннулирование</strong>
-          <form method="post" action="/visits/{{ visit.id }}/cancel" style="margin:0;">
+          <form method="post" action="/visits/{{ visit.id }}/cancel" style="margin:0;" class="{% if visit_techspec_closed_override %}js-closed-period-form{% endif %}">
+            {% if visit_techspec_closed_override %}
+              <input type="hidden" name="closed_period_ack" value="" />
+            {% endif %}
             <button type="submit" class="secondary">Отменить визит</button>
           </form>
         </div>
         <div class="muted" style="font-size:12px; margin-top:6px;">
           При отмене визита будут возвращены списанные со склада заготовки (если возможно) и запись попадёт в историю изменений.
+          {% if visit_techspec_closed_override %} Нужно двойное подтверждение (закрытый период).{% endif %}
         </div>
       </div>
     {% endif %}
@@ -275,4 +292,7 @@
       {% endif %}
     {% endif %}
   </div>
+  {% if visit_techspec_closed_override %}
+    {% include "_closed_period_confirm.html" %}
+  {% endif %}
 {% endblock %}

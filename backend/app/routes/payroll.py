@@ -255,6 +255,7 @@ def admin_payroll_fund_page(
     source_kind_options = [
         {"value": k.value, "label": PAYROLL_FUND_SOURCE_KIND_RU[k]}
         for k in PayrollFundSourceKind
+        if k != PayrollFundSourceKind.VISIT_SERVICE
     ]
     page_err = _payroll_fund_err_ru(err) or journal_err
     return templates.TemplateResponse(

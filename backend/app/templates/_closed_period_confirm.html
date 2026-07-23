@@ -1,0 +1,29 @@
+{# Двойное подтверждение правки закрытого периода ЗП (техспец). #}
+<script>
+(function () {
+  var ACK = "CONFIRM_CLOSED_PERIOD";
+  function doubleConfirmClosed(actionLabel) {
+    var a = window.confirm(
+      "Закрытый период ЗП.\n\n" +
+        (actionLabel || "Это действие") +
+        " изменит проводки и сальдо фонда.\n\nПродолжить?"
+    );
+    if (!a) return false;
+    return window.confirm(
+      "Подтвердите ещё раз: правка закрытого периода ЗП.\n\nОтменить будет нельзя без новой правки техспецом."
+    );
+  }
+  window.lbConfirmClosedPeriodEdit = doubleConfirmClosed;
+  document.querySelectorAll("form.js-closed-period-form").forEach(function (form) {
+    form.addEventListener("submit", function (e) {
+      var ack = form.querySelector('input[name="closed_period_ack"]');
+      if (ack) ack.value = "";
+      if (!doubleConfirmClosed(form.getAttribute("data-closed-action") || "Действие")) {
+        e.preventDefault();
+        return;
+      }
+      if (ack) ack.value = ACK;
+    });
+  });
+})();
+</script>
