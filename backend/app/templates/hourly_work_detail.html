@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card lb-card-max-980">
+    <p class="muted" style="margin-top:0;"><a href="/hourly-work">← Почасовая работа</a></p>
+    <h2 style="margin-top:0;">Почасовая работа #{{ entry.id }}</h2>
+
+    {% if msg == 'created' %}
+      <div class="ok" style="margin-bottom:12px;">Запись сохранена, ЗП начислена.</div>
+    {% endif %}
+    {% if msg == 'saved' %}
+      <div class="ok" style="margin-bottom:12px;">Изменения сохранены, ЗП пересчитана.</div>
+    {% endif %}
+    {% if error %}
+      <p style="background:#fee2e2;border:1px solid #fecaca;color:#991b1b;padding:10px 12px;border-radius:8px;">{{ error }}</p>
+    {% endif %}
+
+    <table style="margin:12px 0; width:100%;">
+      <tr>
+        <td class="muted" style="width:11rem; vertical-align:top;">Создано</td>
+        <td>
+          {{ entry.created_at.strftime('%d.%m.%Y %H:%M') if entry.created_at else '—' }}
+          {% if entry.created_by_user %}
+            · {{ entry.created_by_user.display_name or entry.created_by_user.username }}
+          {% endif %}
+        </td>
+      </tr>
+      {% if entry.work_plan_id %}
+        <tr>
+          <td class="muted">План работ</td>
+          <td><a href="/work-plans/{{ entry.work_plan_id }}">#{{ entry.work_plan_id }}</a></td>
+        </tr>
+      {% endif %}
+    </table>
+
+    <form method="post" action="/hourly-work/{{ entry.id }}">
+      <div class="row" style="align-items:flex-end;">
+        <div>
+          <label for="performed_date">Дата *</label>
+          <input type="date" name="performed_date" id="performed_date" required value="{{ fp.get('performed_date','') }}" />
+        </div>
+        <div>
+          <label>Длительность *</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="number" name="duration_h" min="0" step="1" style="width:4rem;" value="{{ fp.get('duration_h','0') }}" />
+            <span class="muted">ч</span>
+            <input type="number" name="duration_m" min="0" max="59" step="1" style="width:4rem;" value="{{ fp.get('duration_m','0') }}" />
+            <span class="muted">мин</span>
+          </div>
+        </div>
+        <div>
+          <label for="amount">Сумма, ₽ *</label>
+          <input type="number" name="amount" id="amount" min="1" step="1" required value="{{ fp.get('amount','') }}" style="max-width:8rem;" />
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px; background:#f8fafc;">
+        <div style="font-weight:600; margin-bottom:8px;">Мастер *</div>
+        {% if is_admin %}
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            {% for m in masters %}
+              <label style="display:flex; align-items:center; gap:8px;">
+                <input type="radio" name="master_id" value="{{ m.id }}"
+                  {% if fp.get('master_id')|string == m.id|string %}checked{% elif loop.first and not fp.get('master_id') %}checked{% endif %} />
+                <span>{{ m.display_name or m.username }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        {% else %}
+          <input type="hidden" name="master_id" value="{{ fp.get('master_id', current_user.id) }}" />
+          <p style="margin:0;"><strong>{{ entry.master_user.display_name or entry.master_user.username }}</strong></p>
+        {% endif %}
+      </div>
+
+      <div style="margin-top:14px;">
+        <label for="comment">Комментарий</label>
+        <textarea name="comment" id="comment" rows="2" style="width:100%; max-width:32rem;">{{ fp.get('comment','') }}</textarea>
+      </div>
+
+      <p class="muted" style="font-size:12px; margin-top:12px;">
+        При сохранении ЗП мастера и списание с фонда студии пересчитываются.
+      </p>
+
+      <p style="margin-top:16px;">
+        <button type="submit">Сохранить</button>
+        <a href="/hourly-work"><button type="button" class="secondary">К списку</button></a>
+      </p>
+    </form>
+  </div>
+{% endblock %}

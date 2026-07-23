@@ -1434,6 +1434,14 @@ def post_hourly_work_accruals(
         return
     if _has_accruals_for_source(db, PayrollFundSourceKind.HOURLY_WORK, int(entry.id)):
         return
+    _append_hourly_work_accruals(db, entry, created_by_user_id)
+
+
+def _append_hourly_work_accruals(
+    db: Session,
+    entry: HourlyWorkEntry,
+    created_by_user_id: int | None,
+) -> None:
     amt = money_q2(float(entry.amount or 0))
     if amt <= 0:
         return
@@ -1459,6 +1467,18 @@ def post_hourly_work_accruals(
         created_by_user_id=created_by_user_id,
         comment="Почасовая работа",
     )
+
+
+def replace_hourly_work_accruals(
+    db: Session,
+    entry: HourlyWorkEntry,
+    created_by_user_id: int | None,
+) -> None:
+    """Сторно прежних проводок почасовой работы и новое начисление."""
+    if entry.id is None:
+        return
+    storno_source_accruals(db, PayrollFundSourceKind.HOURLY_WORK, int(entry.id), created_by_user_id)
+    _append_hourly_work_accruals(db, entry, created_by_user_id)
 
 
 def recent_ledger_rows(db: Session, limit: int = 150) -> list[PayrollFundLedger]:

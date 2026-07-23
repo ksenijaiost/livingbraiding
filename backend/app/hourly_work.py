@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.db.models import HourlyWorkEntry, User, UserRole
 from app.forms_parse import parse_date_iso, parse_float, parse_int
 from app.hourly_help import format_hourly_help_duration
-from app.payroll_fund import post_hourly_work_accruals
+from app.payroll_fund import post_hourly_work_accruals, replace_hourly_work_accruals
 from app.user_roles import select_users_with_role, user_has_role
 from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
 from app.work_plan import complete_work_plan_from_hourly_work, validate_work_plan_for_hourly_entry
@@ -25,6 +25,32 @@ def list_masters_for_hourly_work_form(db: Session) -> list[User]:
             .order_by(User.display_name.asc(), User.username.asc())
         ).all()
     )
+
+
+def can_access_hourly_work_entry(
+    entry: HourlyWorkEntry,
+    *,
+    current_user_id: int,
+    is_admin: bool,
+) -> bool:
+    if is_admin:
+        return True
+    return int(entry.master_user_id) == int(current_user_id)
+
+
+def entry_to_form_prefill(entry: HourlyWorkEntry) -> dict[str, str]:
+    mins = int(entry.duration_minutes or 0)
+    fp = {
+        "performed_date": entry.performed_date.date().isoformat() if entry.performed_date else "",
+        "duration_h": str(mins // 60),
+        "duration_m": str(mins % 60),
+        "amount": str(int(entry.amount) if float(entry.amount).is_integer() else entry.amount),
+        "comment": entry.comment or "",
+        "master_id": str(entry.master_user_id),
+    }
+    if entry.work_plan_id:
+        fp["work_plan_id"] = str(entry.work_plan_id)
+    return fp
 
 
 def _form_str(form: Any, name: str) -> str:
@@ -131,6 +157,34 @@ def create_hourly_work_entry(
     post_hourly_work_accruals(db, entry, created_by_user_id)
     if entry.work_plan_id is not None:
         complete_work_plan_from_hourly_work(db, int(entry.work_plan_id), int(entry.id))
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+def update_hourly_work_entry(
+    db: Session,
+    entry: HourlyWorkEntry,
+    draft: HourlyWorkEntry,
+    *,
+    updated_by_user_id: int,
+    is_admin: bool,
+) -> HourlyWorkEntry:
+    """Обновить запись и пересчитать проводки ЗП/фонда студии."""
+    ensure_event_date_in_open_payroll_period(db, draft.performed_date)
+    master_id = int(draft.master_user_id) if is_admin else int(entry.master_user_id)
+    err = validate_hourly_work_master(db, master_id)
+    if err:
+        raise ValueError(err)
+
+    entry.performed_date = draft.performed_date
+    entry.duration_minutes = int(draft.duration_minutes)
+    entry.amount = float(draft.amount)
+    entry.comment = draft.comment
+    entry.master_user_id = master_id
+    # Связь с планом не меняем при правке.
+    db.flush()
+    replace_hourly_work_accruals(db, entry, updated_by_user_id)
     db.commit()
     db.refresh(entry)
     return entry

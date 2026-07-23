@@ -59,7 +59,7 @@
         <tr><td class="muted">Работа</td><td><a href="/sales/work/{{ linked_work.id }}">№{{ linked_work.id }}</a></td></tr>
       {% endif %}
       {% if linked_hourly %}
-        <tr><td class="muted">Почасовая работа</td><td><a href="/hourly-work">№{{ linked_hourly.id }}</a></td></tr>
+        <tr><td class="muted">Почасовая работа</td><td><a href="/hourly-work/{{ linked_hourly.id }}">№{{ linked_hourly.id }}</a></td></tr>
       {% endif %}
       {% if plan.cancelled_at %}
         <tr><td class="muted">Отмена</td><td>{{ plan.cancelled_at.strftime('%d.%m.%Y %H:%M') }}{% if plan.cancelled_by_user %} · {{ plan.cancelled_by_user.display_name or plan.cancelled_by_user.username }}{% endif %}</td></tr>
