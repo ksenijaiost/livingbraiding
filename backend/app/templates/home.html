@@ -408,9 +408,9 @@
             var cnt = Number(payload.count || 0);
             var payout = money2(payload.payout_sum || 0);
             var studio = money2(payload.studio_sum || 0);
-            var showStudio = !!data.is_super && key !== 'bookings';
-            var isBookings = key === 'bookings';
-            var useServiceLabel = key === 'bookings' || key === 'visits';
+            var showStudio = !!data.is_super && key !== 'bookings' && key !== 'consultations';
+            var isBookings = key === 'bookings' || key === 'consultations';
+            var useServiceLabel = key === 'bookings' || key === 'consultations' || key === 'visits';
             var h = '';
             h += '<div class=\"card\" style=\"background:#f8fafc; margin: 10px 0;\">';
             h += '<div style=\"display:flex; justify-content:space-between; gap:12px; align-items:baseline; flex-wrap:wrap;\">';
@@ -461,6 +461,7 @@
           var html = '';
           html += renderOccupancy(data.occupancy);
           html += block('Брони', data.bookings, 'bookings');
+          html += block('Консультации', data.consultations, 'consultations');
           html += block('Визиты', data.visits, 'visits');
           html += block('Работа', data.works, 'works');
           if (data.drafts && data.drafts.count) {
