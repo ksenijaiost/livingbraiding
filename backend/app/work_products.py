@@ -288,7 +288,7 @@ def _work_edit_template_ctx(
 def _work_edit_allowed(db: Session, work: WorkForInventory) -> tuple[bool, str]:
     if getattr(work, "is_voided", False):
         return False, "Работа аннулирована — редактирование запрещено."
-    if is_in_closed_payroll_period(db, work.created_at):
+    if is_in_closed_payroll_period(db, work.performed_date or work.created_at):
         return False, "Работа относится к закрытому периоду ЗП — редактирование запрещено."
     days = edit_window_days(db)
     if not within_edit_window(work, days):

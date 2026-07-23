@@ -1263,6 +1263,8 @@ class PayrollFundLedger(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    # Учётная дата (дата события); created_at — когда провели в журнал.
+    effective_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     entry_kind: Mapped[PayrollFundEntryKind] = mapped_column(
         Enum(PayrollFundEntryKind, native_enum=False, length=20),
         nullable=False,

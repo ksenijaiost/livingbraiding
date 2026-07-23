@@ -15,6 +15,9 @@ class Settings:
         self.secret_key = os.getenv("SECRET_KEY", "change-me")
         # Один файл SQLite = все таблицы внутри. Папка `data/` — чтобы не лежало в корне backend.
         self.database_url = os.getenv("DATABASE_URL", "sqlite:///./data/livingbraiding.db")
+        # Разовый backfill: сдвигать effective_at проводок даже в закрытые периоды ЗП.
+        raw = (os.getenv("PAYROLL_LEDGER_BACKFILL_CLOSED") or "false").strip().lower()
+        self.payroll_ledger_backfill_closed = raw in ("1", "true", "yes", "on")
 
 
 @functools.lru_cache(maxsize=1)

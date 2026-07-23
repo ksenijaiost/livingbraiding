@@ -322,12 +322,12 @@ def home(
             studio_payroll_sum_by_day[day_key] += amt
 
         other_stmt = (
-            select(PayrollFundLedger.created_at, PayrollFundLedger.amount)
+            select(PayrollFundLedger.effective_at, PayrollFundLedger.amount)
             .where(
                 PayrollFundLedger.side == PayrollFundSide.MASTER,
                 PayrollFundLedger.user_id == current_user.id,
-                PayrollFundLedger.created_at >= month_start_utc,
-                PayrollFundLedger.created_at < month_end_utc,
+                PayrollFundLedger.effective_at >= month_start_utc,
+                PayrollFundLedger.effective_at < month_end_utc,
                 PayrollFundLedger.source_kind.notin_(
                     (
                         PayrollFundSourceKind.VISIT,
