@@ -297,6 +297,7 @@ def _master_visit_step1_template_response(
     edit_visit_id: int | None = None,
     cancel_url: str | None = None,
     visit_photos: list[str] | None = None,
+    closed_period_confirm_required: bool = False,
 ):
     performed = (form_prefill.get("performed_date") or "").strip() or (default_date or date.today().isoformat())
     salon_cut_pct = get_salon_cut_pct(db, current_user.id)
@@ -377,6 +378,7 @@ def _master_visit_step1_template_response(
             edit_visit_id=edit_visit_id,
             cancel_url=cancel_url,
             visit_photos=visit_photos or [],
+            closed_period_confirm_required=closed_period_confirm_required,
         ),
         status_code=status_code,
     )

@@ -16,7 +16,14 @@
     {% if not row %}
       <p class="muted">Нет данных.</p>
     {% else %}
-      <form method="post" action="/sales/work/{{ row.id }}/edit" id="work_edit_form">
+      <form method="post" action="/sales/work/{{ row.id }}/edit" id="work_edit_form"
+        {% if closed_period_confirm_required %}class="js-closed-period-form" data-closed-action="Сохранение работы"{% endif %}>
+        {% if closed_period_confirm_required %}
+          <input type="hidden" name="closed_period_ack" value="" />
+          <div class="card" style="border-color:#f59e0b; background:#fffbeb; margin-bottom: 14px;">
+            <strong>Закрытый период ЗП.</strong> Сохранение — только техспец, с двойным подтверждением.
+          </div>
+        {% endif %}
         <div class="row">
           <div>
             <label>Сумма от клиента, ₽</label>
@@ -393,5 +400,8 @@
     syncMasterProfitTotal();
   })();
   </script>
+  {% endif %}
+  {% if closed_period_confirm_required %}
+    {% include "_closed_period_confirm.html" %}
   {% endif %}
 {% endblock %}

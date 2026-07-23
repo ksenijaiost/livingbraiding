@@ -45,7 +45,12 @@ from app.visit_multi_service import (
     recalc_visit_totals,
     update_visit_with_services,
 )
-from app.visit_edit_policy import is_in_closed_payroll_period, visit_edit_policy
+from app.visit_edit_policy import (
+    is_in_closed_payroll_period,
+    require_closed_period_ack,
+    user_may_edit_closed_payroll_period,
+    visit_edit_policy,
+)
 from app.visit_form_prefill import visit_to_form_prefill
 from app.visit_stock import visit_cancel_revert_stock, visit_service_revert_stock
 from app.audit import diff_fields, write_audit_rows
@@ -247,6 +252,9 @@ def admin_visit_detail(
     v_policy = visit_edit_policy(visit, current_user, db)
     visit_closed_period = is_in_closed_payroll_period(db, visit.performed_date)
     visit_super_priv = UserRole.ADMIN_SUPER in current_user.roles or UserRole.TECHSPEC in current_user.roles
+    visit_techspec_closed_override = bool(
+        visit_closed_period and user_may_edit_closed_payroll_period(current_user)
+    )
     visit_master_pay_rows = build_visit_master_pay_rows(visit, db)
     visit_masters_lines = build_visit_masters_lines(visit, db)
     from app.hourly_help import build_hourly_help_display_rows, hourly_help_rows_from_visit
@@ -279,6 +287,7 @@ def admin_visit_detail(
             visit_client_change_confirm_required=False,
             visit_closed_period=visit_closed_period,
             visit_super_priv=visit_super_priv,
+            visit_techspec_closed_override=visit_techspec_closed_override,
             visit_master_pay_rows=visit_master_pay_rows,
             visit_masters_lines=visit_masters_lines,
             hourly_help_rows=hourly_help_rows,
@@ -329,6 +338,10 @@ def admin_visit_edit_get(
     selected_client = visit.client
     photos = [p for p in (visit.photo_1, visit.photo_2, visit.photo_3) if p]
     err = request.query_params.get("err")
+    closed_period_confirm_required = bool(
+        is_in_closed_payroll_period(db, visit.performed_date)
+        and user_may_edit_closed_payroll_period(current_user)
+    )
     return _master_visit_step1_template_response(
         request,
         current_user=current_user,
@@ -342,6 +355,7 @@ def admin_visit_edit_get(
         edit_visit_id=visit_id,
         cancel_url=f"/visits/{visit_id}",
         visit_photos=photos,
+        closed_period_confirm_required=closed_period_confirm_required,
     )
 
 
@@ -387,8 +401,13 @@ def _visit_edit_form_error_response(
         selected_client = db.get(Client, eid_int)
     visit = db.get(Visit, visit_id)
     photos = []
+    closed_period_confirm_required = False
     if visit:
         photos = [p for p in (visit.photo_1, visit.photo_2, visit.photo_3) if p]
+        closed_period_confirm_required = bool(
+            is_in_closed_payroll_period(db, visit.performed_date)
+            and user_may_edit_closed_payroll_period(current_user)
+        )
     return _master_visit_step1_template_response(
         request,
         current_user=current_user,
@@ -403,6 +422,7 @@ def _visit_edit_form_error_response(
         edit_visit_id=visit_id,
         cancel_url=f"/visits/{visit_id}",
         visit_photos=photos,
+        closed_period_confirm_required=closed_period_confirm_required,
     )
 
 
@@ -421,7 +441,12 @@ async def admin_visit_edit_post(
         raise HTTPException(status_code=403, detail=policy.message_when_blocked or "Недостаточно прав")
 
     form = await request.form()
+    closed_needed = bool(
+        is_in_closed_payroll_period(db, visit.performed_date)
+        and user_may_edit_closed_payroll_period(current_user)
+    )
     try:
+        require_closed_period_ack(needed=closed_needed, form_ack=form.get("closed_period_ack"))
         multi = parse_multi_service_visit_form(
             form,
             booking_id=visit.booking_id,
@@ -429,7 +454,14 @@ async def admin_visit_edit_post(
             # обязан явно выбрать мастеров; мастер тоже сохраняет отмеченных из формы.
             single_master_default_id=None,
         )
-        update_visit_with_services(db, visit_id, current_user.id, multi)
+        update_visit_with_services(
+            db,
+            visit_id,
+            current_user.id,
+            multi,
+            allow_closed_period=closed_needed,
+            force_replace_accruals=closed_needed,
+        )
         visit = db.get(Visit, visit_id)
         assert visit is not None
         try:
@@ -479,6 +511,7 @@ def _visit_service_cancel_revert_stock(db: Session, visit_service_id: int) -> tu
 @router.post("/admin/visits/{visit_id}/cancel")
 async def admin_visit_cancel(
     visit_id: int,
+    request: Request,
     current_user: AuthUser = Depends(require_assigned_roles(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -491,8 +524,15 @@ async def admin_visit_cancel(
         raise HTTPException(status_code=404, detail="Визит не найден")
     if visit.is_cancelled:
         return RedirectResponse(url=f"/visits/{visit_id}?msg=already_cancelled", status_code=303)
-    if is_in_closed_payroll_period(db, visit.performed_date):
-        return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_closed_period", status_code=303)
+    closed = is_in_closed_payroll_period(db, visit.performed_date)
+    if closed:
+        if not user_may_edit_closed_payroll_period(current_user):
+            return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_closed_period", status_code=303)
+        form = await request.form()
+        try:
+            require_closed_period_ack(needed=True, form_ack=form.get("closed_period_ack"))
+        except ValueError:
+            return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_closed_ack", status_code=303)
 
     ok, err = _visit_cancel_revert_stock(db, visit)
     if not ok:
@@ -527,6 +567,7 @@ async def admin_visit_cancel(
 async def admin_visit_service_cancel(
     visit_id: int,
     vs_id: int,
+    request: Request,
     current_user: AuthUser = Depends(require_assigned_roles(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -544,8 +585,15 @@ async def admin_visit_service_cancel(
         return RedirectResponse(url=f"/visits/{visit_id}?msg=already_cancelled", status_code=303)
     if vs.is_cancelled:
         return RedirectResponse(url=f"/visits/{visit_id}?msg=service_already_cancelled", status_code=303)
-    if is_in_closed_payroll_period(db, visit.performed_date):
-        return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_closed_period", status_code=303)
+    closed = is_in_closed_payroll_period(db, visit.performed_date)
+    if closed:
+        if not user_may_edit_closed_payroll_period(current_user):
+            return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_closed_period", status_code=303)
+        form = await request.form()
+        try:
+            require_closed_period_ack(needed=True, form_ack=form.get("closed_period_ack"))
+        except ValueError:
+            return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_closed_ack", status_code=303)
 
     ok, _err = _visit_service_cancel_revert_stock(db, vs.id)
     if not ok:

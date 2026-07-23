@@ -3,7 +3,12 @@
   <div class="card">
     {% if sale %}
       <h2 style="margin-top:0;">Редактировать продажу #{{ sale.id }}</h2>
-      <p class="muted">Только суперадмин. Редактирование ограничено периодом ЗП и окном дней.</p>
+      <p class="muted">Суперадмин или техспец. Редактирование ограничено периодом ЗП и окном дней.</p>
+      {% if closed_period_confirm_required %}
+        <div class="card" style="border-color:#f59e0b; background:#fffbeb; margin-bottom: 14px;">
+          <strong>Закрытый период ЗП.</strong> Сохранение — только техспец, с двойным подтверждением.
+        </div>
+      {% endif %}
     {% else %}
       <h2 style="margin-top:0;">Редактировать продажу</h2>
     {% endif %}
@@ -21,7 +26,11 @@
         </span>
       </p>
 
-      <form method="post" action="/sales/products/{{ sale.id }}/edit" id="product-sale-edit-form">
+      <form method="post" action="/sales/products/{{ sale.id }}/edit" id="product-sale-edit-form"
+        {% if closed_period_confirm_required %}class="js-closed-period-form" data-closed-action="Сохранение продажи"{% endif %}>
+        {% if closed_period_confirm_required %}
+          <input type="hidden" name="closed_period_ack" value="" />
+        {% endif %}
         <h3>Клиент</h3>
         <div class="card" style="margin-top: 8px;">
           <input type="hidden" name="existing_client_id" id="existing_client_id" value="{{ fp.get('existing_client_id', '') }}" />
@@ -503,5 +512,8 @@
       if (pcsH) pcsH.value = first.mode === 'PIECES' ? String(Math.max(1, first.pieces || 0)) : '';
     });
   </script>
+  {% if closed_period_confirm_required %}
+    {% include "_closed_period_confirm.html" %}
+  {% endif %}
 {% endblock %}
 

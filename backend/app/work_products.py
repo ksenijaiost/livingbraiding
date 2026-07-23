@@ -149,6 +149,8 @@ from app.visit_edit_policy import (
     edit_window_days,
     ensure_event_date_in_open_payroll_period,
     is_in_closed_payroll_period,
+    require_closed_period_ack,
+    user_may_edit_closed_payroll_period,
     within_edit_window,
 )
 from app.audit import diff_fields, write_audit_rows
@@ -250,6 +252,11 @@ def _work_edit_template_ctx(
     }
     if not work:
         return ctx
+    closed_period_confirm_required = bool(
+        is_in_closed_payroll_period(db, work.performed_date or work.created_at)
+        and user_may_edit_closed_payroll_period(current_user)
+    )
+    ctx["closed_period_confirm_required"] = closed_period_confirm_required
     masters = _list_masters_for_work_form(db)
     staff_profit_by_uid = {
         int(s.user_id): float(s.master_profit_amount or 0.0) for s in (work.staff_rows or [])
@@ -285,11 +292,16 @@ def _work_edit_template_ctx(
     return ctx
 
 
-def _work_edit_allowed(db: Session, work: WorkForInventory) -> tuple[bool, str]:
+def _work_edit_allowed(db: Session, work: WorkForInventory, user: AuthUser | None = None) -> tuple[bool, str]:
     if getattr(work, "is_voided", False):
         return False, "Работа аннулирована — редактирование запрещено."
     if is_in_closed_payroll_period(db, work.performed_date or work.created_at):
-        return False, "Работа относится к закрытому периоду ЗП — редактирование запрещено."
+        if user is not None and user_may_edit_closed_payroll_period(user):
+            return True, ""
+        return False, (
+            "Работа относится к закрытому периоду ЗП — редактирование запрещено "
+            "(исключение: техспец с двойным подтверждением)."
+        )
     days = edit_window_days(db)
     if not within_edit_window(work, days):
         return False, (
@@ -1905,8 +1917,13 @@ def work_detail(
                 ),
                 status_code=403,
             )
-    can_edit = (current_user.role == UserRole.ADMIN_SUPER)
-    edit_allowed, edit_block_msg = _work_edit_allowed(db, w) if can_edit else (False, "")
+    can_edit = UserRole.ADMIN_SUPER in current_user.roles or UserRole.TECHSPEC in current_user.roles
+    edit_allowed, edit_block_msg = _work_edit_allowed(db, w, current_user) if can_edit else (False, "")
+    closed_period_confirm_required = bool(
+        edit_allowed
+        and is_in_closed_payroll_period(db, w.performed_date or w.created_at)
+        and user_may_edit_closed_payroll_period(current_user)
+    )
     void_msg = request.query_params.get("msg")
     details = _details_obj(w.details_json)
     audit_rows = list(
@@ -1976,6 +1993,7 @@ def work_detail(
             can_edit=can_edit,
             edit_allowed=edit_allowed,
             edit_block_msg=edit_block_msg,
+            closed_period_confirm_required=closed_period_confirm_required,
             audit_rows=audit_rows,
             msg=void_msg,
             linked_sale_ids=linked_sale_ids,
@@ -2024,7 +2042,7 @@ async def work_void(
     if w.is_voided:
         return RedirectResponse(url=f"/sales/work/{work_id}?msg=already_voided", status_code=303)
 
-    ok, _ = _work_edit_allowed(db, w)
+    ok, _ = _work_edit_allowed(db, w, current_user)
     if not ok:
         return RedirectResponse(url=f"/sales/work/{work_id}?msg=void_blocked", status_code=303)
 
@@ -2089,7 +2107,7 @@ def work_edit_form(
             _work_edit_template_ctx(request, current_user, None, err="Работа не найдена.", db=db),
             status_code=404,
         )
-    edit_allowed, edit_block_msg = _work_edit_allowed(db, w)
+    edit_allowed, edit_block_msg = _work_edit_allowed(db, w, current_user)
     if not edit_allowed:
         return templates.TemplateResponse(
             "work_products_edit.html",
@@ -2120,7 +2138,7 @@ async def work_edit_save(
     )
     if not w:
         return RedirectResponse(url=f"/sales/work/{work_id}", status_code=303)
-    edit_allowed, edit_block_msg = _work_edit_allowed(db, w)
+    edit_allowed, edit_block_msg = _work_edit_allowed(db, w, current_user)
     if not edit_allowed:
         return templates.TemplateResponse(
             "work_products_edit.html",
@@ -2128,6 +2146,18 @@ async def work_edit_save(
             status_code=403,
         )
     form = await request.form()
+    closed_needed = bool(
+        is_in_closed_payroll_period(db, w.performed_date or w.created_at)
+        and user_may_edit_closed_payroll_period(current_user)
+    )
+    try:
+        require_closed_period_ack(needed=closed_needed, form_ack=form.get("closed_period_ack"))
+    except ValueError as e:
+        return templates.TemplateResponse(
+            "work_products_edit.html",
+            _work_edit_template_ctx(request, current_user, w, err=str(e), db=db),
+            status_code=400,
+        )
 
     prev_staff_sig = tuple(
         sorted(
