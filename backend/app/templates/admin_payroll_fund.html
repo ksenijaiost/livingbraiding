@@ -275,7 +275,51 @@
       </script>
     </div>
 
-    <h3 style="margin-top: 24px;">Журнал (последние записи)</h3>
+    <h3 style="margin-top: 24px;">Журнал</h3>
+    <form method="get" action="/admin/payroll-fund" class="card" style="background:#f8f9fb; margin-bottom: 14px;">
+      <div class="pf-journal-filters" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 16px; align-items:end;">
+        <div>
+          <label for="pf_j_df">Дата учёта с</label>
+          <input type="date" name="df" id="pf_j_df" value="{{ form_df|default('') }}" style="width:100%; box-sizing:border-box;" />
+        </div>
+        <div>
+          <label for="pf_j_dt">Дата учёта по</label>
+          <input type="date" name="dt" id="pf_j_dt" value="{{ form_dt|default('') }}" style="width:100%; box-sizing:border-box;" />
+        </div>
+        <div>
+          <label for="pf_j_whom">Кому</label>
+          <select name="whom" id="pf_j_whom" style="width:100%; box-sizing:border-box;">
+            <option value="">— все —</option>
+            <option value="studio" {% if form_whom == 'studio' %}selected{% endif %}>Студия (без сотрудника)</option>
+            {% for o in payout_user_options %}
+              <option value="{{ o.user.id }}" {% if form_whom == (o.user.id|string) %}selected{% endif %}>{{ o.user.display_name }}{{ o.roles_ru }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="pf_j_source">Источник</label>
+          <select name="source" id="pf_j_source" style="width:100%; box-sizing:border-box;">
+            <option value="">— все —</option>
+            {% for opt in source_kind_options|default([]) %}
+              <option value="{{ opt.value }}" {% if form_source == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button type="submit">Найти</button>
+          {% if journal_filtered %}
+            <a href="/admin/payroll-fund">Сбросить</a>
+          {% endif %}
+        </div>
+      </div>
+      <p class="muted" style="margin:10px 0 0; font-size:12px;">
+        {% if journal_filtered %}
+          Показаны записи по фильтру (не более {{ journal_limit }}).
+        {% else %}
+          Без фильтра — последние {{ journal_limit|default(150) }} записей. Укажите дату, период, сотрудника или источник.
+        {% endif %}
+      </p>
+    </form>
     {% if ledger_rows %}
       <div style="overflow-x:auto;">
         <table>
@@ -332,6 +376,7 @@
                   {% elif r.source_kind.value == 'WORK' %}Работа {{ r.source_id or '' }}
                   {% elif r.source_kind.value == 'PRODUCT_SALE' %}Продажа {{ r.source_id or '' }}
                   {% elif r.source_kind.value == 'CONSULTATION' %}Консультация {{ r.source_id or '' }}
+                  {% elif r.source_kind.value == 'HOURLY_WORK' %}Почасовая {{ r.source_id or '' }}
                   {% elif r.source_kind.value == 'STUDIO_EXPENSE' %}Расход {{ r.source_id or '' }}
                   {% elif r.source_kind.value == 'MANUAL' %}Ручная
                   {% else %}{{ r.source_kind.value }}{% endif %}
@@ -343,8 +388,11 @@
           </tbody>
         </table>
       </div>
+      {% if ledger_rows|length >= journal_limit %}
+        <p class="muted" style="margin-top:8px;">Показаны первые {{ journal_limit }} записей — уточните фильтр, если нужно меньше.</p>
+      {% endif %}
     {% else %}
-      <p class="muted">Записей пока нет.</p>
+      <p class="muted">{% if journal_filtered %}По фильтру записей нет.{% else %}Записей пока нет.{% endif %}</p>
     {% endif %}
   </div>
 {% endblock %}
