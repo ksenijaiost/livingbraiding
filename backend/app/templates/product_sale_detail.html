@@ -131,19 +131,28 @@
           {% if not kit_sale_lines_detail %}
             <p style="margin:6px 0;" class="muted">Строки комплектов не сохранены.</p>
           {% endif %}
+          {% if sale.kit_description %}
+            <div class="card" style="margin-top:10px;background:#f8fafc;">
+              <p class="muted" style="margin:0 0 4px;">Комментарий</p>
+              <p style="margin:0;white-space:pre-wrap;">{{ sale.kit_description }}</p>
+            </div>
+          {% endif %}
         {% elif sale.kind.value == 'RUBBER' %}
           <p style="margin:6px 0;"><strong>Тип</strong>: Хвост/резинка</p>
           <div class="card" style="margin-top:10px;background:#f8fafc;">
             <p style="margin:0;white-space:pre-wrap;">{{ sale.rubber_description }}</p>
           </div>
           {% if sale.rubber_price_override is not none %}
-            <p style="margin:10px 0 0;"><strong>Цена товара</strong>: {{ sale.rubber_price_override }} ₽</p>
+            <p style="margin:10px 0 0;"><strong>Себестоимость с учётом ЗП</strong>: {{ sale.rubber_price_override }} ₽</p>
           {% endif %}
         {% elif sale.kind.value == 'OTHER' %}
           <p style="margin:6px 0;"><strong>Тип</strong>: Другое</p>
           <div class="card" style="margin-top:10px;background:#f8fafc;">
             <p style="margin:0;white-space:pre-wrap;">{{ sale.other_description }}</p>
           </div>
+          {% if sale.other_cost is not none %}
+            <p style="margin:10px 0 0;"><strong>Себестоимость</strong>: {{ '%.2f'|format(sale.other_cost) }} ₽</p>
+          {% endif %}
         {% endif %}
       </div>
 

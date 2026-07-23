@@ -879,8 +879,12 @@ def compute_product_sale_studio_margin(db: Session, sale: ProductSale) -> float:
     if kind == ProductSaleKind.MATERIAL:
         # Маржа материала выставляется в finalize_material_sale_fields (роутер / sync).
         return money_q2(float(sale.studio_margin_amount or 0))
-    if kind in (ProductSaleKind.RUBBER, ProductSaleKind.OTHER):
-        return money_q2(max(0.0, amt))
+    if kind == ProductSaleKind.RUBBER:
+        cost = float(sale.rubber_price_override or 0)
+        return money_q2(max(0.0, amt - cost))
+    if kind == ProductSaleKind.OTHER:
+        cost = float(getattr(sale, "other_cost", None) or 0)
+        return money_q2(max(0.0, amt - cost))
     return money_q2(max(0.0, amt))
 
 

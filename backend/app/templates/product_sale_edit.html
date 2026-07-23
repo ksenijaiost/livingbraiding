@@ -78,19 +78,7 @@
 
           <div id="block_material" style="margin-top: 12px;">
             <h4 style="margin: 0 0 10px;">Материал</h4>
-            <div class="row">
-              <div style="flex:1;">
-                <label>Подкатегория / услуга (каталог «Продажа материала»)</label>
-                <select name="material_service_id">
-                  <option value="">— не указано —</option>
-                  {% for s in material_services %}
-                    <option value="{{ s.id }}" {% if fp.get('material_service_id')|string == s.id|string %}selected{% endif %}>
-                      {{ s.subcategory.name }} — {{ s.name }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-            </div>
+            {% include "_product_sale_material_service_selects.html" %}
             {% include "_product_sale_material_fields.html" %}
             <div style="margin-top: 10px;">
               <label>Описание материала</label>
@@ -156,6 +144,10 @@
             <p style="margin-top:10px;">
               <button type="button" class="secondary" id="sale_add_kit_row">+ Ещё комплект из наличия</button>
             </p>
+            <div style="margin-top: 12px;">
+              <label>Комментарий</label>
+              <textarea name="kit_description" rows="3" maxlength="2000">{{ fp.get('kit_description', '') }}</textarea>
+            </div>
           </div>
 
           <div id="block_rubber" style="margin-top: 12px; display:none;">
@@ -165,7 +157,7 @@
               <textarea name="rubber_description" rows="3" maxlength="2000">{{ fp.get('rubber_description', '') }}</textarea>
             </div>
             <div style="margin-top:10px;">
-              <label>Цена для товара, ₽ (если отличается от суммы с клиента)</label>
+              <label>Себестоимость с учётом ЗП *</label>
               <input type="number" name="rubber_price_override" min="0" step="1" value="{{ fp.get('rubber_price_override', '') }}" />
             </div>
           </div>
@@ -175,6 +167,10 @@
             <div>
               <label>Описание *</label>
               <textarea name="other_description" rows="3" maxlength="2000">{{ fp.get('other_description', '') }}</textarea>
+            </div>
+            <div style="margin-top:10px;">
+              <label>Себестоимость *</label>
+              <input type="number" name="other_cost" min="0" step="0.01" value="{{ fp.get('other_cost', '') }}" />
             </div>
           </div>
         </div>
