@@ -212,3 +212,43 @@ def test_booking_list_master_labels(memory_db) -> None:
     labels = _booking_list_master_labels(db, [b])
     assert "Master" in labels[int(b.id)]
     assert "Анна" in labels[int(b.id)]
+
+
+def test_auto_complete_consultation_booking_after_consultation(memory_db) -> None:
+    from app.routes.bookings import booking_linked_need_consultation, try_auto_complete_booking
+
+    db = memory_db
+    admin_id, client_id, master_id = _seed(db)
+    planned = datetime(2026, 4, 15, 10, 0, 0)
+    b = Booking(
+        created_by_user_id=admin_id,
+        client_id=client_id,
+        planned_date=planned,
+        kind=BookingKind.CONSULTATION,
+        status=BookingStatus.ACTIVE,
+    )
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+
+    assert booking_linked_need_consultation(b) is True
+    try_auto_complete_booking(db, int(b.id))
+    db.commit()
+    db.refresh(b)
+    assert b.status == BookingStatus.ACTIVE
+
+    cons = Consultation(
+        created_at=datetime(2026, 4, 15),
+        created_by_user_id=master_id,
+        client_id=client_id,
+        source_booking_id=b.id,
+        consultation_date=planned,
+        types_json=types_json_dumps({"BRAIDING": True}),
+    )
+    db.add(cons)
+    db.commit()
+
+    try_auto_complete_booking(db, int(b.id))
+    db.commit()
+    db.refresh(b)
+    assert b.status == BookingStatus.DONE

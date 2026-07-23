@@ -22,6 +22,7 @@ from app.db.models import (
     BookingStaff,
     BookingStatus,
     Consultation,
+    HourlyWorkEntry,
     Service,
     ServiceSubcategory,
     PayrollFundLedger,
@@ -44,6 +45,7 @@ from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_date_iso
+from app.hourly_work import duration_display
 from app.payroll_fund import sum_ledger_amounts_by_source, visit_ids_visible_to_master_clause, sum_work_master_payroll_by_work_id, sum_work_studio_payroll_by_work_id
 from app.ui_service_display import (
     booking_service_labels_from_booking,
@@ -415,6 +417,58 @@ def api_calendar_day(
                 "url": f"/sales/work/{wid}",
                 "payout_sum": float(work_payout.get(wid, 0.0)),
                 "studio_sum": float(work_studio.get(wid, 0.0)),
+            }
+        )
+
+    # ---- Hourly work (в том же блоке «Работа») ----
+    hw_stmt = (
+        select(HourlyWorkEntry)
+        .options(selectinload(HourlyWorkEntry.master_user))
+        .where(
+            HourlyWorkEntry.performed_date >= day_start,
+            HourlyWorkEntry.performed_date < day_end,
+        )
+        .order_by(HourlyWorkEntry.performed_date.asc(), HourlyWorkEntry.id.asc())
+    )
+    if is_master:
+        hw_stmt = hw_stmt.where(HourlyWorkEntry.master_user_id == current_user.id)
+    hourly_entries = list(db.scalars(hw_stmt).all())
+    hw_ids = [int(e.id) for e in hourly_entries if e.id is not None]
+    hw_payout = _sum_ledger(
+        db,
+        side=PayrollFundSide.MASTER,
+        source_kind=PayrollFundSourceKind.HOURLY_WORK,
+        source_ids=hw_ids,
+        user_id=current_user.id if is_master else None,
+    )
+    hw_studio = (
+        _sum_ledger(
+            db,
+            side=PayrollFundSide.STUDIO,
+            source_kind=PayrollFundSourceKind.HOURLY_WORK,
+            source_ids=hw_ids,
+            user_id=None,
+        )
+        if is_super
+        else {}
+    )
+    for e in hourly_entries:
+        eid = int(e.id)
+        master = e.master_user
+        master_name = (master.display_name or master.username) if master else "—"
+        dur = duration_display(int(e.duration_minutes or 0))
+        comment = (e.comment or "").strip()
+        label = f"Почасовая · {dur}"
+        if comment:
+            label = f"{label} — {comment}"
+        work_items.append(
+            {
+                "id": eid,
+                "client": master_name,
+                "label": label,
+                "url": f"/hourly-work/{eid}",
+                "payout_sum": float(hw_payout.get(eid, 0.0)),
+                "studio_sum": float(hw_studio.get(eid, 0.0)),
             }
         )
 
