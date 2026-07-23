@@ -17,13 +17,15 @@ from app.display_time import get_display_timezone
 from app.forms_parse import parse_date_iso, parse_float, parse_int
 from app.db.models import PayrollFundSourceKind
 from app.payroll_fund import (
+    LEDGER_JOURNAL_SEARCH_LIMIT,
+    PAYROLL_FUND_SOURCE_KIND_RU,
     PayrollFundPayoutPaymentKind,
     PayrollFundSide,
     current_fund_balance,
     ledger_balances,
     post_manual_adjustment,
     post_payout,
-    recent_ledger_rows,
+    search_ledger_rows,
     visit_ids_for_visit_service_source_ids,
 )
 from app.payroll_utils import payroll_period_day_end, payroll_period_day_start
@@ -149,13 +151,77 @@ def admin_payroll_fund_page(
     request: Request,
     msg: str | None = None,
     err: str | None = None,
+    df: str | None = None,
+    dt: str | None = None,
+    whom: str | None = None,
+    source: str | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     masters_bal, studio_bal = ledger_balances(db)
     # Показываем всех сотрудников (даже с 0), а нулевые выносим в конец списка.
     bal_by_uid = {int(m["user_id"]): float(m["balance"]) for m in masters_bal}
-    ledger_rows = recent_ledger_rows(db)
+
+    journal_err: str | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
+    form_df = (df or "").strip()
+    form_dt = (dt or "").strip()
+    form_whom = (whom or "").strip()
+    form_source = (source or "").strip().upper()
+    if form_df:
+        try:
+            effective_from = parse_date_iso(form_df, field_name="df")
+        except ValueError:
+            journal_err = "Некорректная дата «с» в фильтре журнала."
+            form_df = ""
+    if form_dt:
+        try:
+            effective_to = parse_date_iso(form_dt, field_name="dt")
+        except ValueError:
+            journal_err = "Некорректная дата «по» в фильтре журнала."
+            form_dt = ""
+    if effective_from is not None and effective_to is not None and effective_to < effective_from:
+        journal_err = "В фильтре журнала дата «по» раньше даты «с»."
+        effective_from = None
+        effective_to = None
+        form_df = ""
+        form_dt = ""
+
+    filter_user_id: int | None = None
+    studio_only = False
+    if form_whom == "studio":
+        studio_only = True
+    elif form_whom:
+        try:
+            filter_user_id = parse_int(form_whom, min=1, field_name="whom")
+        except ValueError:
+            journal_err = "Некорректный сотрудник в фильтре журнала."
+            form_whom = ""
+
+    filter_source: PayrollFundSourceKind | None = None
+    if form_source:
+        try:
+            filter_source = PayrollFundSourceKind(form_source)
+        except ValueError:
+            journal_err = "Некорректный источник в фильтре журнала."
+            form_source = ""
+
+    journal_filtered = bool(
+        effective_from is not None
+        or effective_to is not None
+        or filter_user_id is not None
+        or studio_only
+        or filter_source is not None
+    )
+    ledger_rows = search_ledger_rows(
+        db,
+        effective_from=effective_from,
+        effective_to=effective_to,
+        user_id=filter_user_id,
+        studio_only=studio_only,
+        source_kind=filter_source,
+    )
     vs_source_ids = [
         int(r.source_id)
         for r in ledger_rows
@@ -186,6 +252,11 @@ def admin_payroll_fund_page(
     payout_fund_balances_json = json.dumps({"studio": round(float(studio_bal), 2), "employees": payout_employee_balances}, ensure_ascii=False)
     tz = ZoneInfo(get_display_timezone(db))
     today_local = utcnow_naive().replace(tzinfo=ZoneInfo("UTC")).astimezone(tz).date()
+    source_kind_options = [
+        {"value": k.value, "label": PAYROLL_FUND_SOURCE_KIND_RU[k]}
+        for k in PayrollFundSourceKind
+    ]
+    page_err = _payroll_fund_err_ru(err) or journal_err
     return templates.TemplateResponse(
         "admin_payroll_fund.html",
         _ctx(
@@ -199,8 +270,15 @@ def admin_payroll_fund_page(
             payout_user_options=payout_user_options,
             payout_fund_balances_json=payout_fund_balances_json,
             payout_default_date=today_local.isoformat(),
+            journal_filtered=journal_filtered,
+            journal_limit=LEDGER_JOURNAL_SEARCH_LIMIT if journal_filtered else 150,
+            form_df=form_df,
+            form_dt=form_dt,
+            form_whom=form_whom,
+            form_source=form_source,
+            source_kind_options=source_kind_options,
             msg=_payroll_fund_msg_ru(msg),
-            err=_payroll_fund_err_ru(err),
+            err=page_err,
         ),
     )
 

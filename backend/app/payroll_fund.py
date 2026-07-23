@@ -1514,15 +1514,69 @@ def replace_hourly_work_accruals(
     _append_hourly_work_accruals(db, entry, created_by_user_id)
 
 
-def recent_ledger_rows(db: Session, limit: int = 150) -> list[PayrollFundLedger]:
-    return list(
-        db.scalars(
-            select(PayrollFundLedger)
-            .options(
-                selectinload(PayrollFundLedger.created_by_user),
-                selectinload(PayrollFundLedger.user),
-            )
-            .order_by(PayrollFundLedger.id.desc())
-            .limit(limit)
-        ).all()
+LEDGER_JOURNAL_DEFAULT_LIMIT = 150
+LEDGER_JOURNAL_SEARCH_LIMIT = 500
+
+PAYROLL_FUND_SOURCE_KIND_RU: dict[PayrollFundSourceKind, str] = {
+    PayrollFundSourceKind.VISIT: "Визит",
+    PayrollFundSourceKind.VISIT_SERVICE: "Услуга визита",
+    PayrollFundSourceKind.WORK: "Работа",
+    PayrollFundSourceKind.PRODUCT_SALE: "Продажа",
+    PayrollFundSourceKind.CONSULTATION: "Консультация",
+    PayrollFundSourceKind.HOURLY_WORK: "Почасовая работа",
+    PayrollFundSourceKind.STUDIO_EXPENSE: "Расход студии",
+    PayrollFundSourceKind.MANUAL: "Ручная",
+}
+
+
+def search_ledger_rows(
+    db: Session,
+    *,
+    effective_from: date | None = None,
+    effective_to: date | None = None,
+    user_id: int | None = None,
+    studio_only: bool = False,
+    source_kind: PayrollFundSourceKind | None = None,
+    limit: int | None = None,
+) -> list[PayrollFundLedger]:
+    """Журнал фонда: без фильтров — последние записи; с фильтрами — по дате учёта.
+
+    studio_only: проводки без сотрудника (колонка «Кому» = —), обычно фонд студии.
+    """
+    has_filter = bool(
+        effective_from is not None
+        or effective_to is not None
+        or user_id is not None
+        or studio_only
+        or source_kind is not None
     )
+    if limit is None:
+        limit = LEDGER_JOURNAL_SEARCH_LIMIT if has_filter else LEDGER_JOURNAL_DEFAULT_LIMIT
+
+    q = select(PayrollFundLedger).options(
+        selectinload(PayrollFundLedger.created_by_user),
+        selectinload(PayrollFundLedger.user),
+    )
+    if effective_from is not None:
+        q = q.where(PayrollFundLedger.effective_at >= datetime.combine(effective_from, time.min))
+    if effective_to is not None:
+        q = q.where(
+            PayrollFundLedger.effective_at < datetime.combine(effective_to + timedelta(days=1), time.min)
+        )
+    if studio_only:
+        q = q.where(PayrollFundLedger.user_id.is_(None))
+    elif user_id is not None:
+        q = q.where(PayrollFundLedger.user_id == int(user_id))
+    if source_kind is not None:
+        q = q.where(PayrollFundLedger.source_kind == source_kind)
+
+    if has_filter:
+        q = q.order_by(PayrollFundLedger.effective_at.desc(), PayrollFundLedger.id.desc())
+    else:
+        q = q.order_by(PayrollFundLedger.id.desc())
+
+    return list(db.scalars(q.limit(limit)).all())
+
+
+def recent_ledger_rows(db: Session, limit: int = LEDGER_JOURNAL_DEFAULT_LIMIT) -> list[PayrollFundLedger]:
+    return search_ledger_rows(db, limit=limit)
