@@ -136,7 +136,7 @@ def _ctx(request: Request, current_user: AuthUser, **kwargs):
 def _sale_edit_allowed(db: Session, sale: ProductSale) -> tuple[bool, str]:
     if sale.is_voided:
         return False, "Продажа аннулирована — редактирование запрещено."
-    if is_in_closed_payroll_period(db, sale.created_at):
+    if is_in_closed_payroll_period(db, sale.performed_date):
         return False, "Продажа относится к закрытому периоду ЗП — редактирование запрещено."
     days = edit_window_days(db)
     if not within_edit_window(sale, days):

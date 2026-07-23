@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.time_utils import utcnow_naive
 from app.auth import AuthUser
 from app.db.models import PayrollPeriod, Setting, UserRole, Visit, VisitMaster, VisitService, VisitServiceMaster
+from app.display_time import get_display_timezone
 from app.setting_keys import EDIT_WINDOW_DAYS
 
 
@@ -31,29 +33,45 @@ def within_edit_window(visit: Visit, days: int, *, now: datetime | None = None) 
     return visit.created_at + timedelta(days=days) >= now
 
 
-def is_in_closed_payroll_period(db: Session, created_at: datetime) -> bool:
+def is_in_closed_payroll_period(db: Session, event_at: datetime) -> bool:
     """
-    True если дата создания записи попадает в закрытый период ЗП.
+    True если дата события попадает в закрытый период ЗП.
     В этом случае блокируем редактирование (денежные поля и всё, что влияет на расчёты).
     """
     p = db.scalar(
         select(PayrollPeriod).where(
             PayrollPeriod.closed_at.is_not(None),
-            PayrollPeriod.date_from <= created_at,
-            PayrollPeriod.date_to >= created_at,
+            PayrollPeriod.date_from <= event_at,
+            PayrollPeriod.date_to >= event_at,
         )
     )
     return p is not None
 
 
+def _event_local_date(db: Session, event_at: datetime):
+    tz = ZoneInfo(get_display_timezone(db))
+    utc_dt = event_at.replace(tzinfo=ZoneInfo("UTC")) if event_at.tzinfo is None else event_at.astimezone(ZoneInfo("UTC"))
+    return utc_dt.astimezone(tz).date()
+
+
+def _today_local_date(db: Session):
+    tz = ZoneInfo(get_display_timezone(db))
+    now_utc = utcnow_naive().replace(tzinfo=ZoneInfo("UTC"))
+    return now_utc.astimezone(tz).date()
+
+
 def ensure_event_date_in_open_payroll_period(db: Session, event_at: datetime) -> None:
     """
-    Запрещаем создание/перенос денежных событий в закрытый период ЗП.
+    Запрещаем создание/перенос денежных событий в закрытый период ЗП и в будущее.
 
     Правило:
+    - день события не позже «сегодня» в TZ студии
     - если дата попадает в закрытый период → ошибка
     - иначе должна быть не раньше текущего открытого периода (от date_from и дальше)
     """
+    if _event_local_date(db, event_at) > _today_local_date(db):
+        raise ValueError("Дата в будущем недопустима.")
+
     closed = db.scalar(
         select(PayrollPeriod.id).where(
             PayrollPeriod.closed_at.is_not(None),
@@ -143,7 +161,7 @@ def _edit_window_block_message(days: int) -> str:
 def visit_edit_policy(visit: Visit, user: AuthUser, db: Session) -> VisitEditPolicy:
     if visit.is_cancelled:
         return VisitEditPolicy(False, "Визит отменён — редактирование запрещено.")
-    if is_in_closed_payroll_period(db, visit.created_at):
+    if is_in_closed_payroll_period(db, visit.performed_date):
         return VisitEditPolicy(
             False,
             "Визит относится к закрытому периоду ЗП — редактирование и аннулирование запрещено.",

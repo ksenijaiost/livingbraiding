@@ -50,6 +50,7 @@ from app.db.models import (
     WorkScope,
     WorkForInventoryStaff,
 )
+from app.payroll_ledger_backfill import consultation_fulfillment_event_at, work_event_at
 from app.work_rate_keys import (
     CONSULTATION_PAY_AMOUNT_THRESHOLD,
     CONSULTATION_PAY_AT_OR_ABOVE_THRESHOLD,
@@ -183,7 +184,8 @@ def append_ledger(
     storno_of_id: int | None = None,
     comment: str | None = None,
     payout_payment_kind: PayrollFundPayoutPaymentKind | None = None,
-) -> PayrollFundLedger:
+    effective_at: datetime | None = None,
+        ) -> PayrollFundLedger:
     if side == PayrollFundSide.MASTER and user_id is None:
         raise ValueError("MASTER требует user_id")
     if side == PayrollFundSide.STUDIO:
@@ -194,8 +196,10 @@ def append_ledger(
             raise ValueError("STUDIO: user_id должен быть NULL")
     if payout_payment_kind is not None and entry_kind != PayrollFundEntryKind.PAYOUT:
         raise ValueError("payout_payment_kind только для PAYOUT")
+    now = utcnow_naive()
     row = PayrollFundLedger(
-        created_at=utcnow_naive(),
+        created_at=now,
+        effective_at=effective_at if effective_at is not None else now,
         entry_kind=entry_kind,
         side=side,
         user_id=user_id,
@@ -263,6 +267,7 @@ def storno_source_accruals(
             created_by_user_id=created_by_user_id,
             storno_of_id=acc.id,
             comment=None,
+            effective_at=acc.effective_at,
         )
 
 
@@ -285,6 +290,7 @@ def _append_visit_service_accruals(
             source_kind=PayrollFundSourceKind.VISIT_SERVICE,
             source_id=visit_service.id,
             created_by_user_id=created_by_user_id,
+            effective_at=visit.performed_date,
         )
 
     append_visit_service_master_pool_and_mix_bonus_ledgers(
@@ -338,6 +344,7 @@ def replace_visit_accruals(
             source_kind=PayrollFundSourceKind.VISIT,
             source_id=visit.id,
             created_by_user_id=created_by_user_id,
+            effective_at=visit.performed_date,
         )
     replace_visit_hourly_help_accruals(db, visit, created_by_user_id)
 
@@ -389,6 +396,7 @@ def append_visit_service_master_pool_and_mix_bonus_ledgers(
                 source_kind=PayrollFundSourceKind.VISIT_SERVICE,
                 source_id=visit_service.id,
                 created_by_user_id=created_by_user_id,
+                effective_at=visit.performed_date,
             )
 
     bonus_mid = visit_service.mix_bonus_master_id
@@ -403,6 +411,7 @@ def append_visit_service_master_pool_and_mix_bonus_ledgers(
             source_kind=PayrollFundSourceKind.VISIT_SERVICE,
             source_id=visit_service.id,
             created_by_user_id=created_by_user_id,
+            effective_at=visit.performed_date,
         )
 
     corr_mid = visit_service.correction_master_id
@@ -417,6 +426,7 @@ def append_visit_service_master_pool_and_mix_bonus_ledgers(
             source_kind=PayrollFundSourceKind.VISIT_SERVICE,
             source_id=visit_service.id,
             created_by_user_id=created_by_user_id,
+            effective_at=visit.performed_date,
         )
 
 
@@ -446,6 +456,7 @@ def post_visit_accruals(db: Session, visit: Visit, created_by_user_id: int | Non
                     source_kind=PayrollFundSourceKind.VISIT,
                     source_id=visit.id,
                     created_by_user_id=created_by_user_id,
+                    effective_at=visit.performed_date,
                 )
 
             append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
@@ -487,6 +498,7 @@ def append_visit_hourly_help_ledgers(db: Session, visit: Visit, created_by_user_
             source_id=visit.id,
             created_by_user_id=created_by_user_id,
             comment=HOURLY_HELP_LEDGER_COMMENT,
+            effective_at=visit.performed_date,
         )
 
 
@@ -533,6 +545,7 @@ def storno_visit_hourly_help_accruals(
             created_by_user_id=created_by_user_id,
             storno_of_id=acc.id,
             comment=HOURLY_HELP_LEDGER_COMMENT,
+            effective_at=acc.effective_at,
         )
 
 
@@ -568,6 +581,7 @@ def append_visit_master_pool_and_mix_bonus_ledgers(
                 source_kind=PayrollFundSourceKind.VISIT,
                 source_id=visit.id,
                 created_by_user_id=created_by_user_id,
+                effective_at=visit.performed_date,
             )
 
     bonus_mid = visit.mix_bonus_master_id
@@ -582,6 +596,7 @@ def append_visit_master_pool_and_mix_bonus_ledgers(
             source_kind=PayrollFundSourceKind.VISIT,
             source_id=visit.id,
             created_by_user_id=created_by_user_id,
+            effective_at=visit.performed_date,
         )
 
 
@@ -657,6 +672,8 @@ def _append_work_accruals(
     staff_rows: Sequence[WorkForInventoryStaff],
     created_by_user_id: int | None,
 ) -> None:
+    w = db.get(WorkForInventory, int(work_id))
+    _work_eff = work_event_at(w) if w else utcnow_naive()
     total_staff = 0.0
     for s in staff_rows:
         amt = money_q2(float(s.master_profit_amount or 0))
@@ -671,8 +688,8 @@ def _append_work_accruals(
                 source_kind=PayrollFundSourceKind.WORK,
                 source_id=work_id,
                 created_by_user_id=created_by_user_id,
+                effective_at=_work_eff,
             )
-    w = db.get(WorkForInventory, int(work_id))
     if w and w.scope == WorkScope.CUSTOM_ORDER:
         studio_amt = money_q2(float(w.studio_profit_amount or 0))
         if studio_amt != 0:
@@ -685,6 +702,7 @@ def _append_work_accruals(
                 source_kind=PayrollFundSourceKind.WORK,
                 source_id=work_id,
                 created_by_user_id=created_by_user_id,
+                effective_at=_work_eff,
             )
     # Для работ «в наличие» начисление мастерам должно идти из фонда студии,
     # чтобы не появлялись «деньги из воздуха» до продажи.
@@ -699,6 +717,7 @@ def _append_work_accruals(
             source_id=work_id,
             created_by_user_id=created_by_user_id,
             comment="Оплата мастерам (работа в наличие)",
+            effective_at=_work_eff,
         )
 
 
@@ -904,6 +923,7 @@ def _append_product_sale_ledger_rows(
             source_kind=PayrollFundSourceKind.PRODUCT_SALE,
             source_id=sale.id,
             created_by_user_id=created_by_user_id,
+            effective_at=sale.performed_date,
         )
     bonus_uid = sale.material_mix_bonus_user_id
     bonus_amt = money_q2(float(sale.material_mix_bonus_amount or 0))
@@ -917,6 +937,7 @@ def _append_product_sale_ledger_rows(
             source_kind=PayrollFundSourceKind.PRODUCT_SALE,
             source_id=sale.id,
             created_by_user_id=created_by_user_id,
+            effective_at=sale.performed_date,
         )
 
 
@@ -952,10 +973,12 @@ def post_payout(
     created_by_user_id: int,
     comment: str | None,
     payout_payment_kind: PayrollFundPayoutPaymentKind = PayrollFundPayoutPaymentKind.UNSPECIFIED,
+    effective_at: datetime | None = None,
 ) -> None:
     """Выплата из фонда: положительная сумма уменьшает сальдо фонда (отрицательная запись в журнале).
 
     Отрицательная сумма вводимая в форме даёт положительную проводку (возврат в фонд).
+    effective_at — учётная дата выплаты (дата события); по умолчанию момент записи.
     """
     pay = money_q2(amount)
     if pay == 0:
@@ -971,6 +994,7 @@ def post_payout(
         created_by_user_id=created_by_user_id,
         comment=(comment or "").strip() or None,
         payout_payment_kind=payout_payment_kind,
+        effective_at=effective_at,
     )
 
 
@@ -1113,8 +1137,8 @@ def employee_payroll_net_in_period(
         select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
             PayrollFundLedger.side == PayrollFundSide.MASTER,
             PayrollFundLedger.user_id == user_id,
-            PayrollFundLedger.created_at >= start,
-            PayrollFundLedger.created_at < end_excl,
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
             PayrollFundLedger.entry_kind.in_(
                 (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.STORNO)
             ),
@@ -1134,8 +1158,8 @@ def employee_payouts_in_period(
         select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
             PayrollFundLedger.entry_kind == PayrollFundEntryKind.PAYOUT,
             PayrollFundLedger.user_id == user_id,
-            PayrollFundLedger.created_at >= start,
-            PayrollFundLedger.created_at < end_excl,
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
         )
     )
     return money_q2(-float(v or 0))
@@ -1146,8 +1170,8 @@ def studio_payroll_net_in_period(db: Session, start: datetime, end_excl: datetim
     v = db.scalar(
         select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
             PayrollFundLedger.side == PayrollFundSide.STUDIO,
-            PayrollFundLedger.created_at >= start,
-            PayrollFundLedger.created_at < end_excl,
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
             PayrollFundLedger.entry_kind.in_(
                 (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.STORNO)
             ),
@@ -1162,8 +1186,8 @@ def studio_payouts_in_period(db: Session, start: datetime, end_excl: datetime) -
         select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
             PayrollFundLedger.side == PayrollFundSide.STUDIO,
             PayrollFundLedger.entry_kind == PayrollFundEntryKind.PAYOUT,
-            PayrollFundLedger.created_at >= start,
-            PayrollFundLedger.created_at < end_excl,
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
         )
     )
     return money_q2(-float(v or 0))
@@ -1174,8 +1198,8 @@ def studio_fund_net_in_period(db: Session, start: datetime, end_excl: datetime) 
     v = db.scalar(
         select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
             PayrollFundLedger.side == PayrollFundSide.STUDIO,
-            PayrollFundLedger.created_at >= start,
-            PayrollFundLedger.created_at < end_excl,
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
         )
     )
     return money_q2(float(v or 0))
@@ -1255,6 +1279,7 @@ def replace_studio_expense_ledger(
         source_id=expense.id,
         created_by_user_id=created_by_user_id,
         comment=None,
+        effective_at=expense.date,
     )
 
 
@@ -1415,6 +1440,7 @@ def post_consultation_accrual(
     below, above, threshold = consultation_pay_settings(db)
     base = sum_booking_fulfillment_amount(db, b.id)
     pay = float(above if base >= threshold else below)
+    eff = consultation_fulfillment_event_at(db, b) or utcnow_naive()
     append_ledger(
         db,
         entry_kind=PayrollFundEntryKind.ACCRUAL,
@@ -1425,6 +1451,7 @@ def post_consultation_accrual(
         source_id=consultation_id,
         created_by_user_id=created_by_user_id,
         comment=f"Консультация #{consultation_id}, бронь #{b.id}, база {base} ₽",
+        effective_at=eff,
     )
 
 
@@ -1459,6 +1486,7 @@ def _append_hourly_work_accruals(
         source_id=int(entry.id),
         created_by_user_id=created_by_user_id,
         comment="Почасовая работа",
+        effective_at=entry.performed_date,
     )
     append_ledger(
         db,
@@ -1470,6 +1498,7 @@ def _append_hourly_work_accruals(
         source_id=int(entry.id),
         created_by_user_id=created_by_user_id,
         comment="Почасовая работа",
+        effective_at=entry.performed_date,
     )
 
 

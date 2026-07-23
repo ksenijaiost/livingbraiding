@@ -391,8 +391,8 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
     def _ledger_sum(kind: PayrollFundEntryKind) -> float:
         v = db.scalar(
             select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
-                PayrollFundLedger.created_at >= start,
-                PayrollFundLedger.created_at < end_excl,
+                PayrollFundLedger.effective_at >= start,
+                PayrollFundLedger.effective_at < end_excl,
                 PayrollFundLedger.entry_kind == kind,
             )
         )
@@ -406,8 +406,8 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
     reconciliation_delta = money_q2(total_to_funds - ledger_net_accruals)
     ledger_all_raw = db.scalar(
         select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
-            PayrollFundLedger.created_at >= start,
-            PayrollFundLedger.created_at < end_excl,
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
         )
     )
     ledger_net_all = money_q2(float(ledger_all_raw or 0))

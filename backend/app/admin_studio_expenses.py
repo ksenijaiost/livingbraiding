@@ -27,7 +27,7 @@ from app.db.session import get_db
 from app.forms_parse import parse_date_iso, parse_float, parse_int
 from app.payroll_fund import replace_studio_expense_ledger, studio_fund_balance
 from app.time_utils import utcnow_naive
-from app.visit_edit_policy import is_in_closed_payroll_period
+from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
 from app.ru_labels import ru_user_role
 
 templates = Jinja2Templates(directory="app/templates")
@@ -72,8 +72,10 @@ def _parse_amount(raw: str) -> float | None:
 
 
 def _expense_touch_allowed(db: Session, expense_dt: datetime) -> tuple[bool, str]:
-    if is_in_closed_payroll_period(db, expense_dt):
-        return False, "Дата расхода попадает в закрытый период ЗП — операция запрещена."
+    try:
+        ensure_event_date_in_open_payroll_period(db, expense_dt)
+    except ValueError as e:
+        return False, str(e)
     return True, ""
 
 

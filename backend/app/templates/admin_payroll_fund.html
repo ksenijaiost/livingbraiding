@@ -107,6 +107,11 @@
             <label for="pf_amount">Сумма, руб.</label>
             <input type="text" name="amount" id="pf_amount" required placeholder="0.00" style="width:100%; max-width:100%; box-sizing:border-box;" />
           </div>
+          <div>
+            <label for="pf_payout_date">Дата выплаты *</label>
+            <input type="date" name="payout_date" id="pf_payout_date" required value="{{ payout_default_date }}" style="width:100%; max-width:100%; box-sizing:border-box;" />
+            <p class="muted" style="margin:6px 0 0;">Учётная дата: по ней выплата попадает в период ЗП.</p>
+          </div>
           <div style="grid-column: 1 / -1;">
             <label for="pf_comment">Комментарий</label>
             <input type="text" name="comment" id="pf_comment" placeholder="Необязательно" style="width:100%; max-width:100%; box-sizing:border-box;" />
@@ -277,7 +282,8 @@
           <thead>
             <tr>
               <th>ID</th>
-              <th>Дата</th>
+              <th>Дата учёта</th>
+              <th>Проведено</th>
               <th>Тип</th>
               <th>Фонд</th>
               <th>Кому</th>
@@ -292,7 +298,8 @@
             {% for r in ledger_rows %}
               <tr>
                 <td>{{ r.id }}</td>
-                <td>{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ (r.effective_at or r.created_at).strftime('%Y-%m-%d %H:%M') }}</td>
+                <td class="muted" style="font-size:12px;">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                 <td>
                   {% if r.entry_kind.value == 'ACCRUAL' %}Начисление
                   {% elif r.entry_kind.value == 'STORNO' %}Сторно

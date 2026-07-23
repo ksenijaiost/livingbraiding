@@ -245,7 +245,7 @@ def admin_visit_detail(
     duration_m = visit.duration_minutes % 60
 
     v_policy = visit_edit_policy(visit, current_user, db)
-    visit_closed_period = is_in_closed_payroll_period(db, visit.created_at)
+    visit_closed_period = is_in_closed_payroll_period(db, visit.performed_date)
     visit_super_priv = UserRole.ADMIN_SUPER in current_user.roles or UserRole.TECHSPEC in current_user.roles
     visit_master_pay_rows = build_visit_master_pay_rows(visit, db)
     visit_masters_lines = build_visit_masters_lines(visit, db)
@@ -491,7 +491,7 @@ async def admin_visit_cancel(
         raise HTTPException(status_code=404, detail="Визит не найден")
     if visit.is_cancelled:
         return RedirectResponse(url=f"/visits/{visit_id}?msg=already_cancelled", status_code=303)
-    if is_in_closed_payroll_period(db, visit.created_at):
+    if is_in_closed_payroll_period(db, visit.performed_date):
         return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_closed_period", status_code=303)
 
     ok, err = _visit_cancel_revert_stock(db, visit)
@@ -544,7 +544,7 @@ async def admin_visit_service_cancel(
         return RedirectResponse(url=f"/visits/{visit_id}?msg=already_cancelled", status_code=303)
     if vs.is_cancelled:
         return RedirectResponse(url=f"/visits/{visit_id}?msg=service_already_cancelled", status_code=303)
-    if is_in_closed_payroll_period(db, visit.created_at):
+    if is_in_closed_payroll_period(db, visit.performed_date):
         return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_closed_period", status_code=303)
 
     ok, _err = _visit_service_cancel_revert_stock(db, vs.id)

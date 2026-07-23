@@ -114,7 +114,7 @@ def employee_fund_balance_before(db: Session, user_id: int, before: datetime) ->
         select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
             PayrollFundLedger.side == PayrollFundSide.MASTER,
             PayrollFundLedger.user_id == user_id,
-            PayrollFundLedger.created_at < before,
+            PayrollFundLedger.effective_at < before,
         )
     )
     return money_q2(float(v or 0))
