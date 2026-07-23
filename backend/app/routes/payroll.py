@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.auth import AuthUser, require_role
 from app.db.models import PayrollPeriod, User, UserRole
 from app.db.session import get_db
+from app.display_time import get_display_timezone
 from app.forms_parse import parse_date_iso, parse_float, parse_int
 from app.db.models import PayrollFundSourceKind
 from app.payroll_fund import (
@@ -25,10 +27,11 @@ from app.payroll_fund import (
     visit_ids_for_visit_service_source_ids,
 )
 from app.payroll_utils import payroll_period_day_end, payroll_period_day_start
+from app.ru_labels import ru_user_roles_payout_suffix
 from app.time_utils import utcnow_naive
 from app.user_roles import get_roles_for_user, select_users_with_any_role, user_has_any_role
+from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
 from app.webui import templates, ctx as _ctx
-from app.ru_labels import ru_user_roles_payout_suffix
 
 
 router = APIRouter()
@@ -136,6 +139,8 @@ def _payroll_fund_err_ru(code: str | None) -> str | None:
         "bad_user": "Выберите сотрудника.",
         "bad_payment": "Укажите тип оплаты.",
         "bad_mode": "Укажите корректный режим корректировки.",
+        "bad_date": "Укажите корректную дату выплаты.",
+        "bad_period": "Дата выплаты недопустима (закрытый период, будущее или раньше открытого периода).",
     }.get(code or "", code)
 
 
@@ -179,6 +184,8 @@ def admin_payroll_fund_page(
         payout_user_options.append({"user": u, "roles_ru": ru_user_roles_payout_suffix(get_roles_for_user(db, u.id))})
     payout_employee_balances = {str(o["user"].id): round(float(bal_by_uid.get(o["user"].id, 0.0)), 2) for o in payout_user_options}
     payout_fund_balances_json = json.dumps({"studio": round(float(studio_bal), 2), "employees": payout_employee_balances}, ensure_ascii=False)
+    tz = ZoneInfo(get_display_timezone(db))
+    today_local = utcnow_naive().replace(tzinfo=ZoneInfo("UTC")).astimezone(tz).date()
     return templates.TemplateResponse(
         "admin_payroll_fund.html",
         _ctx(
@@ -191,6 +198,7 @@ def admin_payroll_fund_page(
             visit_id_by_service_id=visit_id_by_service_id,
             payout_user_options=payout_user_options,
             payout_fund_balances_json=payout_fund_balances_json,
+            payout_default_date=today_local.isoformat(),
             msg=_payroll_fund_msg_ru(msg),
             err=_payroll_fund_err_ru(err),
         ),
@@ -227,6 +235,16 @@ async def admin_payroll_fund_payout(
         payment_kind = PayrollFundPayoutPaymentKind(pay_raw)
     except ValueError:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_payment", status_code=303)
+    date_raw = (str(form.get("payout_date") or "")).strip()
+    try:
+        payout_day = parse_date_iso(date_raw, field_name="payout_date")
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_date", status_code=303)
+    effective_at = datetime.combine(payout_day, datetime.min.time())
+    try:
+        ensure_event_date_in_open_payroll_period(db, effective_at)
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_period", status_code=303)
     try:
         post_payout(
             db,
@@ -236,6 +254,7 @@ async def admin_payroll_fund_payout(
             created_by_user_id=current_user.id,
             comment=comment,
             payout_payment_kind=payment_kind,
+            effective_at=effective_at,
         )
     except ValueError:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_amount", status_code=303)

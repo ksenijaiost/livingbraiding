@@ -33,6 +33,7 @@ from app.payroll_fund import (
     employee_payroll_net_in_period,
     post_consultation_accrual,
     post_hourly_work_accruals,
+    post_payout,
     storno_source_accruals,
 )
 from app.payroll_ledger_backfill import backfill_payroll_ledger_effective_at
@@ -270,3 +271,28 @@ def test_backfill_respects_closed_flag(memory_db) -> None:
     db.commit()
     db.refresh(led)
     assert led.effective_at == datetime(2026, 6, 8)
+
+
+def test_post_payout_uses_effective_at(memory_db) -> None:
+    db = memory_db
+    u, _ = _seed_user_client(db)
+    event = datetime(2026, 6, 12)
+    post_payout(
+        db,
+        side=PayrollFundSide.MASTER,
+        user_id=u.id,
+        amount=500.0,
+        created_by_user_id=u.id,
+        comment="аванс",
+        effective_at=event,
+    )
+    db.commit()
+    row = db.scalars(
+        select(PayrollFundLedger).where(
+            PayrollFundLedger.entry_kind == PayrollFundEntryKind.PAYOUT,
+            PayrollFundLedger.user_id == u.id,
+        )
+    ).first()
+    assert row is not None
+    assert row.effective_at == event
+    assert row.amount == -500.0

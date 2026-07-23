@@ -973,10 +973,12 @@ def post_payout(
     created_by_user_id: int,
     comment: str | None,
     payout_payment_kind: PayrollFundPayoutPaymentKind = PayrollFundPayoutPaymentKind.UNSPECIFIED,
+    effective_at: datetime | None = None,
 ) -> None:
     """Выплата из фонда: положительная сумма уменьшает сальдо фонда (отрицательная запись в журнале).
 
     Отрицательная сумма вводимая в форме даёт положительную проводку (возврат в фонд).
+    effective_at — учётная дата выплаты (дата события); по умолчанию момент записи.
     """
     pay = money_q2(amount)
     if pay == 0:
@@ -992,6 +994,7 @@ def post_payout(
         created_by_user_id=created_by_user_id,
         comment=(comment or "").strip() or None,
         payout_payment_kind=payout_payment_kind,
+        effective_at=effective_at,
     )
 
 
