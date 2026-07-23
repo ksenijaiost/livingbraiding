@@ -328,6 +328,10 @@ async def consultation_new_post(
     db.commit()
     db.refresh(c)
     if source_booking_id:
+        from app.routes.bookings import try_auto_complete_booking
+
+        try_auto_complete_booking(db, int(source_booking_id))
+        db.commit()
         return RedirectResponse(url=f"/bookings/{source_booking_id}?msg=consultation_created", status_code=303)
     return RedirectResponse(url=f"/consultations/{c.id}?msg=created", status_code=303)
 

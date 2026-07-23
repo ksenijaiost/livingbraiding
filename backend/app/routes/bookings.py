@@ -696,6 +696,10 @@ def booking_linked_need_sale(b: Booking) -> bool:
     return b.kind == BookingKind.PRODUCT_SALE
 
 
+def booking_linked_need_consultation(b: Booking) -> bool:
+    return b.kind == BookingKind.CONSULTATION
+
+
 def _prefill_booking_fp_from_consultation(db: Session, cons: Consultation, fp: dict[str, str]) -> str | None:
     """Заполнить fp из консультации. Возвращает текст ошибки или None."""
     from app.planned_services_db import consultation_service_ids
@@ -1233,6 +1237,9 @@ def try_auto_complete_booking(db: Session, booking_id: int) -> None:
             ).limit(1)
         )
         if sid is None:
+            return
+    if booking_linked_need_consultation(b):
+        if consultation_for_booking(db, booking_id) is None:
             return
     old_status = b.status
     b.status = BookingStatus.DONE
