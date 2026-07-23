@@ -90,3 +90,18 @@ def test_search_without_filters_is_recent(memory_db) -> None:
     assert len(rows) == 1
     assert rows[0].id == second.id
     assert first.id != second.id
+
+
+def test_search_visit_includes_visit_service(memory_db) -> None:
+    db = memory_db
+    u = _user(db)
+    visit_row = _row(
+        db, user_id=u.id, effective_at=datetime(2026, 6, 5), source_kind=PayrollFundSourceKind.VISIT
+    )
+    svc_row = _row(
+        db, user_id=u.id, effective_at=datetime(2026, 6, 6), source_kind=PayrollFundSourceKind.VISIT_SERVICE
+    )
+    _row(db, user_id=u.id, effective_at=datetime(2026, 6, 7), source_kind=PayrollFundSourceKind.WORK)
+    db.commit()
+    rows = search_ledger_rows(db, source_kind=PayrollFundSourceKind.VISIT)
+    assert {r.id for r in rows} == {visit_row.id, svc_row.id}

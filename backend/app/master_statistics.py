@@ -12,6 +12,7 @@ from app.client_payment import format_client_payment_kinds
 from app.db.models import (
     Booking,
     Consultation,
+    HourlyWorkEntry,
     Kit,
     PayrollFundLedger,
     PayrollFundSide,
@@ -83,6 +84,15 @@ class MasterStatsConsultationRow:
 
 
 @dataclass
+class MasterStatsHourlyRow:
+    entry_id: int
+    work_date: datetime
+    duration_minutes: int
+    master_payroll: float
+    comment: str | None
+
+
+@dataclass
 class MasterStatisticsResult:
     master_id: int
     master_name: str
@@ -97,6 +107,7 @@ class MasterStatisticsResult:
     works: list[MasterStatsWorkRow]
     sales: list[MasterStatsSaleRow]
     consultations: list[MasterStatsConsultationRow]
+    hourly_works: list[MasterStatsHourlyRow]
 
 
 def format_discounts(percents: list[int]) -> str:
@@ -390,6 +401,29 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
             )
         )
 
+    hourly_out: list[MasterStatsHourlyRow] = []
+    hourly_entries = list(
+        db.scalars(
+            select(HourlyWorkEntry)
+            .where(
+                HourlyWorkEntry.master_user_id == master_id,
+                HourlyWorkEntry.performed_date >= visit_start,
+                HourlyWorkEntry.performed_date < visit_end,
+            )
+            .order_by(HourlyWorkEntry.performed_date.desc(), HourlyWorkEntry.id.desc())
+        ).all()
+    )
+    for he in hourly_entries:
+        hourly_out.append(
+            MasterStatsHourlyRow(
+                entry_id=int(he.id),
+                work_date=he.performed_date,
+                duration_minutes=int(he.duration_minutes or 0),
+                master_payroll=money_q2(float(he.amount or 0)),
+                comment=(he.comment or "").strip() or None,
+            )
+        )
+
     return MasterStatisticsResult(
         master_id=master_id,
         master_name=master.display_name,
@@ -404,4 +438,5 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
         works=works_out,
         sales=sales_out,
         consultations=consultations_out,
+        hourly_works=hourly_out,
     )

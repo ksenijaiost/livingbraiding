@@ -1568,7 +1568,15 @@ def search_ledger_rows(
     elif user_id is not None:
         q = q.where(PayrollFundLedger.user_id == int(user_id))
     if source_kind is not None:
-        q = q.where(PayrollFundLedger.source_kind == source_kind)
+        # В UI и VISIT, и VISIT_SERVICE показываются как «Визит N» — фильтр «Визит» включает оба.
+        if source_kind == PayrollFundSourceKind.VISIT:
+            q = q.where(
+                PayrollFundLedger.source_kind.in_(
+                    (PayrollFundSourceKind.VISIT, PayrollFundSourceKind.VISIT_SERVICE)
+                )
+            )
+        else:
+            q = q.where(PayrollFundLedger.source_kind == source_kind)
 
     if has_filter:
         q = q.order_by(PayrollFundLedger.effective_at.desc(), PayrollFundLedger.id.desc())
