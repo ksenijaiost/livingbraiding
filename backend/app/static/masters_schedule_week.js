@@ -60,10 +60,20 @@
     if (!wrap) return;
     if (loading) loading.style.display = 'none';
     if (label) label.textContent = formatWeekLabel(data);
-    if (data && data.colors) colors = data.colors;
+    if (data && data.colors) {
+      colors = Object.assign({}, colors, data.colors);
+    }
 
     var days = (data && data.days) ? data.days : [];
     var masters = (data && data.masters) ? data.masters : [];
+
+    function cellHasFreeTime(cell) {
+      if (!cell || cell.state !== 'working') return false;
+      if (cell.has_free_time === true || cell.has_free_time === 1 || cell.has_free_time === 'true') return true;
+      if (cell.has_free_time === false || cell.has_free_time === 0 || cell.has_free_time === 'false') return false;
+      // Старый API без поля: рабочий день без броней считаем свободным.
+      return !cell.has_booking;
+    }
 
     var h = '<table class="lb-msw-grid" style="width:100%; border-collapse:collapse; min-width:640px;">';
     h += '<thead><tr>';
@@ -98,10 +108,10 @@
         h += '<td class="lb-msw-cell" data-day="' + esc(dayIso) + '" style="' + tdStyle + '">';
         h += cellContent(cell);
         if (cell.has_booking) {
-          h += '<span style="position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:' + esc(colors.booking_dot || '#f97316') + ';" title="Есть брони"></span>';
+          h += '<span style="position:absolute;top:4px;right:4px;width:9px;height:9px;border-radius:50%;background:' + esc(colors.booking_dot || '#f97316') + ';box-shadow:0 0 0 1px rgba(255,255,255,0.9);z-index:2;" title="Есть брони"></span>';
         }
-        if (cell.has_free_time) {
-          h += '<span style="position:absolute;top:4px;left:4px;width:8px;height:8px;border-radius:50%;background:' + esc(colors.free_time_dot || '#22c55e') + ';" title="Есть свободное время"></span>';
+        if (cellHasFreeTime(cell)) {
+          h += '<span style="position:absolute;top:4px;left:4px;width:9px;height:9px;border-radius:50%;background:' + esc(colors.free_time_dot || '#22c55e') + ';box-shadow:0 0 0 1px rgba(255,255,255,0.9);z-index:2;" title="Есть свободное время"></span>';
         }
         h += '</td>';
       }

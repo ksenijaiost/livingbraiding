@@ -126,3 +126,83 @@ def test_create_hourly_work_posts_master_and_studio_ledger(memory_db):
     assert int(master_row.user_id) == int(master.id)
     assert studio_row.entry_kind == PayrollFundEntryKind.EXPENSE
     assert float(studio_row.amount) == -800.0
+
+
+def test_update_hourly_work_replaces_payroll(memory_db):
+    from app.hourly_work import update_hourly_work_entry
+
+    master = _seed_master(memory_db, uid=10)
+    admin = User(
+        id=1,
+        username="admin",
+        display_name="Admin",
+        password_hash="x",
+        role=UserRole.ADMIN_SUPER,
+        is_active=True,
+    )
+    memory_db.add(admin)
+    memory_db.flush()
+    memory_db.add(UserRoleAssignment(user_id=admin.id, role=UserRole.ADMIN_SUPER))
+    memory_db.add(
+        PayrollPeriod(
+            date_from=datetime(2020, 1, 1),
+            date_to=datetime(2030, 12, 31, 23, 59, 59),
+            closed_at=None,
+        )
+    )
+    memory_db.commit()
+
+    entry = HourlyWorkEntry(
+        performed_date=datetime(2026, 7, 20),
+        duration_minutes=60,
+        amount=800.0,
+        comment=None,
+        master_user_id=int(master.id),
+    )
+    saved = create_hourly_work_entry(memory_db, entry, created_by_user_id=int(admin.id))
+
+    draft = HourlyWorkEntry(
+        performed_date=datetime(2026, 7, 21),
+        duration_minutes=90,
+        amount=1200.0,
+        comment="правка",
+        master_user_id=int(master.id),
+    )
+    updated = update_hourly_work_entry(
+        memory_db,
+        saved,
+        draft,
+        updated_by_user_id=int(admin.id),
+        is_admin=True,
+    )
+    assert updated.amount == 1200.0
+    assert updated.duration_minutes == 90
+
+    rows = list(
+        memory_db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.HOURLY_WORK,
+                PayrollFundLedger.source_id == int(updated.id),
+            )
+        ).all()
+    )
+    accruals = [r for r in rows if r.entry_kind == PayrollFundEntryKind.ACCRUAL]
+    stornos = [r for r in rows if r.entry_kind == PayrollFundEntryKind.STORNO]
+    assert len(accruals) == 2  # old + new
+    assert len(stornos) >= 2  # master + studio of old
+    latest_master = max(
+        (r for r in accruals if r.side == PayrollFundSide.MASTER),
+        key=lambda r: int(r.id),
+    )
+    assert float(latest_master.amount) == 1200.0
+
+
+def test_can_access_hourly_work_entry():
+    from types import SimpleNamespace
+
+    from app.hourly_work import can_access_hourly_work_entry
+
+    entry = SimpleNamespace(master_user_id=10)
+    assert can_access_hourly_work_entry(entry, current_user_id=10, is_admin=False) is True
+    assert can_access_hourly_work_entry(entry, current_user_id=11, is_admin=False) is False
+    assert can_access_hourly_work_entry(entry, current_user_id=11, is_admin=True) is True

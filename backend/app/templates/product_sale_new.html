@@ -447,6 +447,7 @@
       if (k) saleSelectKitForRow(row, k, lab || undefined);
       else saleSyncRowModeUi(row);
     }
+    const saleAddKitBtn = document.getElementById('sale_add_kit_row');
     if (saleAddKitBtn) saleAddKitBtn.addEventListener('click', saleAddKitRow);
     document.querySelectorAll('#sale_kit_rows_wrap .sale-kit-row').forEach(function (row) {
       saleBindKitRow(row);

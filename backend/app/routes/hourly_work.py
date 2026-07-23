@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -11,10 +11,13 @@ from app.auth import AuthUser, require_role
 from app.db.models import HourlyWorkEntry, UserRole
 from app.db.session import get_db
 from app.hourly_work import (
+    can_access_hourly_work_entry,
     create_hourly_work_entry,
     duration_display,
+    entry_to_form_prefill,
     list_masters_for_hourly_work_form,
     parse_hourly_work_form,
+    update_hourly_work_entry,
 )
 from app.webui import ctx as _ctx
 from app.webui import templates
@@ -41,6 +44,18 @@ def _list_entries(db: Session, current_user: AuthUser, *, limit: int = 100) -> l
     if UserRole.MASTER in current_user.roles and not _is_admin_user(current_user):
         stmt = stmt.where(HourlyWorkEntry.master_user_id == int(current_user.id))
     return list(db.scalars(stmt).all())
+
+
+def _get_entry(db: Session, entry_id: int) -> HourlyWorkEntry | None:
+    return db.scalar(
+        select(HourlyWorkEntry)
+        .options(
+            selectinload(HourlyWorkEntry.master_user),
+            selectinload(HourlyWorkEntry.created_by_user),
+            selectinload(HourlyWorkEntry.work_plan),
+        )
+        .where(HourlyWorkEntry.id == entry_id)
+    )
 
 
 @router.get("", response_class=HTMLResponse)
@@ -147,7 +162,106 @@ async def hourly_work_new_post(
             ),
             status_code=400,
         )
-    redirect_url = "/hourly-work?msg=created"
     if saved.work_plan_id:
-        redirect_url = f"/work-plans/{int(saved.work_plan_id)}?msg=hourly_created"
-    return RedirectResponse(url=redirect_url, status_code=303)
+        return RedirectResponse(
+            url=f"/work-plans/{int(saved.work_plan_id)}?msg=hourly_created",
+            status_code=303,
+        )
+    return RedirectResponse(url=f"/hourly-work/{int(saved.id)}?msg=created", status_code=303)
+
+
+@router.get("/{entry_id}", response_class=HTMLResponse)
+def hourly_work_detail(
+    entry_id: int,
+    request: Request,
+    current_user: AuthUser = _ACCESS,
+    db: Session = Depends(get_db),
+):
+    entry = _get_entry(db, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    is_admin = _is_admin_user(current_user)
+    if not can_access_hourly_work_entry(
+        entry, current_user_id=int(current_user.id), is_admin=is_admin
+    ):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    return templates.TemplateResponse(
+        "hourly_work_detail.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            entry=entry,
+            fp=entry_to_form_prefill(entry),
+            masters=list_masters_for_hourly_work_form(db),
+            is_admin=is_admin,
+            duration_display=duration_display,
+            error=None,
+            msg=request.query_params.get("msg"),
+        ),
+    )
+
+
+@router.post("/{entry_id}")
+async def hourly_work_detail_save(
+    entry_id: int,
+    request: Request,
+    current_user: AuthUser = _ACCESS,
+    db: Session = Depends(get_db),
+):
+    entry = _get_entry(db, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    is_admin = _is_admin_user(current_user)
+    if not can_access_hourly_work_entry(
+        entry, current_user_id=int(current_user.id), is_admin=is_admin
+    ):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+
+    form = await request.form()
+    fp = {k: form.get(k) for k in form.keys()}
+    draft, err = parse_hourly_work_form(
+        form,
+        current_user_id=int(current_user.id),
+        is_admin=is_admin,
+    )
+    if err or draft is None:
+        return templates.TemplateResponse(
+            "hourly_work_detail.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                entry=entry,
+                fp={k: str(v) if v is not None else "" for k, v in fp.items()},
+                masters=list_masters_for_hourly_work_form(db),
+                is_admin=is_admin,
+                duration_display=duration_display,
+                error=err or "Некорректные данные.",
+                msg=None,
+            ),
+            status_code=400,
+        )
+    try:
+        update_hourly_work_entry(
+            db,
+            entry,
+            draft,
+            updated_by_user_id=int(current_user.id),
+            is_admin=is_admin,
+        )
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            "hourly_work_detail.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                entry=entry,
+                fp={k: str(v) if v is not None else "" for k, v in fp.items()},
+                masters=list_masters_for_hourly_work_form(db),
+                is_admin=is_admin,
+                duration_display=duration_display,
+                error=str(exc),
+                msg=None,
+            ),
+            status_code=400,
+        )
+    return RedirectResponse(url=f"/hourly-work/{entry_id}?msg=saved", status_code=303)

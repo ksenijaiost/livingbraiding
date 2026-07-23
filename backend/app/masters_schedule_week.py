@@ -13,7 +13,8 @@ from app.calendar_occupancy import (
     COLOR_OCCUPANCY_DAY_OFF,
     COLOR_OCCUPANCY_NO_DATA,
     build_occupancy_for_day,
-    master_has_free_time_on_day,
+    master_shift_has_free_time,
+    occupied_intervals_for_master,
 )
 from app.db.models import (
     Booking,
@@ -26,7 +27,7 @@ from app.db.models import (
     UserRole,
 )
 from app.display_time import get_display_timezone
-from app.master_schedule import day_state, get_default_work_hours
+from app.master_schedule import day_state, get_default_work_hours, resolve_day_interval
 from app.user_roles import select_users_with_role
 
 COLOR_SCHEDULE_WORKING = "#bae6fd"
@@ -56,6 +57,37 @@ def _schedule_row_payload(row: MasterScheduleDay | None) -> dict[str, Any]:
     tf = row.time_from.isoformat(timespec="minutes") if row.time_from else None
     tt = row.time_to.isoformat(timespec="minutes") if row.time_to else None
     return {"state": "working", "time_from": tf, "time_to": tt}
+
+
+def _break_ranges_for_row(row: MasterScheduleDay) -> list[tuple[int, int]]:
+    bf = row.break_from
+    bt = row.break_to
+    if bf is None or bt is None:
+        return []
+    break_start = int(bf.hour) * 60 + int(bf.minute)
+    break_end = int(bt.hour) * 60 + int(bt.minute)
+    if break_end <= break_start:
+        return []
+    return [(break_start, break_end)]
+
+
+def _cell_has_free_time(
+    db: Session,
+    *,
+    row: MasterScheduleDay | None,
+    master_id: int,
+    occupancy: dict[str, Any],
+) -> bool:
+    """Свободное время по смене из графика минус брони/блоки/планы занятости."""
+    if row is None or row.status != MasterScheduleStatus.WORKING:
+        return False
+    work_start, work_end = resolve_day_interval(db, row)
+    return master_shift_has_free_time(
+        work_start_m=work_start,
+        work_end_m=work_end,
+        break_ranges=_break_ranges_for_row(row),
+        occupied=occupied_intervals_for_master(occupancy, master_id),
+    )
 
 
 def _masters_with_bookings(
@@ -168,9 +200,11 @@ def build_masters_schedule_week(db: Session, *, week_start: date) -> dict[str, A
             else:
                 cell = {"state": "no_data", "time_from": None, "time_to": None}
             cell["has_booking"] = (mid, d0) in booking_keys
-            cell["has_free_time"] = (
+            cell["has_free_time"] = bool(
                 st == "working"
-                and master_has_free_time_on_day(
+                and _cell_has_free_time(
+                    db,
+                    row=row,
                     master_id=mid,
                     occupancy=occupancy_by_day[d0],
                 )

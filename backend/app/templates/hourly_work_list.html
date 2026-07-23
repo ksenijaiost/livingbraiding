@@ -9,30 +9,37 @@
     {% if msg == 'created' %}
       <div class="ok" style="margin-top:12px;">Запись сохранена, ЗП начислена.</div>
     {% endif %}
+    {% if msg == 'saved' %}
+      <div class="ok" style="margin-top:12px;">Изменения сохранены.</div>
+    {% endif %}
 
     {% if rows %}
-      <table style="width:100%; margin-top:16px; border-collapse:collapse; font-size:14px;">
-        <thead>
-          <tr style="text-align:left; border-bottom:1px solid #e2e8f0;">
-            <th style="padding:8px;">Дата</th>
-            <th style="padding:8px;">Мастер</th>
-            <th style="padding:8px;">Время</th>
-            <th style="padding:8px;">Сумма</th>
-            <th style="padding:8px;">Комментарий</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in rows %}
-            <tr style="border-bottom:1px solid #f1f5f9;">
-              <td style="padding:8px;">{{ row.performed_date.strftime('%d.%m.%Y') }}</td>
-              <td style="padding:8px;">{{ row.master_user.display_name or row.master_user.username }}</td>
-              <td style="padding:8px;">{{ duration_display(row.duration_minutes) }}</td>
-              <td style="padding:8px;">{{ "%.0f"|format(row.amount) }} ₽</td>
-              <td style="padding:8px;" class="muted">{{ row.comment or '—' }}</td>
+      <div style="overflow-x:auto; margin-top:16px; -webkit-overflow-scrolling:touch;">
+        <table style="width:100%; min-width:28rem; border-collapse:collapse; font-size:14px;">
+          <thead>
+            <tr style="text-align:left; border-bottom:1px solid #e2e8f0;">
+              <th style="padding:8px; white-space:nowrap;">Дата</th>
+              <th style="padding:8px; white-space:nowrap;">Мастер</th>
+              <th style="padding:8px; white-space:nowrap;">Время</th>
+              <th style="padding:8px; white-space:nowrap;">Сумма</th>
+              <th style="padding:8px;">Комментарий</th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+              <tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:8px; white-space:nowrap;">
+                  <a href="/hourly-work/{{ row.id }}">{{ row.performed_date.strftime('%d.%m.%Y') }}</a>
+                </td>
+                <td style="padding:8px; white-space:nowrap;">{{ row.master_user.display_name or row.master_user.username }}</td>
+                <td style="padding:8px; white-space:nowrap;">{{ duration_display(row.duration_minutes) }}</td>
+                <td style="padding:8px; white-space:nowrap;">{{ "%.0f"|format(row.amount) }} ₽</td>
+                <td style="padding:8px;" class="muted">{{ row.comment or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     {% else %}
       <p class="muted" style="margin-top:16px;">Пока нет записей.</p>
     {% endif %}
