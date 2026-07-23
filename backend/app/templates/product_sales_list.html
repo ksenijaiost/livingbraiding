@@ -73,13 +73,19 @@
                   {% if r.kit_pieces_sold is not none %}
                     , заготовок: {{ r.kit_pieces_sold }}
                   {% endif %}
+                  {% if r.kit_description %}
+                    <div class="muted" style="margin-top:4px;white-space:pre-wrap;">{{ r.kit_description }}</div>
+                  {% endif %}
                 {% elif r.kind.value == 'RUBBER' %}
                   {{ r.rubber_description }}
                   {% if r.rubber_price_override is not none %}
-                    <div class="muted" style="margin-top:4px;">Цена товара: {{ r.rubber_price_override }} ₽</div>
+                    <div class="muted" style="margin-top:4px;">Себестоимость с учётом ЗП: {{ r.rubber_price_override }} ₽</div>
                   {% endif %}
                 {% elif r.kind.value == 'OTHER' %}
                   {{ r.other_description }}
+                  {% if r.other_cost is not none %}
+                    <div class="muted" style="margin-top:4px;">Себестоимость: {{ '%.2f'|format(r.other_cost) }} ₽</div>
+                  {% endif %}
                 {% endif %}
               </td>
               <td>{% if r.material_cost_review_pending %}<span title="Нужна себестоимость">[!]</span>{% endif %}</td>

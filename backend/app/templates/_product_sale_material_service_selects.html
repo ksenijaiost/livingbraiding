@@ -1,0 +1,67 @@
+{# Cascading subcategory → service for «Продажа материала». #}
+<div class="row">
+  <div style="flex:1;">
+    <label>Подкатегория</label>
+    <select id="material_subcategory_id" name="material_subcategory_id">
+      <option value="">— выберите подкатегорию —</option>
+      {% for sub in material_subcategories %}
+        <option value="{{ sub.id }}" {% if fp.get('material_subcategory_id')|string == sub.id|string %}selected{% endif %}>
+          {{ sub.name }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div style="flex:1;">
+    <label>Услуга</label>
+    <select id="material_service_id" name="material_service_id">
+      <option value="">— выберите услугу —</option>
+    </select>
+  </div>
+</div>
+<script>
+(function () {
+  const cascade = {{ material_services_cascade_json|safe }};
+  const subEl = document.getElementById('material_subcategory_id');
+  const svcEl = document.getElementById('material_service_id');
+  if (!subEl || !svcEl || !cascade) return;
+  const bySub = cascade.bySub || {};
+  const initialSvc = {{ (fp.get('material_service_id') or '')|tojson }};
+
+  function fillServices(subId, preferSvcId) {
+    const prev = preferSvcId != null ? String(preferSvcId) : String(svcEl.value || '');
+    svcEl.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = '— выберите услугу —';
+    svcEl.appendChild(opt0);
+    const list = bySub[String(subId || '')] || [];
+    list.forEach(function (s) {
+      const o = document.createElement('option');
+      o.value = String(s.id);
+      o.textContent = s.name;
+      if (prev && String(s.id) === prev) o.selected = true;
+      svcEl.appendChild(o);
+    });
+    svcEl.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  subEl.addEventListener('change', function () {
+    fillServices(subEl.value, '');
+  });
+
+  if (subEl.value) {
+    fillServices(subEl.value, initialSvc);
+  } else if (initialSvc) {
+    const keys = Object.keys(bySub);
+    for (let i = 0; i < keys.length; i++) {
+      const sid = keys[i];
+      const hit = (bySub[sid] || []).some(function (s) { return String(s.id) === String(initialSvc); });
+      if (hit) {
+        subEl.value = sid;
+        fillServices(sid, initialSvc);
+        break;
+      }
+    }
+  }
+})();
+</script>

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_role
 from app.consultation_booking import booking_status_label
+from app.consultation_types import format_types_display
 from app.calendar_display import get_calendar_display_hours
 from app.calendar_occupancy import build_occupancy_for_day, list_calendar_masters
 from app.master_schedule import is_master_available_for_interval
@@ -20,6 +21,7 @@ from app.db.models import (
     BookingPlannedService,
     BookingStaff,
     BookingStatus,
+    Consultation,
     Service,
     ServiceSubcategory,
     PayrollFundLedger,
@@ -200,6 +202,41 @@ def api_calendar_day(
                 "payout_sum": 0.0,
                 "studio_sum": 0.0,
                 "is_work_plan": True,
+            }
+        )
+
+    # ---- Consultations (карточки консультаций, не брони вида CONSULTATION) ----
+    c_stmt = (
+        select(Consultation)
+        .options(
+            selectinload(Consultation.client),
+            selectinload(Consultation.booking),
+        )
+        .where(
+            Consultation.consultation_date >= day_start,
+            Consultation.consultation_date < day_end,
+        )
+        .order_by(Consultation.consultation_date.asc(), Consultation.id.asc())
+    )
+    if is_master:
+        c_stmt = c_stmt.where(Consultation.created_by_user_id == current_user.id)
+    consultation_items: list[dict[str, Any]] = []
+    for c in db.scalars(c_stmt).all():
+        time_l = format_naive_utc_datetime(c.consultation_date, tz)
+        types_l = (format_types_display(c.types_json) or "").strip() or "Консультация"
+        linked = c.booking
+        consultation_items.append(
+            {
+                "id": int(c.id),
+                "client": (c.client.name if c.client else "—"),
+                "kind": "Консультация",
+                "label": f"{types_l} · {time_l}",
+                "service_label": types_l,
+                "status": booking_status_label(linked.status if linked else None),
+                "time": time_l,
+                "url": f"/consultations/{int(c.id)}",
+                "payout_sum": 0.0,
+                "studio_sum": 0.0,
             }
         )
 
@@ -399,6 +436,12 @@ def api_calendar_day(
         "date": day.isoformat(),
         "occupancy": occupancy,
         "bookings": {"count": len(booking_items), "payout_sum": 0.0, "studio_sum": 0.0, "items": booking_items},
+        "consultations": {
+            "count": len(consultation_items),
+            "payout_sum": 0.0,
+            "studio_sum": 0.0,
+            "items": consultation_items,
+        },
         "visits": {
             "count": len(visit_items),
             "payout_sum": _money0(sum(i["payout_sum"] for i in visit_items)),

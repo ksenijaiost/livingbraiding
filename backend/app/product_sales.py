@@ -825,6 +825,40 @@ def _material_services_meta_json(services: list[Service]) -> str:
     return json.dumps(d, ensure_ascii=False)
 
 
+def _material_services_cascade(services: list[Service]) -> tuple[list[dict[str, Any]], str]:
+    """Подкатегории + JSON {subs, bySub} для каскадного выбора услуги."""
+    subs: list[dict[str, Any]] = []
+    by_sub: dict[str, list[dict[str, Any]]] = {}
+    seen: set[int] = set()
+    for s in services:
+        sub = s.subcategory
+        if not sub:
+            continue
+        if sub.id not in seen:
+            seen.add(int(sub.id))
+            subs.append({"id": int(sub.id), "name": sub.name})
+        by_sub.setdefault(str(sub.id), []).append({"id": int(s.id), "name": s.name})
+    payload = {"subs": subs, "bySub": by_sub}
+    return subs, json.dumps(payload, ensure_ascii=False)
+
+
+def _material_subcategory_id_for_fp(fp: dict[str, str], services: list[Service]) -> str:
+    raw = (fp.get("material_subcategory_id") or "").strip()
+    if raw:
+        return raw
+    sid_raw = (fp.get("material_service_id") or "").strip()
+    if not sid_raw:
+        return ""
+    try:
+        sid = int(sid_raw)
+    except ValueError:
+        return ""
+    for s in services:
+        if int(s.id) == sid and s.subcategory_id:
+            return str(s.subcategory_id)
+    return ""
+
+
 def _render_new(
     request: Request,
     current_user: AuthUser,
@@ -845,6 +879,9 @@ def _render_new(
         selected_client = db.get(Client, eid_i)
     sale_kit_lines_initial = _product_sale_kit_lines_initial(db, fp, sale=None)
     default_date = (fp.get("performed_date") or "").strip() or date.today().isoformat()
+    material_subcategories, material_services_cascade_json = _material_services_cascade(material_services)
+    fp = dict(fp)
+    fp["material_subcategory_id"] = _material_subcategory_id_for_fp(fp, material_services)
     return templates.TemplateResponse(
         "product_sale_new.html",
         _ctx(
@@ -857,6 +894,8 @@ def _render_new(
             default_date=default_date,
             material_services=material_services,
             material_services_meta_json=_material_services_meta_json(material_services),
+            material_subcategories=material_subcategories,
+            material_services_cascade_json=material_services_cascade_json,
         ),
         status_code=400 if error else 200,
     )
@@ -1040,6 +1079,8 @@ def product_sale_edit_form(
     )
     if not sale:
         sk_init_404 = _product_sale_kit_lines_initial(db, {}, sale=None)
+        ms404 = _prodazha_materiala_services(db)
+        sub404, cascade404 = _material_services_cascade(ms404)
         return templates.TemplateResponse(
             "product_sale_edit.html",
             _ctx(
@@ -1050,8 +1091,10 @@ def product_sale_edit_form(
                 fp={},
                 selected_client=None,
                 default_date=date.today().isoformat(),
-                material_services=_prodazha_materiala_services(db),
+                material_services=ms404,
                 material_services_meta_json="{}",
+                material_subcategories=sub404,
+                material_services_cascade_json=cascade404,
                 sale_kit_lines_initial=sk_init_404,
             ),
             status_code=404,
@@ -1059,6 +1102,7 @@ def product_sale_edit_form(
     ok, msg = _sale_edit_allowed(db, sale)
     if not ok:
         ms403 = _prodazha_materiala_services(db)
+        sub403, cascade403 = _material_services_cascade(ms403)
         sk_init_403 = _product_sale_kit_lines_initial(db, {}, sale=sale)
         return templates.TemplateResponse(
             "product_sale_edit.html",
@@ -1072,18 +1116,25 @@ def product_sale_edit_form(
                 default_date=sale.performed_date.date().isoformat(),
                 material_services=ms403,
                 material_services_meta_json=_material_services_meta_json(ms403),
+                material_subcategories=sub403,
+                material_services_cascade_json=cascade403,
                 sale_kit_lines_initial=sk_init_403,
             ),
             status_code=403,
         )
     ms = _prodazha_materiala_services(db)
+    material_subcategories, material_services_cascade_json = _material_services_cascade(ms)
     err_qp = request.query_params.get("err")
+    sub_id = ""
+    if sale.material_service and sale.material_service.subcategory_id:
+        sub_id = str(sale.material_service.subcategory_id)
     fp = {
         "existing_client_id": str(sale.client_id),
         "performed_date": sale.performed_date.date().isoformat(),
         "amount_from_client": str(sale.amount_from_client),
         "client_payment_kind": sale.client_payment_kind.value if sale.client_payment_kind else ClientPaymentKind.CASH.value,
         "kind": sale.kind.value,
+        "material_subcategory_id": sub_id,
         "material_service_id": str(sale.material_service_id or ""),
         "material_grams": "" if sale.material_grams is None else str(sale.material_grams),
         "material_description": sale.material_description or "",
@@ -1105,9 +1156,11 @@ def product_sale_edit_form(
         "kit_mode": "PIECES",
         "kit_pieces_sold": "" if sale.kit_pieces_sold is None else str(sale.kit_pieces_sold),
         "sale_kit_lines_json": getattr(sale, "kit_lines_json", None) or "",
+        "kit_description": getattr(sale, "kit_description", None) or "",
         "rubber_description": sale.rubber_description or "",
         "rubber_price_override": "" if sale.rubber_price_override is None else str(sale.rubber_price_override),
         "other_description": sale.other_description or "",
+        "other_cost": "" if getattr(sale, "other_cost", None) is None else str(sale.other_cost),
     }
     sale_kit_lines_initial = _product_sale_kit_lines_initial(db, fp, sale=sale)
     return templates.TemplateResponse(
@@ -1122,6 +1175,8 @@ def product_sale_edit_form(
             default_date=sale.performed_date.date().isoformat(),
             material_services=ms,
             material_services_meta_json=_material_services_meta_json(ms),
+            material_subcategories=material_subcategories,
+            material_services_cascade_json=material_services_cascade_json,
             sale_kit_lines_initial=sale_kit_lines_initial,
         ),
     )
@@ -1164,9 +1219,11 @@ async def product_sale_edit_save(
         "kit_pieces_sold",
         "kit_breakdown_json",
         "kit_lines_json",
+        "kit_description",
         "rubber_description",
         "rubber_price_override",
         "other_description",
+        "other_cost",
         "is_voided",
         "studio_margin_amount",
     )})
@@ -1245,9 +1302,11 @@ async def product_sale_edit_save(
     sale.kit_pieces_sold = None
     sale.kit_breakdown_json = None
     sale.kit_lines_json = None
+    sale.kit_description = None
     sale.rubber_description = None
     sale.rubber_price_override = None
     sale.other_description = None
+    sale.other_cost = None
 
     if kind == ProductSaleKind.MATERIAL:
         try:
@@ -1261,38 +1320,72 @@ async def product_sale_edit_save(
     elif kind == ProductSaleKind.KIT:
         try:
             parsed_lines = _parse_sale_kit_lines_structured(form)
-        except ValueError as exc:
-            raise ValueError(str(exc)) from None
-        if not parsed_lines:
-            raise ValueError("Выберите хотя бы один комплект из наличия.")
-        try:
+            if not parsed_lines:
+                raise ValueError("Выберите хотя бы один комплект из наличия.")
             saved = _apply_parsed_kit_sale_lines(db, client, parsed_lines)
-        except ValueError as exc:
-            raise ValueError(str(exc)) from None
+        except ValueError as e:
+            return RedirectResponse(
+                url=f"/sales/products/{sale_id}/edit?err={quote(str(e))}",
+                status_code=303,
+            )
         sale.kit_id = int(saved[0]["kit_id"])
         sale.kit_pieces_sold = int(sum(int(x["pieces_sold"]) for x in saved))
         sale.kit_breakdown_json = (
             json.dumps(saved[0]["breakdown"], ensure_ascii=False) if saved[0].get("breakdown") else None
         )
         sale.kit_lines_json = json.dumps(saved, ensure_ascii=False)
+        kit_desc = (_g_str(form, "kit_description") or "").strip()
+        sale.kit_description = kit_desc or None
 
     elif kind == ProductSaleKind.RUBBER:
         desc = (_g_str(form, "rubber_description") or "").strip()
         if not desc:
-            raise ValueError("Для «Хвост/резинка» укажите описание.")
+            return RedirectResponse(
+                url=f"/sales/products/{sale_id}/edit?err={quote('Для «Хвост/резинка» укажите описание.')}",
+                status_code=303,
+            )
         sale.rubber_description = desc
         override_raw = (_g_str(form, "rubber_price_override") or "").strip()
-        if override_raw:
-            override = _g_int(form, "rubber_price_override", -1)
-            if override < 0:
-                raise ValueError("Цена (если указана) должна быть целым числом ≥ 0.")
-            sale.rubber_price_override = int(override)
+        if not override_raw:
+            return RedirectResponse(
+                url=f"/sales/products/{sale_id}/edit?err={quote('Для «Хвост/резинка» укажите себестоимость с учётом ЗП.')}",
+                status_code=303,
+            )
+        override = _g_int(form, "rubber_price_override", -1)
+        if override < 0:
+            return RedirectResponse(
+                url=f"/sales/products/{sale_id}/edit?err={quote('Себестоимость с учётом ЗП должна быть целым числом ≥ 0.')}",
+                status_code=303,
+            )
+        sale.rubber_price_override = int(override)
 
     elif kind == ProductSaleKind.OTHER:
         desc = (_g_str(form, "other_description") or "").strip()
         if not desc:
-            raise ValueError("Для «Другое» укажите описание.")
+            return RedirectResponse(
+                url=f"/sales/products/{sale_id}/edit?err={quote('Для «Другое» укажите описание.')}",
+                status_code=303,
+            )
         sale.other_description = desc
+        cost_raw = (_g_str(form, "other_cost") or "").strip()
+        if not cost_raw:
+            return RedirectResponse(
+                url=f"/sales/products/{sale_id}/edit?err={quote('Для «Другое» укажите себестоимость.')}",
+                status_code=303,
+            )
+        try:
+            cost = parse_float(cost_raw, field_name="other_cost")
+        except ValueError:
+            return RedirectResponse(
+                url=f"/sales/products/{sale_id}/edit?err={quote('Себестоимость должна быть числом ≥ 0.')}",
+                status_code=303,
+            )
+        if cost < 0:
+            return RedirectResponse(
+                url=f"/sales/products/{sale_id}/edit?err={quote('Себестоимость должна быть числом ≥ 0.')}",
+                status_code=303,
+            )
+        sale.other_cost = float(cost)
 
     if kind == ProductSaleKind.KIT and sale.kit_id:
         db.refresh(sale, attribute_names=["kit"])
@@ -1347,9 +1440,11 @@ async def product_sale_edit_save(
                 "kit_pieces_sold",
                 "kit_breakdown_json",
                 "kit_lines_json",
+                "kit_description",
                 "rubber_description",
                 "rubber_price_override",
                 "other_description",
+                "other_cost",
                 "studio_margin_amount",
             ),
         ),
@@ -1422,6 +1517,7 @@ async def product_sale_new_post(
         "client_payment_kind": _g_str(form, "client_payment_kind"),
         "kind": _g_str(form, "kind") or ProductSaleKind.MATERIAL.value,
         # material
+        "material_subcategory_id": _g_str(form, "material_subcategory_id"),
         "material_service_id": _g_str(form, "material_service_id"),
         "material_grams": _g_str(form, "material_grams"),
         "material_description": _g_str(form, "material_description"),
@@ -1436,11 +1532,13 @@ async def product_sale_new_post(
         "kit_mode": _g_str(form, "kit_mode") or "PIECES",
         "kit_pieces_sold": _g_str(form, "kit_pieces_sold"),
         "sale_kit_lines_json": _g_str(form, "sale_kit_lines_json"),
+        "kit_description": _g_str(form, "kit_description"),
         # rubber
         "rubber_description": _g_str(form, "rubber_description"),
         "rubber_price_override": _g_str(form, "rubber_price_override"),
         # other
         "other_description": _g_str(form, "other_description"),
+        "other_cost": _g_str(form, "other_cost"),
     }
 
     def _fail(msg: str):
@@ -1517,6 +1615,8 @@ async def product_sale_new_post(
             json.dumps(saved[0]["breakdown"], ensure_ascii=False) if saved[0].get("breakdown") else None
         )
         row.kit_lines_json = json.dumps(saved, ensure_ascii=False)
+        kit_desc = (fp.get("kit_description") or "").strip()
+        row.kit_description = kit_desc or None
 
     elif kind == ProductSaleKind.RUBBER:
         desc = (fp["rubber_description"] or "").strip()
@@ -1525,17 +1625,28 @@ async def product_sale_new_post(
         row.rubber_description = desc
 
         override_raw = (fp["rubber_price_override"] or "").strip()
-        if override_raw:
-            override = _g_int(form, "rubber_price_override", -1)
-            if override < 0:
-                return _fail("Цена (если указана) должна быть целым числом ≥ 0.")
-            row.rubber_price_override = override
+        if not override_raw:
+            return _fail("Для «Хвост/резинка» укажите себестоимость с учётом ЗП.")
+        override = _g_int(form, "rubber_price_override", -1)
+        if override < 0:
+            return _fail("Себестоимость с учётом ЗП должна быть целым числом ≥ 0.")
+        row.rubber_price_override = override
 
     elif kind == ProductSaleKind.OTHER:
         desc = (fp["other_description"] or "").strip()
         if not desc:
             return _fail("Для «Другое» укажите описание.")
         row.other_description = desc
+        cost_raw = (fp.get("other_cost") or "").strip()
+        if not cost_raw:
+            return _fail("Для «Другое» укажите себестоимость.")
+        try:
+            cost = parse_float(cost_raw, field_name="other_cost")
+        except ValueError:
+            return _fail("Себестоимость должна быть числом ≥ 0.")
+        if cost < 0:
+            return _fail("Себестоимость должна быть числом ≥ 0.")
+        row.other_cost = float(cost)
 
     db.add(row)
     db.flush()

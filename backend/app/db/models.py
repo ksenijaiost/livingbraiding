@@ -1061,13 +1061,16 @@ class ProductSale(Base):
     kit_pieces_sold: Mapped[int | None] = mapped_column(Integer, nullable=True)
     kit_breakdown_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     kit_lines_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kit_description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # RUBBER
     rubber_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Себестоимость с учётом ЗП (историческое имя колонки).
     rubber_price_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # OTHER
     other_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    other_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Маржа в фонд студии (снимок для розницы; проводки ЗП по этому полю).
     studio_margin_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
