@@ -40,7 +40,21 @@ CONSULTATION_DEFAULT_DURATION_MINUTES = 60
 
 
 def occupancy_color_for_status(status: BookingStatus | str) -> str:
+    """Цвет брони-визита по статусу (без учёта kind)."""
+    return occupancy_color_for_booking(status, kind=BookingKind.VISIT)
+
+
+def occupancy_color_for_booking(
+    status: BookingStatus | str,
+    *,
+    kind: BookingKind | str | None = None,
+) -> str:
+    """Цвет сегмента занятости: консультации всегда жёлтые; визиты — по статусу."""
+    k = kind.value if isinstance(kind, BookingKind) else (str(kind or "").strip().upper())
     s = status.value if isinstance(status, BookingStatus) else str(status)
+    # Консультация: всегда жёлтый (и ACTIVE, и PENDING). DONE — тот же цвет + opacity в UI.
+    if k == BookingKind.CONSULTATION.value:
+        return COLOR_OCCUPANCY_PENDING
     if s == BookingStatus.PENDING_CONFIRMATION.value:
         return COLOR_OCCUPANCY_PENDING
     return COLOR_OCCUPANCY_ACTIVE
@@ -58,6 +72,7 @@ class OccupancySegment:
     service_label: str
     booking_id: int | None = None
     work_plan_id: int | None = None
+    kind: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -74,6 +89,8 @@ class OccupancySegment:
             out["booking_id"] = self.booking_id
         if self.work_plan_id is not None:
             out["work_plan_id"] = self.work_plan_id
+        if self.kind:
+            out["kind"] = self.kind
         return out
 
 
@@ -198,8 +215,9 @@ def build_occupancy_for_day(
         if b.kind not in (BookingKind.VISIT, BookingKind.CONSULTATION) or b.status == BookingStatus.CANCELLED:
             continue
         status = b.status
-        color = occupancy_color_for_status(status)
+        color = occupancy_color_for_booking(status, kind=b.kind)
         status_s = status.value if status else BookingStatus.ACTIVE.value
+        kind_s = b.kind.value if b.kind else BookingKind.VISIT.value
         url = f"/bookings/{int(b.id)}"
         booking_master_ids = [int(m.master_id) for m in (b.masters or []) if m.master_id]
         client_name = _booking_client_name(b)
@@ -242,6 +260,7 @@ def build_occupancy_for_day(
                         url=url,
                         client_name=client_name,
                         service_label="Консультация",
+                        kind=kind_s,
                     )
                 )
             continue
@@ -305,6 +324,7 @@ def build_occupancy_for_day(
                             url=url,
                             client_name=client_name,
                             service_label=_segment_service_label(b, svc),
+                            kind=kind_s,
                         )
                     )
             continue
@@ -332,6 +352,7 @@ def build_occupancy_for_day(
                     url=url,
                     client_name=client_name,
                     service_label=_segment_service_label(b, svc),
+                    kind=kind_s,
                 )
             )
 

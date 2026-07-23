@@ -157,7 +157,7 @@
         var segTop = ((Number(seg.start_minutes) - hourFrom * 60) / spanMin) * 100;
         var segH = ((Number(seg.end_minutes) - Number(seg.start_minutes)) / spanMin) * 100;
         if (segH <= 0) continue;
-        var bg = seg.color || (seg.work_plan_id ? cWorkPlan : (seg.status === 'PENDING_CONFIRMATION' ? cPending : cConfirmed));
+        var bg = seg.color || (seg.work_plan_id ? cWorkPlan : ((seg.kind === 'CONSULTATION' || seg.status === 'PENDING_CONFIRMATION') ? cPending : cConfirmed));
         var op = (seg.status === 'DONE') ? '0.55' : '1';
         html += '<a href="' + esc(seg.url || '#') + '" title="' + esc(occupancySegTitle(seg)) + '" style="position:absolute; left:2px; right:2px; top:' + segTop + '%; height:' + segH + '%; background:' + bg + '; opacity:' + op + '; color:#1f2937; font-size:11px; text-decoration:none; border-radius:3px; padding:2px 4px; overflow:hidden; box-sizing:border-box; z-index:' + (si + 1) + '; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.08);">' + occupancySegBody(seg) + '</a>';
       }
@@ -176,8 +176,8 @@
     }
     html += '</div>';
     html += '<div style="margin-top:10px; font-size:12px; display:flex; gap:16px; flex-wrap:wrap; color:#475569;">';
-    html += '<span><span style="display:inline-block; width:12px; height:12px; background:' + cConfirmed + '; vertical-align:middle; margin-right:4px; border:1px solid rgba(0,0,0,0.08)"></span> Подтверждена</span>';
-    html += '<span><span style="display:inline-block; width:12px; height:12px; background:' + cPending + '; vertical-align:middle; margin-right:4px; border:1px solid rgba(0,0,0,0.08)"></span> Ждёт подтверждения</span>';
+    html += '<span><span style="display:inline-block; width:12px; height:12px; background:' + cConfirmed + '; vertical-align:middle; margin-right:4px; border:1px solid rgba(0,0,0,0.08)"></span> Подтверждена (визит)</span>';
+    html += '<span><span style="display:inline-block; width:12px; height:12px; background:' + cPending + '; vertical-align:middle; margin-right:4px; border:1px solid rgba(0,0,0,0.08)"></span> Ждёт подтверждения / консультация</span>';
     html += '<span><span style="display:inline-block; width:12px; height:12px; background:' + cWorkPlan + '; vertical-align:middle; margin-right:4px; border:1px solid rgba(0,0,0,0.08)"></span> План работ</span>';
     html += '<span><span style="display:inline-block; width:12px; height:12px; background:' + cUnavailable + '; vertical-align:middle; margin-right:4px; border:1px solid rgba(0,0,0,0.08)"></span> Нерабочее / занято</span>';
     html += '<span><span style="display:inline-block; width:12px; height:12px; background:' + cDayOff + '; vertical-align:middle; margin-right:4px; border:1px solid rgba(0,0,0,0.08)"></span> Выходной</span>';

@@ -82,6 +82,19 @@ def test_occupancy_color_for_status() -> None:
     assert COLOR_OCCUPANCY_PENDING == "#f7d368"
 
 
+def test_occupancy_color_for_consultation_always_yellow() -> None:
+    from app.calendar_occupancy import occupancy_color_for_booking
+    from app.db.models import BookingKind
+
+    assert occupancy_color_for_booking(BookingStatus.ACTIVE, kind=BookingKind.CONSULTATION) == COLOR_OCCUPANCY_PENDING
+    assert (
+        occupancy_color_for_booking(BookingStatus.PENDING_CONFIRMATION, kind=BookingKind.CONSULTATION)
+        == COLOR_OCCUPANCY_PENDING
+    )
+    assert occupancy_color_for_booking(BookingStatus.DONE, kind=BookingKind.CONSULTATION) == COLOR_OCCUPANCY_PENDING
+    assert occupancy_color_for_booking(BookingStatus.ACTIVE, kind=BookingKind.VISIT) == COLOR_OCCUPANCY_ACTIVE
+
+
 def test_parse_estimated_duration() -> None:
     assert _parse_estimated_duration("120") == 120
     with pytest.raises(ValueError):
@@ -364,3 +377,34 @@ def test_build_occupancy_includes_consultation_booking(memory_db) -> None:
     assert seg["end_minutes"] == 17 * 60
     assert seg["color"] == COLOR_OCCUPANCY_PENDING
     assert seg["service_label"] == "Консультация"
+    assert seg["kind"] == "CONSULTATION"
+
+
+def test_build_occupancy_active_consultation_is_yellow(memory_db) -> None:
+    db = memory_db
+    db.add(Setting(key=DISPLAY_TIMEZONE, value="UTC"))
+    master = User(username="m_c2", password_hash="x", display_name="Мастер", role=UserRole.MASTER, is_active=True)
+    admin = User(username="a_c2", password_hash="x", display_name="Admin", role=UserRole.ADMIN, is_active=True)
+    client = Client(name="Клиент", is_confirmed=True)
+    db.add_all([master, admin, client])
+    db.flush()
+    booking = Booking(
+        created_by_user_id=admin.id,
+        client_id=client.id,
+        planned_date=datetime(2026, 7, 18, 10, 0, 0),
+        kind=BookingKind.CONSULTATION,
+        status=BookingStatus.ACTIVE,
+        details_json=json.dumps({"consultation_duration_minutes": 20}, ensure_ascii=False),
+    )
+    db.add(booking)
+    db.flush()
+    db.add(BookingMaster(booking_id=booking.id, master_id=master.id))
+    db.commit()
+    db.refresh(booking)
+    booking.masters = list(db.query(BookingMaster).filter_by(booking_id=booking.id).all())
+
+    occ = build_occupancy_for_day(db, day=date(2026, 7, 18), hour_from=9, hour_to=21, bookings=[booking])
+    assert len(occ["segments"]) == 1
+    assert occ["segments"][0]["color"] == COLOR_OCCUPANCY_PENDING
+    assert occ["segments"][0]["status"] == BookingStatus.ACTIVE.value
+    assert occ["segments"][0]["kind"] == "CONSULTATION"
