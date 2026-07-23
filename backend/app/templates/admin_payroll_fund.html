@@ -126,6 +126,7 @@
           var elData = document.getElementById("pf-fund-balances-data");
           var hint = document.getElementById("pf_fund_balance_hint");
           var sel = document.getElementById("pf_user");
+          var root = document.querySelector(".pf-payout-grid");
           var data = { studio: 0, employees: {} };
           try {
             if (elData && elData.textContent) data = JSON.parse(elData.textContent);
@@ -136,7 +137,7 @@
             return x.toFixed(2);
           }
           function currentSide() {
-            var r = document.querySelector('input[name="side"]:checked');
+            var r = root ? root.querySelector('input[name="side"]:checked') : null;
             return r ? r.value : "MASTER";
           }
           function syncHint() {
@@ -155,9 +156,11 @@
             }
             hint.textContent = label + ": " + fmt(v) + " руб.";
           }
-          document.querySelectorAll('input[name="side"]').forEach(function (inp) {
-            inp.addEventListener("change", syncHint);
-          });
+          if (root) {
+            root.querySelectorAll('input[name="side"]').forEach(function (inp) {
+              inp.addEventListener("change", syncHint);
+            });
+          }
           if (sel) sel.addEventListener("change", syncHint);
           syncHint();
         })();
@@ -226,25 +229,42 @@
           var elData = document.getElementById("pf-fund-balances-data");
           var hint = document.getElementById("pf_adj_balance_hint");
           var sel = document.getElementById("pf_adj_user");
+          var root = document.querySelector(".pf-adj-grid");
           var data = { studio: 0, employees: {} };
-          try { if (elData && elData.textContent) data = JSON.parse(elData.textContent); } catch (e) {}
-          function fmt(n) { var x = Number(n); if (!isFinite(x)) x = 0; return x.toFixed(2); }
-          function currentSide() { var r = document.querySelector('input[name=\"side\"]:checked'); return r ? r.value : \"MASTER\"; }
+          try {
+            if (elData && elData.textContent) data = JSON.parse(elData.textContent);
+          } catch (e) {}
+          function fmt(n) {
+            var x = Number(n);
+            if (!isFinite(x)) x = 0;
+            return x.toFixed(2);
+          }
+          function currentSide() {
+            var r = root ? root.querySelector('input[name="side"]:checked') : null;
+            return r ? r.value : "MASTER";
+          }
           function syncHint() {
             if (!hint) return;
             var side = currentSide();
-            var v, label;
-            if (side === "STUDIO") { v = data.studio; label = "Текущий баланс фонда студии"; }
-            else {
-              var uid = sel && sel.value ? String(sel.value) : \"\";
+            var v;
+            var label;
+            if (side === "STUDIO") {
+              v = data.studio;
+              label = "Текущий баланс фонда студии";
+            } else {
+              var uid = sel && sel.value ? String(sel.value) : "";
               v = (data.employees && uid) ? data.employees[uid] : 0;
               if (v === undefined || v === null) v = 0;
               label = "Текущий баланс фонда сотрудника";
             }
             hint.textContent = label + ": " + fmt(v) + " руб.";
           }
-          document.querySelectorAll('input[name=\"side\"]').forEach(function (inp) { inp.addEventListener(\"change\", syncHint); });
-          if (sel) sel.addEventListener(\"change\", syncHint);
+          if (root) {
+            root.querySelectorAll('input[name="side"]').forEach(function (inp) {
+              inp.addEventListener("change", syncHint);
+            });
+          }
+          if (sel) sel.addEventListener("change", syncHint);
           syncHint();
         })();
       </script>
