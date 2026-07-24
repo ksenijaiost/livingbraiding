@@ -544,6 +544,29 @@
       return 'ID ' + uid;
     }
 
+    function collectWorkParticipantMasterIds() {
+      var ids = new Set();
+      var kindEl = document.querySelector('select[name="kind"]');
+      var k = kindEl ? kindEl.value : '';
+      if (k === 'KIT') {
+        if (typeof window.getKitColumnMasterIds === 'function') {
+          window.getKitColumnMasterIds().forEach(function (uid) { ids.add(uid); });
+        }
+      } else {
+        var st0 = kitState();
+        if (st0 && st0.currentUserId) ids.add(st0.currentUserId);
+      }
+      return ids;
+    }
+    function syncHourlyHelpRowStatesWork() {
+      if (typeof window.rebuildHourlyHelpOptions === 'function') {
+        window.rebuildHourlyHelpOptions();
+      }
+    }
+    window.getHourlyHelpExcludedMasterIds = collectWorkParticipantMasterIds;
+    window.onHourlyHelpChange = function () { syncWorkPreview(); };
+    window.syncHourlyHelpRowStatesWork = syncHourlyHelpRowStatesWork;
+
     function syncWorkPreview() {
       var kind = document.querySelector('select[name="kind"]');
       var piecesEl = document.getElementById('work_preview_pieces_line');
@@ -552,19 +575,6 @@
       if (!piecesEl || !payEl || !costEl) return;
       syncHourlyHelpRowStatesWork();
 
-      function collectWorkParticipantMasterIds() {
-        var ids = new Set();
-        var k = kind ? kind.value : '';
-        if (k === 'KIT') {
-          if (typeof window.getKitColumnMasterIds === 'function') {
-            window.getKitColumnMasterIds().forEach(function (uid) { ids.add(uid); });
-          }
-        } else {
-          var st0 = kitState();
-          if (st0 && st0.currentUserId) ids.add(st0.currentUserId);
-        }
-        return ids;
-      }
       function hourlyHelpTotalWork() {
         var total = 0;
         document.querySelectorAll('input[name^="hourly_help_amount_"]').forEach(function (inp) {
@@ -573,18 +583,6 @@
           if (v > 0) total += v;
         });
         return total;
-      }
-      function syncHourlyHelpRowStatesWork() {
-        var participantIds = collectWorkParticipantMasterIds();
-        document.querySelectorAll('.hourly-help-row').forEach(function (row) {
-          var mid = parseInt(row.getAttribute('data-master-id') || '0', 10);
-          var disabled = participantIds.has(mid);
-          row.style.opacity = disabled ? '0.45' : '1';
-          row.querySelectorAll('.hourly-help-field').forEach(function (inp) {
-            inp.disabled = disabled;
-            if (disabled) inp.value = '';
-          });
-        });
       }
       function applyHourlyHelpToPreviewLines(payLines, st) {
         if (!payLines || !payLines.length) return payLines;
@@ -622,7 +620,6 @@
         });
         return out.concat(otherLines);
       }
-      window.syncHourlyHelpRowStatesWork = syncHourlyHelpRowStatesWork;
 
       var k = kind ? kind.value : '';
       var meta = readWorkPriceMeta();
@@ -1246,16 +1243,6 @@
             block.style.display = block.style.display === 'none' ? 'block' : 'none';
             if (typeof window.syncHourlyHelpRowStatesWork === 'function') window.syncHourlyHelpRowStatesWork();
             if (typeof syncWorkPreview === 'function') syncWorkPreview();
-          });
-          document.querySelectorAll('.hourly-help-field').forEach(function (inp) {
-            inp.addEventListener('input', function () {
-              if (typeof window.syncHourlyHelpRowStatesWork === 'function') window.syncHourlyHelpRowStatesWork();
-              if (typeof syncWorkPreview === 'function') syncWorkPreview();
-            });
-            inp.addEventListener('change', function () {
-              if (typeof window.syncHourlyHelpRowStatesWork === 'function') window.syncHourlyHelpRowStatesWork();
-              if (typeof syncWorkPreview === 'function') syncWorkPreview();
-            });
           });
         }
       })();
