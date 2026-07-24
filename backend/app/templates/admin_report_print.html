@@ -48,15 +48,15 @@
 
     <div class="section">
       <strong>Расходы студии</strong>
-      <p>{{ "%.2f"|format(expenses_total) }} руб.</p>
+      <p>{{ "%.2f"|format(expenses_total) }} руб. (по дате расхода)</p>
     </div>
 
     <div class="section">
       <strong>В фонды (операционно)</strong>
-      <p>{{ "%.2f"|format(total_to_funds) }} руб.</p>
+      <p>{{ "%.2f"|format(total_to_funds) }} руб. — по снимкам записей (дата события).</p>
       <table>
         <tr><td>Нетто начисления + сторно в журнале</td><td>{{ "%.2f"|format(ledger_net_accruals) }} руб.</td></tr>
-        <tr><td>Дельта (операционно − нетто начисления)</td><td>{{ "%.2f"|format(reconciliation_delta) }} руб.</td></tr>
+        <tr><td>Дельта (снимки − нетто журнала)</td><td>{{ "%.2f"|format(reconciliation_delta) }} руб.</td></tr>
         <tr><td>Нетто все проводки журнала</td><td>{{ "%.2f"|format(ledger_net_all) }} руб.</td></tr>
       </table>
     </div>
