@@ -8,14 +8,16 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.db.models import (
+    HourlyWorkEntry,
     MaterialPriceCurrent,
     MaterialType,
     PayrollFundEntryKind,
     PayrollFundLedger,
+    PayrollFundSourceKind,
     PayrollPeriod,
     ProductSale,
     ProductSaleKind,
@@ -26,7 +28,17 @@ from app.db.models import (
     WorkForInventory,
     WorkScope,
 )
-from app.payroll_fund import money_q2
+from app.payroll_fund import PAYROLL_FUND_SOURCE_KIND_RU, money_q2
+
+# Сторно расхода (EXPENSE) не должно попадать в «начисления+сторно» сверки.
+_LedgerOrig = aliased(PayrollFundLedger)
+_ACCRUAL_OR_ACCRUAL_STORNO = or_(
+    PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+    and_(
+        PayrollFundLedger.entry_kind == PayrollFundEntryKind.STORNO,
+        _LedgerOrig.entry_kind == PayrollFundEntryKind.ACCRUAL,
+    ),
+)
 
 
 def resolve_report_dates(
@@ -98,7 +110,32 @@ class EmployeeFundSlice:
     display_name: str
     from_visits: float
     from_works: float
+    from_consultations: float
+    from_hourly: float
+    from_manual: float
     total: float
+
+
+@dataclass
+class ReconcileBucket:
+    key: str
+    label: str
+    ops_amount: float
+    ledger_amount: float
+    delta: float
+    journal_source: str  # значение фильтра source в /admin/payroll-fund
+
+
+@dataclass
+class LedgerSourceLine:
+    source_kind: str
+    source_label: str
+    source_id: int | None
+    amount: float
+    user_name: str
+    comment: str
+    link: str
+    effective_at: datetime | None = None
 
 
 @dataclass
@@ -121,6 +158,8 @@ class OperationalReportResult:
     works_total: int
     visits_plus_sales: int
     unique_clients: int
+    consultations_count: int
+    hourly_work_count: int
 
     expenses_total: float
 
@@ -134,7 +173,11 @@ class OperationalReportResult:
     work_studio_to_fund: float
     work_masters_to_fund: float
     retail_studio_to_fund: float
+    consultation_masters_to_fund: float
+    hourly_masters_to_fund: float
+    manual_to_fund: float
     total_to_funds: float
+    total_to_funds_without_manual: float
 
     ledger_accrual: float
     ledger_storno: float
@@ -145,6 +188,8 @@ class OperationalReportResult:
     reconciliation_delta: float
 
     employees: list[EmployeeFundSlice] = field(default_factory=list)
+    reconcile_buckets: list[ReconcileBucket] = field(default_factory=list)
+    reconcile_extra_lines: list[LedgerSourceLine] = field(default_factory=list)
 
 
 def _grams_times_price(grams: float, price_per_gram: float | None) -> float:
@@ -335,7 +380,13 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
 
     def add_emp(uid: int, key: str, amt: float) -> None:
         if uid not in by_uid:
-            by_uid[uid] = {"visits": 0.0, "works": 0.0}
+            by_uid[uid] = {
+                "visits": 0.0,
+                "works": 0.0,
+                "consultations": 0.0,
+                "hourly": 0.0,
+                "manual": 0.0,
+            }
         by_uid[uid][key] = money_q2(by_uid[uid][key] + amt)
 
     for v in visits:
@@ -368,9 +419,88 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
 
     retail_studio = money_q2(sum(float(s.studio_margin_amount or 0) for s in sales))
 
-    total_to_funds = money_q2(
-        visit_studio + visit_masters + work_studio + work_masters + retail_studio
+    hourly_rows = list(
+        db.scalars(
+            select(HourlyWorkEntry).where(
+                HourlyWorkEntry.performed_date >= start,
+                HourlyWorkEntry.performed_date < end_excl,
+            )
+        ).all()
     )
+    hourly_masters = 0.0
+    for h in hourly_rows:
+        a = money_q2(float(h.amount or 0))
+        if a <= 0:
+            continue
+        hourly_masters = money_q2(hourly_masters + a)
+        add_emp(int(h.master_user_id), "hourly", a)
+
+    def _ledger_kind_net(kinds: tuple[PayrollFundSourceKind, ...]) -> float:
+        """Нетто начислений по источникам: ACCRUAL + сторно начислений (не расходов)."""
+        v = db.scalar(
+            select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
+            .select_from(PayrollFundLedger)
+            .outerjoin(_LedgerOrig, PayrollFundLedger.storno_of_id == _LedgerOrig.id)
+            .where(
+                PayrollFundLedger.effective_at >= start,
+                PayrollFundLedger.effective_at < end_excl,
+                _ACCRUAL_OR_ACCRUAL_STORNO,
+                PayrollFundLedger.source_kind.in_(kinds),
+            )
+        )
+        return money_q2(float(v or 0))
+
+    consultation_masters = _ledger_kind_net((PayrollFundSourceKind.CONSULTATION,))
+    manual_net = _ledger_kind_net((PayrollFundSourceKind.MANUAL,))
+
+    # Разнести консультации/ручные по сотрудникам из журнала (для таблицы долей).
+    cons_manual_rows = list(
+        db.scalars(
+            select(PayrollFundLedger)
+            .outerjoin(_LedgerOrig, PayrollFundLedger.storno_of_id == _LedgerOrig.id)
+            .where(
+                PayrollFundLedger.effective_at >= start,
+                PayrollFundLedger.effective_at < end_excl,
+                _ACCRUAL_OR_ACCRUAL_STORNO,
+                PayrollFundLedger.source_kind.in_(
+                    (PayrollFundSourceKind.CONSULTATION, PayrollFundSourceKind.MANUAL)
+                ),
+            )
+        ).all()
+    )
+    for row in cons_manual_rows:
+        if row.user_id is None:
+            continue
+        amt = money_q2(float(row.amount or 0))
+        if amt == 0:
+            continue
+        key = "consultations" if row.source_kind == PayrollFundSourceKind.CONSULTATION else "manual"
+        add_emp(int(row.user_id), key, amt)
+
+    consultations_count = int(
+        db.scalar(
+            select(func.count(func.distinct(PayrollFundLedger.source_id))).where(
+                PayrollFundLedger.effective_at >= start,
+                PayrollFundLedger.effective_at < end_excl,
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.CONSULTATION,
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+                PayrollFundLedger.source_id.isnot(None),
+            )
+        )
+        or 0
+    )
+    hourly_work_count = len(hourly_rows)
+
+    total_without_manual = money_q2(
+        visit_studio
+        + visit_masters
+        + work_studio
+        + work_masters
+        + retail_studio
+        + consultation_masters
+        + hourly_masters
+    )
+    total_to_funds = money_q2(total_without_manual + manual_net)
 
     uids = list(by_uid.keys())
     users_by_id: dict[int, User] = {}
@@ -378,18 +508,36 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
         for u in db.scalars(select(User).where(User.id.in_(uids))).all():
             users_by_id[u.id] = u
     employees: list[EmployeeFundSlice] = []
-    for uid in sorted(by_uid.keys(), key=lambda x: (-(by_uid[x]["visits"] + by_uid[x]["works"]), x)):
+    for uid in sorted(
+        by_uid.keys(),
+        key=lambda x: (
+            -(
+                by_uid[x]["visits"]
+                + by_uid[x]["works"]
+                + by_uid[x]["consultations"]
+                + by_uid[x]["hourly"]
+                + by_uid[x]["manual"]
+            ),
+            x,
+        ),
+    ):
         u = users_by_id.get(uid)
         name = u.display_name if u else f"ID {uid}"
         fv = money_q2(by_uid[uid]["visits"])
         fw = money_q2(by_uid[uid]["works"])
+        fc = money_q2(by_uid[uid]["consultations"])
+        fh = money_q2(by_uid[uid]["hourly"])
+        fm = money_q2(by_uid[uid]["manual"])
         employees.append(
             EmployeeFundSlice(
                 user_id=uid,
                 display_name=name,
                 from_visits=fv,
                 from_works=fw,
-                total=money_q2(fv + fw),
+                from_consultations=fc,
+                from_hourly=fh,
+                from_manual=fm,
+                total=money_q2(fv + fw + fc + fh + fm),
             )
         )
 
@@ -404,7 +552,19 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
         return money_q2(float(v or 0))
 
     ledger_accrual = _ledger_sum(PayrollFundEntryKind.ACCRUAL)
-    ledger_storno = _ledger_sum(PayrollFundEntryKind.STORNO)
+    # Сторно только по начислениям — сторно расходов не смешиваем со сверкой фондов.
+    ledger_storno_raw = db.scalar(
+        select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
+        .select_from(PayrollFundLedger)
+        .join(_LedgerOrig, PayrollFundLedger.storno_of_id == _LedgerOrig.id)
+        .where(
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
+            PayrollFundLedger.entry_kind == PayrollFundEntryKind.STORNO,
+            _LedgerOrig.entry_kind == PayrollFundEntryKind.ACCRUAL,
+        )
+    )
+    ledger_storno = money_q2(float(ledger_storno_raw or 0))
     ledger_expense = _ledger_sum(PayrollFundEntryKind.EXPENSE)
     ledger_payout = _ledger_sum(PayrollFundEntryKind.PAYOUT)
     ledger_net_accruals = money_q2(ledger_accrual + ledger_storno)
@@ -416,6 +576,96 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
         )
     )
     ledger_net_all = money_q2(float(ledger_all_raw or 0))
+
+    ledger_visits = _ledger_kind_net(
+        (PayrollFundSourceKind.VISIT, PayrollFundSourceKind.VISIT_SERVICE)
+    )
+    ledger_works = _ledger_kind_net((PayrollFundSourceKind.WORK,))
+    ledger_sales = _ledger_kind_net((PayrollFundSourceKind.PRODUCT_SALE,))
+    ledger_hourly = _ledger_kind_net((PayrollFundSourceKind.HOURLY_WORK,))
+
+    ops_visits = money_q2(visit_studio + visit_masters)
+    ops_works = money_q2(work_studio + work_masters)
+
+    def _bucket(
+        key: str,
+        label: str,
+        ops: float,
+        led: float,
+        journal_source: str,
+    ) -> ReconcileBucket:
+        return ReconcileBucket(
+            key=key,
+            label=label,
+            ops_amount=ops,
+            ledger_amount=led,
+            delta=money_q2(ops - led),
+            journal_source=journal_source,
+        )
+
+    reconcile_buckets = [
+        _bucket("visits", "Визиты (услуги визита)", ops_visits, ledger_visits, "VISIT"),
+        _bucket("works", "Работы", ops_works, ledger_works, "WORK"),
+        _bucket("sales", "Розница / продажи", retail_studio, ledger_sales, "PRODUCT_SALE"),
+        _bucket(
+            "consultations",
+            "Консультации",
+            consultation_masters,
+            consultation_masters,
+            "CONSULTATION",
+        ),
+        _bucket("hourly", "Почасовая работа", hourly_masters, ledger_hourly, "HOURLY_WORK"),
+        _bucket("manual", "Ручные проводки", manual_net, manual_net, "MANUAL"),
+    ]
+
+    # Строки журнала по консультациям / почасовой / ручным — для drill-down.
+    extra_kinds = (
+        PayrollFundSourceKind.CONSULTATION,
+        PayrollFundSourceKind.HOURLY_WORK,
+        PayrollFundSourceKind.MANUAL,
+    )
+    extra_ledger = list(
+        db.scalars(
+            select(PayrollFundLedger)
+            .options(selectinload(PayrollFundLedger.user))
+            .outerjoin(_LedgerOrig, PayrollFundLedger.storno_of_id == _LedgerOrig.id)
+            .where(
+                PayrollFundLedger.effective_at >= start,
+                PayrollFundLedger.effective_at < end_excl,
+                _ACCRUAL_OR_ACCRUAL_STORNO,
+                PayrollFundLedger.source_kind.in_(extra_kinds),
+            )
+            .order_by(PayrollFundLedger.effective_at.desc(), PayrollFundLedger.id.desc())
+            .limit(80)
+        ).all()
+    )
+    reconcile_extra_lines: list[LedgerSourceLine] = []
+    for row in extra_ledger:
+        sk = row.source_kind
+        sid = row.source_id
+        label = PAYROLL_FUND_SOURCE_KIND_RU.get(sk, sk.value if sk else "")
+        link = ""
+        if sk == PayrollFundSourceKind.CONSULTATION and sid:
+            link = f"/consultations/{sid}"
+        elif sk == PayrollFundSourceKind.HOURLY_WORK and sid:
+            link = f"/hourly-work/{sid}"
+        elif sk == PayrollFundSourceKind.MANUAL:
+            link = ""
+        uname = ""
+        if row.user is not None:
+            uname = (row.user.display_name or row.user.username or "").strip()
+        reconcile_extra_lines.append(
+            LedgerSourceLine(
+                source_kind=sk.value if sk else "",
+                source_label=label,
+                source_id=int(sid) if sid is not None else None,
+                amount=money_q2(float(row.amount or 0)),
+                user_name=uname or "—",
+                comment=(row.comment or "").strip(),
+                link=link,
+                effective_at=row.effective_at,
+            )
+        )
 
     return OperationalReportResult(
         date_from=d0,
@@ -434,6 +684,8 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
         works_total=works_total,
         visits_plus_sales=visits_plus_sales,
         unique_clients=unique_clients,
+        consultations_count=consultations_count,
+        hourly_work_count=hourly_work_count,
         expenses_total=expenses_total,
         kanekalon_grams_total=k_g_total,
         kanekalon_snapshot_rub=k_rub_total,
@@ -444,7 +696,11 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
         work_studio_to_fund=work_studio,
         work_masters_to_fund=work_masters,
         retail_studio_to_fund=retail_studio,
+        consultation_masters_to_fund=consultation_masters,
+        hourly_masters_to_fund=hourly_masters,
+        manual_to_fund=manual_net,
         total_to_funds=total_to_funds,
+        total_to_funds_without_manual=total_without_manual,
         ledger_accrual=ledger_accrual,
         ledger_storno=ledger_storno,
         ledger_expense=ledger_expense,
@@ -453,6 +709,8 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
         ledger_net_all=ledger_net_all,
         reconciliation_delta=reconciliation_delta,
         employees=employees,
+        reconcile_buckets=reconcile_buckets,
+        reconcile_extra_lines=reconcile_extra_lines,
     )
 
 
@@ -475,6 +733,8 @@ def result_to_template_dict(r: OperationalReportResult) -> dict[str, Any]:
         "works_total": r.works_total,
         "visits_plus_sales": r.visits_plus_sales,
         "unique_clients": r.unique_clients,
+        "consultations_count": r.consultations_count,
+        "hourly_work_count": r.hourly_work_count,
         "expenses_total": r.expenses_total,
         "kanekalon_grams_total": r.kanekalon_grams_total,
         "kanekalon_snapshot_rub": r.kanekalon_snapshot_rub,
@@ -485,8 +745,14 @@ def result_to_template_dict(r: OperationalReportResult) -> dict[str, Any]:
         "work_studio_to_fund": r.work_studio_to_fund,
         "work_masters_to_fund": r.work_masters_to_fund,
         "retail_studio_to_fund": r.retail_studio_to_fund,
+        "consultation_masters_to_fund": r.consultation_masters_to_fund,
+        "hourly_masters_to_fund": r.hourly_masters_to_fund,
+        "manual_to_fund": r.manual_to_fund,
         "total_to_funds": r.total_to_funds,
+        "total_to_funds_without_manual": r.total_to_funds_without_manual,
         "employees": r.employees,
+        "reconcile_buckets": r.reconcile_buckets,
+        "reconcile_extra_lines": r.reconcile_extra_lines,
         "ledger_accrual": r.ledger_accrual,
         "ledger_storno": r.ledger_storno,
         "ledger_expense": r.ledger_expense,
@@ -563,11 +829,21 @@ def report_to_csv(r: OperationalReportResult) -> str:
     wr.writerow(["Продаж", str(r.sales_count)])
     wr.writerow(["Работ всего", str(r.works_total)])
     wr.writerow(["Уникальных клиентов", str(r.unique_clients)])
+    wr.writerow(["Консультаций (с начислением)", str(r.consultations_count)])
+    wr.writerow(["Почасовых работ", str(r.hourly_work_count)])
     wr.writerow(["Расходы студии", f"{r.expenses_total:.2f}"])
     wr.writerow(["Канекалон г", f"{r.kanekalon_grams_total:.2f}"])
     wr.writerow(["Канекалон руб снимок", f"{r.kanekalon_snapshot_rub:.2f}"])
     wr.writerow(["Кудри г", f"{r.kudri_grams_total:.2f}"])
     wr.writerow(["Кудри руб снимок", f"{r.kudri_snapshot_rub:.2f}"])
+    wr.writerow(["В фонды визиты студия", f"{r.visit_studio_to_fund:.2f}"])
+    wr.writerow(["В фонды визиты сотрудники", f"{r.visit_masters_to_fund:.2f}"])
+    wr.writerow(["В фонды работы студия", f"{r.work_studio_to_fund:.2f}"])
+    wr.writerow(["В фонды работы сотрудники", f"{r.work_masters_to_fund:.2f}"])
+    wr.writerow(["В фонды розница", f"{r.retail_studio_to_fund:.2f}"])
+    wr.writerow(["В фонды консультации", f"{r.consultation_masters_to_fund:.2f}"])
+    wr.writerow(["В фонды почасовая", f"{r.hourly_masters_to_fund:.2f}"])
+    wr.writerow(["В фонды ручные", f"{r.manual_to_fund:.2f}"])
     wr.writerow(["В фонды операционно", f"{r.total_to_funds:.2f}"])
     wr.writerow(["Журнал начисления", f"{r.ledger_accrual:.2f}"])
     wr.writerow(["Журнал сторно", f"{r.ledger_storno:.2f}"])
@@ -577,7 +853,21 @@ def report_to_csv(r: OperationalReportResult) -> str:
     wr.writerow(["Журнал выплаты", f"{r.ledger_payout:.2f}"])
     wr.writerow(["Журнал нетто все проводки", f"{r.ledger_net_all:.2f}"])
     wr.writerow([])
-    wr.writerow(["Сотрудник", "По визитам", "По работам", "Всего"])
+    wr.writerow(["Источник сверки", "В отчёте", "В журнале", "Дельта"])
+    for b in r.reconcile_buckets:
+        wr.writerow([b.label, f"{b.ops_amount:.2f}", f"{b.ledger_amount:.2f}", f"{b.delta:.2f}"])
+    wr.writerow([])
+    wr.writerow(["Сотрудник", "По визитам", "По работам", "Консультации", "Почасовая", "Ручные", "Всего"])
     for e in r.employees:
-        wr.writerow([e.display_name, f"{e.from_visits:.2f}", f"{e.from_works:.2f}", f"{e.total:.2f}"])
+        wr.writerow(
+            [
+                e.display_name,
+                f"{e.from_visits:.2f}",
+                f"{e.from_works:.2f}",
+                f"{e.from_consultations:.2f}",
+                f"{e.from_hourly:.2f}",
+                f"{e.from_manual:.2f}",
+                f"{e.total:.2f}",
+            ]
+        )
     return buf.getvalue()
