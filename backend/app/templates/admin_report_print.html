@@ -24,7 +24,7 @@
   <body>
     <p class="no-print"><a href="javascript:window.print()">Печать / PDF</a> · <a href="/admin/reports">Закрыть</a></p>
     <h1>Операционный отчёт</h1>
-    <div class="muted">Период: {{ period_label }}. Сохранение в PDF: печать из браузера (Ctrl+P) → «Сохранить как PDF».</div>
+    <div class="muted">Период: {{ period_label }}. Операционные показатели — по дате события; журнал — по учётной дате. Сохранение в PDF: печать из браузера (Ctrl+P) → «Сохранить как PDF».</div>
 
     <div class="section">
       <strong>Выручка</strong>
@@ -62,7 +62,7 @@
     </div>
 
     <div class="section">
-      <strong>Журнал фондов (по дате проводки)</strong>
+      <strong>Журнал фондов (по учётной дате)</strong>
       <table>
         <tr><td>Начисления</td><td>{{ "%.2f"|format(ledger_accrual) }}</td></tr>
         <tr><td>Сторно</td><td>{{ "%.2f"|format(ledger_storno) }}</td></tr>
