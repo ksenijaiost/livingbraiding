@@ -170,6 +170,13 @@
         </div>
       </div>
       <div class="card" style="flex: 1; min-width: 200px;">
+        <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Ещё начисления ЗП</div>
+        <div style="font-size: 1.1rem; font-weight: 600; line-height: 1.45;">
+          консультаций с начислением: <strong>{{ consultations_count }}</strong><br />
+          почасовых работ: <strong>{{ hourly_work_count }}</strong>
+        </div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 200px;">
         <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Уникальные клиенты</div>
         <div style="font-size: 1.25rem; font-weight: 700;">{{ unique_clients }}</div>
         <div class="muted" style="font-size: 13px; margin-top: 8px; line-height: 1.45;">по визитам, продажам и работам с клиентом за период</div>
@@ -207,17 +214,18 @@
       </div>
     </div>
 
-    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">В фонды ЗП (по снимкам записей)</h3>
+    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">В фонды ЗП (все деньги за период)</h3>
     <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
-      Как по карточкам должны были распределиться деньги: доля студии и доля сотрудников.
-      Не «сколько в кассе», а снимок расчёта на визитах/работах/продажах с датой события в периоде.
+      Визиты / работы / розница — по снимкам карточек (дата события).
+      Консультации и ручные — нетто начислений+сторно из журнала.
+      Почасовая — сумма записей почасовой работы (дата события).
     </p>
     <div class="row" style="margin-bottom: 12px;">
       <div class="card" style="flex: 1; min-width: 220px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Визиты</div>
         <div style="font-size: 14px; line-height: 1.5;">
           <div>→ студии <strong>{{ "%.2f"|format(visit_studio_to_fund) }}</strong> руб.</div>
-          <div class="muted" style="font-size: 12px; margin: 0 0 6px;">Прибыль салона + фонд студии из визита</div>
+          <div class="muted" style="font-size: 12px; margin: 0 0 6px;">Прибыль салона + фонд студии</div>
           <div>→ сотрудникам <strong>{{ "%.2f"|format(visit_masters_to_fund) }}</strong> руб.</div>
           <div class="muted" style="font-size: 12px;">Пул мастеров по % + бонусы за микс</div>
         </div>
@@ -226,68 +234,170 @@
         <div style="font-weight: 600; margin-bottom: 8px;">Работы</div>
         <div style="font-size: 14px; line-height: 1.5;">
           <div>→ студии <strong>{{ "%.2f"|format(work_studio_to_fund) }}</strong> руб.</div>
-          <div class="muted" style="font-size: 12px; margin: 0 0 6px;">Только работы не «в наличие» (деньги появляются при продаже)</div>
+          <div class="muted" style="font-size: 12px; margin: 0 0 6px;">Только не «в наличие»</div>
           <div>→ сотрудникам <strong>{{ "%.2f"|format(work_masters_to_fund) }}</strong> руб.</div>
-          <div class="muted" style="font-size: 12px;">ЗП по строкам сотрудников работы</div>
         </div>
       </div>
       <div class="card" style="flex: 1; min-width: 220px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Розница</div>
         <div style="font-size: 14px; line-height: 1.5;">
           <div>→ фонд студии <strong>{{ "%.2f"|format(retail_studio_to_fund) }}</strong> руб.</div>
-          <div class="muted" style="font-size: 12px;">Маржа студии с продаж (без непроверенной себестоимости)</div>
+        </div>
+      </div>
+    </div>
+    <div class="row" style="margin-bottom: 12px;">
+      <div class="card" style="flex: 1; min-width: 220px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Консультации</div>
+        <div style="font-size: 14px; line-height: 1.5;">
+          <div>→ сотрудникам <strong>{{ "%.2f"|format(consultation_masters_to_fund) }}</strong> руб.</div>
+          <div class="muted" style="font-size: 12px;">Нетто из журнала (начисл. + сторно)</div>
+        </div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 220px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Почасовая работа</div>
+        <div style="font-size: 14px; line-height: 1.5;">
+          <div>→ сотрудникам <strong>{{ "%.2f"|format(hourly_masters_to_fund) }}</strong> руб.</div>
+          <div class="muted" style="font-size: 12px;">Сумма записей почасовой за период</div>
+        </div>
+      </div>
+      <div class="card" style="flex: 1; min-width: 220px; border-left: 4px solid #94a3b8;">
+        <div style="font-weight: 600; margin-bottom: 8px;">Ручные проводки</div>
+        <div style="font-size: 14px; line-height: 1.5;">
+          <div>нетто <strong>{{ "%.2f"|format(manual_to_fund) }}</strong> руб.</div>
+          <div class="muted" style="font-size: 12px;">Из журнала (начисл. + сторно, источник «Ручная»)</div>
         </div>
       </div>
     </div>
     <div class="card" style="margin-bottom: 24px; background: #ecfdf5; border: 1px solid #a7f3d0;">
-      <div class="muted" style="font-size: 12px;">Итого в фонды (операционно)</div>
+      <div class="muted" style="font-size: 12px;">Итого в фонды (все источники)</div>
       <div style="font-size: 1.4rem; font-weight: 700; color: #065f46;">{{ "%.2f"|format(total_to_funds) }} руб.</div>
-      <div class="muted" style="font-size: 12px; margin-top: 6px;">Сумма всех стрелок выше — с этим сравниваем журнал</div>
+      <div class="muted" style="font-size: 12px; margin-top: 6px;">
+        без ручных: {{ "%.2f"|format(total_to_funds_without_manual) }} · ручные: {{ "%.2f"|format(manual_to_fund) }}
+      </div>
     </div>
 
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Сверка: операционные фонды и журнал</h3>
     <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
-      Одна календарная ось: снимки по дате события, журнал по учётной дате (обычно та же дата события).
-      Сравниваем только начисления и сторно — без расходов и выплат.
+      Одна ось дат: события / учётная дата. Сравниваем начисления + сторно (без расходов и выплат).
+      Таблица ниже показывает, <strong>где именно</strong> расхождение.
     </p>
     <div class="card" style="margin-bottom: 12px; background: #f8fafc; border: 1px solid #e2e8f0;">
       <div style="font-size: 14px; line-height: 1.55;">
         <div>
-          Снимки «в фонды»: <strong>{{ "%.2f"|format(total_to_funds) }}</strong>
-          − нетто журнала (начисл. + сторно): <strong>{{ "%.2f"|format(ledger_net_accruals) }}</strong>
+          Все источники: <strong>{{ "%.2f"|format(total_to_funds) }}</strong>
+          − нетто журнала: <strong>{{ "%.2f"|format(ledger_net_accruals) }}</strong>
           = дельта: <strong>{{ "%.2f"|format(reconciliation_delta) }}</strong> руб.
         </div>
         <div class="muted" style="font-size: 13px; margin-top: 8px;">
           {% if reconciliation_delta == 0 %}
-            Сходится: по карточкам и по журналу одно и то же.
+            Сходится.
           {% elif reconciliation_delta > 0 %}
-            По карточкам больше, чем в журнале — возможно, не все начисления попали в журнал или есть ручные правки.
+            В отчёте больше, чем в журнале — возможно, не все начисления проведены.
           {% else %}
-            В журнале больше, чем по карточкам — часто из‑за правок/сторно, ручных проводок или событий, которых уже нет в операционном срезе.
+            В журнале больше, чем в отчёте — смотрите строки с ненулевой дельтой в таблице сверки.
           {% endif %}
         </div>
       </div>
     </div>
-    <div class="row" style="margin-bottom: 24px;">
+    <div class="row" style="margin-bottom: 16px;">
       <div class="card" style="flex: 1; min-width: 200px; border-left: 4px solid #0ea5e9;">
-        <div class="muted" style="font-size: 12px;">Дельта (снимки − нетто начисл.+сторно)</div>
+        <div class="muted" style="font-size: 12px;">Дельта (всё − нетто начисл.+сторно)</div>
         <div style="font-size: 1.35rem; font-weight: 700;">{{ "%.2f"|format(reconciliation_delta) }} руб.</div>
       </div>
       <div class="card" style="flex: 1; min-width: 200px;">
         <div class="muted" style="font-size: 12px;">Нетто начисления + сторно в журнале</div>
         <div style="font-size: 1.2rem; font-weight: 600;">{{ "%.2f"|format(ledger_net_accruals) }} руб.</div>
-        <div class="muted" style="font-size: 12px; margin-top: 6px;">{{ "%.2f"|format(ledger_accrual) }} + {{ "%.2f"|format(ledger_storno) }}</div>
+        <div class="muted" style="font-size: 12px; margin-top: 6px;">{{ "%.2f"|format(ledger_accrual) }} + {{ "%.2f"|format(ledger_storno) }} (сторно расходов не входят)</div>
       </div>
       <div class="card" style="flex: 1; min-width: 200px;">
         <div class="muted" style="font-size: 12px;">Нетто все проводки журнала</div>
         <div style="font-size: 1.2rem; font-weight: 600;">{{ "%.2f"|format(ledger_net_all) }} руб.</div>
-        <div class="muted" style="font-size: 12px; margin-top: 6px;">Включая расходы и выплаты — для общей картины, не для дельты</div>
+        <div class="muted" style="font-size: 12px; margin-top: 6px;">Включая расходы и выплаты</div>
       </div>
     </div>
 
+    {% set jdf = date_from.isoformat() %}
+    {% set jdt = date_to.isoformat() %}
+    <div style="overflow-x: auto; margin-bottom: 20px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Источник</th>
+            <th>В отчёте</th>
+            <th>В журнале (начисл.+сторно)</th>
+            <th>Дельта</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in reconcile_buckets %}
+            <tr {% if b.delta != 0 %}style="background:#fff7ed;"{% endif %}>
+              <td>{{ b.label }}</td>
+              <td>{{ "%.2f"|format(b.ops_amount) }}</td>
+              <td>{{ "%.2f"|format(b.ledger_amount) }}</td>
+              <td><strong>{{ "%.2f"|format(b.delta) }}</strong></td>
+              <td style="white-space: nowrap; font-size: 13px;">
+                {% if b.key == 'visits' %}
+                  <a href="/admin/reports/visits?{{ reports_filter_q }}">список</a> ·
+                  <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source=VISIT">журнал</a> ·
+                  <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source=VISIT_SERVICE">услуги</a>
+                {% elif b.key == 'works' %}
+                  <a href="/admin/reports/works?{{ reports_filter_q }}">список</a> ·
+                  <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source={{ b.journal_source }}">журнал</a>
+                {% elif b.key == 'sales' %}
+                  <a href="/admin/reports/sales?{{ reports_filter_q }}">список</a> ·
+                  <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source={{ b.journal_source }}">журнал</a>
+                {% else %}
+                  <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source={{ b.journal_source }}">журнал</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted" style="font-size: 12px; margin-top: 8px;">
+        «Список» — карточки за период по дате события. «Журнал» — проводки по учётной дате.
+        У визитов в журнале два источника: VISIT и VISIT_SERVICE (оба входят в колонку «В журнале»).
+      </p>
+    </div>
+
+    {% if reconcile_extra_lines %}
+      <h4 style="margin: 0 0 8px; font-size: 14px;">Консультации, почасовая, ручные — строки журнала</h4>
+      <div style="overflow-x: auto; margin-bottom: 24px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Дата</th>
+              <th>Тип</th>
+              <th>ID</th>
+              <th>Кому</th>
+              <th>Сумма</th>
+              <th>Комментарий</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for line in reconcile_extra_lines %}
+              <tr>
+                <td class="muted" style="font-size: 12px; white-space: nowrap;">
+                  {% if line.effective_at %}{{ line.effective_at|dt_local('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+                </td>
+                <td>{{ line.source_label }}</td>
+                <td>{% if line.source_id %}{{ line.source_id }}{% else %}—{% endif %}</td>
+                <td>{{ line.user_name }}</td>
+                <td>{{ "%.2f"|format(line.amount) }}</td>
+                <td class="muted" style="font-size: 12px;">{{ line.comment or '—' }}</td>
+                <td>{% if line.link %}<a href="{{ line.link }}">открыть</a>{% else %}—{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Доля сотрудников (по дате события)</h3>
     <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
-      Разбивка «визиты → сотрудникам» и «работы → сотрудникам» по людям (из снимков карточек).
+      Визиты и работы — из снимков; консультации / почасовая / ручные — из журнала или записей почасовой.
     </p>
     {% if employees %}
       <div style="overflow-x: auto; margin-bottom: 24px;">
@@ -295,8 +405,11 @@
           <thead>
             <tr>
               <th>Сотрудник</th>
-              <th>По визитам</th>
-              <th>По работам</th>
+              <th>Визиты</th>
+              <th>Работы</th>
+              <th>Консульт.</th>
+              <th>Почасовая</th>
+              <th>Ручные</th>
               <th>Всего</th>
             </tr>
           </thead>
@@ -306,6 +419,9 @@
                 <td>{{ e.display_name }} <span class="muted">(#{{ e.user_id }})</span></td>
                 <td>{{ "%.2f"|format(e.from_visits) }}</td>
                 <td>{{ "%.2f"|format(e.from_works) }}</td>
+                <td>{{ "%.2f"|format(e.from_consultations) }}</td>
+                <td>{{ "%.2f"|format(e.from_hourly) }}</td>
+                <td>{{ "%.2f"|format(e.from_manual) }}</td>
                 <td><strong>{{ "%.2f"|format(e.total) }}</strong></td>
               </tr>
             {% endfor %}

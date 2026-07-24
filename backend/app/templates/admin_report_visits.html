@@ -3,14 +3,14 @@
   <div class="card" style="max-width: 1100px;">
     <p class="muted" style="margin: 0 0 8px;"><a href="/admin/reports?{{ reports_nav_q }}">← К отчёту</a></p>
     <h2 style="margin-top: 0;">Визиты за период</h2>
-    <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}, не отменённые, по дате создания записи.</p>
+    <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}, не отменённые, по дате события (performed_date).</p>
     {% if rows %}
       <div style="overflow-x: auto;">
         <table>
           <thead>
             <tr>
               <th>ID</th>
-              <th>Создан</th>
+              <th>Дата события</th>
               <th>Клиент</th>
               <th>От клиента, руб.</th>
               <th></th>
@@ -20,7 +20,7 @@
             {% for v in rows %}
               <tr>
                 <td>{{ v.id }}</td>
-                <td>{{ v.created_at|dt_local('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ v.performed_date|dt_local('%Y-%m-%d %H:%M') }}</td>
                 <td>{% if v.client %}{{ v.client.display_name }}{% else %}—{% endif %}</td>
                 <td>{{ "%.2f"|format(v.amount_from_client) }}</td>
                 <td><a href="/visits/{{ v.id }}">Открыть</a></td>

@@ -12,6 +12,7 @@ from app.db import models as _orm_models  # noqa: F401
 from app.db.base import Base
 from app.db.models import (
     Client,
+    HourlyWorkEntry,
     PayrollFundEntryKind,
     PayrollFundLedger,
     PayrollFundSide,
@@ -165,3 +166,176 @@ def test_report_excludes_visit_created_in_period_but_performed_outside(memory_db
 
     may = build_operational_report(db, date(2026, 5, 1), date(2026, 5, 31))
     assert may.visits_count == 1
+
+
+def test_report_includes_consultations_hourly_and_manual(memory_db) -> None:
+    db = memory_db
+    user, client = _seed_user_client(db)
+    when = datetime(2026, 6, 10, 12, 0)
+
+    hourly = HourlyWorkEntry(
+        performed_date=when,
+        duration_minutes=60,
+        amount=500.0,
+        master_user_id=user.id,
+        created_by_user_id=user.id,
+        comment="hour",
+    )
+    db.add(hourly)
+    db.flush()
+
+    # Как в post_hourly_work: ACCRUAL мастеру + EXPENSE студии.
+    db.add(
+        PayrollFundLedger(
+            created_at=when,
+            effective_at=when,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=user.id,
+            amount=500.0,
+            source_kind=PayrollFundSourceKind.HOURLY_WORK,
+            source_id=hourly.id,
+            created_by_user_id=user.id,
+        )
+    )
+    db.add(
+        PayrollFundLedger(
+            created_at=when,
+            effective_at=when,
+            entry_kind=PayrollFundEntryKind.EXPENSE,
+            side=PayrollFundSide.STUDIO,
+            user_id=None,
+            amount=-500.0,
+            source_kind=PayrollFundSourceKind.HOURLY_WORK,
+            source_id=hourly.id,
+            created_by_user_id=user.id,
+        )
+    )
+    db.add(
+        PayrollFundLedger(
+            created_at=when,
+            effective_at=when,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=user.id,
+            amount=300.0,
+            source_kind=PayrollFundSourceKind.CONSULTATION,
+            source_id=42,
+            created_by_user_id=user.id,
+        )
+    )
+    db.add(
+        PayrollFundLedger(
+            created_at=when,
+            effective_at=when,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=user.id,
+            amount=150.0,
+            source_kind=PayrollFundSourceKind.MANUAL,
+            source_id=None,
+            created_by_user_id=user.id,
+            comment="ручная доплата",
+        )
+    )
+    db.commit()
+
+    june = build_operational_report(db, date(2026, 6, 1), date(2026, 6, 30))
+    assert june.hourly_work_count == 1
+    assert june.hourly_masters_to_fund == 500.0
+    assert june.consultations_count == 1
+    assert june.consultation_masters_to_fund == 300.0
+    assert june.manual_to_fund == 150.0
+    assert june.total_to_funds_without_manual == 800.0
+    assert june.total_to_funds == 950.0
+    # EXPENSE почасовой не входит в нетто начислений.
+    assert june.ledger_net_accruals == 950.0
+    assert june.reconciliation_delta == 0.0
+
+    by_key = {b.key: b for b in june.reconcile_buckets}
+    assert by_key["hourly"].delta == 0.0
+    assert by_key["consultations"].delta == 0.0
+    assert by_key["manual"].delta == 0.0
+    assert june.employees[0].from_hourly == 500.0
+    assert june.employees[0].from_consultations == 300.0
+    assert june.employees[0].from_manual == 150.0
+
+
+def test_report_hourly_expense_storno_does_not_inflate_ledger_net(memory_db) -> None:
+    """Сторно EXPENSE почасовой не должно портить сверку начислений."""
+    db = memory_db
+    user, _client = _seed_user_client(db)
+    when = datetime(2026, 6, 12, 9, 0)
+    hourly = HourlyWorkEntry(
+        performed_date=when,
+        duration_minutes=30,
+        amount=200.0,
+        master_user_id=user.id,
+        created_by_user_id=user.id,
+    )
+    db.add(hourly)
+    db.flush()
+
+    acc = PayrollFundLedger(
+        created_at=when,
+        effective_at=when,
+        entry_kind=PayrollFundEntryKind.ACCRUAL,
+        side=PayrollFundSide.MASTER,
+        user_id=user.id,
+        amount=200.0,
+        source_kind=PayrollFundSourceKind.HOURLY_WORK,
+        source_id=hourly.id,
+        created_by_user_id=user.id,
+    )
+    exp = PayrollFundLedger(
+        created_at=when,
+        effective_at=when,
+        entry_kind=PayrollFundEntryKind.EXPENSE,
+        side=PayrollFundSide.STUDIO,
+        user_id=None,
+        amount=-200.0,
+        source_kind=PayrollFundSourceKind.HOURLY_WORK,
+        source_id=hourly.id,
+        created_by_user_id=user.id,
+    )
+    db.add_all([acc, exp])
+    db.flush()
+    db.add(
+        PayrollFundLedger(
+            created_at=when,
+            effective_at=when,
+            entry_kind=PayrollFundEntryKind.STORNO,
+            side=PayrollFundSide.MASTER,
+            user_id=user.id,
+            amount=-200.0,
+            source_kind=PayrollFundSourceKind.HOURLY_WORK,
+            source_id=hourly.id,
+            storno_of_id=acc.id,
+            created_by_user_id=user.id,
+        )
+    )
+    db.add(
+        PayrollFundLedger(
+            created_at=when,
+            effective_at=when,
+            entry_kind=PayrollFundEntryKind.STORNO,
+            side=PayrollFundSide.STUDIO,
+            user_id=None,
+            amount=200.0,
+            source_kind=PayrollFundSourceKind.HOURLY_WORK,
+            source_id=hourly.id,
+            storno_of_id=exp.id,
+            created_by_user_id=user.id,
+        )
+    )
+    # Карточка осталась — ops всё ещё видит 200, журнал начислений нетто 0.
+    db.commit()
+
+    june = build_operational_report(db, date(2026, 6, 1), date(2026, 6, 30))
+    assert june.hourly_masters_to_fund == 200.0
+    assert june.ledger_net_accruals == 0.0
+    assert june.reconciliation_delta == 200.0
+    by_key = {b.key: b for b in june.reconcile_buckets}
+    assert by_key["hourly"].ops_amount == 200.0
+    assert by_key["hourly"].ledger_amount == 0.0
+    assert by_key["hourly"].delta == 200.0
