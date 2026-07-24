@@ -4,8 +4,9 @@
   <div class="card" style="max-width: 1100px;">
     <h2 style="margin-top: 0;">Отчёт за период</h2>
     <p class="muted" style="margin-top: -6px;">
-      Операционные показатели — по дате создания записи (визит / продажа / работа / расход). Отменённые визиты и аннулированные продажи и работы не учитываются.
-      Блок «журнал ЗП» — по дате проводки; он может отличаться от среза по записям, если проводки создавались или менялись позже.
+      Операционные показатели — по дате события (визит / продажа / работа: performed_date; расход: дата расхода).
+      Отменённые визиты и аннулированные продажи, работы и расходы не учитываются.
+      Блок «журнал ЗП» — по учётной дате проводки (effective_at); при согласованных данных сверка с блоком фондов должна сходиться.
     </p>
 
     <form method="get" action="/admin/reports" id="rep_form" class="card" style="background: #f8f9fb; margin-bottom: 20px;">
@@ -103,6 +104,9 @@
     </p>
 
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Выручка</h3>
+    <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
+      Сколько клиенты заплатили за период. Берётся поле «сумма с клиента» у записей с датой события в периоде.
+    </p>
     <div class="row" style="margin-bottom: 20px;">
       <div class="card" style="flex: 1; min-width: 160px; border-left: 4px solid #3b82f6;">
         <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Всего</div>
@@ -127,7 +131,7 @@
           <span class="muted" style="font-size: 0.8rem; font-weight: 500;"> руб.</span>
         </div>
         {% if revenue_sales_pending_review > 0 %}
-          <div class="muted" style="font-size: 12px; margin-top: 6px;">[!] Непроверенные: {{ "%.2f"|format(revenue_sales_pending_review) }} руб.</div>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">[!] Без себестоимости (маржа в фонд ещё не считалась): {{ "%.2f"|format(revenue_sales_pending_review) }} руб.</div>
         {% endif %}
       </div>
       <div class="card" style="flex: 1; min-width: 140px;">
@@ -140,6 +144,9 @@
     </div>
 
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Объёмы и клиенты</h3>
+    <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
+      Сколько событий было и сколько разных клиентов. «Услуг всего» = визиты + продажи.
+    </p>
     <div class="row" style="margin-bottom: 20px;">
       <div class="card" style="flex: 1; min-width: 200px;">
         <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Работы</div>
@@ -171,7 +178,8 @@
 
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Материал</h3>
     <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
-      Учтены граммы по визитам, работам с товарами и продажам материала (розница). Сумма «граммы × цена за грамм»: для визитов и работ — по полю снимка в записи; для продаж материала снимка цены в БД нет — берётся актуальная цена из справочника на момент отчёта; канекалон/кудри по названию подкатегории услуги, иначе граммы отнесены к канекалону (как в расчёте маржи продажи).
+      Сколько граммов ушло и сколько это в рублях (граммы × цена).
+      Источники: визиты, работы, розница материала. Цена — из снимка в записи; если снимка нет (часть розницы) — из справочника на момент отчёта.
     </p>
     <div class="row" style="margin-bottom: 20px;">
       <div class="card" style="flex: 1; min-width: 220px; border-left: 4px solid #6366f1;">
@@ -191,62 +199,96 @@
     </div>
 
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Расходы студии</h3>
-    <div class="card" style="margin-bottom: 20px; border-left: 4px solid #f59e0b; max-width: 320px;">
-      <div class="muted" style="font-size: 12px;">По дате создания расхода (не аннулированные)</div>
+    <div class="card" style="margin-bottom: 20px; border-left: 4px solid #f59e0b; max-width: 360px;">
+      <div class="muted" style="font-size: 12px;">По дате расхода из карточки (не аннулированные)</div>
       <div style="font-size: 1.25rem; font-weight: 700;">{{ "%.2f"|format(expenses_total) }} <span class="muted" style="font-size: 0.85rem; font-weight: 500;">руб.</span></div>
+      <div class="muted" style="font-size: 12px; margin-top: 8px; line-height: 1.4;">
+        Это расходы из раздела «Расходы студии». В журнале фондов ниже — отдельная сумма проводок типа «расход».
+      </div>
     </div>
 
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">В фонды ЗП (по снимкам записей)</h3>
-    <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">Сумма того, что распределяется в фонды: студия и сотрудники по визитам и работам, маржа студии с розницы. По работам доля студии из поля работы; сотрудникам — по строкам сотрудников, как в журнале.</p>
+    <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
+      Как по карточкам должны были распределиться деньги: доля студии и доля сотрудников.
+      Не «сколько в кассе», а снимок расчёта на визитах/работах/продажах с датой события в периоде.
+    </p>
     <div class="row" style="margin-bottom: 12px;">
       <div class="card" style="flex: 1; min-width: 220px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Визиты</div>
         <div style="font-size: 14px; line-height: 1.5;">
           <div>→ студии <strong>{{ "%.2f"|format(visit_studio_to_fund) }}</strong> руб.</div>
+          <div class="muted" style="font-size: 12px; margin: 0 0 6px;">Прибыль салона + фонд студии из визита</div>
           <div>→ сотрудникам <strong>{{ "%.2f"|format(visit_masters_to_fund) }}</strong> руб.</div>
+          <div class="muted" style="font-size: 12px;">Пул мастеров по % + бонусы за микс</div>
         </div>
       </div>
       <div class="card" style="flex: 1; min-width: 220px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Работы</div>
         <div style="font-size: 14px; line-height: 1.5;">
           <div>→ студии <strong>{{ "%.2f"|format(work_studio_to_fund) }}</strong> руб.</div>
+          <div class="muted" style="font-size: 12px; margin: 0 0 6px;">Только работы не «в наличие» (деньги появляются при продаже)</div>
           <div>→ сотрудникам <strong>{{ "%.2f"|format(work_masters_to_fund) }}</strong> руб.</div>
+          <div class="muted" style="font-size: 12px;">ЗП по строкам сотрудников работы</div>
         </div>
       </div>
       <div class="card" style="flex: 1; min-width: 220px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Розница</div>
         <div style="font-size: 14px; line-height: 1.5;">
           <div>→ фонд студии <strong>{{ "%.2f"|format(retail_studio_to_fund) }}</strong> руб.</div>
+          <div class="muted" style="font-size: 12px;">Маржа студии с продаж (без непроверенной себестоимости)</div>
         </div>
       </div>
     </div>
     <div class="card" style="margin-bottom: 24px; background: #ecfdf5; border: 1px solid #a7f3d0;">
       <div class="muted" style="font-size: 12px;">Итого в фонды (операционно)</div>
       <div style="font-size: 1.4rem; font-weight: 700; color: #065f46;">{{ "%.2f"|format(total_to_funds) }} руб.</div>
+      <div class="muted" style="font-size: 12px; margin-top: 6px;">Сумма всех стрелок выше — с этим сравниваем журнал</div>
     </div>
 
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Сверка: операционные фонды и журнал</h3>
     <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
-      <strong>Дельта</strong> — разница между суммой «в фонды» по снимкам записей и нетто начислений плюс сторно в журнале за тот же календарный интервал (по дате проводки).
-      Нулевая дельта обычно означает согласованность; расхождение возможно при поздних правках, ручных проводках или если проводки относятся к другому срезу дат.
-      Строка «нетто все проводки» — сумма всех типов проводок журнала в интервале (включая расходы и выплаты), для общей картины.
+      Одна календарная ось: снимки по дате события, журнал по учётной дате (обычно та же дата события).
+      Сравниваем только начисления и сторно — без расходов и выплат.
     </p>
+    <div class="card" style="margin-bottom: 12px; background: #f8fafc; border: 1px solid #e2e8f0;">
+      <div style="font-size: 14px; line-height: 1.55;">
+        <div>
+          Снимки «в фонды»: <strong>{{ "%.2f"|format(total_to_funds) }}</strong>
+          − нетто журнала (начисл. + сторно): <strong>{{ "%.2f"|format(ledger_net_accruals) }}</strong>
+          = дельта: <strong>{{ "%.2f"|format(reconciliation_delta) }}</strong> руб.
+        </div>
+        <div class="muted" style="font-size: 13px; margin-top: 8px;">
+          {% if reconciliation_delta == 0 %}
+            Сходится: по карточкам и по журналу одно и то же.
+          {% elif reconciliation_delta > 0 %}
+            По карточкам больше, чем в журнале — возможно, не все начисления попали в журнал или есть ручные правки.
+          {% else %}
+            В журнале больше, чем по карточкам — часто из‑за правок/сторно, ручных проводок или событий, которых уже нет в операционном срезе.
+          {% endif %}
+        </div>
+      </div>
+    </div>
     <div class="row" style="margin-bottom: 24px;">
       <div class="card" style="flex: 1; min-width: 200px; border-left: 4px solid #0ea5e9;">
-        <div class="muted" style="font-size: 12px;">Дельта (операционно − нетто начисл.+сторно)</div>
+        <div class="muted" style="font-size: 12px;">Дельта (снимки − нетто начисл.+сторно)</div>
         <div style="font-size: 1.35rem; font-weight: 700;">{{ "%.2f"|format(reconciliation_delta) }} руб.</div>
       </div>
       <div class="card" style="flex: 1; min-width: 200px;">
         <div class="muted" style="font-size: 12px;">Нетто начисления + сторно в журнале</div>
         <div style="font-size: 1.2rem; font-weight: 600;">{{ "%.2f"|format(ledger_net_accruals) }} руб.</div>
+        <div class="muted" style="font-size: 12px; margin-top: 6px;">{{ "%.2f"|format(ledger_accrual) }} + {{ "%.2f"|format(ledger_storno) }}</div>
       </div>
       <div class="card" style="flex: 1; min-width: 200px;">
         <div class="muted" style="font-size: 12px;">Нетто все проводки журнала</div>
         <div style="font-size: 1.2rem; font-weight: 600;">{{ "%.2f"|format(ledger_net_all) }} руб.</div>
+        <div class="muted" style="font-size: 12px; margin-top: 6px;">Включая расходы и выплаты — для общей картины, не для дельты</div>
       </div>
     </div>
 
-    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Доля сотрудников (тот же период записей)</h3>
+    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Доля сотрудников (по дате события)</h3>
+    <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
+      Разбивка «визиты → сотрудникам» и «работы → сотрудникам» по людям (из снимков карточек).
+    </p>
     {% if employees %}
       <div style="overflow-x: auto; margin-bottom: 24px;">
         <table>
@@ -274,36 +316,39 @@
       <p class="muted" style="margin-bottom: 24px;">Нет распределения на сотрудников за период.</p>
     {% endif %}
 
-    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Журнал фондов за период (по дате проводки)</h3>
+    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Журнал фондов за период (по учётной дате проводки)</h3>
+    <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
+      Что реально записано в журнал ЗП за период. Начисления и сторно участвуют в сверке выше; расходы и выплаты — отдельно.
+    </p>
     <div style="overflow-x: auto;">
       <table>
         <thead>
           <tr>
             <th>Показатель</th>
             <th>Сумма в журнале</th>
-            <th class="muted">Комментарий</th>
+            <th class="muted">Простыми словами</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td>Начисления</td>
             <td><strong>{{ "%.2f"|format(ledger_accrual) }}</strong></td>
-            <td class="muted">Обычно увеличивают сальдо фондов</td>
+            <td class="muted">Плюс в фонды (ЗП мастеров / студии)</td>
           </tr>
           <tr>
             <td>Сторно</td>
             <td><strong>{{ "%.2f"|format(ledger_storno) }}</strong></td>
-            <td class="muted">Обратные проводки</td>
+            <td class="muted">Отмены и пересчёты старых начислений</td>
           </tr>
           <tr>
             <td>Расходы студии</td>
             <td><strong>{{ "%.2f"|format(ledger_expense) }}</strong></td>
-            <td class="muted">Обычно отрицательные</td>
+            <td class="muted">Проводки расходов в журнале (не путать с блоком «Расходы студии» выше)</td>
           </tr>
           <tr>
             <td>Выплаты</td>
             <td><strong>{{ "%.2f"|format(ledger_payout) }}</strong></td>
-            <td class="muted">Списание из фондов при выплате. В колонке — сумма проводок (обычно отрицательная); модуль совпадает с выплаченными рублями при обычной выплате.</td>
+            <td class="muted">Списание из фондов при выплате (обычно отрицательные; модуль = выплаченные рубли)</td>
           </tr>
         </tbody>
       </table>

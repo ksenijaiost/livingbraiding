@@ -24,7 +24,7 @@
   <body>
     <p class="no-print"><a href="javascript:window.print()">Печать / PDF</a> · <a href="/admin/reports">Закрыть</a></p>
     <h1>Операционный отчёт</h1>
-    <div class="muted">Период: {{ period_label }}. Сохранение в PDF: печать из браузера (Ctrl+P) → «Сохранить как PDF».</div>
+    <div class="muted">Период: {{ period_label }}. Операционные показатели — по дате события; журнал — по учётной дате. Сохранение в PDF: печать из браузера (Ctrl+P) → «Сохранить как PDF».</div>
 
     <div class="section">
       <strong>Выручка</strong>
@@ -48,21 +48,21 @@
 
     <div class="section">
       <strong>Расходы студии</strong>
-      <p>{{ "%.2f"|format(expenses_total) }} руб.</p>
+      <p>{{ "%.2f"|format(expenses_total) }} руб. (по дате расхода)</p>
     </div>
 
     <div class="section">
       <strong>В фонды (операционно)</strong>
-      <p>{{ "%.2f"|format(total_to_funds) }} руб.</p>
+      <p>{{ "%.2f"|format(total_to_funds) }} руб. — по снимкам записей (дата события).</p>
       <table>
         <tr><td>Нетто начисления + сторно в журнале</td><td>{{ "%.2f"|format(ledger_net_accruals) }} руб.</td></tr>
-        <tr><td>Дельта (операционно − нетто начисления)</td><td>{{ "%.2f"|format(reconciliation_delta) }} руб.</td></tr>
+        <tr><td>Дельта (снимки − нетто журнала)</td><td>{{ "%.2f"|format(reconciliation_delta) }} руб.</td></tr>
         <tr><td>Нетто все проводки журнала</td><td>{{ "%.2f"|format(ledger_net_all) }} руб.</td></tr>
       </table>
     </div>
 
     <div class="section">
-      <strong>Журнал фондов (по дате проводки)</strong>
+      <strong>Журнал фондов (по учётной дате)</strong>
       <table>
         <tr><td>Начисления</td><td>{{ "%.2f"|format(ledger_accrual) }}</td></tr>
         <tr><td>Сторно</td><td>{{ "%.2f"|format(ledger_storno) }}</td></tr>

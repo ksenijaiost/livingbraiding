@@ -1,4 +1,4 @@
-"""Операционный отчёт за период (срез по created_at сущностей + блок по журналу ЗП)."""
+"""Операционный отчёт за период (срез по дате события + блок журнала ЗП по effective_at)."""
 
 from __future__ import annotations
 
@@ -87,6 +87,10 @@ def period_bounds(d0: date, d1: date) -> tuple[datetime, datetime]:
     end_excl = datetime.combine(d1 + timedelta(days=1), time.min)
     return start, end_excl
 
+
+def _work_event_at():
+    """Дата события работы: performed_date, иначе created_at."""
+    return func.coalesce(WorkForInventory.performed_date, WorkForInventory.created_at)
 
 @dataclass
 class EmployeeFundSlice:
@@ -183,8 +187,8 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
             select(Visit)
             .options(selectinload(Visit.masters))
             .where(
-                Visit.created_at >= start,
-                Visit.created_at < end_excl,
+                Visit.performed_date >= start,
+                Visit.performed_date < end_excl,
                 Visit.is_cancelled.is_(False),
             )
         )
@@ -199,20 +203,21 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
                 selectinload(ProductSale.material_service).selectinload(Service.subcategory),
             )
             .where(
-                ProductSale.created_at >= start,
-                ProductSale.created_at < end_excl,
+                ProductSale.performed_date >= start,
+                ProductSale.performed_date < end_excl,
                 ProductSale.is_voided.is_(False),
             )
         ).all()
     )
 
+    work_at = _work_event_at()
     works = list(
         db.scalars(
             select(WorkForInventory)
             .options(selectinload(WorkForInventory.staff_rows))
             .where(
-                WorkForInventory.created_at >= start,
-                WorkForInventory.created_at < end_excl,
+                work_at >= start,
+                work_at < end_excl,
                 WorkForInventory.is_voided.is_(False),
             )
         )
@@ -257,8 +262,8 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
 
     exp_val = db.scalar(
         select(func.coalesce(func.sum(StudioExpense.amount), 0.0)).where(
-            StudioExpense.created_at >= start,
-            StudioExpense.created_at < end_excl,
+            StudioExpense.date >= start,
+            StudioExpense.date < end_excl,
             StudioExpense.is_voided.is_(False),
         )
     )
@@ -499,11 +504,11 @@ def list_report_visits(db: Session, d0: date, d1: date) -> list[Visit]:
             select(Visit)
             .options(selectinload(Visit.client))
             .where(
-                Visit.created_at >= start,
-                Visit.created_at < end_excl,
+                Visit.performed_date >= start,
+                Visit.performed_date < end_excl,
                 Visit.is_cancelled.is_(False),
             )
-            .order_by(Visit.created_at.desc(), Visit.id.desc())
+            .order_by(Visit.performed_date.desc(), Visit.id.desc())
         ).all()
     )
 
@@ -515,27 +520,28 @@ def list_report_sales(db: Session, d0: date, d1: date) -> list[ProductSale]:
             select(ProductSale)
             .options(selectinload(ProductSale.client))
             .where(
-                ProductSale.created_at >= start,
-                ProductSale.created_at < end_excl,
+                ProductSale.performed_date >= start,
+                ProductSale.performed_date < end_excl,
                 ProductSale.is_voided.is_(False),
             )
-            .order_by(ProductSale.created_at.desc(), ProductSale.id.desc())
+            .order_by(ProductSale.performed_date.desc(), ProductSale.id.desc())
         ).all()
     )
 
 
 def list_report_works(db: Session, d0: date, d1: date) -> list[WorkForInventory]:
     start, end_excl = period_bounds(d0, d1)
+    work_at = _work_event_at()
     return list(
         db.scalars(
             select(WorkForInventory)
             .options(selectinload(WorkForInventory.client))
             .where(
-                WorkForInventory.created_at >= start,
-                WorkForInventory.created_at < end_excl,
+                work_at >= start,
+                work_at < end_excl,
                 WorkForInventory.is_voided.is_(False),
             )
-            .order_by(WorkForInventory.created_at.desc(), WorkForInventory.id.desc())
+            .order_by(work_at.desc(), WorkForInventory.id.desc())
         ).all()
     )
 
