@@ -4,8 +4,9 @@
   <div class="card" style="max-width: 1100px;">
     <h2 style="margin-top: 0;">Отчёт за период</h2>
     <p class="muted" style="margin-top: -6px;">
-      Операционные показатели — по дате создания записи (визит / продажа / работа / расход). Отменённые визиты и аннулированные продажи и работы не учитываются.
-      Блок «журнал ЗП» — по дате проводки; он может отличаться от среза по записям, если проводки создавались или менялись позже.
+      Операционные показатели — по дате создания записи (визит / продажа / работа). Расходы студии — по дате расхода.
+      Отменённые визиты и аннулированные продажи, работы и расходы не учитываются.
+      Блок «журнал ЗП» — по учётной дате проводки; он может отличаться от среза по записям, если проводки создавались или менялись позже.
     </p>
 
     <form method="get" action="/admin/reports" id="rep_form" class="card" style="background: #f8f9fb; margin-bottom: 20px;">
@@ -192,7 +193,7 @@
 
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Расходы студии</h3>
     <div class="card" style="margin-bottom: 20px; border-left: 4px solid #f59e0b; max-width: 320px;">
-      <div class="muted" style="font-size: 12px;">По дате создания расхода (не аннулированные)</div>
+      <div class="muted" style="font-size: 12px;">По дате расхода (не аннулированные)</div>
       <div style="font-size: 1.25rem; font-weight: 700;">{{ "%.2f"|format(expenses_total) }} <span class="muted" style="font-size: 0.85rem; font-weight: 500;">руб.</span></div>
     </div>
 

@@ -257,8 +257,8 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
 
     exp_val = db.scalar(
         select(func.coalesce(func.sum(StudioExpense.amount), 0.0)).where(
-            StudioExpense.created_at >= start,
-            StudioExpense.created_at < end_excl,
+            StudioExpense.date >= start,
+            StudioExpense.date < end_excl,
             StudioExpense.is_voided.is_(False),
         )
     )
