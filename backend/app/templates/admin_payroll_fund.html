@@ -60,8 +60,16 @@
       {% if not payout_user_options %}
         <p class="muted">Нет активных сотрудников с ролями мастер/админ — добавьте пользователя, чтобы записывать выплаты.</p>
       {% endif %}
+      {% if payout_techspec_closed_override %}
+        <p class="muted" style="margin-top:0;">Техспец: выплата с датой в закрытом периоде ЗП — с двойным подтверждением.</p>
+        <script type="application/json" id="pf-closed-periods-data">{{ closed_periods_json|safe }}</script>
+      {% endif %}
       <script type="application/json" id="pf-fund-balances-data">{{ payout_fund_balances_json|safe }}</script>
-      <form method="post" action="/admin/payroll-fund/payout"{% if not payout_user_options %} aria-disabled="true"{% endif %}>
+      <form method="post" action="/admin/payroll-fund/payout"{% if not payout_user_options %} aria-disabled="true"{% endif %}
+        {% if payout_techspec_closed_override %}class="js-closed-period-form" data-closed-action="Выплата" data-closed-date-input="pf_payout_date" data-closed-periods-el="pf-closed-periods-data"{% endif %}>
+        {% if payout_techspec_closed_override %}
+          <input type="hidden" name="closed_period_ack" value="" />
+        {% endif %}
         <div class="pf-payout-grid" style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 32px; align-items:start;">
           <div>
             <div class="muted" style="margin-bottom:6px;">Фонд-источник</div>
@@ -395,4 +403,7 @@
       <p class="muted">{% if journal_filtered %}По фильтру записей нет.{% else %}Записей пока нет.{% endif %}</p>
     {% endif %}
   </div>
+  {% if payout_techspec_closed_override %}
+    {% include "_closed_period_confirm.html" %}
+  {% endif %}
 {% endblock %}
