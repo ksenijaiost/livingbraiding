@@ -32,7 +32,13 @@ from app.payroll_utils import payroll_period_day_end, payroll_period_day_start
 from app.ru_labels import ru_user_roles_payout_suffix
 from app.time_utils import utcnow_naive
 from app.user_roles import get_roles_for_user, select_users_with_any_role, user_has_any_role
-from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
+from app.operational_report import list_closed_payroll_periods
+from app.visit_edit_policy import (
+    ensure_event_date_in_open_payroll_period,
+    is_in_closed_payroll_period,
+    require_closed_period_ack,
+    user_may_edit_closed_payroll_period,
+)
 from app.webui import templates, ctx as _ctx
 
 
@@ -143,6 +149,7 @@ def _payroll_fund_err_ru(code: str | None) -> str | None:
         "bad_mode": "Укажите корректный режим корректировки.",
         "bad_date": "Укажите корректную дату выплаты.",
         "bad_period": "Дата выплаты недопустима (закрытый период, будущее или раньше открытого периода).",
+        "bad_period_ack": "Для выплаты в закрытом периоде ЗП нужно двойное подтверждение (только техспец).",
     }.get(code or "", code)
 
 
@@ -257,6 +264,17 @@ def admin_payroll_fund_page(
         for k in PayrollFundSourceKind
         if k != PayrollFundSourceKind.VISIT_SERVICE
     ]
+    payout_techspec_closed_override = user_may_edit_closed_payroll_period(current_user)
+    closed_periods_json = json.dumps(
+        [
+            {
+                "from": p.date_from.date().isoformat() if hasattr(p.date_from, "date") else str(p.date_from)[:10],
+                "to": p.date_to.date().isoformat() if hasattr(p.date_to, "date") else str(p.date_to)[:10],
+            }
+            for p in list_closed_payroll_periods(db)
+        ],
+        ensure_ascii=False,
+    )
     page_err = _payroll_fund_err_ru(err) or journal_err
     return templates.TemplateResponse(
         "admin_payroll_fund.html",
@@ -271,6 +289,8 @@ def admin_payroll_fund_page(
             payout_user_options=payout_user_options,
             payout_fund_balances_json=payout_fund_balances_json,
             payout_default_date=today_local.isoformat(),
+            payout_techspec_closed_override=payout_techspec_closed_override,
+            closed_periods_json=closed_periods_json,
             journal_filtered=journal_filtered,
             journal_limit=LEDGER_JOURNAL_SEARCH_LIMIT if journal_filtered else 150,
             form_df=form_df,
@@ -320,8 +340,16 @@ async def admin_payroll_fund_payout(
     except ValueError:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_date", status_code=303)
     effective_at = datetime.combine(payout_day, datetime.min.time())
+    closed = is_in_closed_payroll_period(db, effective_at)
+    allow_closed = bool(closed and user_may_edit_closed_payroll_period(current_user))
+    if closed and not allow_closed:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_period", status_code=303)
     try:
-        ensure_event_date_in_open_payroll_period(db, effective_at)
+        require_closed_period_ack(needed=allow_closed, form_ack=form.get("closed_period_ack"))
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_period_ack", status_code=303)
+    try:
+        ensure_event_date_in_open_payroll_period(db, effective_at, allow_closed=allow_closed)
     except ValueError:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_period", status_code=303)
     try:

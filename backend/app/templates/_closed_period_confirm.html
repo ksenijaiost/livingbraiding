@@ -1,4 +1,5 @@
-{# Двойное подтверждение правки закрытого периода ЗП (техспец). #}
+{# Двойное подтверждение правки закрытого периода ЗП (техспец).
+   Опционально: data-closed-date-input + data-closed-periods-el — confirm только если дата в закрытом периоде. #}
 <script>
 (function () {
   var ACK = "CONFIRM_CLOSED_PERIOD";
@@ -13,11 +14,35 @@
       "Подтвердите ещё раз: правка закрытого периода ЗП.\n\nОтменить будет нельзя без новой правки техспецом."
     );
   }
+  function dateInClosedPeriods(isoDate, periods) {
+    if (!isoDate || !periods || !periods.length) return false;
+    for (var i = 0; i < periods.length; i++) {
+      var p = periods[i] || {};
+      var a = p.from || "";
+      var b = p.to || "";
+      if (a && b && isoDate >= a && isoDate <= b) return true;
+    }
+    return false;
+  }
   window.lbConfirmClosedPeriodEdit = doubleConfirmClosed;
   document.querySelectorAll("form.js-closed-period-form").forEach(function (form) {
     form.addEventListener("submit", function (e) {
       var ack = form.querySelector('input[name="closed_period_ack"]');
       if (ack) ack.value = "";
+      var dateInputId = form.getAttribute("data-closed-date-input");
+      if (dateInputId) {
+        var periodsElId = form.getAttribute("data-closed-periods-el") || "";
+        var periodsEl = periodsElId ? document.getElementById(periodsElId) : null;
+        var periods = [];
+        try {
+          if (periodsEl && periodsEl.textContent) periods = JSON.parse(periodsEl.textContent);
+        } catch (err) {}
+        var dateEl = document.getElementById(dateInputId);
+        var iso = dateEl ? String(dateEl.value || "").trim() : "";
+        if (!dateInClosedPeriods(iso, periods)) {
+          return;
+        }
+      }
       if (!doubleConfirmClosed(form.getAttribute("data-closed-action") || "Действие")) {
         e.preventDefault();
         return;
