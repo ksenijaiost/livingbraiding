@@ -12,14 +12,17 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.client_validation import client_age_group_label
 from app.db.models import Client, Visit
+from app.display_time import format_naive_utc_datetime, get_display_timezone
 
 
-def _cell(v: Any) -> str:
+def _cell(v: Any, *, tz_name: str | None = None) -> str:
     if v is None:
         return ""
     if isinstance(v, bool):
         return "да" if v else "нет"
     if isinstance(v, datetime):
+        if tz_name:
+            return format_naive_utc_datetime(v, tz_name, "%Y-%m-%d %H:%M:%S")
         return v.strftime("%Y-%m-%d %H:%M:%S")
     if isinstance(v, date):
         return v.isoformat()
@@ -28,6 +31,7 @@ def _cell(v: Any) -> str:
 
 def build_all_clients_csv_bytes(db: Session) -> bytes:
     """Все клиенты (без лимита списка на экране), одна таблица."""
+    tz = get_display_timezone(db)
     clients = list(
         db.scalars(
             select(Client)
@@ -91,7 +95,7 @@ def build_all_clients_csv_bytes(db: Session) -> bytes:
                 _cell(c.birth_month),
                 _cell(c.birth_year),
                 _cell(c.created_by_label),
-                _cell(c.updated_at),
+                _cell(c.updated_at, tz_name=tz),
                 updater_name,
                 _cell(c.photo_1),
                 _cell(c.photo_2),

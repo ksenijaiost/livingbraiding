@@ -350,8 +350,8 @@
             {% for r in ledger_rows %}
               <tr>
                 <td>{{ r.id }}</td>
-                <td>{{ (r.effective_at or r.created_at).strftime('%Y-%m-%d %H:%M') }}</td>
-                <td class="muted" style="font-size:12px;">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ (r.effective_at or r.created_at)|dt_local('%Y-%m-%d %H:%M') }}</td>
+                <td class="muted" style="font-size:12px;">{{ r.created_at|dt_local('%Y-%m-%d %H:%M') }}</td>
                 <td>
                   {% if r.entry_kind.value == 'ACCRUAL' %}Начисление
                   {% elif r.entry_kind.value == 'STORNO' %}Сторно

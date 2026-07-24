@@ -18,7 +18,7 @@
       <tr>
         <td class="muted" style="width:11rem; vertical-align:top;">Создано</td>
         <td>
-          {{ entry.created_at.strftime('%d.%m.%Y %H:%M') if entry.created_at else '—' }}
+          {{ entry.created_at|dt_local if entry.created_at else '—' }}
           {% if entry.created_by_user %}
             · {{ entry.created_by_user.display_name or entry.created_by_user.username }}
           {% endif %}

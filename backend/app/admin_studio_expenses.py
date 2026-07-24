@@ -9,7 +9,6 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
@@ -24,21 +23,15 @@ from app.db.models import (
     UserRole,
 )
 from app.db.session import get_db
+from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.forms_parse import parse_date_iso, parse_float, parse_int
 from app.payroll_fund import replace_studio_expense_ledger, studio_fund_balance
 from app.time_utils import utcnow_naive
 from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
-from app.ru_labels import ru_user_role
-
-templates = Jinja2Templates(directory="app/templates")
-templates.env.globals["ru_user_role"] = ru_user_role
+from app.webui import ctx as _ctx, templates
 
 router = APIRouter(prefix="/admin/expenses", tags=["admin-studio-expenses"])
 _SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
-
-
-def _ctx(request: Request, current_user: AuthUser, **kwargs):
-    return {"request": request, "current_user": current_user, **kwargs}
 
 
 def _g_str(form: Any, name: str, default: str = "") -> str:
@@ -204,11 +197,12 @@ def studio_expense_audit(
             .limit(200)
         ).all()
     )
+    tz = get_display_timezone(db)
     return JSONResponse(
         {
             "rows": [
                 {
-                    "changed_at": r.changed_at.strftime("%d.%m.%Y %H:%M") if r.changed_at else "",
+                    "changed_at": format_naive_utc_datetime(r.changed_at, tz) if r.changed_at else "",
                     "changed_by": (r.changed_by_user.display_name if r.changed_by_user else None),
                     "field_name": r.field_name,
                     "old_value": r.old_value,

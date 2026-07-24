@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.auth import AuthUser, require_role
 from app.db.models import Client, UserRole
 from app.db.session import get_db
+from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.thermo_visit import list_client_thermo_templates_for_visit
 
 
@@ -77,10 +78,15 @@ def master_client_thermo_templates(
     db: Session = Depends(get_db),
 ):
     rows = list_client_thermo_templates_for_visit(db, client_id)
+    tz = get_display_timezone(db)
     return JSONResponse(
         {
             "templates": [
-                {"id": t.id, "label": t.label, "created_at": t.created_at.strftime("%d.%m.%Y %H:%M")}
+                {
+                    "id": t.id,
+                    "label": t.label,
+                    "created_at": format_naive_utc_datetime(t.created_at, tz),
+                }
                 for t in rows
             ]
         }

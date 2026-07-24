@@ -65,7 +65,7 @@
                 <td><a href="/sales/work/{{ w.id }}">{{ w.id }}</a></td>
                 <td>
                   {% if w.created_at %}
-                    <a href="/sales/work/{{ w.id }}">{{ w.created_at.strftime('%Y-%m-%d %H:%M') }}</a>
+                    <a href="/sales/work/{{ w.id }}">{{ w.created_at|dt_local('%Y-%m-%d %H:%M') }}</a>
                   {% else %}
                     <span class="muted">—</span>
                   {% endif %}

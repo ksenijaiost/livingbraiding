@@ -21,7 +21,7 @@
             {% for s in rows %}
               <tr>
                 <td>{{ s.id }}</td>
-                <td>{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ s.created_at|dt_local('%Y-%m-%d %H:%M') }}</td>
                 <td>
                   {% if s.kind == ProductSaleKind.MATERIAL %}Материал
                   {% elif s.kind == ProductSaleKind.KIT %}Комплект

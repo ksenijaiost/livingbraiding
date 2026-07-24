@@ -40,7 +40,7 @@
           {% for r in rows %}
             <tr>
               <td><a href="/sales/products/{{ r.id }}">{{ r.id }}</a></td>
-              <td><a href="/sales/products/{{ r.id }}">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</a></td>
+              <td><a href="/sales/products/{{ r.id }}">{{ r.created_at|dt_local('%Y-%m-%d %H:%M') }}</a></td>
               <td>{{ r.performed_date.date().isoformat() }}</td>
               <td>{{ r.client.name }}</td>
               <td>

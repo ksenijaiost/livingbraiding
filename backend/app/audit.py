@@ -12,6 +12,7 @@ from typing import Any, Iterable, Type
 
 from sqlalchemy.orm import Session
 
+from app.display_time import DEFAULT_DISPLAY_TIMEZONE, format_naive_utc_datetime, get_display_timezone
 from app.time_utils import utcnow_naive
 
 
@@ -22,11 +23,11 @@ class FieldChange:
     new_value: Any
 
 
-def _to_audit_str(v: Any) -> str | None:
+def _to_audit_str(v: Any, *, tz_name: str = DEFAULT_DISPLAY_TIMEZONE) -> str | None:
     if v is None:
         return None
     if isinstance(v, datetime):
-        return v.strftime("%d.%m.%Y %H:%M")
+        return format_naive_utc_datetime(v, tz_name) or None
     if isinstance(v, date):
         return v.strftime("%d.%m.%Y")
     if isinstance(v, (str, int, float, bool)):
@@ -57,6 +58,7 @@ def write_audit_rows(
     if not changes:
         return
     when = changed_at or utcnow_naive()
+    tz = get_display_timezone(db)
     for ch in changes:
         db.add(
             log_model(
@@ -65,8 +67,8 @@ def write_audit_rows(
                     "changed_at": when,
                     "changed_by_user_id": changed_by_user_id,
                     "field_name": ch.field_name,
-                    "old_value": _to_audit_str(ch.old_value),
-                    "new_value": _to_audit_str(ch.new_value),
+                    "old_value": _to_audit_str(ch.old_value, tz_name=tz),
+                    "new_value": _to_audit_str(ch.new_value, tz_name=tz),
                 }
             )
         )

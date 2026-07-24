@@ -60,7 +60,7 @@
                 </td>
                 <td>
                   {% if p.closed_at %}
-                    {{ p.closed_at.strftime('%d.%m.%Y %H:%M') }}
+                    {{ p.closed_at|dt_local }}
                   {% else %}
                     <span class="muted">нет</span>
                   {% endif %}
