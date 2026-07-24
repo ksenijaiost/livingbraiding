@@ -21,6 +21,7 @@ from app.db.models import (
     VisitKitUsage,
     WorkForInventory,
 )
+from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.forms_parse import parse_int
 from app.payroll_fund import PayrollFundSourceKind, storno_source_accruals
 from app.kit_blank_stock_core import parse_usage_breakdown_json, return_reserve_row_to_stock
@@ -202,11 +203,11 @@ def parse_purge_entity(entity: str, entity_id_raw: str) -> tuple[str, int | list
     return e, int(eid)
 
 
-def _fmt_dt(dt) -> str:
+def _fmt_dt(dt, tz_name: str) -> str:
     if dt is None:
         return "—"
     try:
-        return dt.strftime("%d.%m.%Y %H:%M")
+        return format_naive_utc_datetime(dt, tz_name) or "—"
     except Exception:
         return str(dt)
 
@@ -216,6 +217,7 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
     kind = (entity or "").strip().lower()
     ids = entity_id if isinstance(entity_id, list) else [int(entity_id)]
     eid = int(ids[0]) if ids else 0
+    tz = get_display_timezone(db)
 
     if kind == "visit":
         visit = db.scalar(
@@ -238,7 +240,7 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
         cancelled = "да" if visit.is_cancelled else "нет"
         lines = [
             f"Клиент: {cname}" + (f", {phone}" if phone else ""),
-            f"Дата визита: {_fmt_dt(visit.performed_date)}",
+            f"Дата визита: {_fmt_dt(visit.performed_date, tz)}",
             f"Услуги: {svc}",
             f"Сумма от клиента: {float(visit.amount_from_client or 0):.2f} ₽",
             f"Отменён: {cancelled}",
@@ -260,7 +262,7 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
             svc = (b.planned_service.name or "").strip()
         lines = [
             f"Клиент: {cname}" + (f", {phone}" if phone else ""),
-            f"План: {_fmt_dt(b.planned_date)}",
+            f"План: {_fmt_dt(b.planned_date, tz)}",
             f"Тип: {b.kind.value if b.kind else '—'}, статус: {b.status.value if b.status else '—'}",
         ]
         if svc:
@@ -278,7 +280,7 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
         voided = "да" if s.is_voided else "нет"
         lines = [
             f"Клиент: {cname}" + (f", {phone}" if phone else ""),
-            f"Дата: {_fmt_dt(s.performed_date)}",
+            f"Дата: {_fmt_dt(s.performed_date, tz)}",
             f"Вид: {s.kind.value if s.kind else '—'}",
             f"Сумма: {int(s.amount_from_client or 0)} ₽",
             f"Аннулирована: {voided}",
@@ -304,7 +306,7 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
         lines = [
             f"Номер записи: {num}",
             f"Клиент: {cpart}",
-            f"Дата: {_fmt_dt(w.performed_date or w.created_at)}",
+            f"Дата: {_fmt_dt(w.performed_date or w.created_at, tz)}",
             f"Вид: {w.kind.value if w.kind else '—'}, сфера: {w.scope.value if w.scope else '—'}",
             f"Аннулирована: {voided}",
         ]

@@ -1,8 +1,23 @@
 {% set hh_fp = form_prefill if form_prefill is defined else fp %}
+{% set hh_masters_src = masters_for_visit if masters_for_visit is defined else (masters if masters is defined else []) %}
+{% set hh_prefill_rows = [] %}
+{% for u in hh_masters_src %}
+  {% set _h = hh_fp.get('hourly_help_hours_' ~ u.id, '') %}
+  {% set _m = hh_fp.get('hourly_help_minutes_' ~ u.id, '') %}
+  {% set _a = hh_fp.get('hourly_help_amount_' ~ u.id, '') %}
+  {% if _h or _m or _a %}
+    {% if hh_prefill_rows.append({
+      'master_id': u.id,
+      'hours': _h,
+      'minutes': _m,
+      'amount': _a
+    }) %}{% endif %}
+  {% endif %}
+{% endfor %}
 <div style="margin: 12px 0;">
   <button type="button" class="secondary" id="hourly_help_toggle_btn">Почасовая помощь</button>
 </div>
-<div id="hourly_help_block" class="card" style="display: {% if hh_fp.get('hourly_help_open') %}block{% else %}none{% endif %}; margin: 12px 0; border: 1px solid #e2e8f0; background: #f8fafc;">
+<div id="hourly_help_block" class="card" style="display: {% if hh_fp.get('hourly_help_open') or hh_prefill_rows %}block{% else %}none{% endif %}; margin: 12px 0; border: 1px solid #e2e8f0; background: #f8fafc;">
   <h3 style="margin-top: 0;">Почасовая помощь</h3>
   <p class="muted" style="font-size: 12px; margin-top: 0;">Время — для истории. Сумма — ЗП мастера-помощника (вычитается из пула ЗП участников визита/работы).</p>
   <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
@@ -12,26 +27,258 @@
         <th style="padding: 6px 8px; width: 5rem;">Часы</th>
         <th style="padding: 6px 8px; width: 5rem;">Минуты</th>
         <th style="padding: 6px 8px; width: 7rem;">Сумма, ₽</th>
+        <th style="padding: 6px 8px; width: 2.5rem;"></th>
       </tr>
     </thead>
-    <tbody>
-      {% for u in masters %}
-        <tr class="hourly-help-row" data-master-id="{{ u.id }}" style="border-bottom: 1px solid #f1f5f9;">
-          <td style="padding: 6px 8px;" class="hourly-help-master-name">{{ u.display_name or u.username }}</td>
-          <td style="padding: 6px 8px;">
-            <input type="number" name="hourly_help_hours_{{ u.id }}" min="0" step="1" class="hourly-help-field" style="width: 4.5rem;"
-              value="{{ hh_fp.get('hourly_help_hours_' ~ u.id, '')|e }}" />
-          </td>
-          <td style="padding: 6px 8px;">
-            <input type="number" name="hourly_help_minutes_{{ u.id }}" min="0" max="59" step="1" class="hourly-help-field" style="width: 4.5rem;"
-              value="{{ hh_fp.get('hourly_help_minutes_' ~ u.id, '')|e }}" />
-          </td>
-          <td style="padding: 6px 8px;">
-            <input type="number" name="hourly_help_amount_{{ u.id }}" min="0" step="1" class="hourly-help-field" style="width: 6rem;"
-              value="{{ hh_fp.get('hourly_help_amount_' ~ u.id, '')|e }}" />
-          </td>
-        </tr>
-      {% endfor %}
-    </tbody>
+    <tbody id="hourly_help_rows"></tbody>
   </table>
 </div>
+<script type="application/json" id="hourly_help_masters_json">[{% for u in hh_masters_src %}{"id":{{ u.id }},"name":{{ (u.display_name or u.username)|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}]</script>
+<script type="application/json" id="hourly_help_prefill_json">{{ hh_prefill_rows|tojson }}</script>
+<template id="hourly_help_row_tpl">
+  <tr class="hourly-help-row" data-master-id="">
+    <td style="padding: 6px 8px;">
+      <select class="hourly-help-master-select" style="width: 100%; max-width: 16rem;">
+        <option value="">— выбрать —</option>
+      </select>
+    </td>
+    <td style="padding: 6px 8px;">
+      <input type="number" min="0" step="1" class="hourly-help-field hourly-help-hours" style="width: 4.5rem;" disabled />
+    </td>
+    <td style="padding: 6px 8px;">
+      <input type="number" min="0" max="59" step="1" class="hourly-help-field hourly-help-minutes" style="width: 4.5rem;" disabled />
+    </td>
+    <td style="padding: 6px 8px;">
+      <input type="number" min="0" step="1" class="hourly-help-field hourly-help-amount" style="width: 6rem;" disabled />
+    </td>
+    <td style="padding: 6px 8px;">
+      <button type="button" class="secondary hourly-help-remove" style="padding: 2px 8px; display: none;" title="Убрать">×</button>
+    </td>
+  </tr>
+</template>
+<script>
+(function () {
+  var block = document.getElementById('hourly_help_block');
+  var tbody = document.getElementById('hourly_help_rows');
+  var tpl = document.getElementById('hourly_help_row_tpl');
+  if (!block || !tbody || !tpl) return;
+
+  function readJsonScript(id, fallback) {
+    var el = document.getElementById(id);
+    if (!el || !el.textContent) return fallback;
+    try { return JSON.parse(el.textContent); } catch (e) { return fallback; }
+  }
+
+  var allMasters = readJsonScript('hourly_help_masters_json', []) || [];
+  var prefillRows = readJsonScript('hourly_help_prefill_json', []) || [];
+
+  function excludedIds() {
+    if (typeof window.getHourlyHelpExcludedMasterIds === 'function') {
+      try {
+        var v = window.getHourlyHelpExcludedMasterIds();
+        if (v instanceof Set) return v;
+        if (Array.isArray(v)) return new Set(v.map(function (x) { return parseInt(x, 10); }));
+      } catch (e) {}
+    }
+    return new Set();
+  }
+
+  function notifyChange() {
+    if (typeof window.onHourlyHelpChange === 'function') {
+      try { window.onHourlyHelpChange(); } catch (e) {}
+    }
+  }
+
+  function selectedMasterIds(exceptRow) {
+    var ids = new Set();
+    tbody.querySelectorAll('.hourly-help-row').forEach(function (row) {
+      if (row === exceptRow) return;
+      var sel = row.querySelector('.hourly-help-master-select');
+      var mid = sel ? parseInt(sel.value || '0', 10) : 0;
+      if (mid > 0) ids.add(mid);
+    });
+    return ids;
+  }
+
+  function bindFieldNames(row, mid) {
+    var hours = row.querySelector('.hourly-help-hours');
+    var minutes = row.querySelector('.hourly-help-minutes');
+    var amount = row.querySelector('.hourly-help-amount');
+    if (!hours || !minutes || !amount) return;
+    if (mid > 0) {
+      hours.name = 'hourly_help_hours_' + mid;
+      minutes.name = 'hourly_help_minutes_' + mid;
+      amount.name = 'hourly_help_amount_' + mid;
+      hours.disabled = false;
+      minutes.disabled = false;
+      amount.disabled = false;
+      row.setAttribute('data-master-id', String(mid));
+    } else {
+      hours.removeAttribute('name');
+      minutes.removeAttribute('name');
+      amount.removeAttribute('name');
+      hours.disabled = true;
+      minutes.disabled = true;
+      amount.disabled = true;
+      hours.value = '';
+      minutes.value = '';
+      amount.value = '';
+      row.setAttribute('data-master-id', '');
+    }
+  }
+
+  function fillSelectOptions(row) {
+    var sel = row.querySelector('.hourly-help-master-select');
+    if (!sel) return;
+    var current = parseInt(sel.value || '0', 10) || 0;
+    var taken = selectedMasterIds(row);
+    var excl = excludedIds();
+    sel.innerHTML = '';
+    var emptyOpt = document.createElement('option');
+    emptyOpt.value = '';
+    emptyOpt.textContent = '— выбрать —';
+    sel.appendChild(emptyOpt);
+    allMasters.forEach(function (m) {
+      var id = parseInt(m.id, 10);
+      if (!id) return;
+      if (excl.has(id) && id !== current) return;
+      if (taken.has(id) && id !== current) return;
+      var opt = document.createElement('option');
+      opt.value = String(id);
+      opt.textContent = m.name || ('#' + id);
+      if (id === current) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    if (current > 0 && (excl.has(current) || !allMasters.some(function (m) { return parseInt(m.id, 10) === current; }))) {
+      sel.value = '';
+      bindFieldNames(row, 0);
+    }
+  }
+
+  function hasEmptyRow() {
+    var found = false;
+    tbody.querySelectorAll('.hourly-help-row').forEach(function (row) {
+      var sel = row.querySelector('.hourly-help-master-select');
+      if (sel && !sel.value) found = true;
+    });
+    return found;
+  }
+
+  function availableCount() {
+    var excl = excludedIds();
+    var taken = selectedMasterIds(null);
+    var n = 0;
+    allMasters.forEach(function (m) {
+      var id = parseInt(m.id, 10);
+      if (!id) return;
+      if (excl.has(id) || taken.has(id)) return;
+      n += 1;
+    });
+    return n;
+  }
+
+  function ensureEmptyRow() {
+    if (hasEmptyRow()) return;
+    if (availableCount() <= 0) return;
+    addRow(null);
+  }
+
+  function updateRemoveButtons() {
+    tbody.querySelectorAll('.hourly-help-row').forEach(function (row) {
+      var btn = row.querySelector('.hourly-help-remove');
+      var sel = row.querySelector('.hourly-help-master-select');
+      if (!btn || !sel) return;
+      btn.style.display = sel.value ? 'inline-block' : 'none';
+    });
+  }
+
+  function addRow(prefill) {
+    var node = tpl.content.cloneNode(true);
+    var row = node.querySelector('.hourly-help-row');
+    if (!row) return;
+    tbody.appendChild(row);
+    var sel = row.querySelector('.hourly-help-master-select');
+    var hours = row.querySelector('.hourly-help-hours');
+    var minutes = row.querySelector('.hourly-help-minutes');
+    var amount = row.querySelector('.hourly-help-amount');
+    var removeBtn = row.querySelector('.hourly-help-remove');
+
+    fillSelectOptions(row);
+    if (prefill && prefill.master_id) {
+      sel.value = String(prefill.master_id);
+      fillSelectOptions(row);
+      sel.value = String(prefill.master_id);
+      bindFieldNames(row, parseInt(prefill.master_id, 10));
+      if (hours) hours.value = prefill.hours != null ? String(prefill.hours) : '';
+      if (minutes) minutes.value = prefill.minutes != null ? String(prefill.minutes) : '';
+      if (amount) amount.value = prefill.amount != null ? String(prefill.amount) : '';
+    } else {
+      bindFieldNames(row, 0);
+    }
+
+    sel.addEventListener('change', function () {
+      var mid = parseInt(sel.value || '0', 10) || 0;
+      bindFieldNames(row, mid);
+      rebuildAllOptions();
+      ensureEmptyRow();
+      updateRemoveButtons();
+      notifyChange();
+    });
+    [hours, minutes, amount].forEach(function (inp) {
+      if (!inp) return;
+      inp.addEventListener('input', notifyChange);
+      inp.addEventListener('change', notifyChange);
+    });
+    if (removeBtn) {
+      removeBtn.addEventListener('click', function () {
+        row.remove();
+        rebuildAllOptions();
+        ensureEmptyRow();
+        updateRemoveButtons();
+        notifyChange();
+      });
+    }
+    updateRemoveButtons();
+  }
+
+  function rebuildAllOptions() {
+    var excl = excludedIds();
+    tbody.querySelectorAll('.hourly-help-row').forEach(function (row) {
+      var sel = row.querySelector('.hourly-help-master-select');
+      var mid = sel ? parseInt(sel.value || '0', 10) : 0;
+      if (mid > 0 && excl.has(mid)) {
+        if (sel) sel.value = '';
+        bindFieldNames(row, 0);
+      }
+      fillSelectOptions(row);
+    });
+    var empties = [];
+    tbody.querySelectorAll('.hourly-help-row').forEach(function (row) {
+      var sel = row.querySelector('.hourly-help-master-select');
+      if (sel && !sel.value) empties.push(row);
+    });
+    while (empties.length > 1) {
+      empties.pop().remove();
+    }
+    ensureEmptyRow();
+    updateRemoveButtons();
+  }
+
+  function init() {
+    tbody.innerHTML = '';
+    if (prefillRows.length) {
+      prefillRows.forEach(function (r) { addRow(r); });
+    }
+    ensureEmptyRow();
+    if (!tbody.querySelector('.hourly-help-row')) {
+      addRow(null);
+    }
+    rebuildAllOptions();
+  }
+
+  window.rebuildHourlyHelpOptions = rebuildAllOptions;
+  window.syncHourlyHelpRows = rebuildAllOptions;
+
+  init();
+})();
+</script>

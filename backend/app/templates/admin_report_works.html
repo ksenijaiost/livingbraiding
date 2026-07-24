@@ -24,7 +24,7 @@
               <tr>
                 <td>{{ w.id }}</td>
                 <td>{{ w.display_number or '—' }}</td>
-                <td>{{ w.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ w.created_at|dt_local('%Y-%m-%d %H:%M') }}</td>
                 <td>{{ w.kind.value }}</td>
                 <td>{% if w.scope.value == 'IN_STOCK' %}В наличие{% else %}На заказ{% endif %}</td>
                 <td>{% if w.client %}{{ w.client.display_name }}{% else %}—{% endif %}</td>

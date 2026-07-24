@@ -202,7 +202,7 @@
             <tr>
               <td>{{ tt.id }}</td>
               <td>{{ tt.label }}</td>
-              <td>{{ tt.created_at.strftime("%d.%m.%Y %H:%M") }}</td>
+              <td>{{ tt.created_at|dt_local }}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -229,7 +229,7 @@
             {% if n > 3 %}
               {% for a in audit_rows[:2] %}
                 <tr>
-                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                  <td class="muted">{{ a.changed_at|dt_local }}</td>
                   <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
                   <td><code>{{ a.field_name }}</code></td>
                   <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
@@ -243,7 +243,7 @@
               </tr>
               {% for a in audit_rows[2:] %}
                 <tr class="lb-audit-client" style="display:none;">
-                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                  <td class="muted">{{ a.changed_at|dt_local }}</td>
                   <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
                   <td><code>{{ a.field_name }}</code></td>
                   <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
@@ -253,7 +253,7 @@
             {% else %}
               {% for a in audit_rows[:3] %}
                 <tr>
-                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                  <td class="muted">{{ a.changed_at|dt_local }}</td>
                   <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
                   <td><code>{{ a.field_name }}</code></td>
                   <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>

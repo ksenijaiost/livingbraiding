@@ -1457,17 +1457,12 @@
       return total;
     }
 
+    window.getHourlyHelpExcludedMasterIds = collectVisitParticipantMasterIds;
+    window.onHourlyHelpChange = function () { syncVisitPreview(); };
     function syncHourlyHelpRowStates() {
-      const participantIds = collectVisitParticipantMasterIds();
-      document.querySelectorAll('.hourly-help-row').forEach(function (row) {
-        const mid = parseInt(row.getAttribute('data-master-id') || '0', 10);
-        const disabled = participantIds.has(mid);
-        row.style.opacity = disabled ? '0.45' : '1';
-        row.querySelectorAll('.hourly-help-field').forEach(function (inp) {
-          inp.disabled = disabled;
-          if (disabled) inp.value = '';
-        });
-      });
+      if (typeof window.rebuildHourlyHelpOptions === 'function') {
+        window.rebuildHourlyHelpOptions();
+      }
     }
 
     function readAllocationsForPreview() {
@@ -3186,10 +3181,6 @@
           block.style.display = block.style.display === 'none' ? 'block' : 'none';
           syncHourlyHelpRowStates();
           syncVisitPreview();
-        });
-        document.querySelectorAll('.hourly-help-field').forEach(function (inp) {
-          inp.addEventListener('input', function () { syncHourlyHelpRowStates(); syncVisitPreview(); });
-          inp.addEventListener('change', function () { syncHourlyHelpRowStates(); syncVisitPreview(); });
         });
       }
     })();

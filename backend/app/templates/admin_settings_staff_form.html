@@ -176,7 +176,7 @@
             <tbody>
               {% for a in audit_rows %}
                 <tr>
-                  <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                  <td class="muted">{{ a.changed_at|dt_local }}</td>
                   <td>{{ a.changed_by_user.display_name if a.changed_by_user else "—" }}</td>
                   <td><code>{{ a.field_name }}</code></td>
                   <td class="lb-prewrap-12rem">{{ a.old_value or "—" }}</td>

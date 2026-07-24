@@ -20,6 +20,7 @@ from app.admin_service_catalog import router as admin_service_catalog_router
 from app.audit_retention import purge_expired_audit_logs_startup_safe
 from app.bootstrap import ensure_initial_techspec_user
 from app.db.session import get_db
+from app.display_time import DisplayTimezoneMiddleware
 from app.payroll_fund import backfill_all_visit_master_accruals_if_missing
 from app.seed import ensure_dev_seed_data, ensure_prod_seed_data
 
@@ -29,6 +30,7 @@ from app import work_products as work_products_routes
 
 app = FastAPI(title="livingbraiding")
 app.add_middleware(AccessLogWithUserMiddleware)
+app.add_middleware(DisplayTimezoneMiddleware)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(admin_service_catalog_router)
 app.include_router(admin_questionnaire_fields_router)

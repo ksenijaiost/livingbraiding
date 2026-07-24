@@ -15,7 +15,7 @@
         <div>
           <h2 style="margin:0;">Продажа #{{ sale.id }}</h2>
           <p class="muted" style="margin:6px 0 0;">
-            Создано: {{ sale.created_at.strftime('%Y-%m-%d %H:%M') }} · Тип: {{ ru_kind }}
+            Создано: {{ sale.created_at|dt_local('%Y-%m-%d %H:%M') }} · Тип: {{ ru_kind }}
             {% if sale.is_voided %} · <strong>АННУЛИРОВАНО</strong>{% endif %}
           </p>
         </div>
@@ -60,7 +60,7 @@
         {% if sale.is_voided %}
           <p style="margin:6px 0;">
             <strong>Аннулировано</strong>:
-            {{ sale.voided_at.strftime('%Y-%m-%d %H:%M') if sale.voided_at else '—' }}
+            {{ sale.voided_at|dt_local('%Y-%m-%d %H:%M') if sale.voided_at else '—' }}
             {% if sale.voided_by_user %} ({{ sale.voided_by_user.display_name }}){% endif %}
           </p>
         {% endif %}
@@ -181,7 +181,7 @@
                 {% if n > 3 %}
                   {% for a in audit_rows[:2] %}
                     <tr>
-                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td class="muted">{{ a.changed_at|dt_local }}</td>
                       <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
                       <td><code>{{ a.field_name }}</code></td>
                       <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
@@ -195,7 +195,7 @@
                   </tr>
                   {% for a in audit_rows[2:] %}
                     <tr class="lb-audit-sale" style="display:none;">
-                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td class="muted">{{ a.changed_at|dt_local }}</td>
                       <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
                       <td><code>{{ a.field_name }}</code></td>
                       <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
@@ -205,7 +205,7 @@
                 {% else %}
                   {% for a in audit_rows[:3] %}
                     <tr>
-                      <td class="muted">{{ a.changed_at.strftime("%d.%m.%Y %H:%M") }}</td>
+                      <td class="muted">{{ a.changed_at|dt_local }}</td>
                       <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
                       <td><code>{{ a.field_name }}</code></td>
                       <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>

@@ -54,7 +54,7 @@
       <tr><td class="muted">Тип</td><td>{{ work_plan_type_display(plan) }}</td></tr>
       <tr><td class="muted">Комментарий</td><td>{{ plan.comment or '—' }}</td></tr>
       <tr><td class="muted">Статус</td><td><strong>{{ work_plan_status_label(plan.status) }}</strong></td></tr>
-      <tr><td class="muted">Создание</td><td>{{ plan.created_at.strftime('%d.%m.%Y %H:%M') }} · {{ plan.created_by_user.display_name or plan.created_by_user.username }}</td></tr>
+      <tr><td class="muted">Создание</td><td>{{ plan.created_at|dt_local }} · {{ plan.created_by_user.display_name or plan.created_by_user.username }}</td></tr>
       {% if linked_work %}
         <tr><td class="muted">Работа</td><td><a href="/sales/work/{{ linked_work.id }}">№{{ linked_work.id }}</a></td></tr>
       {% endif %}
@@ -62,7 +62,7 @@
         <tr><td class="muted">Почасовая работа</td><td><a href="/hourly-work/{{ linked_hourly.id }}">№{{ linked_hourly.id }}</a></td></tr>
       {% endif %}
       {% if plan.cancelled_at %}
-        <tr><td class="muted">Отмена</td><td>{{ plan.cancelled_at.strftime('%d.%m.%Y %H:%M') }}{% if plan.cancelled_by_user %} · {{ plan.cancelled_by_user.display_name or plan.cancelled_by_user.username }}{% endif %}</td></tr>
+        <tr><td class="muted">Отмена</td><td>{{ plan.cancelled_at|dt_local }}{% if plan.cancelled_by_user %} · {{ plan.cancelled_by_user.display_name or plan.cancelled_by_user.username }}{% endif %}</td></tr>
       {% endif %}
     </table>
 

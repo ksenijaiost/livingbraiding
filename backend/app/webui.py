@@ -7,15 +7,22 @@ separate router modules.
 """
 
 import json
+from datetime import date, datetime
 from typing import Any
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
+from jinja2 import pass_context
 
 from app.consultation_booking import booking_kind_label, booking_status_display
 from app.client_payment import client_payment_kind_label
 from app.consultation_types import format_types_display
-from app.display_time import format_naive_utc_datetime, timezone_label
+from app.display_time import (
+    DEFAULT_DISPLAY_TIMEZONE,
+    format_naive_utc_datetime,
+    resolve_request_display_timezone,
+    timezone_label,
+)
 from app.planned_service_time import format_planned_service_start_local
 from app.ui_service_display import format_duration_minutes_ru, format_service_catalog_path
 from app.ru_labels import (
@@ -40,7 +47,20 @@ def _jinja_pretty_json(value: str | None) -> str:
         return str(value)
 
 
+@pass_context
+def _jinja_dt_local(context: Any, value: datetime | date | None, fmt: str = "%d.%m.%Y %H:%M") -> str:
+    """Показать naive-UTC datetime в display_tz из контекста (настройка студии)."""
+    if value is None:
+        return "—"
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value.strftime(fmt if "%H" not in fmt else "%d.%m.%Y")
+    tz = context.get("display_tz") or DEFAULT_DISPLAY_TIMEZONE
+    out = format_naive_utc_datetime(value, tz, fmt)
+    return out or "—"
+
+
 templates.env.filters["pretty_json"] = _jinja_pretty_json
+templates.env.filters["dt_local"] = _jinja_dt_local
 templates.env.globals["ru_master_level"] = ru_master_level
 templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_type
 templates.env.globals["ru_user_role"] = ru_user_role
@@ -59,6 +79,8 @@ templates.env.globals["master_levels"] = tuple(MasterLevel)
 
 
 def ctx(request: Request, current_user: Any = None, **kwargs):
-    """Common Jinja context: always pass request + current_user."""
-    return {"request": request, "current_user": current_user, **kwargs}
-
+    """Common Jinja context: always pass request + current_user + display_tz."""
+    out = {"request": request, "current_user": current_user, **kwargs}
+    if "display_tz" not in out:
+        out["display_tz"] = resolve_request_display_timezone(request)
+    return out
