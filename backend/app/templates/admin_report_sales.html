@@ -4,6 +4,7 @@
     <p class="muted" style="margin: 0 0 8px;"><a href="/admin/reports?{{ reports_nav_q }}">← К отчёту</a></p>
     <h2 style="margin-top: 0;">Продажи за период</h2>
     <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}, не аннулированные, по дате события (performed_date).</p>
+    <p class="muted" style="font-size: 13px;">«В журнале» и «В продаже» — одна сумма с клиента (у продажи нет отдельных строк услуг). Расхождение подсвечено.</p>
     {% if rows %}
       <div style="overflow-x: auto;">
         <table>
@@ -13,13 +14,15 @@
               <th>Дата события</th>
               <th>Тип</th>
               <th>Клиент</th>
-              <th>Сумма</th>
+              <th>В журнале, руб.</th>
+              <th>В продаже, руб.</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {% for s in rows %}
-              <tr>
+            {% for row in rows %}
+              {% set s = row.entity %}
+              <tr{% if row.amount_mismatch %} style="background:#fef3c7;"{% endif %}>
                 <td>{{ s.id }}</td>
                 <td>{{ s.performed_date|dt_local('%Y-%m-%d %H:%M') }}</td>
                 <td>
@@ -29,8 +32,9 @@
                   {% elif s.kind == ProductSaleKind.OTHER %}Другое
                   {% else %}{{ s.kind.value }}{% endif %}
                 </td>
-                <td>{% if s.client %}{{ s.client.display_name }}{% else %}—{% endif %}</td>
-                <td>{{ "%.2f"|format(s.amount_from_client) }}</td>
+                <td>{% if s.client %}{{ s.client.name }}{% else %}—{% endif %}</td>
+                <td>{{ "%.2f"|format(row.amount_journal) }}</td>
+                <td>{{ "%.2f"|format(row.amount_card) }}</td>
                 <td><a href="/sales/products/{{ s.id }}">Открыть</a></td>
               </tr>
             {% endfor %}

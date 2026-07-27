@@ -30,6 +30,35 @@ from app.db.models import (
 )
 from app.payroll_fund import PAYROLL_FUND_SOURCE_KIND_RU, money_q2
 
+
+@dataclass(frozen=True)
+class ReportAmountCompareRow:
+    """Строка списка отчёта: сумма в учёте (денорм.) vs сумма в карточке."""
+
+    entity: Any
+    amount_journal: float | None
+    amount_card: float | None
+    amount_mismatch: bool
+
+
+def _amounts_mismatch(a: float | None, b: float | None) -> bool:
+    if a is None and b is None:
+        return False
+    if a is None or b is None:
+        return True
+    return money_q2(a) != money_q2(b)
+
+
+def _visit_services_amount_from_client(visit: Visit) -> float:
+    """Как «Итого с клиента» в карточке визита: сумма активных строк услуг."""
+    return money_q2(
+        sum(
+            float(s.amount_from_client or 0)
+            for s in (visit.services or [])
+            if not s.is_cancelled
+        )
+    )
+
 # Сторно расхода (EXPENSE) не должно попадать в «начисления+сторно» сверки.
 _LedgerOrig = aliased(PayrollFundLedger)
 _ACCRUAL_OR_ACCRUAL_STORNO = or_(
@@ -759,12 +788,15 @@ def result_to_template_dict(r: OperationalReportResult) -> dict[str, Any]:
     }
 
 
-def list_report_visits(db: Session, d0: date, d1: date) -> list[Visit]:
+def list_report_visits(db: Session, d0: date, d1: date) -> list[ReportAmountCompareRow]:
     start, end_excl = period_bounds(d0, d1)
-    return list(
+    visits = list(
         db.scalars(
             select(Visit)
-            .options(selectinload(Visit.client))
+            .options(
+                selectinload(Visit.client),
+                selectinload(Visit.services),
+            )
             .where(
                 Visit.performed_date >= start,
                 Visit.performed_date < end_excl,
@@ -773,11 +805,24 @@ def list_report_visits(db: Session, d0: date, d1: date) -> list[Visit]:
             .order_by(Visit.performed_date.desc(), Visit.id.desc())
         ).all()
     )
+    rows: list[ReportAmountCompareRow] = []
+    for v in visits:
+        journal = money_q2(float(v.amount_from_client or 0))
+        card = _visit_services_amount_from_client(v)
+        rows.append(
+            ReportAmountCompareRow(
+                entity=v,
+                amount_journal=journal,
+                amount_card=card,
+                amount_mismatch=_amounts_mismatch(journal, card),
+            )
+        )
+    return rows
 
 
-def list_report_sales(db: Session, d0: date, d1: date) -> list[ProductSale]:
+def list_report_sales(db: Session, d0: date, d1: date) -> list[ReportAmountCompareRow]:
     start, end_excl = period_bounds(d0, d1)
-    return list(
+    sales = list(
         db.scalars(
             select(ProductSale)
             .options(selectinload(ProductSale.client))
@@ -789,12 +834,24 @@ def list_report_sales(db: Session, d0: date, d1: date) -> list[ProductSale]:
             .order_by(ProductSale.performed_date.desc(), ProductSale.id.desc())
         ).all()
     )
+    rows: list[ReportAmountCompareRow] = []
+    for s in sales:
+        amt = money_q2(float(s.amount_from_client or 0))
+        rows.append(
+            ReportAmountCompareRow(
+                entity=s,
+                amount_journal=amt,
+                amount_card=amt,
+                amount_mismatch=False,
+            )
+        )
+    return rows
 
 
-def list_report_works(db: Session, d0: date, d1: date) -> list[WorkForInventory]:
+def list_report_works(db: Session, d0: date, d1: date) -> list[ReportAmountCompareRow]:
     start, end_excl = period_bounds(d0, d1)
     work_at = _work_event_at()
-    return list(
+    works = list(
         db.scalars(
             select(WorkForInventory)
             .options(selectinload(WorkForInventory.client))
@@ -806,6 +863,18 @@ def list_report_works(db: Session, d0: date, d1: date) -> list[WorkForInventory]
             .order_by(work_at.desc(), WorkForInventory.id.desc())
         ).all()
     )
+    rows: list[ReportAmountCompareRow] = []
+    for w in works:
+        amt = money_q2(float(w.amount_from_client)) if w.amount_from_client is not None else None
+        rows.append(
+            ReportAmountCompareRow(
+                entity=w,
+                amount_journal=amt,
+                amount_card=amt,
+                amount_mismatch=False,
+            )
+        )
+    return rows
 
 
 def report_to_csv(r: OperationalReportResult) -> str:
