@@ -1511,6 +1511,9 @@ def search_ledger_rows(
     user_id: int | None = None,
     studio_only: bool = False,
     source_kind: PayrollFundSourceKind | None = None,
+    entry_kind: PayrollFundEntryKind | None = None,
+    side: PayrollFundSide | None = None,
+    created_by_user_id: int | None = None,
     limit: int | None = None,
 ) -> list[PayrollFundLedger]:
     """Журнал фонда: без фильтров — последние записи; с фильтрами — по дате учёта.
@@ -1523,6 +1526,9 @@ def search_ledger_rows(
         or user_id is not None
         or studio_only
         or source_kind is not None
+        or entry_kind is not None
+        or side is not None
+        or created_by_user_id is not None
     )
     if limit is None:
         limit = LEDGER_JOURNAL_SEARCH_LIMIT if has_filter else LEDGER_JOURNAL_DEFAULT_LIMIT
@@ -1551,6 +1557,12 @@ def search_ledger_rows(
             )
         else:
             q = q.where(PayrollFundLedger.source_kind == source_kind)
+    if entry_kind is not None:
+        q = q.where(PayrollFundLedger.entry_kind == entry_kind)
+    if side is not None:
+        q = q.where(PayrollFundLedger.side == side)
+    if created_by_user_id is not None:
+        q = q.where(PayrollFundLedger.created_by_user_id == int(created_by_user_id))
 
     if has_filter:
         q = q.order_by(PayrollFundLedger.effective_at.desc(), PayrollFundLedger.id.desc())

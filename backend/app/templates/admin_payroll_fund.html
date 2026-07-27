@@ -313,6 +313,33 @@
             {% endfor %}
           </select>
         </div>
+        <div>
+          <label for="pf_j_type">Тип</label>
+          <select name="type" id="pf_j_type" style="width:100%; box-sizing:border-box;">
+            <option value="">— все —</option>
+            {% for opt in entry_kind_options|default([]) %}
+              <option value="{{ opt.value }}" {% if form_type == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="pf_j_fund">Фонд</label>
+          <select name="fund" id="pf_j_fund" style="width:100%; box-sizing:border-box;">
+            <option value="">— все —</option>
+            {% for opt in fund_side_options|default([]) %}
+              <option value="{{ opt.value }}" {% if form_fund == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="pf_j_by">Кто внёс</label>
+          <select name="by" id="pf_j_by" style="width:100%; box-sizing:border-box;">
+            <option value="">— все —</option>
+            {% for o in created_by_user_options|default([]) %}
+              <option value="{{ o.user.id }}" {% if form_by == (o.user.id|string) %}selected{% endif %}>{{ o.user.display_name }} ({{ o.roles_ru }})</option>
+            {% endfor %}
+          </select>
+        </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
           <button type="submit">Найти</button>
           {% if journal_filtered %}
@@ -324,7 +351,7 @@
         {% if journal_filtered %}
           Показаны записи по фильтру (не более {{ journal_limit }}).
         {% else %}
-          Без фильтра — последние {{ journal_limit|default(150) }} записей. Укажите дату, период, сотрудника или источник.
+          Без фильтра — последние {{ journal_limit|default(150) }} записей. Укажите дату, период, сотрудника, источник, тип, фонд или автора записи.
         {% endif %}
       </p>
     </form>

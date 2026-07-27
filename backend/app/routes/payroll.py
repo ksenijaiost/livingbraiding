@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, require_role
-from app.db.models import PayrollPeriod, User, UserRole
+from app.db.models import PayrollFundEntryKind, PayrollPeriod, User, UserRole
 from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_date_iso, parse_float, parse_int
@@ -162,6 +162,9 @@ def admin_payroll_fund_page(
     dt: str | None = None,
     whom: str | None = None,
     source: str | None = None,
+    type: str | None = None,
+    fund: str | None = None,
+    by: str | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -176,6 +179,9 @@ def admin_payroll_fund_page(
     form_dt = (dt or "").strip()
     form_whom = (whom or "").strip()
     form_source = (source or "").strip().upper()
+    form_type = (type or "").strip().upper()
+    form_fund = (fund or "").strip().upper()
+    form_by = (by or "").strip()
     if form_df:
         try:
             effective_from = parse_date_iso(form_df, field_name="df")
@@ -214,12 +220,39 @@ def admin_payroll_fund_page(
             journal_err = "Некорректный источник в фильтре журнала."
             form_source = ""
 
+    filter_entry_kind: PayrollFundEntryKind | None = None
+    if form_type:
+        try:
+            filter_entry_kind = PayrollFundEntryKind(form_type)
+        except ValueError:
+            journal_err = "Некорректный тип в фильтре журнала."
+            form_type = ""
+
+    filter_side: PayrollFundSide | None = None
+    if form_fund:
+        try:
+            filter_side = PayrollFundSide(form_fund)
+        except ValueError:
+            journal_err = "Некорректный фонд в фильтре журнала."
+            form_fund = ""
+
+    filter_created_by_user_id: int | None = None
+    if form_by:
+        try:
+            filter_created_by_user_id = parse_int(form_by, min=1, field_name="by")
+        except ValueError:
+            journal_err = "Некорректный пользователь в фильтре «Кто внёс»."
+            form_by = ""
+
     journal_filtered = bool(
         effective_from is not None
         or effective_to is not None
         or filter_user_id is not None
         or studio_only
         or filter_source is not None
+        or filter_entry_kind is not None
+        or filter_side is not None
+        or filter_created_by_user_id is not None
     )
     ledger_rows = search_ledger_rows(
         db,
@@ -228,6 +261,9 @@ def admin_payroll_fund_page(
         user_id=filter_user_id,
         studio_only=studio_only,
         source_kind=filter_source,
+        entry_kind=filter_entry_kind,
+        side=filter_side,
+        created_by_user_id=filter_created_by_user_id,
     )
     vs_source_ids = [
         int(r.source_id)
@@ -264,6 +300,17 @@ def admin_payroll_fund_page(
         for k in PayrollFundSourceKind
         if k != PayrollFundSourceKind.VISIT_SERVICE
     ]
+    entry_kind_options = [
+        {"value": PayrollFundEntryKind.ACCRUAL.value, "label": "Начисление"},
+        {"value": PayrollFundEntryKind.STORNO.value, "label": "Сторно"},
+        {"value": PayrollFundEntryKind.PAYOUT.value, "label": "Выплата"},
+        {"value": PayrollFundEntryKind.EXPENSE.value, "label": "Расход студии"},
+    ]
+    fund_side_options = [
+        {"value": PayrollFundSide.MASTER.value, "label": "Фонд сотрудника"},
+        {"value": PayrollFundSide.STUDIO.value, "label": "Фонд студии"},
+    ]
+    created_by_user_options = payout_user_options
     payout_techspec_closed_override = user_may_edit_closed_payroll_period(current_user)
     closed_periods_json = json.dumps(
         [
@@ -297,7 +344,13 @@ def admin_payroll_fund_page(
             form_dt=form_dt,
             form_whom=form_whom,
             form_source=form_source,
+            form_type=form_type,
+            form_fund=form_fund,
+            form_by=form_by,
             source_kind_options=source_kind_options,
+            entry_kind_options=entry_kind_options,
+            fund_side_options=fund_side_options,
+            created_by_user_options=created_by_user_options,
             msg=_payroll_fund_msg_ru(msg),
             err=page_err,
         ),
