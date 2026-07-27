@@ -65,7 +65,7 @@ def test_build_visit_master_pay_rows_visit_scope_splits_pool() -> None:
     assert rows[1].total == 500.0
 
 
-def test_build_visit_master_pay_rows_per_service_and_mix_bonus() -> None:
+def test_build_visit_master_pay_rows_per_service_ignores_mix_bonus() -> None:
     visit = SimpleNamespace(
         masters_scope=VisitMastersScope.PER_SERVICE,
         masters_pool=800.0,
@@ -96,9 +96,9 @@ def test_build_visit_master_pay_rows_per_service_and_mix_bonus() -> None:
     rows = build_visit_master_pay_rows(visit)
     by_id = {r.master_id: r for r in rows}
     assert by_id[1].total == 600.0
-    assert by_id[2].total == 300.0
+    assert by_id[2].total == 200.0
     assert by_id[2].pool_share == 200.0
-    assert by_id[2].mix_bonus == 100.0
+    assert by_id[2].mix_bonus == 0.0
 
 
 def test_build_visit_masters_lines_per_service() -> None:

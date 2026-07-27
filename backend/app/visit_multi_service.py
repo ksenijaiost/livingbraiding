@@ -64,7 +64,6 @@ from app.kit_inlay_visit import (
     read_visit_master_form_state,
     service_requires_kit_block,
 )
-from app.mix_rates import mix_complexity_rate_for
 from app.payroll_fund import (
     PayrollFundSourceKind,
     post_visit_accruals,
@@ -410,12 +409,12 @@ def compute_visit_service_line(
     if line.mix_source and line.mix_source != MixSource.NO_MIX:
         if line.mix_complexity is None:
             raise ValueError("Укажите сложность смешки")
-        coef = mix_complexity_rate_for(db, line.mix_complexity)
-        mix_cost = grams_total * coef
-        if line.mix_source == MixSource.SELF_MIXED:
-            mix_bonus_amount = mix_cost
-            if mix_bonus_master_id is None:
-                mix_bonus_master_id = default_mix_bonus_master_id
+        # 1.19: финансово бонус за смешку в визите отключён.
+        # Сохраняем сам факт смешки (source/complexity), но не добавляем его
+        # ни в себестоимость, ни в начисление мастеру. Если захотите вернуть
+        # прежнее поведение, здесь нужно снова считать coef -> mix_cost и bonus.
+        if line.mix_source == MixSource.SELF_MIXED and mix_bonus_master_id is None:
+            mix_bonus_master_id = default_mix_bonus_master_id
     if mix_bonus_master_id:
         _validate_mix_bonus_master(db, mix_bonus_master_id)
 

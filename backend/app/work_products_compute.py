@@ -246,16 +246,8 @@ def compute_work_financials(
                     q = int(kit_by_staff.get(uid, {}).get(item_key, 0))
                     if q > 0:
                         staff_master_profit[uid] += rate * q
-        if mix_source == MixSource.SELF_MIXED and grams_total > 0 and mix_complexity is not None:
-            mrate = float(mix_complexity_rate_map(db).get(mix_complexity, 0.0))
-            mix_pay = max(0.0, float(grams_total) * mrate)
-            if mix_pay > 0:
-                if current_user_id in staff_master_profit:
-                    staff_master_profit[current_user_id] += mix_pay
-                elif kit_staff_ids:
-                    share = mix_pay / float(len(kit_staff_ids))
-                    for uid in kit_staff_ids:
-                        staff_master_profit[uid] += share
+        # 1.19: в работах не добавляем бонус за смешку в ЗП мастеров.
+        # Если правило вернётся, прежнее начисление SELF_MIXED можно восстановить здесь.
 
     elif kind == WorkKind.RUBBER:
         mp, sp, fx, is_per_unit, _ul = _rubber_pricing_from_catalog(db, rubber_type)
@@ -307,13 +299,7 @@ def compute_work_financials(
         studio_total = float(sp) * float(units) * bonus
         extra_costs_amount = float(fx) * float(units)
 
-        if (
-            mix_source == MixSource.SELF_MIXED
-            and grams_total > 0
-            and mix_complexity is not None
-        ):
-            rate = float(mix_complexity_rate_map(db).get(mix_complexity, 0.0))
-            staff_master_profit[current_user_id] += max(0.0, float(grams_total) * rate)
+        # 1.19: в «Другое» бонус за смешку тоже не начисляем.
 
     master_total = float(sum(staff_master_profit.values()))
     cost_total_amount = float(mat_cost) + float(extra_costs_amount)

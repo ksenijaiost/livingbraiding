@@ -156,8 +156,6 @@ def _master_visit_service_pay(visit: Visit, vs: VisitService, master_id: int) ->
         for m in visit.masters:
             if int(m.master_id) == master_id:
                 amt = money_q2(amt + pool * float(m.percent or 0) / 100.0)
-    if vs.mix_bonus_master_id and int(vs.mix_bonus_master_id) == master_id:
-        amt = money_q2(amt + float(vs.mix_bonus_amount or 0))
     if vs.correction_master_id and int(vs.correction_master_id) == master_id:
         amt = money_q2(amt + float(vs.correction_master_amount or 0))
     return amt
@@ -168,12 +166,12 @@ def _visit_studio_pay(vs: VisitService) -> float:
 
 
 def _visit_masters_pay_total(visit: Visit) -> float:
-    """Суммарная ЗП всех мастеров по визиту: пул + бонусы за смешку."""
+    """Суммарная ЗП всех мастеров по визиту: пул + коррекции."""
     total = 0.0
     for vs in visit.services or []:
         if vs.is_cancelled:
             continue
-        total = money_q2(total + float(vs.masters_pool or 0) + float(vs.mix_bonus_amount or 0) + float(vs.correction_master_amount or 0))
+        total = money_q2(total + float(vs.masters_pool or 0) + float(vs.correction_master_amount or 0))
     return total
 
 

@@ -1743,13 +1743,11 @@
       }
       const gramsTotal = kan + kud;
       const mixCoef = mixComp ? (parseFloat(mixComplexityRatesPerGram[mixComp]) || 0) : 0;
-      const mixCost = (gramsTotal > 0 && mixSource !== 'NO_MIX' && mixComp && mixCoef) ? (gramsTotal * mixCoef) : 0;
-      let mixBonus = 0;
-      if (mixSource === 'SELF_MIXED' && mixCost > 0) {
-        const target = bonusMasterId > 0 ? bonusMasterId : currentUserId;
-        if (target > 0) mixBonus = mixCost;
-      }
-      return { mixCost: mixCost, mixBonus: mixBonus, bonusMasterId: bonusMasterId > 0 ? bonusMasterId : (mixSource === 'SELF_MIXED' ? currentUserId : 0) };
+      void gramsTotal;
+      void mixCoef;
+      // 1.19: бонус за смешку в визите отключён и в превью тоже.
+      // Возвращаем нули, но выбор мастера/сложности оставляем в форме на будущее.
+      return { mixCost: 0, mixBonus: 0, bonusMasterId: bonusMasterId > 0 ? bonusMasterId : (mixSource === 'SELF_MIXED' ? currentUserId : 0) };
     }
 
     function lineKitCostParts(idx, meta) {
@@ -1978,7 +1976,7 @@
         payEl.innerHTML = lines.map((l) => '<div>' + l + '</div>').join('');
       }
 
-      let costLine = 'Себестоимость (итого): ' + money2(costTotal) + ' ₽ (материал + комплект + доп. продажи + смешка + амортизация)';
+      let costLine = 'Себестоимость (итого): ' + money2(costTotal) + ' ₽ (материал + комплект + доп. продажи + амортизация)';
       if (stockKitParts || extraKitParts) {
         const bits = [];
         if (stockKitParts) bits.push('комплект: ' + stockKitParts);
