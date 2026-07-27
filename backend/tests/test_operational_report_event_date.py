@@ -23,6 +23,7 @@ from app.db.models import (
     VisitClientType,
     VisitMaster,
     VisitPriceType,
+    VisitService,
 )
 from app.operational_report import build_operational_report, list_report_visits
 from app.payroll_fund import money_q2
@@ -166,6 +167,45 @@ def test_report_excludes_visit_created_in_period_but_performed_outside(memory_db
 
     may = build_operational_report(db, date(2026, 5, 1), date(2026, 5, 31))
     assert may.visits_count == 1
+
+
+def test_list_report_visits_compares_journal_and_card_amounts(memory_db) -> None:
+    db = memory_db
+    user, client = _seed_user_client(db)
+    when = datetime(2026, 7, 10, 7, 0)
+    visit = _add_visit(
+        db,
+        user=user,
+        client=client,
+        performed_date=when,
+        created_at=when,
+        amount=10670.0,
+    )
+    db.add(
+        VisitService(
+            visit_id=visit.id,
+            service_id=1,
+            category_name="Cat",
+            subcategory_name="Sub",
+            service_name="Svc",
+            sort_order=1,
+            amount_from_client=7900.0,
+            cost_total=0,
+            profit_before_split=0,
+            salon_profit=0,
+            masters_pool=0,
+        )
+    )
+    db.commit()
+
+    rows = list_report_visits(db, date(2026, 7, 1), date(2026, 7, 27))
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.entity.id == visit.id
+    assert row.entity.client.name == "C"
+    assert row.amount_journal == 10670.0
+    assert row.amount_card == 7900.0
+    assert row.amount_mismatch is True
 
 
 def test_report_includes_consultations_hourly_and_manual(memory_db) -> None:
