@@ -31,7 +31,8 @@ from app.ui_service_display import booking_service_labels_from_booking, format_s
 from app.user_roles import select_users_with_role
 
 COLOR_OCCUPANCY_ACTIVE = "#69d186"
-COLOR_OCCUPANCY_PENDING = "#f7d368"
+COLOR_OCCUPANCY_PENDING = "#9CFF19"
+COLOR_OCCUPANCY_CONSULTATION = "#f7d368"
 COLOR_OCCUPANCY_WORK_PLAN = "#D8BFD8"
 COLOR_OCCUPANCY_DAY_OFF = "#fc8580"
 COLOR_OCCUPANCY_UNAVAILABLE = "#cfcfcf"
@@ -52,9 +53,9 @@ def occupancy_color_for_booking(
     """Цвет сегмента занятости: консультации всегда жёлтые; визиты — по статусу."""
     k = kind.value if isinstance(kind, BookingKind) else (str(kind or "").strip().upper())
     s = status.value if isinstance(status, BookingStatus) else str(status)
-    # Консультация: всегда жёлтый (и ACTIVE, и PENDING). DONE — тот же цвет + opacity в UI.
+    # Консультация: всегда жёлтая. DONE — тот же цвет + opacity в UI.
     if k == BookingKind.CONSULTATION.value:
-        return COLOR_OCCUPANCY_PENDING
+        return COLOR_OCCUPANCY_CONSULTATION
     if s == BookingStatus.PENDING_CONFIRMATION.value:
         return COLOR_OCCUPANCY_PENDING
     return COLOR_OCCUPANCY_ACTIVE
@@ -437,6 +438,7 @@ def build_occupancy_for_day(
         "colors": {
             "confirmed": COLOR_OCCUPANCY_ACTIVE,
             "pending": COLOR_OCCUPANCY_PENDING,
+            "consultation": COLOR_OCCUPANCY_CONSULTATION,
             "day_off": COLOR_OCCUPANCY_DAY_OFF,
             "unavailable": COLOR_OCCUPANCY_UNAVAILABLE,
             "no_data": COLOR_OCCUPANCY_NO_DATA,
