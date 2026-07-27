@@ -399,20 +399,8 @@ def append_visit_service_master_pool_and_mix_bonus_ledgers(
                 effective_at=visit.performed_date,
             )
 
-    bonus_mid = visit_service.mix_bonus_master_id
-    bonus_amt = money_q2(float(visit_service.mix_bonus_amount or 0))
-    if bonus_mid and bonus_amt > 0:
-        append_ledger(
-            db,
-            entry_kind=PayrollFundEntryKind.ACCRUAL,
-            side=PayrollFundSide.MASTER,
-            user_id=int(bonus_mid),
-            amount=bonus_amt,
-            source_kind=PayrollFundSourceKind.VISIT_SERVICE,
-            source_id=visit_service.id,
-            created_by_user_id=created_by_user_id,
-            effective_at=visit.performed_date,
-        )
+    # 1.19: бонус за смешку для визита больше не начисляем.
+    # Если бизнес-правило вернётся, восстановить отдельную проводку можно здесь.
 
     corr_mid = visit_service.correction_master_id
     corr_amt = money_q2(float(visit_service.correction_master_amount or 0))
@@ -563,7 +551,7 @@ def replace_visit_hourly_help_accruals(
 def append_visit_master_pool_and_mix_bonus_ledgers(
     db: Session, visit: Visit, created_by_user_id: int | None
 ) -> None:
-    """Начисления мастерам с визита: доля от masters_pool + бонус за смешку (без проводки студии)."""
+    """Начисления мастерам с визита: только доля от masters_pool."""
     mp = float(visit.masters_pool or 0)
     masters = list(
         db.scalars(select(VisitMaster).where(VisitMaster.visit_id == visit.id).order_by(VisitMaster.id.asc())).all()
@@ -584,20 +572,7 @@ def append_visit_master_pool_and_mix_bonus_ledgers(
                 effective_at=visit.performed_date,
             )
 
-    bonus_mid = visit.mix_bonus_master_id
-    bonus_amt = money_q2(float(visit.mix_bonus_amount or 0))
-    if bonus_mid and bonus_amt > 0:
-        append_ledger(
-            db,
-            entry_kind=PayrollFundEntryKind.ACCRUAL,
-            side=PayrollFundSide.MASTER,
-            user_id=int(bonus_mid),
-            amount=bonus_amt,
-            source_kind=PayrollFundSourceKind.VISIT,
-            source_id=visit.id,
-            created_by_user_id=created_by_user_id,
-            effective_at=visit.performed_date,
-        )
+    # 1.19: бонус за смешку для визита больше не начисляем.
 
 
 def _has_master_side_accrual_for_visit(db: Session, visit_id: int) -> bool:
@@ -628,11 +603,10 @@ def backfill_visit_master_accruals_if_missing(db: Session, visit: Visit, created
     if _has_master_side_accrual_for_visit(db, visit.id):
         return
     mp = float(visit.masters_pool or 0)
-    bonus_amt = money_q2(float(visit.mix_bonus_amount or 0))
     masters = list(
         db.scalars(select(VisitMaster).where(VisitMaster.visit_id == visit.id).order_by(VisitMaster.id.asc())).all()
     )
-    if mp <= 0 and bonus_amt <= 0:
+    if mp <= 0:
         return
     if mp > 0 and not masters:
         return
@@ -1537,6 +1511,9 @@ def search_ledger_rows(
     user_id: int | None = None,
     studio_only: bool = False,
     source_kind: PayrollFundSourceKind | None = None,
+    entry_kind: PayrollFundEntryKind | None = None,
+    side: PayrollFundSide | None = None,
+    created_by_user_id: int | None = None,
     limit: int | None = None,
 ) -> list[PayrollFundLedger]:
     """Журнал фонда: без фильтров — последние записи; с фильтрами — по дате учёта.
@@ -1549,6 +1526,9 @@ def search_ledger_rows(
         or user_id is not None
         or studio_only
         or source_kind is not None
+        or entry_kind is not None
+        or side is not None
+        or created_by_user_id is not None
     )
     if limit is None:
         limit = LEDGER_JOURNAL_SEARCH_LIMIT if has_filter else LEDGER_JOURNAL_DEFAULT_LIMIT
@@ -1577,6 +1557,12 @@ def search_ledger_rows(
             )
         else:
             q = q.where(PayrollFundLedger.source_kind == source_kind)
+    if entry_kind is not None:
+        q = q.where(PayrollFundLedger.entry_kind == entry_kind)
+    if side is not None:
+        q = q.where(PayrollFundLedger.side == side)
+    if created_by_user_id is not None:
+        q = q.where(PayrollFundLedger.created_by_user_id == int(created_by_user_id))
 
     if has_filter:
         q = q.order_by(PayrollFundLedger.effective_at.desc(), PayrollFundLedger.id.desc())

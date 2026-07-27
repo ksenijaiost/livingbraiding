@@ -399,11 +399,7 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
             a = money_q2(mp * pct)
             visit_masters = money_q2(visit_masters + a)
             add_emp(int(vm.master_id), "visits", a)
-        bonus_mid = v.mix_bonus_master_id
-        bonus_amt = money_q2(float(v.mix_bonus_amount or 0))
-        if bonus_mid and bonus_amt > 0:
-            visit_masters = money_q2(visit_masters + bonus_amt)
-            add_emp(int(bonus_mid), "visits", bonus_amt)
+        # 1.19: бонус за смешку больше не входит в фонды визита.
 
     work_studio = 0.0
     work_masters = 0.0

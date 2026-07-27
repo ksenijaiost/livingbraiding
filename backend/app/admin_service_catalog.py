@@ -32,6 +32,7 @@ from app.db.models import (
     UserRole,
 )
 from app.db.session import get_db
+from app.price_ordering import price_sort_key, service_sort_price
 from app.ru_labels import ru_master_level, ru_user_role
 from app.time_utils import utcnow_naive
 
@@ -120,7 +121,7 @@ def _allowed_service_scope_rows(db: Session) -> list[tuple[ServiceCategory, Serv
             .join(ServiceSubcategory, ServiceSubcategory.category_id == ServiceCategory.id)
             .join(Service, Service.subcategory_id == ServiceSubcategory.id)
             .where(ServiceCategory.name.not_in(_PRODUCT_CATALOG_ONLY_CATEGORIES))
-            .order_by(ServiceCategory.name.asc(), ServiceSubcategory.name.asc(), Service.name.asc(), Service.id.asc())
+            .order_by(ServiceCategory.name.asc(), ServiceSubcategory.name.asc(), Service.id.asc())
         ).all()
     )
 
@@ -892,10 +893,16 @@ def service_list(
     cat = db.get(ServiceCategory, sub.category_id)
     if cat and (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
         return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
-    services = (
-        db.scalars(
-            select(Service).where(Service.subcategory_id == subcategory_id).order_by(Service.id)
-        ).all()
+    services = sorted(
+        list(
+            db.scalars(
+                select(Service).where(Service.subcategory_id == subcategory_id)
+            ).all()
+        ),
+        key=lambda s: (
+            not bool(s.is_active),
+            *price_sort_key(service_sort_price(s), name=s.name, secondary=(int(s.id),)),
+        ),
     )
     return templates.TemplateResponse(
         "admin_catalog_services.html",

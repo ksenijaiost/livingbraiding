@@ -12,6 +12,7 @@ import json
 from app.admin_service_catalog import _parse_estimated_duration
 from app.calendar_occupancy import (
     COLOR_OCCUPANCY_ACTIVE,
+    COLOR_OCCUPANCY_CONSULTATION,
     COLOR_OCCUPANCY_PENDING,
     build_occupancy_for_day,
     occupancy_color_for_status,
@@ -79,19 +80,19 @@ def test_occupancy_color_for_status() -> None:
     assert occupancy_color_for_status(BookingStatus.PENDING_CONFIRMATION) == COLOR_OCCUPANCY_PENDING
     assert occupancy_color_for_status(BookingStatus.DONE) == COLOR_OCCUPANCY_ACTIVE
     assert COLOR_OCCUPANCY_ACTIVE == "#69d186"
-    assert COLOR_OCCUPANCY_PENDING == "#f7d368"
+    assert COLOR_OCCUPANCY_PENDING == "#9CFF19"
 
 
 def test_occupancy_color_for_consultation_always_yellow() -> None:
     from app.calendar_occupancy import occupancy_color_for_booking
     from app.db.models import BookingKind
 
-    assert occupancy_color_for_booking(BookingStatus.ACTIVE, kind=BookingKind.CONSULTATION) == COLOR_OCCUPANCY_PENDING
+    assert occupancy_color_for_booking(BookingStatus.ACTIVE, kind=BookingKind.CONSULTATION) == COLOR_OCCUPANCY_CONSULTATION
     assert (
         occupancy_color_for_booking(BookingStatus.PENDING_CONFIRMATION, kind=BookingKind.CONSULTATION)
-        == COLOR_OCCUPANCY_PENDING
+        == COLOR_OCCUPANCY_CONSULTATION
     )
-    assert occupancy_color_for_booking(BookingStatus.DONE, kind=BookingKind.CONSULTATION) == COLOR_OCCUPANCY_PENDING
+    assert occupancy_color_for_booking(BookingStatus.DONE, kind=BookingKind.CONSULTATION) == COLOR_OCCUPANCY_CONSULTATION
     assert occupancy_color_for_booking(BookingStatus.ACTIVE, kind=BookingKind.VISIT) == COLOR_OCCUPANCY_ACTIVE
 
 
@@ -375,7 +376,7 @@ def test_build_occupancy_includes_consultation_booking(memory_db) -> None:
     assert seg["master_id"] == master.id
     assert seg["start_minutes"] == 16 * 60 + 15
     assert seg["end_minutes"] == 17 * 60
-    assert seg["color"] == COLOR_OCCUPANCY_PENDING
+    assert seg["color"] == COLOR_OCCUPANCY_CONSULTATION
     assert seg["service_label"] == "Консультация"
     assert seg["kind"] == "CONSULTATION"
 
@@ -405,6 +406,6 @@ def test_build_occupancy_active_consultation_is_yellow(memory_db) -> None:
 
     occ = build_occupancy_for_day(db, day=date(2026, 7, 18), hour_from=9, hour_to=21, bookings=[booking])
     assert len(occ["segments"]) == 1
-    assert occ["segments"][0]["color"] == COLOR_OCCUPANCY_PENDING
+    assert occ["segments"][0]["color"] == COLOR_OCCUPANCY_CONSULTATION
     assert occ["segments"][0]["status"] == BookingStatus.ACTIVE.value
     assert occ["segments"][0]["kind"] == "CONSULTATION"

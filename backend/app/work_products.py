@@ -155,7 +155,7 @@ from app.visit_edit_policy import (
 )
 from app.audit import diff_fields, write_audit_rows
 from app.kit_crud import kit_key_excluded_from_client_price
-from app.mix_rates import mix_complexity_rate_for, mix_rates_meta_json_dict
+from app.mix_rates import mix_rates_meta_json_dict
 from app.ui_visit_display import ru_mix_complexity as ru_mix_complexity_label
 from app.zakaz_blanks import kit_composition_catalog_items, kit_form_blank_defs
 from app.webui import templates
@@ -936,14 +936,8 @@ def _kit_cost_snapshot_text(
         wage_total += row_total
         lines.append(f"{labels.get(key) or key} — {qty} шт — ЗП {_fmt_money(row_total)}")
 
-    if mix_source == MixSource.SELF_MIXED and grams_total > 0 and mix_complexity is not None:
-        mix_rate = mix_complexity_rate_for(db, mix_complexity)
-        mix_pay = float(grams_total) * float(mix_rate)
-        if mix_pay > 0:
-            wage_total += mix_pay
-            lines.append(
-                f"Смешка ({ru_mix_complexity_label(mix_complexity.value)}) — {grams_total:.0f} г × {_fmt_money(float(mix_rate)).replace(' ₽', ' ₽/г')} = {_fmt_money(mix_pay)}"
-            )
+    # 1.19: бонус за смешку в работе не включаем в себестоимость.
+    # Оставляем source/complexity в записи, но денежный эффект отключён.
 
     if wage_total > 0:
         total += wage_total

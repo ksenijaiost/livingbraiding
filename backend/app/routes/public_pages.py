@@ -45,6 +45,7 @@ from app.payroll_fund import (
     sum_work_studio_payroll_by_work_id,
     visit_ids_visible_to_master_clause,
 )
+from app.price_ordering import price_sort_key, service_sort_price
 from app.master_schedule import schedule_filled_until
 from app.techspec_home import collect_techspec_home_stats
 from app.webui import templates, ctx as _ctx
@@ -490,12 +491,17 @@ def service_catalog_view(
                     .order_by(ServiceSubcategory.name.asc())
                 ).all()
             )
-            services = list(
-                db.scalars(
-                    select(Service)
-                    .where(Service.subcategory_id == sub_from_q.id)
-                    .order_by(Service.is_active.desc(), Service.name.asc())
-                ).all()
+            services = sorted(
+                list(
+                    db.scalars(
+                        select(Service)
+                        .where(Service.subcategory_id == sub_from_q.id)
+                    ).all()
+                ),
+                key=lambda s: (
+                    not bool(s.is_active),
+                    *price_sort_key(service_sort_price(s), name=s.name, secondary=(int(s.id),)),
+                ),
             )
     elif category_id is not None and category_id > 0:
         selected_category = db.scalar(
@@ -515,12 +521,17 @@ def service_catalog_view(
             )
             if (subcategory_id is None or subcategory_id <= 0) and len(subcategories) == 1:
                 selected_subcategory = subcategories[0]
-                services = list(
-                    db.scalars(
-                        select(Service)
-                        .where(Service.subcategory_id == selected_subcategory.id)
-                        .order_by(Service.is_active.desc(), Service.name.asc())
-                    ).all()
+                services = sorted(
+                    list(
+                        db.scalars(
+                            select(Service)
+                            .where(Service.subcategory_id == selected_subcategory.id)
+                        ).all()
+                    ),
+                    key=lambda s: (
+                        not bool(s.is_active),
+                        *price_sort_key(service_sort_price(s), name=s.name, secondary=(int(s.id),)),
+                    ),
                 )
 
     return templates.TemplateResponse(

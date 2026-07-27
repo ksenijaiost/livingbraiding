@@ -28,6 +28,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.forms_parse import parse_bool, parse_optional_float
+from app.price_ordering import price_sort_key, service_sort_price
 from app.ru_labels import format_price_integer_rub
 from app.webui import templates, ctx as _ctx
 
@@ -347,6 +348,13 @@ def _format_product_catalog_price(s: Service) -> str | None:
     return None
 
 
+def _sort_catalog_rows(rows: list[SimpleNamespace]) -> list[SimpleNamespace]:
+    return sorted(
+        rows,
+        key=lambda r: price_sort_key(r.price, name=r.name, secondary=(0 if bool(r.is_active) else 1, int(r.id or 0))),
+    )
+
+
 @router.get("/products-catalog", response_class=HTMLResponse)
 def products_catalog_view(
     request: Request,
@@ -415,6 +423,9 @@ def products_catalog_view(
             for row in product_rows:
                 bucket = groups_active if row.is_active else groups_inactive
                 bucket[row.subcategory_name].append(_catalog_row_ns(row))
+            for bucket in (groups_active, groups_inactive):
+                for sub_name, rows in list(bucket.items()):
+                    bucket[sub_name] = _sort_catalog_rows(rows)
             sub_names = sorted(set(groups_active.keys()) | set(groups_inactive.keys()))
             if selected == "Заказ" and "Другое" not in sub_names:
                 sub_names.append("Другое")
@@ -441,7 +452,7 @@ def products_catalog_view(
                         ServiceSubcategory.is_active.is_(True),
                         Service.is_active.is_(True),
                     )
-                    .order_by(ServiceSubcategory.name.asc(), Service.is_active.desc(), Service.name.asc())
+                    .order_by(ServiceSubcategory.name.asc(), Service.name.asc())
                 ).all()
             )
             groups2: dict[str, list[SimpleNamespace]] = defaultdict(list)
@@ -453,6 +464,7 @@ def products_catalog_view(
                         category_name=selected,
                         subcategory_name=sub.name if sub else "—",
                         name=s.name,
+                        sort_price=service_sort_price(s),
                         price=_format_product_catalog_price(s),
                         master_pay=None,
                         fixed_expense=None,
@@ -462,6 +474,11 @@ def products_catalog_view(
                         is_bu=False,
                         is_active=s.is_active,
                     )
+                )
+            for sub_name, rows in list(groups2.items()):
+                groups2[sub_name] = sorted(
+                    rows,
+                    key=lambda r: price_sort_key(getattr(r, "sort_price", None), name=r.name),
                 )
             grouped_rows = [
                 SimpleNamespace(subcategory_name=sub_name, rows=groups2[sub_name], inactive_rows=[])

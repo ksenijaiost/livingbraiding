@@ -347,6 +347,12 @@
                 {% elif b.key == 'sales' %}
                   <a href="/admin/reports/sales?{{ reports_filter_q }}">список</a> ·
                   <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source={{ b.journal_source }}">журнал</a>
+                {% elif b.key == 'consultations' %}
+                  <a href="/consultations">список</a> ·
+                  <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source={{ b.journal_source }}">журнал</a>
+                {% elif b.key == 'hourly' %}
+                  <a href="/hourly-work">список</a> ·
+                  <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source={{ b.journal_source }}">журнал</a>
                 {% else %}
                   <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source={{ b.journal_source }}">журнал</a>
                 {% endif %}
@@ -356,12 +362,11 @@
         </tbody>
       </table>
       <p class="muted" style="font-size: 12px; margin-top: 8px;">
-        «Список» — карточки за период по дате события. «Журнал» — проводки по учётной дате.
-        У визитов в журнале два источника: VISIT и VISIT_SERVICE (оба входят в колонку «В журнале»).
+        «Список» — карточки. «Журнал» — проводки в фондах за этот период.
       </p>
     </div>
 
-    {% if reconcile_extra_lines %}
+    {# {% if reconcile_extra_lines %}
       <h4 style="margin: 0 0 8px; font-size: 14px;">Консультации, почасовая, ручные — строки журнала</h4>
       <div style="overflow-x: auto; margin-bottom: 24px;">
         <table>
@@ -393,7 +398,7 @@
           </tbody>
         </table>
       </div>
-    {% endif %}
+    {% endif %} #}
 
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Доля сотрудников (по дате события)</h3>
     <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
@@ -459,7 +464,7 @@
           <tr>
             <td>Расходы студии</td>
             <td><strong>{{ "%.2f"|format(ledger_expense) }}</strong></td>
-            <td class="muted">Проводки расходов в журнале (не путать с блоком «Расходы студии» выше)</td>
+            <td class="muted">Расходные проводки внутри журнала фондов</td>
           </tr>
           <tr>
             <td>Выплаты</td>

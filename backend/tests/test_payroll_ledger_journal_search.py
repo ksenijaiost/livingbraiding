@@ -105,3 +105,64 @@ def test_search_visit_includes_visit_service(memory_db) -> None:
     db.commit()
     rows = search_ledger_rows(db, source_kind=PayrollFundSourceKind.VISIT)
     assert {r.id for r in rows} == {visit_row.id, svc_row.id}
+
+
+def test_search_by_type_fund_and_created_by(memory_db) -> None:
+    db = memory_db
+    employee = _user(db, "Emp")
+    author_a = _user(db, "AuthorA")
+    author_b = _user(db, "AuthorB")
+
+    keep = append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.PAYOUT,
+        side=PayrollFundSide.STUDIO,
+        user_id=employee.id,
+        amount=-50.0,
+        source_kind=PayrollFundSourceKind.MANUAL,
+        source_id=None,
+        created_by_user_id=author_a.id,
+        effective_at=datetime(2026, 6, 10, 12, 0),
+    )
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.PAYOUT,
+        side=PayrollFundSide.MASTER,
+        user_id=employee.id,
+        amount=-40.0,
+        source_kind=PayrollFundSourceKind.MANUAL,
+        source_id=None,
+        created_by_user_id=author_a.id,
+        effective_at=datetime(2026, 6, 10, 12, 5),
+    )
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.ACCRUAL,
+        side=PayrollFundSide.STUDIO,
+        user_id=None,
+        amount=70.0,
+        source_kind=PayrollFundSourceKind.STUDIO_EXPENSE,
+        source_id=1,
+        created_by_user_id=author_a.id,
+        effective_at=datetime(2026, 6, 10, 12, 10),
+    )
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.PAYOUT,
+        side=PayrollFundSide.STUDIO,
+        user_id=employee.id,
+        amount=-60.0,
+        source_kind=PayrollFundSourceKind.MANUAL,
+        source_id=None,
+        created_by_user_id=author_b.id,
+        effective_at=datetime(2026, 6, 10, 12, 15),
+    )
+    db.commit()
+
+    rows = search_ledger_rows(
+        db,
+        entry_kind=PayrollFundEntryKind.PAYOUT,
+        side=PayrollFundSide.STUDIO,
+        created_by_user_id=author_a.id,
+    )
+    assert [r.id for r in rows] == [keep.id]
