@@ -2,16 +2,16 @@
 {% block content %}
   <div class="card" style="max-width: 1100px;">
     <p class="muted" style="margin: 0 0 8px;"><a href="/admin/reports?{{ reports_nav_q }}">← К отчёту</a></p>
-    <h2 style="margin-top: 0;">Продажи — сверка фондов</h2>
-    <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}. «В отчёте» — маржа студии в карточке; «В журнале» — нетто начисл.+сторно PRODUCT_SALE за период.</p>
+    <h2 style="margin-top: 0;">Почасовая — сверка фондов</h2>
+    <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}. «В отчёте» — сумма записи; «В журнале» — нетто начисл.+сторно HOURLY_WORK (без studio EXPENSE).</p>
     {% if rows %}
       <div style="overflow-x: auto;">
         <table>
           <thead>
             <tr>
               <th>ID</th>
-              <th>Дата события</th>
-              <th>Тип</th>
+              <th>Дата</th>
+              <th>Мастер</th>
               <th>В отчёте, руб.</th>
               <th>В журнале, руб.</th>
               <th>Дельта</th>
@@ -21,18 +21,11 @@
           </thead>
           <tbody>
             {% for row in rows %}
-              {% set s = row.entity %}
+              {% set h = row.entity %}
               <tr{% if row.amount_mismatch %} style="background:#fef3c7;"{% endif %}>
                 <td>{{ row.entity_id }}</td>
                 <td>{% if row.event_at %}{{ row.event_at|dt_local('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
-                <td>
-                  {% if s and s.kind == ProductSaleKind.MATERIAL %}Материал
-                  {% elif s and s.kind == ProductSaleKind.KIT %}Комплект
-                  {% elif s and s.kind == ProductSaleKind.RUBBER %}Резинка
-                  {% elif s and s.kind == ProductSaleKind.OTHER %}Другое
-                  {% elif s %}{{ s.kind.value }}
-                  {% else %}—{% endif %}
-                </td>
+                <td>{% if h and h.master_user %}{{ h.master_user.display_name }}{% else %}—{% endif %}</td>
                 <td>{{ "%.2f"|format(row.amount_ops) }}</td>
                 <td>{{ "%.2f"|format(row.amount_ledger) }}</td>
                 <td><strong>{{ "%.2f"|format(row.amount_ops - row.amount_ledger) }}</strong></td>
@@ -44,7 +37,7 @@
         </table>
       </div>
     {% else %}
-      <p class="muted">Нет продаж и проводок за период.</p>
+      <p class="muted">Нет почасовых записей и проводок за период.</p>
     {% endif %}
   </div>
 {% endblock %}

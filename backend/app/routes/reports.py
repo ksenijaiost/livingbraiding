@@ -14,6 +14,8 @@ from app.forms_parse import parse_date_iso
 from app.operational_report import (
     build_operational_report,
     list_closed_payroll_periods,
+    list_report_consultations,
+    list_report_hourly,
     list_report_sales,
     list_report_visits,
     list_report_works,
@@ -211,5 +213,63 @@ def admin_report_works_list(
     return templates.TemplateResponse(
         "admin_report_works.html",
         _ctx(request, current_user=current_user, title="Работы за период", rows=rows, date_from=d0, date_to=d1, reports_nav_q=reports_nav_q),
+    )
+
+
+@router.get("/admin/reports/consultations", response_class=HTMLResponse)
+def admin_report_consultations_list(
+    request: Request,
+    report_mode: str | None = Query(None),
+    period_id: str | None = Query(None),
+    df: str | None = Query(None),
+    dt: str | None = Query(None),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    today = date.today()
+    month_start = today.replace(day=1)
+    d0, d1 = _report_detail_dates(df, dt, month_start, today)
+    rows = list_report_consultations(db, d0, d1)
+    reports_nav_q = _reports_nav_query(report_mode, period_id, d0, d1)
+    return templates.TemplateResponse(
+        "admin_report_consultations.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            title="Консультации за период",
+            rows=rows,
+            date_from=d0,
+            date_to=d1,
+            reports_nav_q=reports_nav_q,
+        ),
+    )
+
+
+@router.get("/admin/reports/hourly", response_class=HTMLResponse)
+def admin_report_hourly_list(
+    request: Request,
+    report_mode: str | None = Query(None),
+    period_id: str | None = Query(None),
+    df: str | None = Query(None),
+    dt: str | None = Query(None),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    today = date.today()
+    month_start = today.replace(day=1)
+    d0, d1 = _report_detail_dates(df, dt, month_start, today)
+    rows = list_report_hourly(db, d0, d1)
+    reports_nav_q = _reports_nav_query(report_mode, period_id, d0, d1)
+    return templates.TemplateResponse(
+        "admin_report_hourly.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            title="Почасовая за период",
+            rows=rows,
+            date_from=d0,
+            date_to=d1,
+            reports_nav_q=reports_nav_q,
+        ),
     )
 

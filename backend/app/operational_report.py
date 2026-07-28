@@ -12,6 +12,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.db.models import (
+    Consultation,
     HourlyWorkEntry,
     MaterialPriceCurrent,
     MaterialType,
@@ -25,6 +26,7 @@ from app.db.models import (
     StudioExpense,
     User,
     Visit,
+    VisitService,
     WorkForInventory,
     WorkScope,
 )
@@ -32,32 +34,18 @@ from app.payroll_fund import PAYROLL_FUND_SOURCE_KIND_RU, money_q2
 
 
 @dataclass(frozen=True)
-class ReportAmountCompareRow:
-    """Строка списка отчёта: сумма в учёте (денорм.) vs сумма в карточке."""
+class ReportFundCompareRow:
+    """Строка сверки фондов: сумма в отчёте (карточка) vs нетто начисл.+сторно в журнале за период."""
 
     entity: Any
-    amount_journal: float | None
-    amount_card: float | None
+    entity_id: int
+    event_at: datetime | None
+    open_url: str
+    note: str | None
+    amount_ops: float
+    amount_ledger: float
     amount_mismatch: bool
 
-
-def _amounts_mismatch(a: float | None, b: float | None) -> bool:
-    if a is None and b is None:
-        return False
-    if a is None or b is None:
-        return True
-    return money_q2(a) != money_q2(b)
-
-
-def _visit_services_amount_from_client(visit: Visit) -> float:
-    """Как «Итого с клиента» в карточке визита: сумма активных строк услуг."""
-    return money_q2(
-        sum(
-            float(s.amount_from_client or 0)
-            for s in (visit.services or [])
-            if not s.is_cancelled
-        )
-    )
 
 # Сторно расхода (EXPENSE) не должно попадать в «начисления+сторно» сверки.
 _LedgerOrig = aliased(PayrollFundLedger)
@@ -68,6 +56,197 @@ _ACCRUAL_OR_ACCRUAL_STORNO = or_(
         _LedgerOrig.entry_kind == PayrollFundEntryKind.ACCRUAL,
     ),
 )
+
+
+def _fund_mismatch(ops: float, ledger: float) -> bool:
+    return money_q2(ops) != money_q2(ledger)
+
+
+def _sort_fund_rows(rows: list[ReportFundCompareRow]) -> list[ReportFundCompareRow]:
+    """Сначала расхождения, затем по дате события (новые сверху)."""
+
+    def key(r: ReportFundCompareRow) -> tuple:
+        ts = r.event_at.timestamp() if r.event_at is not None else 0.0
+        return (not r.amount_mismatch, -ts, -r.entity_id)
+
+    return sorted(rows, key=key)
+
+
+def _accrual_net_by_source_ids(
+    db: Session,
+    *,
+    source_kind: PayrollFundSourceKind,
+    source_ids: list[int],
+    start: datetime,
+    end_excl: datetime,
+) -> dict[int, float]:
+    """Нетто ACCRUAL + сторно начислений по source_id за период (обе стороны фондов)."""
+    if not source_ids:
+        return {}
+    stmt = (
+        select(PayrollFundLedger.source_id, func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
+        .select_from(PayrollFundLedger)
+        .outerjoin(_LedgerOrig, PayrollFundLedger.storno_of_id == _LedgerOrig.id)
+        .where(
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
+            _ACCRUAL_OR_ACCRUAL_STORNO,
+            PayrollFundLedger.source_kind == source_kind,
+            PayrollFundLedger.source_id.in_(source_ids),
+        )
+        .group_by(PayrollFundLedger.source_id)
+    )
+    out: dict[int, float] = {}
+    for sid, amt in db.execute(stmt).all():
+        if sid is None:
+            continue
+        out[int(sid)] = money_q2(float(amt or 0))
+    return out
+
+
+def _visit_accrual_net_by_visit_id(
+    db: Session,
+    *,
+    visit_ids: list[int],
+    start: datetime,
+    end_excl: datetime,
+) -> dict[int, float]:
+    """Нетто начислений по визиту: legacy VISIT + VISIT_SERVICE за период."""
+    if not visit_ids:
+        return {}
+    out = _accrual_net_by_source_ids(
+        db,
+        source_kind=PayrollFundSourceKind.VISIT,
+        source_ids=visit_ids,
+        start=start,
+        end_excl=end_excl,
+    )
+    stmt = (
+        select(VisitService.visit_id, func.coalesce(func.sum(PayrollFundLedger.amount), 0.0))
+        .select_from(PayrollFundLedger)
+        .join(VisitService, VisitService.id == PayrollFundLedger.source_id)
+        .outerjoin(_LedgerOrig, PayrollFundLedger.storno_of_id == _LedgerOrig.id)
+        .where(
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
+            _ACCRUAL_OR_ACCRUAL_STORNO,
+            PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT_SERVICE,
+            VisitService.visit_id.in_(visit_ids),
+        )
+        .group_by(VisitService.visit_id)
+    )
+    for vid, amt in db.execute(stmt).all():
+        if vid is None:
+            continue
+        k = int(vid)
+        out[k] = money_q2(out.get(k, 0.0) + float(amt or 0))
+    return out
+
+
+def _visit_ids_with_accrual_in_period(db: Session, start: datetime, end_excl: datetime) -> set[int]:
+    legacy = db.scalars(
+        select(PayrollFundLedger.source_id)
+        .select_from(PayrollFundLedger)
+        .outerjoin(_LedgerOrig, PayrollFundLedger.storno_of_id == _LedgerOrig.id)
+        .where(
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
+            _ACCRUAL_OR_ACCRUAL_STORNO,
+            PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+            PayrollFundLedger.source_id.is_not(None),
+        )
+        .distinct()
+    ).all()
+    from_services = db.scalars(
+        select(VisitService.visit_id)
+        .select_from(PayrollFundLedger)
+        .join(VisitService, VisitService.id == PayrollFundLedger.source_id)
+        .outerjoin(_LedgerOrig, PayrollFundLedger.storno_of_id == _LedgerOrig.id)
+        .where(
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
+            _ACCRUAL_OR_ACCRUAL_STORNO,
+            PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT_SERVICE,
+        )
+        .distinct()
+    ).all()
+    out: set[int] = set()
+    for sid in legacy:
+        if sid is not None:
+            out.add(int(sid))
+    for vid in from_services:
+        if vid is not None:
+            out.add(int(vid))
+    return out
+
+
+def _source_ids_with_accrual_in_period(
+    db: Session,
+    *,
+    source_kind: PayrollFundSourceKind,
+    start: datetime,
+    end_excl: datetime,
+) -> set[int]:
+    rows = db.scalars(
+        select(PayrollFundLedger.source_id)
+        .select_from(PayrollFundLedger)
+        .outerjoin(_LedgerOrig, PayrollFundLedger.storno_of_id == _LedgerOrig.id)
+        .where(
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
+            _ACCRUAL_OR_ACCRUAL_STORNO,
+            PayrollFundLedger.source_kind == source_kind,
+            PayrollFundLedger.source_id.is_not(None),
+        )
+        .distinct()
+    ).all()
+    return {int(sid) for sid in rows if sid is not None}
+
+
+def _visit_ops_funds(visit: Visit) -> float:
+    """Фонды визита как в operational report: студия + доли masters_pool."""
+    studio = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
+    mp = float(visit.masters_pool or 0)
+    masters = 0.0
+    for vm in visit.masters or []:
+        masters = money_q2(masters + money_q2(mp * float(vm.percent or 0) / 100.0))
+    return money_q2(studio + masters)
+
+
+def _work_ops_funds(work: WorkForInventory) -> float:
+    studio = 0.0
+    if work.scope != WorkScope.IN_STOCK:
+        studio = money_q2(float(work.studio_profit_amount or 0))
+    masters = money_q2(sum(float(s.master_profit_amount or 0) for s in (work.staff_rows or [])))
+    return money_q2(studio + masters)
+
+
+def _sale_ops_funds(sale: ProductSale) -> float:
+    return money_q2(float(sale.studio_margin_amount or 0))
+
+
+def _hourly_ops_funds(entry: HourlyWorkEntry) -> float:
+    a = money_q2(float(entry.amount or 0))
+    return a if a > 0 else 0.0
+
+
+def _visit_note(visit: Visit, *, in_ops_slice: bool) -> str | None:
+    parts: list[str] = []
+    if visit.is_cancelled:
+        parts.append("отменён")
+    if not in_ops_slice:
+        parts.append("только журнал / вне среза отчёта")
+    return "; ".join(parts) if parts else None
+
+
+def _void_note(is_voided: bool, *, in_ops_slice: bool, void_label: str = "аннулирован") -> str | None:
+    parts: list[str] = []
+    if is_voided:
+        parts.append(void_label)
+    if not in_ops_slice:
+        parts.append("только журнал / вне среза отчёта")
+    return "; ".join(parts) if parts else None
+
 
 
 def resolve_report_dates(
@@ -788,93 +967,333 @@ def result_to_template_dict(r: OperationalReportResult) -> dict[str, Any]:
     }
 
 
-def list_report_visits(db: Session, d0: date, d1: date) -> list[ReportAmountCompareRow]:
+def list_report_visits(db: Session, d0: date, d1: date) -> list[ReportFundCompareRow]:
+    """Сверка фондов по визитам: срез отчёта + сиротские проводки периода."""
     start, end_excl = period_bounds(d0, d1)
-    visits = list(
+    ops_visits = list(
         db.scalars(
             select(Visit)
-            .options(
-                selectinload(Visit.client),
-                selectinload(Visit.services),
-            )
+            .options(selectinload(Visit.masters))
             .where(
                 Visit.performed_date >= start,
                 Visit.performed_date < end_excl,
                 Visit.is_cancelled.is_(False),
             )
-            .order_by(Visit.performed_date.desc(), Visit.id.desc())
         ).all()
     )
-    rows: list[ReportAmountCompareRow] = []
-    for v in visits:
-        journal = money_q2(float(v.amount_from_client or 0))
-        card = _visit_services_amount_from_client(v)
+    ops_by_id = {int(v.id): v for v in ops_visits}
+    ledger_visit_ids = _visit_ids_with_accrual_in_period(db, start, end_excl)
+    all_ids = sorted(set(ops_by_id) | ledger_visit_ids)
+
+    missing_ids = [i for i in all_ids if i not in ops_by_id]
+    if missing_ids:
+        for v in db.scalars(
+            select(Visit).options(selectinload(Visit.masters)).where(Visit.id.in_(missing_ids))
+        ).all():
+            ops_by_id[int(v.id)] = v
+
+    ledger_by_id = _visit_accrual_net_by_visit_id(
+        db, visit_ids=all_ids, start=start, end_excl=end_excl
+    )
+
+    rows: list[ReportFundCompareRow] = []
+    for vid in all_ids:
+        v = ops_by_id.get(vid)
+        in_ops = (
+            v is not None
+            and not v.is_cancelled
+            and v.performed_date is not None
+            and start <= v.performed_date < end_excl
+        )
+        ops_amt = _visit_ops_funds(v) if in_ops and v is not None else 0.0
+        led_amt = money_q2(ledger_by_id.get(vid, 0.0))
+        if v is None:
+            note = "карточка не найдена; только журнал"
+            event_at = None
+            open_url = f"/visits/{vid}"
+        else:
+            note = _visit_note(v, in_ops_slice=in_ops)
+            event_at = v.performed_date
+            open_url = f"/visits/{v.id}"
         rows.append(
-            ReportAmountCompareRow(
+            ReportFundCompareRow(
                 entity=v,
-                amount_journal=journal,
-                amount_card=card,
-                amount_mismatch=_amounts_mismatch(journal, card),
+                entity_id=vid,
+                event_at=event_at,
+                open_url=open_url,
+                note=note,
+                amount_ops=ops_amt,
+                amount_ledger=led_amt,
+                amount_mismatch=_fund_mismatch(ops_amt, led_amt),
             )
         )
-    return rows
+    return _sort_fund_rows(rows)
 
 
-def list_report_sales(db: Session, d0: date, d1: date) -> list[ReportAmountCompareRow]:
+def list_report_sales(db: Session, d0: date, d1: date) -> list[ReportFundCompareRow]:
     start, end_excl = period_bounds(d0, d1)
-    sales = list(
+    ops_sales = list(
         db.scalars(
-            select(ProductSale)
-            .options(selectinload(ProductSale.client))
-            .where(
+            select(ProductSale).where(
                 ProductSale.performed_date >= start,
                 ProductSale.performed_date < end_excl,
                 ProductSale.is_voided.is_(False),
             )
-            .order_by(ProductSale.performed_date.desc(), ProductSale.id.desc())
         ).all()
     )
-    rows: list[ReportAmountCompareRow] = []
-    for s in sales:
-        amt = money_q2(float(s.amount_from_client or 0))
+    ops_by_id = {int(s.id): s for s in ops_sales}
+    ledger_ids = _source_ids_with_accrual_in_period(
+        db, source_kind=PayrollFundSourceKind.PRODUCT_SALE, start=start, end_excl=end_excl
+    )
+    all_ids = sorted(set(ops_by_id) | ledger_ids)
+    missing = [i for i in all_ids if i not in ops_by_id]
+    if missing:
+        for s in db.scalars(select(ProductSale).where(ProductSale.id.in_(missing))).all():
+            ops_by_id[int(s.id)] = s
+
+    ledger_by_id = _accrual_net_by_source_ids(
+        db,
+        source_kind=PayrollFundSourceKind.PRODUCT_SALE,
+        source_ids=all_ids,
+        start=start,
+        end_excl=end_excl,
+    )
+
+    rows: list[ReportFundCompareRow] = []
+    for sid in all_ids:
+        s = ops_by_id.get(sid)
+        in_ops = (
+            s is not None
+            and not s.is_voided
+            and s.performed_date is not None
+            and start <= s.performed_date < end_excl
+        )
+        ops_amt = _sale_ops_funds(s) if in_ops and s is not None else 0.0
+        led_amt = money_q2(ledger_by_id.get(sid, 0.0))
+        if s is None:
+            note = "карточка не найдена; только журнал"
+            event_at = None
+            open_url = f"/sales/products/{sid}"
+        else:
+            note = _void_note(bool(s.is_voided), in_ops_slice=in_ops)
+            event_at = s.performed_date
+            open_url = f"/sales/products/{s.id}"
         rows.append(
-            ReportAmountCompareRow(
+            ReportFundCompareRow(
                 entity=s,
-                amount_journal=amt,
-                amount_card=amt,
-                amount_mismatch=False,
+                entity_id=sid,
+                event_at=event_at,
+                open_url=open_url,
+                note=note,
+                amount_ops=ops_amt,
+                amount_ledger=led_amt,
+                amount_mismatch=_fund_mismatch(ops_amt, led_amt),
             )
         )
-    return rows
+    return _sort_fund_rows(rows)
 
 
-def list_report_works(db: Session, d0: date, d1: date) -> list[ReportAmountCompareRow]:
+def list_report_works(db: Session, d0: date, d1: date) -> list[ReportFundCompareRow]:
     start, end_excl = period_bounds(d0, d1)
     work_at = _work_event_at()
-    works = list(
+    ops_works = list(
         db.scalars(
             select(WorkForInventory)
-            .options(selectinload(WorkForInventory.client))
+            .options(selectinload(WorkForInventory.staff_rows))
             .where(
                 work_at >= start,
                 work_at < end_excl,
                 WorkForInventory.is_voided.is_(False),
             )
-            .order_by(work_at.desc(), WorkForInventory.id.desc())
-        ).all()
+        )
+        .unique()
+        .all()
     )
-    rows: list[ReportAmountCompareRow] = []
-    for w in works:
-        amt = money_q2(float(w.amount_from_client)) if w.amount_from_client is not None else None
+    ops_by_id = {int(w.id): w for w in ops_works}
+    ledger_ids = _source_ids_with_accrual_in_period(
+        db, source_kind=PayrollFundSourceKind.WORK, start=start, end_excl=end_excl
+    )
+    all_ids = sorted(set(ops_by_id) | ledger_ids)
+    missing = [i for i in all_ids if i not in ops_by_id]
+    if missing:
+        for w in db.scalars(
+            select(WorkForInventory)
+            .options(selectinload(WorkForInventory.staff_rows))
+            .where(WorkForInventory.id.in_(missing))
+        ).unique().all():
+            ops_by_id[int(w.id)] = w
+
+    ledger_by_id = _accrual_net_by_source_ids(
+        db,
+        source_kind=PayrollFundSourceKind.WORK,
+        source_ids=all_ids,
+        start=start,
+        end_excl=end_excl,
+    )
+
+    rows: list[ReportFundCompareRow] = []
+    for wid in all_ids:
+        w = ops_by_id.get(wid)
+        event_at = (w.performed_date or w.created_at) if w is not None else None
+        in_ops = (
+            w is not None
+            and not w.is_voided
+            and event_at is not None
+            and start <= event_at < end_excl
+        )
+        ops_amt = _work_ops_funds(w) if in_ops and w is not None else 0.0
+        led_amt = money_q2(ledger_by_id.get(wid, 0.0))
+        if w is None:
+            note = "карточка не найдена; только журнал"
+            open_url = f"/sales/work/{wid}"
+        else:
+            note = _void_note(bool(w.is_voided), in_ops_slice=in_ops)
+            open_url = f"/sales/work/{w.id}"
         rows.append(
-            ReportAmountCompareRow(
+            ReportFundCompareRow(
                 entity=w,
-                amount_journal=amt,
-                amount_card=amt,
-                amount_mismatch=False,
+                entity_id=wid,
+                event_at=event_at,
+                open_url=open_url,
+                note=note,
+                amount_ops=ops_amt,
+                amount_ledger=led_amt,
+                amount_mismatch=_fund_mismatch(ops_amt, led_amt),
             )
         )
-    return rows
+    return _sort_fund_rows(rows)
+
+
+def list_report_consultations(db: Session, d0: date, d1: date) -> list[ReportFundCompareRow]:
+    """Консультации: в отчёте фонды = журнал; строки нужны для сирот и контроля периода."""
+    start, end_excl = period_bounds(d0, d1)
+    ops_rows = list(
+        db.scalars(
+            select(Consultation).where(
+                Consultation.consultation_date >= start,
+                Consultation.consultation_date < end_excl,
+            )
+        ).all()
+    )
+    ops_by_id = {int(c.id): c for c in ops_rows}
+    ledger_ids = _source_ids_with_accrual_in_period(
+        db, source_kind=PayrollFundSourceKind.CONSULTATION, start=start, end_excl=end_excl
+    )
+    all_ids = sorted(set(ops_by_id) | ledger_ids)
+    missing = [i for i in all_ids if i not in ops_by_id]
+    if missing:
+        for c in db.scalars(select(Consultation).where(Consultation.id.in_(missing))).all():
+            ops_by_id[int(c.id)] = c
+
+    ledger_by_id = _accrual_net_by_source_ids(
+        db,
+        source_kind=PayrollFundSourceKind.CONSULTATION,
+        source_ids=all_ids,
+        start=start,
+        end_excl=end_excl,
+    )
+
+    rows: list[ReportFundCompareRow] = []
+    for cid in all_ids:
+        c = ops_by_id.get(cid)
+        led_amt = money_q2(ledger_by_id.get(cid, 0.0))
+        in_date_slice = (
+            c is not None
+            and c.consultation_date is not None
+            and start <= c.consultation_date < end_excl
+        )
+        if c is None:
+            note = "карточка не найдена; только журнал"
+            event_at = None
+            open_url = f"/consultations/{cid}"
+            # Без карточки в сводку попадает только журнал — помечаем как сироту.
+            ops_amt = 0.0
+        else:
+            # В сводке консультации = журнал; по дате показываем ту же сумму.
+            ops_amt = led_amt if in_date_slice or led_amt != 0.0 else 0.0
+            note = None if (in_date_slice or led_amt == 0.0) else "дата консультации вне периода; проводка в периоде"
+            event_at = c.consultation_date
+            open_url = f"/consultations/{c.id}"
+        rows.append(
+            ReportFundCompareRow(
+                entity=c,
+                entity_id=cid,
+                event_at=event_at,
+                open_url=open_url,
+                note=note,
+                amount_ops=ops_amt,
+                amount_ledger=led_amt,
+                amount_mismatch=_fund_mismatch(ops_amt, led_amt),
+            )
+        )
+    return _sort_fund_rows(rows)
+
+
+def list_report_hourly(db: Session, d0: date, d1: date) -> list[ReportFundCompareRow]:
+    start, end_excl = period_bounds(d0, d1)
+    ops_rows = list(
+        db.scalars(
+            select(HourlyWorkEntry)
+            .options(selectinload(HourlyWorkEntry.master_user))
+            .where(
+                HourlyWorkEntry.performed_date >= start,
+                HourlyWorkEntry.performed_date < end_excl,
+            )
+        ).all()
+    )
+    ops_by_id = {int(h.id): h for h in ops_rows}
+    ledger_ids = _source_ids_with_accrual_in_period(
+        db, source_kind=PayrollFundSourceKind.HOURLY_WORK, start=start, end_excl=end_excl
+    )
+    all_ids = sorted(set(ops_by_id) | ledger_ids)
+    missing = [i for i in all_ids if i not in ops_by_id]
+    if missing:
+        for h in db.scalars(
+            select(HourlyWorkEntry)
+            .options(selectinload(HourlyWorkEntry.master_user))
+            .where(HourlyWorkEntry.id.in_(missing))
+        ).all():
+            ops_by_id[int(h.id)] = h
+
+    ledger_by_id = _accrual_net_by_source_ids(
+        db,
+        source_kind=PayrollFundSourceKind.HOURLY_WORK,
+        source_ids=all_ids,
+        start=start,
+        end_excl=end_excl,
+    )
+
+    rows: list[ReportFundCompareRow] = []
+    for hid in all_ids:
+        h = ops_by_id.get(hid)
+        in_ops = (
+            h is not None
+            and h.performed_date is not None
+            and start <= h.performed_date < end_excl
+        )
+        ops_amt = _hourly_ops_funds(h) if in_ops and h is not None else 0.0
+        led_amt = money_q2(ledger_by_id.get(hid, 0.0))
+        if h is None:
+            note = "карточка не найдена; только журнал"
+            event_at = None
+            open_url = f"/hourly-work/{hid}"
+        else:
+            note = None if in_ops else "только журнал / вне среза отчёта"
+            event_at = h.performed_date
+            open_url = f"/hourly-work/{h.id}"
+        rows.append(
+            ReportFundCompareRow(
+                entity=h,
+                entity_id=hid,
+                event_at=event_at,
+                open_url=open_url,
+                note=note,
+                amount_ops=ops_amt,
+                amount_ledger=led_amt,
+                amount_mismatch=_fund_mismatch(ops_amt, led_amt),
+            )
+        )
+    return _sort_fund_rows(rows)
 
 
 def report_to_csv(r: OperationalReportResult) -> str:
