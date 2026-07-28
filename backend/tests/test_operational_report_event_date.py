@@ -206,6 +206,55 @@ def test_list_report_visits_compares_ops_and_ledger_funds(memory_db) -> None:
     assert row.amount_ops == 7000.0
     assert row.amount_ledger == 3000.0
     assert row.amount_mismatch is True
+    assert row.client_amount_header == 7900.0
+    assert row.client_amount_card == 0.0  # нет строк услуг
+    assert row.client_amount_mismatch is True
+    assert row.any_mismatch is True
+
+
+def test_list_report_visits_client_header_vs_services(memory_db) -> None:
+    db = memory_db
+    user, client = _seed_user_client(db)
+    when = datetime(2026, 7, 11, 7, 0)
+    visit = _add_visit(
+        db,
+        user=user,
+        client=client,
+        performed_date=when,
+        created_at=when,
+        amount=10670.0,
+        masters_pool=0.0,
+        salon_profit=0.0,
+    )
+    from app.db.models import VisitService
+
+    db.add(
+        VisitService(
+            visit_id=visit.id,
+            service_id=1,
+            category_name="Cat",
+            subcategory_name="Sub",
+            service_name="Svc",
+            sort_order=1,
+            amount_from_client=7900.0,
+            cost_total=0,
+            profit_before_split=0,
+            salon_profit=0,
+            masters_pool=0,
+        )
+    )
+    db.commit()
+
+    rows = list_report_visits(db, date(2026, 7, 1), date(2026, 7, 27))
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.client_amount_header == 10670.0
+    assert row.client_amount_card == 7900.0
+    assert row.client_amount_mismatch is True
+    assert row.amount_ops == 0.0
+    assert row.amount_ledger == 0.0
+    assert row.amount_mismatch is False
+    assert row.any_mismatch is True
 
 
 def test_list_report_visits_includes_cancelled_with_ledger_orphan(memory_db) -> None:

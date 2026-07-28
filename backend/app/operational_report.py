@@ -35,7 +35,7 @@ from app.payroll_fund import PAYROLL_FUND_SOURCE_KIND_RU, money_q2
 
 @dataclass(frozen=True)
 class ReportFundCompareRow:
-    """Строка сверки фондов: сумма в отчёте (карточка) vs нетто начисл.+сторно в журнале за период."""
+    """Строка сверки: фонды отчёт/журнал + суммы с клиента (шапка vs карточка)."""
 
     entity: Any
     entity_id: int
@@ -45,6 +45,46 @@ class ReportFundCompareRow:
     amount_ops: float
     amount_ledger: float
     amount_mismatch: bool
+    client_amount_header: float | None = None
+    client_amount_card: float | None = None
+    client_amount_mismatch: bool = False
+
+    @property
+    def any_mismatch(self) -> bool:
+        return self.amount_mismatch or self.client_amount_mismatch
+
+
+def _fund_mismatch(ops: float, ledger: float) -> bool:
+    return money_q2(ops) != money_q2(ledger)
+
+
+def _client_amounts_mismatch(a: float | None, b: float | None) -> bool:
+    if a is None and b is None:
+        return False
+    if a is None or b is None:
+        return True
+    return money_q2(a) != money_q2(b)
+
+
+def _visit_services_amount_from_client(visit: Visit) -> float:
+    """Как «Итого с клиента» в карточке: сумма активных строк услуг."""
+    return money_q2(
+        sum(
+            float(s.amount_from_client or 0)
+            for s in (visit.services or [])
+            if not s.is_cancelled
+        )
+    )
+
+
+def _sort_fund_rows(rows: list[ReportFundCompareRow]) -> list[ReportFundCompareRow]:
+    """Сначала любые расхождения, затем по дате события (новые сверху)."""
+
+    def key(r: ReportFundCompareRow) -> tuple:
+        ts = r.event_at.timestamp() if r.event_at is not None else 0.0
+        return (not r.any_mismatch, -ts, -r.entity_id)
+
+    return sorted(rows, key=key)
 
 
 # Сторно расхода (EXPENSE) не должно попадать в «начисления+сторно» сверки.
@@ -56,20 +96,6 @@ _ACCRUAL_OR_ACCRUAL_STORNO = or_(
         _LedgerOrig.entry_kind == PayrollFundEntryKind.ACCRUAL,
     ),
 )
-
-
-def _fund_mismatch(ops: float, ledger: float) -> bool:
-    return money_q2(ops) != money_q2(ledger)
-
-
-def _sort_fund_rows(rows: list[ReportFundCompareRow]) -> list[ReportFundCompareRow]:
-    """Сначала расхождения, затем по дате события (новые сверху)."""
-
-    def key(r: ReportFundCompareRow) -> tuple:
-        ts = r.event_at.timestamp() if r.event_at is not None else 0.0
-        return (not r.amount_mismatch, -ts, -r.entity_id)
-
-    return sorted(rows, key=key)
 
 
 def _accrual_net_by_source_ids(
@@ -973,7 +999,10 @@ def list_report_visits(db: Session, d0: date, d1: date) -> list[ReportFundCompar
     ops_visits = list(
         db.scalars(
             select(Visit)
-            .options(selectinload(Visit.masters))
+            .options(
+                selectinload(Visit.masters),
+                selectinload(Visit.services),
+            )
             .where(
                 Visit.performed_date >= start,
                 Visit.performed_date < end_excl,
@@ -988,7 +1017,12 @@ def list_report_visits(db: Session, d0: date, d1: date) -> list[ReportFundCompar
     missing_ids = [i for i in all_ids if i not in ops_by_id]
     if missing_ids:
         for v in db.scalars(
-            select(Visit).options(selectinload(Visit.masters)).where(Visit.id.in_(missing_ids))
+            select(Visit)
+            .options(
+                selectinload(Visit.masters),
+                selectinload(Visit.services),
+            )
+            .where(Visit.id.in_(missing_ids))
         ).all():
             ops_by_id[int(v.id)] = v
 
@@ -1011,10 +1045,14 @@ def list_report_visits(db: Session, d0: date, d1: date) -> list[ReportFundCompar
             note = "карточка не найдена; только журнал"
             event_at = None
             open_url = f"/visits/{vid}"
+            client_header = None
+            client_card = None
         else:
             note = _visit_note(v, in_ops_slice=in_ops)
             event_at = v.performed_date
             open_url = f"/visits/{v.id}"
+            client_header = money_q2(float(v.amount_from_client or 0))
+            client_card = _visit_services_amount_from_client(v)
         rows.append(
             ReportFundCompareRow(
                 entity=v,
@@ -1025,6 +1063,9 @@ def list_report_visits(db: Session, d0: date, d1: date) -> list[ReportFundCompar
                 amount_ops=ops_amt,
                 amount_ledger=led_amt,
                 amount_mismatch=_fund_mismatch(ops_amt, led_amt),
+                client_amount_header=client_header,
+                client_amount_card=client_card,
+                client_amount_mismatch=_client_amounts_mismatch(client_header, client_card),
             )
         )
     return _sort_fund_rows(rows)
@@ -1074,10 +1115,12 @@ def list_report_sales(db: Session, d0: date, d1: date) -> list[ReportFundCompare
             note = "карточка не найдена; только журнал"
             event_at = None
             open_url = f"/sales/products/{sid}"
+            client_amt = None
         else:
             note = _void_note(bool(s.is_voided), in_ops_slice=in_ops)
             event_at = s.performed_date
             open_url = f"/sales/products/{s.id}"
+            client_amt = money_q2(float(s.amount_from_client or 0))
         rows.append(
             ReportFundCompareRow(
                 entity=s,
@@ -1088,6 +1131,9 @@ def list_report_sales(db: Session, d0: date, d1: date) -> list[ReportFundCompare
                 amount_ops=ops_amt,
                 amount_ledger=led_amt,
                 amount_mismatch=_fund_mismatch(ops_amt, led_amt),
+                client_amount_header=client_amt,
+                client_amount_card=client_amt,
+                client_amount_mismatch=False,
             )
         )
     return _sort_fund_rows(rows)
@@ -1146,9 +1192,13 @@ def list_report_works(db: Session, d0: date, d1: date) -> list[ReportFundCompare
         if w is None:
             note = "карточка не найдена; только журнал"
             open_url = f"/sales/work/{wid}"
+            client_amt = None
         else:
             note = _void_note(bool(w.is_voided), in_ops_slice=in_ops)
             open_url = f"/sales/work/{w.id}"
+            client_amt = (
+                money_q2(float(w.amount_from_client)) if w.amount_from_client is not None else None
+            )
         rows.append(
             ReportFundCompareRow(
                 entity=w,
@@ -1159,6 +1209,9 @@ def list_report_works(db: Session, d0: date, d1: date) -> list[ReportFundCompare
                 amount_ops=ops_amt,
                 amount_ledger=led_amt,
                 amount_mismatch=_fund_mismatch(ops_amt, led_amt),
+                client_amount_header=client_amt,
+                client_amount_card=client_amt,
+                client_amount_mismatch=False,
             )
         )
     return _sort_fund_rows(rows)
