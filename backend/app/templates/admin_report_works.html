@@ -1,10 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="card" style="max-width: 1100px;">
+  <div class="card" style="max-width: 1280px;">
     <p class="muted" style="margin: 0 0 8px;"><a href="/admin/reports?{{ reports_nav_q }}">← К отчёту</a></p>
-    <h2 style="margin-top: 0;">Работы с товарами за период</h2>
-    <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}, не аннулированные, по дате события (performed_date).</p>
-    <p class="muted" style="font-size: 13px;">«В журнале» и «В работе» — сумма с клиента в карточке работы. Расхождение подсвечено.</p>
+    <h2 style="margin-top: 0;">Работы — сверка</h2>
+    <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}. Фонды: студия+ЗП vs журнал. «С клиента» — сумма в карточке работы.</p>
     {% if rows %}
       <div style="overflow-x: auto;">
         <table>
@@ -15,32 +14,36 @@
               <th>Дата события</th>
               <th>Вид</th>
               <th>Область</th>
-              <th>Клиент</th>
-              <th>В журнале, руб.</th>
-              <th>В работе, руб.</th>
+              <th>Фонды в отчёте</th>
+              <th>Фонды в журнале</th>
+              <th>Δ фондов</th>
+              <th>С клиента</th>
+              <th>Пометка</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {% for row in rows %}
               {% set w = row.entity %}
-              <tr{% if row.amount_mismatch %} style="background:#fef3c7;"{% endif %}>
-                <td>{{ w.id }}</td>
-                <td>{{ w.display_number or '—' }}</td>
-                <td>{{ (w.performed_date or w.created_at)|dt_local('%Y-%m-%d %H:%M') }}</td>
-                <td>{{ w.kind.value }}</td>
-                <td>{% if w.scope.value == 'IN_STOCK' %}В наличие{% else %}На заказ{% endif %}</td>
-                <td>{% if w.client %}{{ w.client.name }}{% else %}—{% endif %}</td>
-                <td>{% if row.amount_journal is not none %}{{ "%.2f"|format(row.amount_journal) }}{% else %}—{% endif %}</td>
-                <td>{% if row.amount_card is not none %}{{ "%.2f"|format(row.amount_card) }}{% else %}—{% endif %}</td>
-                <td><a href="/sales/work/{{ w.id }}">Открыть</a></td>
+              <tr{% if row.any_mismatch %} style="background:#fef3c7;"{% endif %}>
+                <td>{{ row.entity_id }}</td>
+                <td>{% if w %}{{ w.display_number or '—' }}{% else %}—{% endif %}</td>
+                <td>{% if row.event_at %}{{ row.event_at|dt_local('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
+                <td>{% if w %}{{ w.kind.value }}{% else %}—{% endif %}</td>
+                <td>{% if w %}{% if w.scope.value == 'IN_STOCK' %}В наличие{% else %}На заказ{% endif %}{% else %}—{% endif %}</td>
+                <td>{{ "%.2f"|format(row.amount_ops) }}</td>
+                <td>{{ "%.2f"|format(row.amount_ledger) }}</td>
+                <td{% if row.amount_mismatch %} style="font-weight:700;"{% endif %}>{{ "%.2f"|format(row.amount_ops - row.amount_ledger) }}</td>
+                <td>{% if row.client_amount_header is not none %}{{ "%.2f"|format(row.client_amount_header) }}{% else %}—{% endif %}</td>
+                <td class="muted" style="font-size:12px;">{% if row.note %}{{ row.note }}{% else %}—{% endif %}</td>
+                <td><a href="{{ row.open_url }}">Открыть</a></td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     {% else %}
-      <p class="muted">Нет работ за период.</p>
+      <p class="muted">Нет работ и проводок за период.</p>
     {% endif %}
   </div>
 {% endblock %}

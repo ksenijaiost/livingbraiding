@@ -1,10 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="card" style="max-width: 1100px;">
+  <div class="card" style="max-width: 1280px;">
     <p class="muted" style="margin: 0 0 8px;"><a href="/admin/reports?{{ reports_nav_q }}">← К отчёту</a></p>
-    <h2 style="margin-top: 0;">Визиты за период</h2>
-    <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}, не отменённые, по дате события (performed_date).</p>
-    <p class="muted" style="font-size: 13px;">«В журнале» — сумма визита в отчёте (поле визита). «В визите» — итог активных услуг в карточке. Расхождение подсвечено.</p>
+    <h2 style="margin-top: 0;">Визиты — сверка</h2>
+    <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}. Сначала строки с любым расхождением.</p>
+    <p class="muted" style="font-size: 13px;">
+      Фонды: «В отчёте» = студия+ЗП в карточке; «В журнале» = нетто начисл.+сторно за период.
+      С клиента: «Шапка» = поле визита; «Услуги» = итог активных услуг (как в карточке) — при расхождении часто помогает пересохранить визит.
+    </p>
     {% if rows %}
       <div style="overflow-x: auto;">
         <table>
@@ -12,29 +15,34 @@
             <tr>
               <th>ID</th>
               <th>Дата события</th>
-              <th>Клиент</th>
-              <th>В журнале, руб.</th>
-              <th>В визите, руб.</th>
+              <th>Фонды в отчёте</th>
+              <th>Фонды в журнале</th>
+              <th>Δ фондов</th>
+              <th>С клиента (шапка)</th>
+              <th>С клиента (услуги)</th>
+              <th>Пометка</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {% for row in rows %}
-              {% set v = row.entity %}
-              <tr{% if row.amount_mismatch %} style="background:#fef3c7;"{% endif %}>
-                <td>{{ v.id }}</td>
-                <td>{{ v.performed_date|dt_local('%Y-%m-%d %H:%M') }}</td>
-                <td>{% if v.client %}{{ v.client.name }}{% else %}—{% endif %}</td>
-                <td>{{ "%.2f"|format(row.amount_journal) }}</td>
-                <td>{{ "%.2f"|format(row.amount_card) }}</td>
-                <td><a href="/visits/{{ v.id }}">Открыть</a></td>
+              <tr{% if row.any_mismatch %} style="background:#fef3c7;"{% endif %}>
+                <td>{{ row.entity_id }}</td>
+                <td>{% if row.event_at %}{{ row.event_at|dt_local('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
+                <td>{{ "%.2f"|format(row.amount_ops) }}</td>
+                <td>{{ "%.2f"|format(row.amount_ledger) }}</td>
+                <td{% if row.amount_mismatch %} style="font-weight:700;"{% endif %}>{{ "%.2f"|format(row.amount_ops - row.amount_ledger) }}</td>
+                <td{% if row.client_amount_mismatch %} style="font-weight:700;"{% endif %}>{% if row.client_amount_header is not none %}{{ "%.2f"|format(row.client_amount_header) }}{% else %}—{% endif %}</td>
+                <td{% if row.client_amount_mismatch %} style="font-weight:700;"{% endif %}>{% if row.client_amount_card is not none %}{{ "%.2f"|format(row.client_amount_card) }}{% else %}—{% endif %}</td>
+                <td class="muted" style="font-size:12px;">{% if row.note %}{{ row.note }}{% else %}—{% endif %}</td>
+                <td><a href="{{ row.open_url }}">Открыть</a></td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     {% else %}
-      <p class="muted">Нет визитов за период.</p>
+      <p class="muted">Нет визитов и проводок за период.</p>
     {% endif %}
   </div>
 {% endblock %}

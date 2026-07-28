@@ -348,10 +348,10 @@
                   <a href="/admin/reports/sales?{{ reports_filter_q }}">список</a> ·
                   <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source={{ b.journal_source }}">журнал</a>
                 {% elif b.key == 'consultations' %}
-                  <a href="/consultations">список</a> ·
+                  <a href="/admin/reports/consultations?{{ reports_filter_q }}">список</a> ·
                   <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source={{ b.journal_source }}">журнал</a>
                 {% elif b.key == 'hourly' %}
-                  <a href="/hourly-work">список</a> ·
+                  <a href="/admin/reports/hourly?{{ reports_filter_q }}">список</a> ·
                   <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source={{ b.journal_source }}">журнал</a>
                 {% else %}
                   <a href="/admin/payroll-fund?df={{ jdf }}&amp;dt={{ jdt }}&amp;source={{ b.journal_source }}">журнал</a>
@@ -362,7 +362,7 @@
         </tbody>
       </table>
       <p class="muted" style="font-size: 12px; margin-top: 8px;">
-        «Список» — карточки. «Журнал» — проводки в фондах за этот период.
+        «Список» — сверка фондов по каждой карточке (расхождения сверху). «Журнал» — проводки в фондах за этот период.
       </p>
     </div>
 

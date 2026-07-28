@@ -23,7 +23,6 @@ from app.db.models import (
     VisitClientType,
     VisitMaster,
     VisitPriceType,
-    VisitService,
 )
 from app.operational_report import build_operational_report, list_report_visits
 from app.payroll_fund import money_q2
@@ -169,7 +168,7 @@ def test_report_excludes_visit_created_in_period_but_performed_outside(memory_db
     assert may.visits_count == 1
 
 
-def test_list_report_visits_compares_journal_and_card_amounts(memory_db) -> None:
+def test_list_report_visits_compares_ops_and_ledger_funds(memory_db) -> None:
     db = memory_db
     user, client = _seed_user_client(db)
     when = datetime(2026, 7, 10, 7, 0)
@@ -179,8 +178,56 @@ def test_list_report_visits_compares_journal_and_card_amounts(memory_db) -> None
         client=client,
         performed_date=when,
         created_at=when,
-        amount=10670.0,
+        amount=7900.0,
+        masters_pool=4000.0,
+        salon_profit=3000.0,
     )
+    # В журнале меньше, чем в карточке (недопровели начисления).
+    db.add(
+        PayrollFundLedger(
+            created_at=when,
+            effective_at=when,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.STUDIO,
+            user_id=None,
+            amount=3000.0,
+            source_kind=PayrollFundSourceKind.VISIT,
+            source_id=visit.id,
+            created_by_user_id=user.id,
+        )
+    )
+    db.commit()
+
+    rows = list_report_visits(db, date(2026, 7, 1), date(2026, 7, 27))
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.entity_id == visit.id
+    # salon 3000 + masters 4000 (100%) = 7000; studio_fund_amount=0
+    assert row.amount_ops == 7000.0
+    assert row.amount_ledger == 3000.0
+    assert row.amount_mismatch is True
+    assert row.client_amount_header == 7900.0
+    assert row.client_amount_card == 0.0  # нет строк услуг
+    assert row.client_amount_mismatch is True
+    assert row.any_mismatch is True
+
+
+def test_list_report_visits_client_header_vs_services(memory_db) -> None:
+    db = memory_db
+    user, client = _seed_user_client(db)
+    when = datetime(2026, 7, 11, 7, 0)
+    visit = _add_visit(
+        db,
+        user=user,
+        client=client,
+        performed_date=when,
+        created_at=when,
+        amount=10670.0,
+        masters_pool=0.0,
+        salon_profit=0.0,
+    )
+    from app.db.models import VisitService
+
     db.add(
         VisitService(
             visit_id=visit.id,
@@ -201,11 +248,52 @@ def test_list_report_visits_compares_journal_and_card_amounts(memory_db) -> None
     rows = list_report_visits(db, date(2026, 7, 1), date(2026, 7, 27))
     assert len(rows) == 1
     row = rows[0]
-    assert row.entity.id == visit.id
-    assert row.entity.client.name == "C"
-    assert row.amount_journal == 10670.0
-    assert row.amount_card == 7900.0
+    assert row.client_amount_header == 10670.0
+    assert row.client_amount_card == 7900.0
+    assert row.client_amount_mismatch is True
+    assert row.amount_ops == 0.0
+    assert row.amount_ledger == 0.0
+    assert row.amount_mismatch is False
+    assert row.any_mismatch is True
+
+
+def test_list_report_visits_includes_cancelled_with_ledger_orphan(memory_db) -> None:
+    db = memory_db
+    user, client = _seed_user_client(db)
+    when = datetime(2026, 7, 12, 8, 0)
+    visit = _add_visit(
+        db,
+        user=user,
+        client=client,
+        performed_date=when,
+        created_at=when,
+        amount=1000.0,
+        masters_pool=500.0,
+        salon_profit=400.0,
+    )
+    visit.is_cancelled = True
+    db.add(
+        PayrollFundLedger(
+            created_at=when,
+            effective_at=when,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=user.id,
+            amount=500.0,
+            source_kind=PayrollFundSourceKind.VISIT,
+            source_id=visit.id,
+            created_by_user_id=user.id,
+        )
+    )
+    db.commit()
+
+    rows = list_report_visits(db, date(2026, 7, 1), date(2026, 7, 27))
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.amount_ops == 0.0
+    assert row.amount_ledger == 500.0
     assert row.amount_mismatch is True
+    assert row.note and "отменён" in row.note
 
 
 def test_report_includes_consultations_hourly_and_manual(memory_db) -> None:
