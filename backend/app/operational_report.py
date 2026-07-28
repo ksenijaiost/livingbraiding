@@ -31,6 +31,7 @@ from app.db.models import (
     WorkScope,
 )
 from app.payroll_fund import PAYROLL_FUND_SOURCE_KIND_RU, money_q2
+from app.ui_visit_display import visit_masters_fund_by_master, visit_masters_fund_total
 
 
 @dataclass(frozen=True)
@@ -230,13 +231,9 @@ def _source_ids_with_accrual_in_period(
 
 
 def _visit_ops_funds(visit: Visit) -> float:
-    """Фонды визита как в operational report: студия + доли masters_pool."""
+    """Фонды визита: студия + ЗП мастеров (как в карточке / VISIT_SERVICE), вкл. PER_SERVICE."""
     studio = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
-    mp = float(visit.masters_pool or 0)
-    masters = 0.0
-    for vm in visit.masters or []:
-        masters = money_q2(masters + money_q2(mp * float(vm.percent or 0) / 100.0))
-    return money_q2(studio + masters)
+    return money_q2(studio + visit_masters_fund_total(visit))
 
 
 def _work_ops_funds(work: WorkForInventory) -> float:
@@ -464,7 +461,10 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
     visits = list(
         db.scalars(
             select(Visit)
-            .options(selectinload(Visit.masters))
+            .options(
+                selectinload(Visit.masters),
+                selectinload(Visit.services).selectinload(VisitService.masters),
+            )
             .where(
                 Visit.performed_date >= start,
                 Visit.performed_date < end_excl,
@@ -627,12 +627,9 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
         visit_studio = money_q2(
             visit_studio + float(v.salon_profit or 0) + float(v.studio_fund_amount or 0)
         )
-        mp = float(v.masters_pool or 0)
-        for vm in v.masters:
-            pct = float(vm.percent or 0) / 100.0
-            a = money_q2(mp * pct)
+        for mid, a in visit_masters_fund_by_master(v).items():
             visit_masters = money_q2(visit_masters + a)
-            add_emp(int(vm.master_id), "visits", a)
+            add_emp(int(mid), "visits", a)
         # 1.19: бонус за смешку больше не входит в фонды визита.
 
     work_studio = 0.0
@@ -1001,7 +998,7 @@ def list_report_visits(db: Session, d0: date, d1: date) -> list[ReportFundCompar
             select(Visit)
             .options(
                 selectinload(Visit.masters),
-                selectinload(Visit.services),
+                selectinload(Visit.services).selectinload(VisitService.masters),
             )
             .where(
                 Visit.performed_date >= start,
@@ -1020,7 +1017,7 @@ def list_report_visits(db: Session, d0: date, d1: date) -> list[ReportFundCompar
             select(Visit)
             .options(
                 selectinload(Visit.masters),
-                selectinload(Visit.services),
+                selectinload(Visit.services).selectinload(VisitService.masters),
             )
             .where(Visit.id.in_(missing_ids))
         ).all():

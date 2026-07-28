@@ -345,6 +345,44 @@ def _master_display_name(user: User | None, master_id: int, db: Session | None) 
     return f"ID {master_id}"
 
 
+def visit_masters_fund_by_master(visit: Visit) -> dict[int, float]:
+    """ЗП в фонды по master_id (доля пула + коррекция), как в карточке и проводках.
+
+    Учитывает masters_scope: PER_SERVICE → доли с строк услуг, иначе — visit.masters.
+    """
+    by_master: dict[int, float] = {}
+
+    def add(mid: int, amount: float) -> None:
+        amt = money_q2(float(amount or 0))
+        if amt <= 0:
+            return
+        by_master[mid] = money_q2(by_master.get(mid, 0.0) + amt)
+
+    active_services = [vs for vs in (visit.services or []) if not vs.is_cancelled]
+    if active_services:
+        for vs in active_services:
+            pool = float(vs.masters_pool or 0)
+            if visit.masters_scope == VisitMastersScope.PER_SERVICE:
+                master_rows = vs.masters or []
+            else:
+                master_rows = visit.masters or []
+            for m in master_rows:
+                add(int(m.master_id), pool * float(m.percent or 0) / 100.0)
+            if getattr(vs, "correction_master_id", None):
+                add(int(vs.correction_master_id), float(getattr(vs, "correction_master_amount", 0) or 0))
+    else:
+        pool = float(visit.masters_pool or 0)
+        for m in visit.masters or []:
+            add(int(m.master_id), pool * float(m.percent or 0) / 100.0)
+        if getattr(visit, "correction_master_id", None):
+            add(int(visit.correction_master_id), float(getattr(visit, "correction_master_amount", 0) or 0))
+    return by_master
+
+
+def visit_masters_fund_total(visit: Visit) -> float:
+    return money_q2(sum(visit_masters_fund_by_master(visit).values()))
+
+
 def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list[VisitMasterPayRow]:
     """ЗП каждого мастера по визиту: доля пула и, при наличии, коррекция."""
     active_services = [vs for vs in (visit.services or []) if not vs.is_cancelled]
