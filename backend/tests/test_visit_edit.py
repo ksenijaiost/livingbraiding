@@ -218,7 +218,8 @@ def test_update_amount_triggers_storno(memory_db):
     assert len(accruals) >= 1
 
 
-def test_update_comment_only_no_storno(memory_db):
+def test_update_comment_only_still_rebuilds_ledger(memory_db):
+    """Даже без смены сумм пересохранение сторнирует и заново начисляет (чинит неполный журнал)."""
     db = memory_db
     master_a, _master_b, _admin, svc_ids = _seed_users_and_services(db)
     client = db.scalar(select(Client).limit(1))
@@ -277,7 +278,121 @@ def test_update_comment_only_no_storno(memory_db):
         ).all()
     )
     after_storno = sum(1 for r in after if r.entry_kind == PayrollFundEntryKind.STORNO)
-    assert after_storno == before_storno
+    assert after_storno > before_storno
+    net = sum_visit_ledger_by_visit_id(
+        db, side=PayrollFundSide.MASTER, visit_ids=[visit.id]
+    ).get(visit.id, 0.0) + sum_visit_ledger_by_visit_id(
+        db, side=PayrollFundSide.STUDIO, visit_ids=[visit.id]
+    ).get(visit.id, 0.0)
+    expected = float(vs.salon_profit or 0) + float(vs.studio_fund_amount or 0) + float(vs.masters_pool or 0)
+    assert abs(net - expected) < 0.01
+
+
+def test_update_rebuilds_incomplete_legacy_visit_ledger(memory_db):
+    """Как визит 118: неполные legacy VISIT + актуальная карточка → после save нетто = карточке."""
+    db = memory_db
+    master_a, _master_b, _admin, svc_ids = _seed_users_and_services(db)
+    client = db.scalar(select(Client).limit(1))
+    visit = _make_visit(db, master_a, client.id, svc_ids[0])
+    vs = db.scalar(select(VisitService).where(VisitService.visit_id == visit.id))
+    assert vs is not None
+
+    # Стираем правильные VISIT_SERVICE и оставляем «кривой» legacy VISIT (студия ок, мастер 200).
+    for row in list(
+        db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT_SERVICE,
+                PayrollFundLedger.source_id == vs.id,
+            )
+        ).all()
+    ):
+        db.delete(row)
+    db.flush()
+    studio_full = float(vs.salon_profit or 0) + float(vs.studio_fund_amount or 0)
+    db.add(
+        PayrollFundLedger(
+            created_at=visit.performed_date,
+            effective_at=visit.performed_date,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.STUDIO,
+            user_id=None,
+            amount=studio_full,
+            source_kind=PayrollFundSourceKind.VISIT,
+            source_id=visit.id,
+            created_by_user_id=master_a.id,
+        )
+    )
+    db.add(
+        PayrollFundLedger(
+            created_at=visit.performed_date,
+            effective_at=visit.performed_date,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=master_a.id,
+            amount=200.0,
+            source_kind=PayrollFundSourceKind.VISIT,
+            source_id=visit.id,
+            created_by_user_id=master_a.id,
+        )
+    )
+    db.commit()
+
+    header = VisitHeaderInput(
+        client_mode="existing",
+        existing_client_id=client.id,
+        draft_name="",
+        draft_phone="",
+        draft_telegram="",
+        draft_vk="",
+        draft_instagram="",
+        draft_other_contact="",
+        client_type=VisitClientType.RETURNING,
+        performed_date=visit.performed_date.date(),
+        duration_minutes=visit.duration_minutes,
+        masters_scope=VisitMastersScope.VISIT,
+        same_master_shares_all_services=False,
+        visit_master_allocations=[(master_a.id, 100)],
+    )
+    line = VisitServiceLineInput(
+        service_id=svc_ids[0],
+        amount_from_client=float(vs.amount_from_client),
+        client_discount_percent=0,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_source=MixSource.NO_MIX,
+        mix_complexity=None,
+        mix_bonus_master_id=None,
+        amortization_level=None,
+        kit_kind="STOCK",
+        visit_service_id=vs.id,
+    )
+    update_visit_with_services(db, visit.id, master_a.id, MultiServiceVisitInput(header=header, lines=[line]))
+
+    net = sum_visit_ledger_by_visit_id(
+        db, side=PayrollFundSide.MASTER, visit_ids=[visit.id]
+    ).get(visit.id, 0.0) + sum_visit_ledger_by_visit_id(
+        db, side=PayrollFundSide.STUDIO, visit_ids=[visit.id]
+    ).get(visit.id, 0.0)
+    db.refresh(vs)
+    expected = float(vs.salon_profit or 0) + float(vs.studio_fund_amount or 0) + float(vs.masters_pool or 0)
+    assert abs(net - expected) < 0.01
+    # Legacy VISIT начисления должны быть сторнированы.
+    legacy_open = list(
+        db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == visit.id,
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+                PayrollFundLedger.storno_of_id.is_(None),
+            )
+        ).all()
+    )
+    # Без сторно-покрытия: у каждой ACCRUAL есть сторно.
+    for acc in legacy_open:
+        has_storno = db.scalar(
+            select(PayrollFundLedger.id).where(PayrollFundLedger.storno_of_id == acc.id).limit(1)
+        )
+        assert has_storno is not None
 
 
 def test_update_visit_writes_audit_rows(memory_db):
