@@ -271,6 +271,116 @@ def _void_note(is_voided: bool, *, in_ops_slice: bool, void_label: str = "анн
     return "; ".join(parts) if parts else None
 
 
+@dataclass(frozen=True)
+class OrphanVisitLedgerSummary:
+    """Проводки VISIT / VISIT_SERVICE за период без живой карточки услуги/визита."""
+
+    net_amount: float
+    source_count: int
+    details: tuple[tuple[str, int, float], ...]  # (VISIT|VISIT_SERVICE, source_id, net)
+
+
+def _orphan_source_ids_for_kind(
+    db: Session,
+    *,
+    source_kind: PayrollFundSourceKind,
+    start: datetime,
+    end_excl: datetime,
+    existing_ids_subq,
+) -> list[int]:
+    """source_id с начисл./сторно начисл. в периоде, которых нет в existing_ids_subq."""
+    rows = db.scalars(
+        select(PayrollFundLedger.source_id)
+        .select_from(PayrollFundLedger)
+        .outerjoin(_LedgerOrig, PayrollFundLedger.storno_of_id == _LedgerOrig.id)
+        .where(
+            PayrollFundLedger.effective_at >= start,
+            PayrollFundLedger.effective_at < end_excl,
+            _ACCRUAL_OR_ACCRUAL_STORNO,
+            PayrollFundLedger.source_kind == source_kind,
+            PayrollFundLedger.source_id.is_not(None),
+            ~PayrollFundLedger.source_id.in_(existing_ids_subq),
+        )
+        .distinct()
+    ).all()
+    return sorted({int(sid) for sid in rows if sid is not None})
+
+
+def summarize_orphan_visit_ledger(db: Session, d0: date, d1: date) -> OrphanVisitLedgerSummary:
+    """Нетто «Визит ?» / удалённых услуг за период — то, что не попадает в строки списка сверки."""
+    start, end_excl = period_bounds(d0, d1)
+    visit_ids_subq = select(Visit.id)
+    service_ids_subq = select(VisitService.id)
+
+    orphan_visit_ids = _orphan_source_ids_for_kind(
+        db,
+        source_kind=PayrollFundSourceKind.VISIT,
+        start=start,
+        end_excl=end_excl,
+        existing_ids_subq=visit_ids_subq,
+    )
+    orphan_service_ids = _orphan_source_ids_for_kind(
+        db,
+        source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+        start=start,
+        end_excl=end_excl,
+        existing_ids_subq=service_ids_subq,
+    )
+
+    details: list[tuple[str, int, float]] = []
+    visit_nets = _accrual_net_by_source_ids(
+        db,
+        source_kind=PayrollFundSourceKind.VISIT,
+        source_ids=orphan_visit_ids,
+        start=start,
+        end_excl=end_excl,
+    )
+    for sid in orphan_visit_ids:
+        net = money_q2(visit_nets.get(sid, 0.0))
+        if net != 0.0:
+            details.append(("VISIT", sid, net))
+
+    svc_nets = _accrual_net_by_source_ids(
+        db,
+        source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+        source_ids=orphan_service_ids,
+        start=start,
+        end_excl=end_excl,
+    )
+    for sid in orphan_service_ids:
+        net = money_q2(svc_nets.get(sid, 0.0))
+        if net != 0.0:
+            details.append(("VISIT_SERVICE", sid, net))
+
+    net_total = money_q2(sum(n for _, _, n in details))
+    return OrphanVisitLedgerSummary(
+        net_amount=net_total,
+        source_count=len(details),
+        details=tuple(details),
+    )
+
+
+def storno_orphan_visit_ledger(
+    db: Session,
+    d0: date,
+    d1: date,
+    *,
+    created_by_user_id: int | None,
+) -> OrphanVisitLedgerSummary:
+    """Сторно непривязанных VISIT / VISIT_SERVICE, у которых есть нетто в периоде."""
+    from app.payroll_fund import storno_source_accruals
+
+    summary = summarize_orphan_visit_ledger(db, d0, d1)
+    for kind, sid, _net in summary.details:
+        sk = (
+            PayrollFundSourceKind.VISIT
+            if kind == "VISIT"
+            else PayrollFundSourceKind.VISIT_SERVICE
+        )
+        storno_source_accruals(db, sk, sid, created_by_user_id)
+    return summarize_orphan_visit_ledger(db, d0, d1)
+
+
 
 def resolve_report_dates(
     db: Session,

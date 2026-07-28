@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
-from app.audit import diff_fields, write_audit_rows
 from app.db.models import (
     Booking,
     Client,
@@ -16,6 +15,7 @@ from app.db.models import (
     KitReserve,
     ProductSale,
     ProductSaleKind,
+    SuperAdminPurgeLog,
     Visit,
     VisitAuditLog,
     VisitKitUsage,
@@ -57,7 +57,10 @@ def release_client_kit_reserves(db: Session, *, client_id: int, changed_by_user_
 def purge_visit_hard(db: Session, visit_id: int, *, actor_user_id: int | None) -> None:
     visit = db.scalar(
         select(Visit)
-        .options(selectinload(Visit.kit_usages).selectinload(VisitKitUsage.kit))
+        .options(
+            selectinload(Visit.kit_usages).selectinload(VisitKitUsage.kit),
+            selectinload(Visit.services),
+        )
         .where(Visit.id == int(visit_id))
     )
     if visit is None:
@@ -65,6 +68,9 @@ def purge_visit_hard(db: Session, visit_id: int, *, actor_user_id: int | None) -
     ok, err = _visit_cancel_revert_stock(db, visit)
     if not ok:
         raise ValueError(err or "Не удалось вернуть комплект на склад для этого визита.")
+    # Сначала услуги (иначе cascade удалит visit_services и останутся «Визит ?»).
+    for vs in list(visit.services or []):
+        storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, int(vs.id), actor_user_id)
     storno_source_accruals(db, PayrollFundSourceKind.VISIT, visit.id, actor_user_id)
     db.execute(delete(VisitAuditLog).where(VisitAuditLog.visit_id == visit.id))
     db.delete(visit)
@@ -158,6 +164,10 @@ def run_purge(
             f"Подтверждение: в первое поле введите «{CONFIRM_PHRASE_1}», во второе — «{CONFIRM_PHRASE_2}»."
         )
     kind = (entity or "").strip().lower()
+    preview = build_purge_preview(db, kind, entity_id)
+    if not preview.get("ok"):
+        raise ValueError(str(preview.get("error") or "Объект не найден."))
+
     if kind == "visit":
         purge_visit_hard(db, int(entity_id), actor_user_id=actor_user_id)
     elif kind == "booking":
@@ -173,6 +183,31 @@ def run_purge(
         purge_kits_hard(db, ids, actor_user_id=actor_user_id)
     else:
         raise ValueError("Неизвестный тип объекта.")
+
+    ids = entity_id if isinstance(entity_id, list) else [int(entity_id)]
+    ids_text = ", ".join(str(i) for i in ids[:40]) + ("…" if len(ids) > 40 else "")
+    details = "\n".join(str(x) for x in (preview.get("lines") or []))
+    db.add(
+        SuperAdminPurgeLog(
+            purged_at=utcnow_naive(),
+            actor_user_id=actor_user_id,
+            entity_kind=kind,
+            entity_ids_text=ids_text[:500],
+            heading=str(preview.get("heading") or "")[:240] or None,
+            details_text=details or None,
+        )
+    )
+
+
+def list_purge_history(db: Session, *, limit: int = 50) -> list[SuperAdminPurgeLog]:
+    return list(
+        db.scalars(
+            select(SuperAdminPurgeLog)
+            .options(selectinload(SuperAdminPurgeLog.actor_user))
+            .order_by(SuperAdminPurgeLog.purged_at.desc(), SuperAdminPurgeLog.id.desc())
+            .limit(limit)
+        ).all()
+    )
 
 
 def parse_purge_entity(entity: str, entity_id_raw: str) -> tuple[str, int | list[int]]:

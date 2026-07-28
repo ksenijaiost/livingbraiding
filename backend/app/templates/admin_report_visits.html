@@ -8,7 +8,37 @@
       Фонды: «В отчёте» = студия+ЗП в карточке; «В журнале» = нетто начисл.+сторно за период.
       С клиента: «Шапка» = поле визита; «Услуги» = итог активных услуг (как в карточке) — при расхождении часто помогает пересохранить визит.
     </p>
-    {% if rows %}
+    {% if msg == 'orphan_storno' %}
+      <p style="color:#166534;font-weight:600;">Непривязанные проводки сторнированы (источников: {{ request.query_params.get('n', '?') }}).</p>
+    {% elif msg == 'orphan_none' %}
+      <p class="muted">Непривязанных проводок за период нет.</p>
+    {% endif %}
+
+    {% if orphan and orphan.source_count > 0 %}
+      <div style="margin:12px 0;padding:12px 14px;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;">
+        <p style="margin:0 0 8px;font-weight:600;">Непривязанный журнал</p>
+        <p class="muted" style="margin:0 0 8px;font-size:13px;">
+          Проводки «Визит ?» / удалённая услуга: нетто <strong>{{ "%.2f"|format(orphan.net_amount) }}</strong> ₽
+          (источников: {{ orphan.source_count }}). В построчную сверку не входят — отсюда дельта сводки без жёлтых строк.
+        </p>
+        <ul style="margin:0 0 10px;padding-left:1.2rem;font-size:13px;">
+          {% for kind, sid, net in orphan.details %}
+            <li>
+              {% if kind == 'VISIT_SERVICE' %}Услуга визита #{{ sid }}{% else %}Визит #{{ sid }} (карточка удалена){% endif %}:
+              {{ "%.2f"|format(net) }} ₽
+            </li>
+          {% endfor %}
+        </ul>
+        <form method="post" action="/admin/reports/visits/storno-orphans?{{ reports_nav_q }}"
+              onsubmit="return confirm('Сторнировать все непривязанные начисления VISIT / VISIT_SERVICE за этот период?');">
+          <button type="submit" style="background:#b45309;border:1px solid #92400e;color:#fff;padding:6px 12px;border-radius:8px;cursor:pointer;">
+            Сторнировать непривязанные
+          </button>
+        </form>
+      </div>
+    {% endif %}
+
+    {% if rows or (orphan and orphan.source_count > 0) %}
       <div style="overflow-x: auto;">
         <table>
           <thead>
@@ -25,6 +55,19 @@
             </tr>
           </thead>
           <tbody>
+            {% if orphan and orphan.source_count > 0 %}
+              <tr style="background:#fef3c7;">
+                <td>—</td>
+                <td>—</td>
+                <td>0.00</td>
+                <td>{{ "%.2f"|format(orphan.net_amount) }}</td>
+                <td style="font-weight:700;">{{ "%.2f"|format(0 - orphan.net_amount) }}</td>
+                <td>—</td>
+                <td>—</td>
+                <td class="muted" style="font-size:12px;">Непривязанный журнал</td>
+                <td>—</td>
+              </tr>
+            {% endif %}
             {% for row in rows %}
               <tr{% if row.any_mismatch %} style="background:#fef3c7;"{% endif %}>
                 <td>{{ row.entity_id }}</td>
