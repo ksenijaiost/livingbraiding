@@ -67,9 +67,7 @@ from app.kit_inlay_visit import (
 from app.payroll_fund import (
     PayrollFundSourceKind,
     post_visit_accruals,
-    post_visit_service_accruals,
-    replace_visit_hourly_help_accruals,
-    replace_visit_service_accruals,
+    replace_visit_accruals,
     storno_source_accruals,
 )
 from app.time_utils import utcnow_naive
@@ -1458,6 +1456,10 @@ def update_visit_with_services(
     allow_closed_period: bool = False,
     force_replace_accruals: bool = False,
 ) -> Visit:
+    """Обновить визит. Проводки ЗП всегда пересобираются (сторно + начисление заново).
+
+    force_replace_accruals сохранён для совместимости вызовов; поведение такое же.
+    """
     if not inp.lines:
         raise ValueError("Добавьте хотя бы одну услугу.")
 
@@ -1504,7 +1506,6 @@ def update_visit_with_services(
         for vs in (visit.services or [])
         if not vs.is_cancelled
     }
-    sig_before = {vs_id: _visit_service_financial_signature(db, vs, visit) for vs_id, vs in active_before.items()}
 
     visit.performed_date = performed_dt
     visit.duration_minutes = max(0, inp.header.duration_minutes)
@@ -1589,7 +1590,6 @@ def update_visit_with_services(
             )
             kept_ids.add(vs.id)
             db.flush()
-            post_visit_service_accruals(db, vs, visit, editor_user_id)
 
     for vs_id, vs in active_before.items():
         if vs_id not in kept_ids:
@@ -1601,9 +1601,7 @@ def update_visit_with_services(
     )
     assert visit is not None
     recalc_visit_totals(visit)
-    prev_help_json = visit.hourly_help_json
     _apply_visit_hourly_help(db, visit, inp, line_master_rows, editor_user_id=editor_user_id)
-    help_changed = prev_help_json != visit.hourly_help_json
 
     after = {
         "client_id": visit.client_id,
@@ -1633,24 +1631,10 @@ def update_visit_with_services(
         ),
     )
 
-    if force_replace_accruals:
-        # Закрытый период (техспец): полная пересборка, даже если финподписи не менялись.
-        from app.payroll_fund import replace_visit_accruals
-
-        replace_visit_accruals(db, visit, editor_user_id)
-    else:
-        for vs in (visit.services or []):
-            if vs.is_cancelled:
-                continue
-            new_sig = _visit_service_financial_signature(db, vs, visit)
-            old_sig = sig_before.get(vs.id)
-            if help_changed or (old_sig is not None and new_sig != old_sig):
-                replace_visit_service_accruals(db, vs, visit, editor_user_id)
-            elif old_sig is None and vs.id not in sig_before:
-                pass  # already posted for new lines
-
-        if help_changed:
-            replace_visit_hourly_help_accruals(db, visit, editor_user_id)
+    # Всегда: legacy VISIT + VISIT_SERVICE + почасовая помощь — сторно и начисление по карточке.
+    # Иначе при «пересохранить без изменений» неполные проводки (как у визита 118) не чинятся.
+    _ = force_replace_accruals  # совместимость вызовов
+    replace_visit_accruals(db, visit, editor_user_id)
 
     db.commit()
     db.refresh(visit)
