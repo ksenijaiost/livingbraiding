@@ -22,6 +22,8 @@ from app.operational_report import (
     report_to_csv,
     resolve_report_dates,
     result_to_template_dict,
+    storno_orphan_visit_ledger,
+    summarize_orphan_visit_ledger,
 )
 from app.webui import templates, ctx as _ctx
 
@@ -151,6 +153,7 @@ def admin_report_visits_list(
     period_id: str | None = Query(None),
     df: str | None = Query(None),
     dt: str | None = Query(None),
+    msg: str | None = Query(None),
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -158,10 +161,48 @@ def admin_report_visits_list(
     month_start = today.replace(day=1)
     d0, d1 = _report_detail_dates(df, dt, month_start, today)
     rows = list_report_visits(db, d0, d1)
+    orphan = summarize_orphan_visit_ledger(db, d0, d1)
     reports_nav_q = _reports_nav_query(report_mode, period_id, d0, d1)
     return templates.TemplateResponse(
         "admin_report_visits.html",
-        _ctx(request, current_user=current_user, title="Визиты за период", rows=rows, date_from=d0, date_to=d1, reports_nav_q=reports_nav_q),
+        _ctx(
+            request,
+            current_user=current_user,
+            title="Визиты за период",
+            rows=rows,
+            date_from=d0,
+            date_to=d1,
+            reports_nav_q=reports_nav_q,
+            orphan=orphan,
+            msg=msg,
+            report_mode=report_mode or "",
+            period_id=period_id or "",
+        ),
+    )
+
+
+@router.post("/admin/reports/visits/storno-orphans")
+def admin_report_visits_storno_orphans(
+    report_mode: str | None = Query(None),
+    period_id: str | None = Query(None),
+    df: str | None = Query(None),
+    dt: str | None = Query(None),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    today = date.today()
+    month_start = today.replace(day=1)
+    d0, d1 = _report_detail_dates(df, dt, month_start, today)
+    before = summarize_orphan_visit_ledger(db, d0, d1)
+    if before.source_count == 0:
+        q = _reports_nav_query(report_mode, period_id, d0, d1)
+        return RedirectResponse(url=f"/admin/reports/visits?{q}&msg=orphan_none", status_code=303)
+    storno_orphan_visit_ledger(db, d0, d1, created_by_user_id=current_user.id)
+    db.commit()
+    q = _reports_nav_query(report_mode, period_id, d0, d1)
+    return RedirectResponse(
+        url=f"/admin/reports/visits?{q}&msg=orphan_storno&n={before.source_count}",
+        status_code=303,
     )
 
 

@@ -1295,6 +1295,22 @@ class PayrollFundLedger(Base):
     user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
 
 
+class SuperAdminPurgeLog(Base):
+    """История безвозвратных удалений через /admin/super/purge (не привязана к удалённой сущности)."""
+
+    __tablename__ = "super_admin_purge_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    purged_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    entity_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    entity_ids_text: Mapped[str] = mapped_column(String(500), nullable=False)
+    heading: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    details_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    actor_user: Mapped["User | None"] = relationship(foreign_keys=[actor_user_id])
+
+
 class HourlyWorkEntry(Base):
     """Почасовая работа мастера (отдельно от визита/работы с товарами)."""
 

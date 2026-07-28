@@ -6,10 +6,12 @@ from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, require_admin_super_assigned
 from app.db.session import get_db
+from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.super_admin_purge import (
     CONFIRM_PHRASE_1,
     CONFIRM_PHRASE_2,
     build_purge_preview,
+    list_purge_history,
     parse_purge_entity,
     run_purge,
 )
@@ -17,6 +19,35 @@ from app.webui import ctx as _ctx, templates
 
 router = APIRouter(prefix="/admin/super", tags=["super_admin_purge"])
 _SUPER = Depends(require_admin_super_assigned())
+
+
+def _history_rows(db: Session) -> list[dict]:
+    history = list_purge_history(db, limit=50)
+    tz = get_display_timezone(db)
+    return [
+        {
+            "when": format_naive_utc_datetime(h.purged_at, tz) or "—",
+            "who": (h.actor_user.display_name if h.actor_user else None)
+            or (f"#{h.actor_user_id}" if h.actor_user_id else "—"),
+            "kind": h.entity_kind,
+            "ids": h.entity_ids_text,
+            "heading": h.heading or "—",
+            "details": h.details_text or "",
+        }
+        for h in history
+    ]
+
+
+def _purge_page_ctx(request: Request, current_user: AuthUser, db: Session, *, error=None, msg=None):
+    return _ctx(
+        request,
+        current_user=current_user,
+        error=error,
+        msg=msg,
+        phrase1=CONFIRM_PHRASE_1,
+        phrase2=CONFIRM_PHRASE_2,
+        history_rows=_history_rows(db),
+    )
 
 
 @router.get("/purge/preview")
@@ -38,18 +69,12 @@ def super_purge_preview(
 def super_purge_form(
     request: Request,
     current_user: AuthUser = _SUPER,
+    db: Session = Depends(get_db),
     msg: str | None = None,
 ):
     return templates.TemplateResponse(
         "admin_super_purge.html",
-        _ctx(
-            request,
-            current_user=current_user,
-            error=None,
-            msg=msg,
-            phrase1=CONFIRM_PHRASE_1,
-            phrase2=CONFIRM_PHRASE_2,
-        ),
+        _purge_page_ctx(request, current_user, db, msg=msg),
     )
 
 
@@ -68,13 +93,11 @@ async def super_purge_post(
     if str(form.get("ack_irreversible") or "") != "on":
         return templates.TemplateResponse(
             "admin_super_purge.html",
-            _ctx(
+            _purge_page_ctx(
                 request,
-                current_user=current_user,
+                current_user,
+                db,
                 error="Нужно отметить: «Я понимаю, что восстановить данные будет нельзя».",
-                msg=None,
-                phrase1=CONFIRM_PHRASE_1,
-                phrase2=CONFIRM_PHRASE_2,
             ),
             status_code=400,
         )
@@ -93,14 +116,7 @@ async def super_purge_post(
         db.rollback()
         return templates.TemplateResponse(
             "admin_super_purge.html",
-            _ctx(
-                request,
-                current_user=current_user,
-                error=str(exc),
-                msg=None,
-                phrase1=CONFIRM_PHRASE_1,
-                phrase2=CONFIRM_PHRASE_2,
-            ),
+            _purge_page_ctx(request, current_user, db, error=str(exc)),
             status_code=400,
         )
     return RedirectResponse(url="/admin/super/purge?msg=deleted", status_code=303)

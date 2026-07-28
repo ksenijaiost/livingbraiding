@@ -352,6 +352,53 @@ def test_list_report_visits_includes_cancelled_with_ledger_orphan(memory_db) -> 
     assert row.note and "отменён" in row.note
 
 
+def test_orphan_visit_service_ledger_summary_and_storno(memory_db) -> None:
+    """Сирота VISIT_SERVICE (услуги нет) — в сводке сирот и чинится сторно."""
+    from app.operational_report import storno_orphan_visit_ledger, summarize_orphan_visit_ledger
+
+    db = memory_db
+    user, client = _seed_user_client(db)
+    when = datetime(2026, 7, 23, 7, 0)
+    # Проводки на несуществующий visit_service_id.
+    db.add(
+        PayrollFundLedger(
+            created_at=when,
+            effective_at=when,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.STUDIO,
+            user_id=None,
+            amount=900.0,
+            source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+            source_id=999001,
+            created_by_user_id=user.id,
+        )
+    )
+    db.add(
+        PayrollFundLedger(
+            created_at=when,
+            effective_at=when,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=user.id,
+            amount=800.0,
+            source_kind=PayrollFundSourceKind.VISIT_SERVICE,
+            source_id=999001,
+            created_by_user_id=user.id,
+        )
+    )
+    db.commit()
+
+    orphan = summarize_orphan_visit_ledger(db, date(2026, 7, 1), date(2026, 7, 27))
+    assert orphan.source_count == 1
+    assert orphan.net_amount == 1700.0
+    assert orphan.details[0] == ("VISIT_SERVICE", 999001, 1700.0)
+
+    after = storno_orphan_visit_ledger(db, date(2026, 7, 1), date(2026, 7, 27), created_by_user_id=user.id)
+    db.commit()
+    assert after.source_count == 0
+    assert after.net_amount == 0.0
+
+
 def test_report_includes_consultations_hourly_and_manual(memory_db) -> None:
     db = memory_db
     user, client = _seed_user_client(db)

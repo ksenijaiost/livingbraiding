@@ -7,15 +7,16 @@ from types import SimpleNamespace
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
-from app.audit import diff_fields, write_audit_rows
 from app.db.models import (
     Booking,
     Client,
+    Consultation,
     Kit,
     KitAuditLog,
     KitReserve,
     ProductSale,
     ProductSaleKind,
+    SuperAdminPurgeLog,
     Visit,
     VisitAuditLog,
     VisitKitUsage,
@@ -54,10 +55,19 @@ def release_client_kit_reserves(db: Session, *, client_id: int, changed_by_user_
         db.delete(r)
 
 
+def _storno_consultation(db: Session, consultation_id: int, actor_user_id: int | None) -> None:
+    storno_source_accruals(
+        db, PayrollFundSourceKind.CONSULTATION, int(consultation_id), actor_user_id
+    )
+
+
 def purge_visit_hard(db: Session, visit_id: int, *, actor_user_id: int | None) -> None:
     visit = db.scalar(
         select(Visit)
-        .options(selectinload(Visit.kit_usages).selectinload(VisitKitUsage.kit))
+        .options(
+            selectinload(Visit.kit_usages).selectinload(VisitKitUsage.kit),
+            selectinload(Visit.services),
+        )
         .where(Visit.id == int(visit_id))
     )
     if visit is None:
@@ -65,6 +75,9 @@ def purge_visit_hard(db: Session, visit_id: int, *, actor_user_id: int | None) -
     ok, err = _visit_cancel_revert_stock(db, visit)
     if not ok:
         raise ValueError(err or "Не удалось вернуть комплект на склад для этого визита.")
+    # Сначала услуги (иначе cascade удалит visit_services и останутся «Визит ?»).
+    for vs in list(visit.services or []):
+        storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, int(vs.id), actor_user_id)
     storno_source_accruals(db, PayrollFundSourceKind.VISIT, visit.id, actor_user_id)
     db.execute(delete(VisitAuditLog).where(VisitAuditLog.visit_id == visit.id))
     db.delete(visit)
@@ -76,9 +89,27 @@ def purge_booking_hard(db: Session, booking_id: int, *, actor_user_id: int | Non
         raise ValueError("Бронь не найдена.")
     release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=actor_user_id)
     bid = int(b.id)
+
+    # ЗП консультации, привязанной к этой брони как результат.
+    if b.consultation_id:
+        _storno_consultation(db, int(b.consultation_id), actor_user_id)
+        b.consultation_id = None
+
+    # Консультация, у которой эта бронь — source_booking (FK надо снять до delete).
+    src_cons = db.scalar(select(Consultation).where(Consultation.source_booking_id == bid))
+    if src_cons is not None:
+        _storno_consultation(db, int(src_cons.id), actor_user_id)
+        db.execute(
+            update(Booking)
+            .where(Booking.consultation_id == int(src_cons.id))
+            .values(consultation_id=None)
+        )
+        src_cons.source_booking_id = None
+
     db.execute(update(Visit).where(Visit.booking_id == bid).values(booking_id=None))
     db.execute(update(ProductSale).where(ProductSale.booking_id == bid).values(booking_id=None))
     db.execute(update(WorkForInventory).where(WorkForInventory.booking_id == bid).values(booking_id=None))
+    db.flush()
     db.delete(b)
 
 
@@ -86,8 +117,9 @@ def purge_product_sale_hard(db: Session, sale_id: int, *, actor_user_id: int | N
     sale = db.get(ProductSale, int(sale_id))
     if sale is None:
         raise ValueError("Продажа не найдена.")
+    # Всегда сторно (идемпотентно): и для аннулированных, если проводки остались.
+    storno_source_accruals(db, PayrollFundSourceKind.PRODUCT_SALE, sale.id, actor_user_id)
     if not sale.is_voided:
-        storno_source_accruals(db, PayrollFundSourceKind.PRODUCT_SALE, sale.id, actor_user_id)
         if sale.kind == ProductSaleKind.KIT and sale.kit_id and sale.kit_pieces_sold:
             _apply_kit_delta(
                 db,
@@ -102,18 +134,31 @@ def purge_work_hard(db: Session, work_id: int, *, actor_user_id: int | None) -> 
     w = db.get(WorkForInventory, int(work_id))
     if w is None:
         raise ValueError("Работа не найдена.")
-    if not w.is_voided:
-        storno_source_accruals(db, PayrollFundSourceKind.WORK, w.id, actor_user_id)
-        if w.created_kit_id:
-            kit = db.get(Kit, int(w.created_kit_id))
-            if kit is not None:
-                kit.is_archived = True
-                kit.is_in_stock = False
-                kit.pieces_available = 0
-                kit.updated_at = utcnow_naive()
-                if actor_user_id is not None:
-                    kit.updated_by_user_id = actor_user_id
+    storno_source_accruals(db, PayrollFundSourceKind.WORK, w.id, actor_user_id)
+    if not w.is_voided and w.created_kit_id:
+        kit = db.get(Kit, int(w.created_kit_id))
+        if kit is not None:
+            kit.is_archived = True
+            kit.is_in_stock = False
+            kit.pieces_available = 0
+            kit.updated_at = utcnow_naive()
+            if actor_user_id is not None:
+                kit.updated_by_user_id = actor_user_id
     db.delete(w)
+
+
+def purge_consultation_hard(db: Session, consultation_id: int, *, actor_user_id: int | None) -> None:
+    """Сторно ЗП и удаление консультации (для каскада клиента)."""
+    cons = db.get(Consultation, int(consultation_id))
+    if cons is None:
+        return
+    _storno_consultation(db, int(cons.id), actor_user_id)
+    db.execute(
+        update(Booking).where(Booking.consultation_id == int(cons.id)).values(consultation_id=None)
+    )
+    cons.source_booking_id = None
+    db.flush()
+    db.delete(cons)
 
 
 def purge_client_hard(db: Session, client_id: int, *, actor_user_id: int | None) -> None:
@@ -135,6 +180,12 @@ def purge_client_hard(db: Session, client_id: int, *, actor_user_id: int | None)
     )
     for wid in work_ids:
         purge_work_hard(db, int(wid), actor_user_id=actor_user_id)
+
+    cons_ids = list(
+        db.scalars(select(Consultation.id).where(Consultation.client_id == cid).order_by(Consultation.id.asc())).all()
+    )
+    for cid_cons in cons_ids:
+        purge_consultation_hard(db, int(cid_cons), actor_user_id=actor_user_id)
 
     booking_ids = list(db.scalars(select(Booking.id).where(Booking.client_id == cid).order_by(Booking.id.asc())).all())
     for bid in booking_ids:
@@ -158,6 +209,10 @@ def run_purge(
             f"Подтверждение: в первое поле введите «{CONFIRM_PHRASE_1}», во второе — «{CONFIRM_PHRASE_2}»."
         )
     kind = (entity or "").strip().lower()
+    preview = build_purge_preview(db, kind, entity_id)
+    if not preview.get("ok"):
+        raise ValueError(str(preview.get("error") or "Объект не найден."))
+
     if kind == "visit":
         purge_visit_hard(db, int(entity_id), actor_user_id=actor_user_id)
     elif kind == "booking":
@@ -173,6 +228,31 @@ def run_purge(
         purge_kits_hard(db, ids, actor_user_id=actor_user_id)
     else:
         raise ValueError("Неизвестный тип объекта.")
+
+    ids = entity_id if isinstance(entity_id, list) else [int(entity_id)]
+    ids_text = ", ".join(str(i) for i in ids[:40]) + ("…" if len(ids) > 40 else "")
+    details = "\n".join(str(x) for x in (preview.get("lines") or []))
+    db.add(
+        SuperAdminPurgeLog(
+            purged_at=utcnow_naive(),
+            actor_user_id=actor_user_id,
+            entity_kind=kind,
+            entity_ids_text=ids_text[:500],
+            heading=str(preview.get("heading") or "")[:240] or None,
+            details_text=details or None,
+        )
+    )
+
+
+def list_purge_history(db: Session, *, limit: int = 50) -> list[SuperAdminPurgeLog]:
+    return list(
+        db.scalars(
+            select(SuperAdminPurgeLog)
+            .options(selectinload(SuperAdminPurgeLog.actor_user))
+            .order_by(SuperAdminPurgeLog.purged_at.desc(), SuperAdminPurgeLog.id.desc())
+            .limit(limit)
+        ).all()
+    )
 
 
 def parse_purge_entity(entity: str, entity_id_raw: str) -> tuple[str, int | list[int]]:

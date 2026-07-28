@@ -63,6 +63,44 @@
       </p>
     </form>
   </div>
+
+  <div class="card" style="max-width: 52rem; margin-top: 1.25rem;">
+    <h2 style="margin-top: 0; font-size: 1.1rem;">История удалений</h2>
+    <p class="muted" style="font-size: 13px; margin-top: 0;">Кто, что и когда удалил через эту страницу (последние 50).</p>
+    {% if history_rows %}
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Когда</th>
+              <th>Кто</th>
+              <th>Тип</th>
+              <th>ID</th>
+              <th>Объект</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for h in history_rows %}
+              <tr>
+                <td style="white-space:nowrap;font-size:13px;">{{ h.when }}</td>
+                <td>{{ h.who }}</td>
+                <td><code>{{ h.kind }}</code></td>
+                <td>{{ h.ids }}</td>
+                <td>
+                  <div>{{ h.heading }}</div>
+                  {% if h.details %}
+                    <div class="muted" style="font-size:12px;white-space:pre-line;margin-top:4px;">{{ h.details }}</div>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Пока пусто — записи появятся после удалений.</p>
+    {% endif %}
+  </div>
   <script>
     (function () {
       var p1 = {{ phrase1 | tojson }};
