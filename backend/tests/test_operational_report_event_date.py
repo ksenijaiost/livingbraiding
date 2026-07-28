@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.db import models as _orm_models  # noqa: F401
@@ -22,10 +22,14 @@ from app.db.models import (
     Visit,
     VisitClientType,
     VisitMaster,
+    VisitMastersScope,
     VisitPriceType,
+    VisitService,
+    VisitServiceMaster,
 )
 from app.operational_report import build_operational_report, list_report_visits
 from app.payroll_fund import money_q2
+from app.ui_visit_display import visit_masters_fund_total
 
 
 @pytest.fixture()
@@ -226,8 +230,6 @@ def test_list_report_visits_client_header_vs_services(memory_db) -> None:
         masters_pool=0.0,
         salon_profit=0.0,
     )
-    from app.db.models import VisitService
-
     db.add(
         VisitService(
             visit_id=visit.id,
@@ -255,6 +257,60 @@ def test_list_report_visits_client_header_vs_services(memory_db) -> None:
     assert row.amount_ledger == 0.0
     assert row.amount_mismatch is False
     assert row.any_mismatch is True
+
+
+def test_visit_ops_funds_include_per_service_masters(memory_db) -> None:
+    """Как визит 178: доли на услуге, visit_masters пустой → раньше ЗП выпадала из отчёта."""
+    db = memory_db
+    user, client = _seed_user_client(db)
+    when = datetime(2026, 7, 6, 7, 0)
+    visit = _add_visit(
+        db,
+        user=user,
+        client=client,
+        performed_date=when,
+        created_at=when,
+        amount=3800.0,
+        masters_pool=1720.0,
+        salon_profit=1720.0,
+    )
+    visit.studio_fund_amount = 200.0
+    visit.masters_scope = VisitMastersScope.PER_SERVICE
+    # Убираем доли уровня визита — остаются только VisitServiceMaster.
+    for vm in list(db.scalars(select(VisitMaster).where(VisitMaster.visit_id == visit.id)).all()):
+        db.delete(vm)
+    db.flush()
+
+    vs = VisitService(
+        visit_id=visit.id,
+        service_id=1,
+        category_name="Cat",
+        subcategory_name="Sub",
+        service_name="Svc",
+        sort_order=1,
+        amount_from_client=3800.0,
+        cost_total=360,
+        profit_before_split=3440,
+        salon_profit=1720,
+        masters_pool=1720,
+        studio_fund_amount=200,
+        amortization_amount=200,
+    )
+    db.add(vs)
+    db.flush()
+    db.add(VisitServiceMaster(visit_service_id=vs.id, master_id=user.id, percent=100))
+    db.commit()
+
+    db.refresh(visit)
+    assert visit_masters_fund_total(visit) == 1720.0
+
+    rows = list_report_visits(db, date(2026, 7, 1), date(2026, 7, 27))
+    assert len(rows) == 1
+    assert rows[0].amount_ops == 3640.0  # 1720 + 200 + 1720
+
+    report = build_operational_report(db, date(2026, 7, 1), date(2026, 7, 27))
+    assert report.visit_studio_to_fund == 1920.0
+    assert report.visit_masters_to_fund == 1720.0
 
 
 def test_list_report_visits_includes_cancelled_with_ledger_orphan(memory_db) -> None:
