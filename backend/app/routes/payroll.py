@@ -22,10 +22,13 @@ from app.payroll_fund import (
     PayrollFundPayoutPaymentKind,
     PayrollFundSide,
     current_fund_balance,
+    existing_storno_id_for_ledger,
+    get_manual_ledger_for_storno,
     ledger_balances,
     post_manual_adjustment,
     post_payout,
     search_ledger_rows,
+    storno_manual_ledger_entry,
     visit_ids_for_visit_service_source_ids,
 )
 from app.payroll_utils import payroll_period_day_end, payroll_period_day_start
@@ -137,6 +140,7 @@ def _payroll_fund_msg_ru(code: str | None) -> str | None:
     return {
         "paid": "Выплата записана в журнал.",
         "adjusted": "Корректировка записана в журнал.",
+        "storno": "Проводка отменена (сторно записано в журнал).",
     }.get(code or "", code)
 
 
@@ -150,6 +154,8 @@ def _payroll_fund_err_ru(code: str | None) -> str | None:
         "bad_date": "Укажите корректную дату выплаты.",
         "bad_period": "Дата выплаты недопустима (закрытый период, будущее или раньше открытого периода).",
         "bad_period_ack": "Для выплаты в закрытом периоде ЗП нужно двойное подтверждение (только техспец).",
+        "bad_storno_id": "Укажите корректный ID проводки.",
+        "storno_fail": "Не удалось отменить проводку.",
     }.get(code or "", code)
 
 
@@ -165,6 +171,7 @@ def admin_payroll_fund_page(
     type: str | None = None,
     fund: str | None = None,
     by: str | None = None,
+    storno_id: str | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -323,6 +330,26 @@ def admin_payroll_fund_page(
         ensure_ascii=False,
     )
     page_err = _payroll_fund_err_ru(err) or journal_err
+
+    storno_preview = None
+    storno_preview_err: str | None = None
+    storno_id_form = (storno_id or "").strip()
+    storno_already_id: int | None = None
+    if storno_id_form:
+        try:
+            sid = parse_int(storno_id_form, min=1, field_name="storno_id")
+        except ValueError:
+            storno_preview_err = "Укажите корректный ID проводки."
+            storno_id_form = ""
+        else:
+            try:
+                storno_preview = get_manual_ledger_for_storno(db, sid)
+                storno_already_id = existing_storno_id_for_ledger(db, sid)
+                if storno_already_id is not None:
+                    storno_preview_err = f"Проводка уже отменена (сторно #{storno_already_id})."
+            except ValueError as e:
+                storno_preview_err = str(e)
+
     return templates.TemplateResponse(
         "admin_payroll_fund.html",
         _ctx(
@@ -351,6 +378,10 @@ def admin_payroll_fund_page(
             entry_kind_options=entry_kind_options,
             fund_side_options=fund_side_options,
             created_by_user_options=created_by_user_options,
+            storno_id_form=storno_id_form,
+            storno_preview=storno_preview,
+            storno_preview_err=storno_preview_err,
+            storno_already_id=storno_already_id,
             msg=_payroll_fund_msg_ru(msg),
             err=page_err,
         ),
@@ -475,4 +506,23 @@ async def admin_payroll_fund_adjust(
 
     db.commit()
     return RedirectResponse(url="/admin/payroll-fund?msg=adjusted", status_code=303)
+
+
+@router.post("/admin/payroll-fund/storno")
+async def admin_payroll_fund_storno(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        entry_id = parse_int(form.get("ledger_id"), min=1, field_name="ledger_id")
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_storno_id", status_code=303)
+    try:
+        storno_manual_ledger_entry(db, entry_id, current_user.id)
+    except ValueError:
+        return RedirectResponse(url=f"/admin/payroll-fund?storno_id={entry_id}", status_code=303)
+    db.commit()
+    return RedirectResponse(url="/admin/payroll-fund?msg=storno", status_code=303)
 

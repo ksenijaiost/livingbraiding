@@ -283,6 +283,108 @@
       </script>
     </div>
 
+    <div class="card" style="margin-top: 16px;">
+      <h3 style="margin-top:0;">Сторно ручной проводки</h3>
+      <p class="muted" style="margin-top:-6px;">
+        Отмена ручной выплаты или корректировки по ID из журнала.
+        Сторно записывается <strong>той же учётной датой</strong>, что и исходная проводка (попадает в тот же период ЗП).
+      </p>
+      <form method="get" action="/admin/payroll-fund" style="display:flex; flex-wrap:wrap; gap:12px; align-items:end;">
+        <div>
+          <label for="pf_storno_id">ID проводки</label>
+          <input type="number" name="storno_id" id="pf_storno_id" min="1" step="1" required
+            value="{{ storno_id_form|default('') }}" placeholder="например 42"
+            style="width:10rem; max-width:100%; box-sizing:border-box;" />
+        </div>
+        <div>
+          <button type="submit" class="secondary">Показать</button>
+        </div>
+      </form>
+
+      {% if storno_preview_err %}
+        <div class="error" style="margin-top: 12px;">{{ storno_preview_err }}</div>
+      {% endif %}
+
+      {% if storno_preview %}
+        <div class="card" style="margin-top: 12px; background:#f8f9fb;">
+          <strong>Проводка #{{ storno_preview.id }}</strong>
+          <table style="margin-top: 8px;">
+            <tbody>
+              <tr>
+                <td class="muted">Тип</td>
+                <td>
+                  {% if storno_preview.entry_kind.value == 'ACCRUAL' %}Корректировка (начисление)
+                  {% elif storno_preview.entry_kind.value == 'PAYOUT' %}Выплата
+                  {% else %}{{ storno_preview.entry_kind.value }}{% endif %}
+                </td>
+              </tr>
+              <tr>
+                <td class="muted">Дата учёта</td>
+                <td>{{ (storno_preview.effective_at or storno_preview.created_at)|dt_local('%Y-%m-%d %H:%M') }}</td>
+              </tr>
+              <tr>
+                <td class="muted">Проведено</td>
+                <td class="muted">{{ storno_preview.created_at|dt_local('%Y-%m-%d %H:%M') }}</td>
+              </tr>
+              <tr>
+                <td class="muted">Фонд</td>
+                <td>{% if storno_preview.side.value == 'STUDIO' %}Фонд студии{% else %}Фонд сотрудника{% endif %}</td>
+              </tr>
+              <tr>
+                <td class="muted">Кому</td>
+                <td>
+                  {% if storno_preview.user %}
+                    {{ storno_preview.user.display_name }} (#{{ storno_preview.user_id }})
+                  {% elif storno_preview.side.value == 'STUDIO' %}
+                    —
+                  {% else %}
+                    #{{ storno_preview.user_id or '—' }}
+                  {% endif %}
+                </td>
+              </tr>
+              {% if storno_preview.entry_kind.value == 'PAYOUT' %}
+              <tr>
+                <td class="muted">Оплата</td>
+                <td>
+                  {% if storno_preview.payout_payment_kind %}
+                    {% if storno_preview.payout_payment_kind.value == 'UNSPECIFIED' %}Не указан
+                    {% elif storno_preview.payout_payment_kind.value == 'NON_CASH' %}Безналичные
+                    {% elif storno_preview.payout_payment_kind.value == 'CASH' %}Наличные
+                    {% else %}{{ storno_preview.payout_payment_kind.value }}{% endif %}
+                  {% else %}—{% endif %}
+                </td>
+              </tr>
+              {% endif %}
+              <tr>
+                <td class="muted">Сумма</td>
+                <td><strong>{{ "%.2f"|format(storno_preview.amount) }}</strong> руб.</td>
+              </tr>
+              <tr>
+                <td class="muted">Кто внёс</td>
+                <td>{{ storno_preview.created_by_user.display_name if storno_preview.created_by_user else '—' }}</td>
+              </tr>
+              <tr>
+                <td class="muted">Комментарий</td>
+                <td>{{ storno_preview.comment or '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="muted" style="margin:10px 0 0; font-size:12px;">
+            После отмены в журнал добавится сторно на сумму {{ "%.2f"|format(-storno_preview.amount) }} руб.
+            с той же датой учёта.
+          </p>
+          {% if not storno_already_id %}
+            <form method="post" action="/admin/payroll-fund/storno" style="margin-top: 12px;"
+              onsubmit="return confirm('Отменить проводку #{{ storno_preview.id }}? Сторно пройдёт датой учёта исходной проводки.');">
+              <input type="hidden" name="ledger_id" value="{{ storno_preview.id }}" />
+              <button type="submit">Сторно (отменить)</button>
+              <a href="/admin/payroll-fund" style="margin-left: 10px;">Сбросить</a>
+            </form>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+
     <h3 style="margin-top: 24px;">Журнал</h3>
     <form method="get" action="/admin/payroll-fund" class="card" style="background:#f8f9fb; margin-bottom: 14px;">
       <div class="pf-journal-filters" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 16px; align-items:end;">
