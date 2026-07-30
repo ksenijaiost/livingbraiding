@@ -53,3 +53,55 @@ def test_within_edit_window_days_zero_is_false() -> None:
 
     v = _Visit(created_at=datetime(2026, 4, 1, 12, 0, 0))
     assert within_edit_window(v, 0, now=v.created_at) is False
+
+
+def test_work_edit_allowed_super_outside_window() -> None:
+    """Суперадмин может править работу вне окна дней (открытый период)."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from app.db.models import UserRole
+    from app.work_products import _work_edit_allowed
+
+    created = datetime(2020, 1, 1, 12, 0, 0)
+    work = SimpleNamespace(
+        is_voided=False,
+        performed_date=created,
+        created_at=created,
+        created_by_user_id=1,
+        staff_rows=[],
+    )
+    user = SimpleNamespace(id=99, role=UserRole.ADMIN_SUPER, roles=(UserRole.ADMIN_SUPER,))
+    db = MagicMock()
+
+    with patch("app.work_products.is_in_closed_payroll_period", return_value=False):
+        ok, msg = _work_edit_allowed(db, work, user)  # type: ignore[arg-type]
+    assert ok is True
+    assert msg == ""
+
+
+def test_work_edit_allowed_admin_outside_window_blocked() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from app.db.models import UserRole
+    from app.work_products import _work_edit_allowed
+
+    created = datetime(2020, 1, 1, 12, 0, 0)
+    work = SimpleNamespace(
+        is_voided=False,
+        performed_date=created,
+        created_at=created,
+        created_by_user_id=1,
+        staff_rows=[],
+    )
+    user = SimpleNamespace(id=2, role=UserRole.ADMIN, roles=(UserRole.ADMIN,))
+    db = MagicMock()
+
+    with patch("app.work_products.is_in_closed_payroll_period", return_value=False):
+        with patch("app.work_products.edit_window_days", return_value=2):
+            with patch("app.work_products.within_edit_window", return_value=False):
+                ok, msg = _work_edit_allowed(db, work, user)  # type: ignore[arg-type]
+    assert ok is False
+    assert "Окно редактирования" in msg
+    assert "Суперадмин" in msg

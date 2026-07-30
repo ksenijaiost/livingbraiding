@@ -15,7 +15,7 @@
       {% elif msg == 'already_voided' %}
         <div class="error" style="margin-bottom: 12px;">Уже аннулировано.</div>
       {% elif msg == 'void_blocked' %}
-        <div class="error" style="margin-bottom: 12px;">Аннулирование запрещено (закрытый период ЗП или истекло окно редактирования).</div>
+        <div class="error" style="margin-bottom: 12px;">Аннулирование запрещено (закрытый период ЗП, окно редактирования для роли или недостаточно прав).</div>
       {% elif msg == 'void_conflict' %}
         <div class="error" style="margin-bottom: 12px;">Нельзя аннулировать: конфликт со складом (комплект уже использован или остатки изменились).</div>
       {% endif %}
