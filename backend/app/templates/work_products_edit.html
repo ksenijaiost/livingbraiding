@@ -26,17 +26,53 @@
         {% endif %}
         <div class="row">
           <div>
-            <label>Сумма от клиента, ₽</label>
-            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px;">
-              <input name="amount_from_client" type="number" step="1" min="0" value="{{ row.amount_from_client if row.amount_from_client is not none else '' }}" style="max-width:12rem;" />
-              {% with name='client_payment_kind', value=(row.client_payment_kind.value if row.client_payment_kind else 'CASH') %}
-                {% include "partials/client_payment_kind_radios.html" %}
-              {% endwith %}
+            <label>Режим</label>
+            <div style="margin-top: 6px;">
+              {% set scope_val = row.scope.value if row.scope else 'IN_STOCK' %}
+              {% for s in scopes %}
+                <label style="margin-right: 16px;">
+                  <input type="radio" name="scope" value="{{ s.value }}" {% if scope_val == s.value %}checked{% endif %} />
+                  {{ s.label }}
+                </label>
+              {% endfor %}
             </div>
           </div>
           <div>
             <label>Комментарий</label>
             <input name="comment" value="{{ row.comment or '' }}" placeholder="необязательно" />
+          </div>
+        </div>
+
+        <div id="client_block" class="card" style="background:#f8fafc; margin: 12px 0; {% if scope_val != 'CUSTOM_ORDER' %}display:none;{% endif %}">
+          <strong style="display:block; margin-bottom: 6px;">Клиент (обязательно для «на заказ»)</strong>
+          <input type="hidden" name="client_id" id="client_id" value="{{ row.client_id or '' }}" />
+          <div id="work_client_search_row" class="row" style="align-items: flex-end;">
+            <div style="flex:1;">
+              <label>Поиск клиента по имени или телефону</label>
+              <input type="search" id="client_search_q" autocomplete="off" placeholder="Имя или цифры телефона, подожди или нажми «Найти»" value="" />
+            </div>
+            <div>
+              <button type="button" id="work_client_find_btn" class="secondary">Найти</button>
+            </div>
+          </div>
+          <ul id="client_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:220px;overflow:auto;"></ul>
+          <div id="work_client_selected_panel" style="{% if selected_client or row.client_id %}display:block;{% else %}display:none;{% endif %}margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
+              <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;">
+                <span style="font-weight:700;color:#065f46;">Выбран клиент</span>
+                <span id="work_client_selected_name" style="font-weight:600;color:#047857;">{% if selected_client %}{{ selected_client.name }}{% if not selected_client.is_confirmed %} (черновик){% endif %}{% elif row.client_id %}id {{ row.client_id }}{% endif %}</span>
+              </div>
+              <button type="button" id="work_client_change_btn" class="secondary" style="flex-shrink:0;">Изменить</button>
+            </div>
+          </div>
+          <div id="amount_from_client_block" style="margin-top: 10px;">
+            <label>Сумма от клиента, ₽ <span class="muted" style="font-weight:normal;">(необязательно)</span></label>
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px;">
+              <input name="amount_from_client" type="number" step="1" min="0" value="{{ row.amount_from_client if row.amount_from_client is not none and scope_val == 'CUSTOM_ORDER' else '' }}" style="max-width:12rem;" />
+              {% with name='client_payment_kind', value=(row.client_payment_kind.value if row.client_payment_kind else 'CASH') %}
+                {% include "partials/client_payment_kind_radios.html" %}
+              {% endwith %}
+            </div>
           </div>
         </div>
 
@@ -187,6 +223,102 @@
     {% endif %}
   </div>
 
+  <script>
+  (function () {
+    function getScopeValue() {
+      var r = document.querySelector('input[name="scope"]:checked');
+      return r ? r.value : 'IN_STOCK';
+    }
+    function syncWorkClientUi() {
+      var cidEl = document.getElementById('client_id');
+      var q = document.getElementById('client_search_q');
+      var findBtn = document.getElementById('work_client_find_btn');
+      var row = document.getElementById('work_client_search_row');
+      var panel = document.getElementById('work_client_selected_panel');
+      var nameEl = document.getElementById('work_client_selected_name');
+      if (!cidEl || !q || !findBtn || !row || !panel || !nameEl) return;
+      var cid = (cidEl.value || '').trim();
+      var has = !!cid;
+      q.disabled = has;
+      findBtn.disabled = has;
+      row.style.opacity = has ? '0.55' : '1';
+      panel.style.display = has ? 'block' : 'none';
+      if (!has) nameEl.textContent = '';
+    }
+    function syncClientBlock() {
+      var el = document.getElementById('client_block');
+      if (!el) return;
+      el.style.display = (getScopeValue() === 'CUSTOM_ORDER') ? 'block' : 'none';
+      syncWorkClientUi();
+    }
+    function clearWorkClientSelection() {
+      var inp = document.getElementById('client_id');
+      if (inp) inp.value = '';
+      var ul = document.getElementById('client_suggest_list');
+      if (ul) ul.innerHTML = '';
+      var q = document.getElementById('client_search_q');
+      if (q) { q.value = ''; q.focus(); }
+      syncWorkClientUi();
+    }
+    function selectClient(id, name, isDraft) {
+      var inp = document.getElementById('client_id');
+      if (inp) inp.value = String(id);
+      var nameEl = document.getElementById('work_client_selected_name');
+      if (nameEl) nameEl.textContent = (name || '') + (isDraft ? ' (черновик)' : '');
+      var ul = document.getElementById('client_suggest_list');
+      if (ul) ul.innerHTML = '';
+      syncWorkClientUi();
+    }
+    async function clientSuggest() {
+      var qEl = document.getElementById('client_search_q');
+      if (qEl && qEl.disabled) return;
+      var q = qEl ? qEl.value.trim() : '';
+      var res = await fetch('/master/clients/suggest?q=' + encodeURIComponent(q));
+      var data = await res.json();
+      var ul = document.getElementById('client_suggest_list');
+      if (!ul) return;
+      ul.innerHTML = '';
+      for (var i = 0; i < (data.clients || []).length; i++) {
+        var c = data.clients[i];
+        var li = document.createElement('li');
+        li.style.margin = '0 0 8px';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'secondary';
+        btn.style.width = '100%';
+        btn.style.textAlign = 'left';
+        btn.textContent = c.name + (c.is_draft ? ' (черновик)' : '');
+        (function(cid, cname, cdraft){ btn.addEventListener('click', function(){ selectClient(cid, cname, cdraft); }); })(c.id, c.name, c.is_draft);
+        li.appendChild(btn);
+        ul.appendChild(li);
+      }
+    }
+    var suggestTimer = null;
+    function scheduleSuggest() {
+      var qEl = document.getElementById('client_search_q');
+      if (qEl && qEl.disabled) return;
+      if (suggestTimer) clearTimeout(suggestTimer);
+      suggestTimer = setTimeout(clientSuggest, 350);
+    }
+    var clientQ = document.getElementById('client_search_q');
+    if (clientQ) {
+      clientQ.addEventListener('input', scheduleSuggest);
+      clientQ.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); clientSuggest(); }
+      });
+    }
+    var findBtn = document.getElementById('work_client_find_btn');
+    if (findBtn) findBtn.addEventListener('click', clientSuggest);
+    var changeBtn = document.getElementById('work_client_change_btn');
+    if (changeBtn) changeBtn.addEventListener('click', clearWorkClientSelection);
+    document.querySelectorAll('input[name="scope"]').forEach(function (el) {
+      el.addEventListener('change', syncClientBlock);
+    });
+    window.getWorkEditScopeValue = getScopeValue;
+    syncClientBlock();
+  })();
+  </script>
+
   {% if is_kit_work %}
   <script>
   (function () {
@@ -331,8 +463,11 @@
       var masterSum = syncMasterProfitTotal();
 
       var costKit = readFieldFloat('cost_total_amount');
-      var afcRaw = String((document.querySelector('input[name="amount_from_client"]') || {}).value || '').trim();
-      var afcVal = afcRaw ? (parseFloat(afcRaw.replace(',', '.')) || 0) : 0;
+      var afcVal = 0;
+      if (typeof window.getWorkEditScopeValue === 'function' && window.getWorkEditScopeValue() === 'CUSTOM_ORDER') {
+        var afcRaw = String((document.querySelector('input[name="amount_from_client"]') || {}).value || '').trim();
+        afcVal = afcRaw ? (parseFloat(afcRaw.replace(',', '.')) || 0) : 0;
+      }
       var studioSum;
       if (afcVal > 0) {
         studioSum = afcVal - costKit - masterSum;

@@ -107,6 +107,7 @@ from app.work_kit_edit import (
     apply_kit_work_edit,
     read_staff_profits_from_form,
     replace_work_staff_rows,
+    sync_work_kit_reserves_for_scope,
     work_kit_edit_template_extras,
 )
 from app.work_rate_keys import CUSTOM_ORDER_BONUS_MULTIPLIER, STUDIO_SHARE
@@ -250,6 +251,10 @@ def _work_edit_template_ctx(
         "masters": [],
         "profit_master_uids": [],
         "staff_profit_by_uid": {},
+        "scopes": [
+            {"value": s.value, "label": ("В наличие" if s == WorkScope.IN_STOCK else "На заказ")}
+            for s in WorkScope
+        ],
     }
     if not work:
         return ctx
@@ -268,6 +273,7 @@ def _work_edit_template_ctx(
         staff_profit_by_uid=staff_profit_by_uid,
         profit_master_uids=profit_master_uids,
         use_per_master_profit=bool(profit_master_uids),
+        selected_client=work.client,
     )
     if work.kind == WorkKind.KIT and work.created_kit_id:
         def _kit_state_builder(*, masters: list[User], initial_lines: list[dict[str, Any]]):
@@ -2188,18 +2194,11 @@ async def work_edit_save(
             status_code=400,
         )
 
-    prev_staff_sig = tuple(
-        sorted(
-            (
-                (int(s.user_id), round(float(s.master_profit_amount or 0.0), 2))
-                for s in (w.staff_rows or [])
-            ),
-            key=lambda x: x[0],
-        )
-    )
     prev_scope = getattr(w, "scope", None)
+    prev_client_id = int(w.client_id) if w.client_id else None
     kit_edit_applied = False
     new_kit_staff_ids: list[int] = []
+    kit_result = None
 
     def _p_float(name: str, default: float) -> float:
         try:
@@ -2221,6 +2220,8 @@ async def work_edit_save(
 
     try:
         before = SimpleNamespace(
+            scope=w.scope,
+            client_id=w.client_id,
             amount_from_client=w.amount_from_client,
             client_payment_kind=w.client_payment_kind,
             comment=w.comment,
@@ -2234,13 +2235,37 @@ async def work_edit_save(
             profit_total_amount=w.profit_total_amount,
             details_json=w.details_json,
         )
-        # base fields
-        w.amount_from_client = _p_int_opt("amount_from_client")
-        w.client_payment_kind = (
-            parse_client_payment_kind(_g_str(form, "client_payment_kind"))
-            if w.amount_from_client is not None
-            else None
-        )
+        scope_raw = (_g_str(form, "scope", "") or "").strip()
+        try:
+            new_scope = WorkScope(scope_raw) if scope_raw else (w.scope or WorkScope.IN_STOCK)
+        except ValueError as e:
+            raise ValueError("Выберите режим: «в наличие» или «на заказ».") from e
+
+        if new_scope == WorkScope.IN_STOCK:
+            w.scope = WorkScope.IN_STOCK
+            w.client_id = None
+            w.amount_from_client = None
+            w.client_payment_kind = None
+        else:
+            w.scope = WorkScope.CUSTOM_ORDER
+            cid_raw = (_g_str(form, "client_id", "") or "").strip()
+            if cid_raw:
+                try:
+                    cid = parse_int(cid_raw, min=1, field_name="client_id")
+                except ValueError as e:
+                    raise ValueError("Для режима «на заказ» выберите клиента.") from e
+            else:
+                cid = int(prev_client_id) if prev_client_id else 0
+            if cid <= 0 or not db.get(Client, cid):
+                raise ValueError("Для режима «на заказ» выберите клиента.")
+            w.client_id = cid
+            w.amount_from_client = _p_int_opt("amount_from_client")
+            w.client_payment_kind = (
+                parse_client_payment_kind(_g_str(form, "client_payment_kind"))
+                if w.amount_from_client is not None
+                else None
+            )
+
         w.comment = (_g_str(form, "comment", "") or "").strip() or None
 
         w.kanekalon_grams = max(0.0, _p_float("kanekalon_grams", float(w.kanekalon_grams or 0.0)))
@@ -2265,6 +2290,12 @@ async def work_edit_save(
             w.master_profit_amount = float(kit_result.master_total)
             new_kit_staff_ids = list(kit_result.kit_staff_ids)
             kit_edit_applied = True
+            w.studio_profit_amount = kit_studio_profit_amount(
+                scope=w.scope,
+                cost_total=float(w.cost_total_amount or 0.0),
+                master_total=float(w.master_profit_amount or 0.0),
+                amount_from_client=float(w.amount_from_client) if w.amount_from_client is not None else None,
+            )
         elif w.staff_rows:
             active_uids = [int(s.user_id) for s in w.staff_rows]
             staff_profits = read_staff_profits_from_form(form, active_uids)
@@ -2275,10 +2306,20 @@ async def work_edit_save(
             w.master_profit_amount = max(0.0, _p_float("master_profit_amount", float(w.master_profit_amount or 0.0)))
 
         profit_raw = (_g_str(form, "profit_total_amount", "") or "").strip()
-        if profit_raw:
+        if w.kind == WorkKind.KIT and w.created_kit_id:
+            w.profit_total_amount = float(w.master_profit_amount or 0.0) + float(w.studio_profit_amount or 0.0)
+        elif profit_raw:
             w.profit_total_amount = _p_float("profit_total_amount", float(w.profit_total_amount or 0.0))
         else:
             w.profit_total_amount = float(w.master_profit_amount or 0.0) + float(w.studio_profit_amount or 0.0)
+
+        sync_work_kit_reserves_for_scope(
+            db,
+            w,
+            prev_scope=prev_scope,
+            prev_client_id=prev_client_id,
+            actor_user_id=int(current_user.id),
+        )
     except ValueError as exc:
         log_user_validation_error(
             _logger,
@@ -2309,6 +2350,8 @@ async def work_edit_save(
         before,
         w,
         (
+            "scope",
+            "client_id",
             "amount_from_client",
             "client_payment_kind",
             "comment",
@@ -2333,7 +2376,7 @@ async def work_edit_save(
         changed_by_user_id=current_user.id,
         changes=audit_changes,
     )
-    if kit_edit_applied:
+    if kit_edit_applied and kit_result is not None:
         staff_rows = replace_work_staff_rows(
             db,
             w,
@@ -2345,15 +2388,7 @@ async def work_edit_save(
         staff_rows = list(
             db.scalars(select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == w.id)).all()
         )
-    new_staff_sig = tuple(
-        sorted(
-            ((int(s.user_id), round(float(s.master_profit_amount or 0.0), 2)) for s in staff_rows),
-            key=lambda x: x[0],
-        )
-    )
-    new_scope = getattr(w, "scope", None)
-    if new_scope != prev_scope or new_staff_sig != prev_staff_sig:
-        replace_work_accruals(db, w.id, staff_rows, current_user.id)
+    replace_work_accruals(db, w.id, staff_rows, current_user.id)
     db.commit()
     return RedirectResponse(url=f"/sales/work/{work_id}?msg=saved", status_code=303)
 

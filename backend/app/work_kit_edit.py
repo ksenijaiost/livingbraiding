@@ -194,6 +194,66 @@ def _sync_kit_reserve_pieces(db: Session, kit: Kit, work: WorkForInventory, new_
         kit.pieces_available = int(new_pieces)
 
 
+def sync_work_kit_reserves_for_scope(
+    db: Session,
+    work: WorkForInventory,
+    *,
+    prev_scope: WorkScope | None,
+    prev_client_id: int | None,
+    actor_user_id: int,
+) -> None:
+    """При смене режима/клиента: снять старый резерв и при «на заказ» зарезервировать комплект."""
+    if work.kind != WorkKind.KIT or not work.created_kit_id:
+        return
+    kit = db.get(Kit, int(work.created_kit_id))
+    if not kit:
+        return
+
+    from app.kit_blank_stock_core import release_client_kit_reserves_into_free_pool
+    from app.time_utils import utcnow_naive
+
+    old_cid = int(prev_client_id or 0)
+    new_cid = int(work.client_id or 0)
+    left_custom = prev_scope == WorkScope.CUSTOM_ORDER and work.scope != WorkScope.CUSTOM_ORDER
+    client_changed = (
+        prev_scope == WorkScope.CUSTOM_ORDER
+        and work.scope == WorkScope.CUSTOM_ORDER
+        and old_cid > 0
+        and old_cid != new_cid
+    )
+    if (left_custom or client_changed) and old_cid > 0:
+        release_client_kit_reserves_into_free_pool(db, kit=kit, client_id=old_cid)
+
+    if work.scope != WorkScope.CUSTOM_ORDER or new_cid <= 0:
+        return
+
+    existing = list(
+        db.scalars(
+            select(KitReserve).where(
+                KitReserve.kit_id == int(kit.id),
+                KitReserve.reserved_for_client_id == new_cid,
+            )
+        ).all()
+    )
+    if existing:
+        return
+
+    pieces_reserved = int(kit.pieces_total or 0)
+    if pieces_reserved <= 0:
+        return
+    db.add(
+        KitReserve(
+            kit_id=int(kit.id),
+            pieces_reserved=pieces_reserved,
+            reserved_at=utcnow_naive(),
+            reserved_by_user_id=int(actor_user_id),
+            reserved_for_client_id=new_cid,
+            reserved_for_user_id=None,
+        )
+    )
+    kit.pieces_available = max(0, int(kit.pieces_available or 0) - pieces_reserved)
+
+
 def apply_kit_work_edit(
     db: Session,
     work: WorkForInventory,
