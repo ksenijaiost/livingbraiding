@@ -60,6 +60,41 @@ def apply_price_snapshots(db: Session, sale: ProductSale, svc: Service | None) -
         sale.material_kudri_price_per_gram_at_time = None
 
 
+def material_sale_goods_cost(sale: ProductSale) -> float:
+    """Себестоимость материала для розницы (граммы×цены + ручная + смешка)."""
+    if sale.kind != ProductSaleKind.MATERIAL:
+        return 0.0
+    svc = sale.material_service
+    cost = 0.0
+    if svc is None:
+        grams = float(sale.material_grams or 0.0)
+        price_g = float(sale.material_kanekalon_price_per_gram_at_time or 0.0)
+        return money_q2(grams * price_g)
+
+    if svc.retail_material_kanekalon:
+        g = float(sale.material_kanekalon_grams or 0.0)
+        p = sale.material_kanekalon_price_per_gram_at_time
+        if p is not None:
+            cost += g * float(p)
+    if svc.retail_material_kudri:
+        g = float(sale.material_kudri_grams or 0.0)
+        p = sale.material_kudri_price_per_gram_at_time
+        if p is not None:
+            cost += g * float(p)
+
+    if not material_retail_has_pricing_path(svc):
+        mc = sale.material_manual_cost
+        if mc is not None:
+            cost += float(mc)
+    elif not (svc.retail_material_kanekalon or svc.retail_material_kudri) and svc.retail_material_mix:
+        mc = sale.material_manual_cost
+        if mc is not None:
+            cost += float(mc)
+
+    cost += float(sale.material_mix_cost_amount or 0.0)
+    return money_q2(cost)
+
+
 def finalize_material_sale_fields(
     db: Session,
     sale: ProductSale,
@@ -91,10 +126,9 @@ def finalize_material_sale_fields(
         sale.material_kanekalon_price_per_gram_at_time = float(pk.price_per_gram) if pk else None
         sale.material_kudri_price_per_gram_at_time = None
         sale.material_cost_review_pending = False
-        grams = float(sale.material_grams or 0.0)
-        price_g = float(pk.price_per_gram) if pk else 0.0
         amt = float(sale.amount_from_client or 0)
-        sale.studio_margin_amount = money_q2(max(0.0, amt - grams * price_g))
+        cost = material_sale_goods_cost(sale)
+        sale.studio_margin_amount = money_q2(max(0.0, amt - cost))
         return
 
     apply_price_snapshots(db, sale, svc)
@@ -142,31 +176,10 @@ def finalize_material_sale_fields(
     sale.material_cost_review_pending = material_cost_review_pending_for_sale(sale, svc)
 
     amt = float(sale.amount_from_client or 0)
-    cost = 0.0
-
-    if svc.retail_material_kanekalon:
-        g = float(sale.material_kanekalon_grams or 0.0)
-        p = sale.material_kanekalon_price_per_gram_at_time
-        if p is not None:
-            cost += g * float(p)
-    if svc.retail_material_kudri:
-        g = float(sale.material_kudri_grams or 0.0)
-        p = sale.material_kudri_price_per_gram_at_time
-        if p is not None:
-            cost += g * float(p)
-
-    if not material_retail_has_pricing_path(svc):
-        mc = sale.material_manual_cost
-        if mc is not None:
-            cost += float(mc)
-    elif not (svc.retail_material_kanekalon or svc.retail_material_kudri) and svc.retail_material_mix:
-        mc = sale.material_manual_cost
-        if mc is not None:
-            cost += float(mc)
-
-    cost += float(sale.material_mix_cost_amount or 0.0)
+    cost = material_sale_goods_cost(sale)
 
     if sale.material_cost_review_pending:
         sale.studio_margin_amount = 0.0
     else:
+        # Legacy-снимок без процента; при sale_percent пересчитает compute_product_sale_studio_margin.
         sale.studio_margin_amount = money_q2(max(0.0, amt - cost))

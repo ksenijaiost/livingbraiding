@@ -307,6 +307,32 @@ def _g_float(form: Any, name: str, default: float = 0.0) -> float:
         return default
 
 
+def _parse_sale_percent(raw: str | None) -> int:
+    """Обязательный процент с продажи: 10 или 15."""
+    s = (raw or "").strip()
+    if not s:
+        raise ValueError("Выберите процент с продажи: 10% или 15%.")
+    try:
+        pct = int(parse_float(s, field_name="sale_percent"))
+    except ValueError as exc:
+        raise ValueError("Выберите процент с продажи: 10% или 15%.") from exc
+    if pct not in (10, 15):
+        raise ValueError("Выберите процент с продажи: 10% или 15%.")
+    return pct
+
+
+def _apply_sale_studio_margin(db: Session, sale: ProductSale, *, seller_user_id: int, active_role) -> None:
+    """Себестоимость/смешка материала + маржа в фонд (процент с продажи или legacy-формула)."""
+    if sale.kind == ProductSaleKind.MATERIAL:
+        finalize_material_sale_fields(
+            db,
+            sale,
+            seller_user_id=seller_user_id,
+            active_role=active_role,
+        )
+    sale.studio_margin_amount = compute_product_sale_studio_margin(db, sale)
+
+
 def _g_optional_float(form: Any, name: str) -> float | None:
     s = _g_str(form, name, "")
     if not s:
@@ -1146,6 +1172,7 @@ def product_sale_edit_form(
         "performed_date": sale.performed_date.date().isoformat(),
         "amount_from_client": str(sale.amount_from_client),
         "client_payment_kind": sale.client_payment_kind.value if sale.client_payment_kind else ClientPaymentKind.CASH.value,
+        "sale_percent": "" if getattr(sale, "sale_percent", None) is None else str(sale.sale_percent),
         "kind": sale.kind.value,
         "material_subcategory_id": sub_id,
         "material_service_id": str(sale.material_service_id or ""),
@@ -1219,6 +1246,7 @@ async def product_sale_edit_save(
         "client_id",
         "performed_date",
         "amount_from_client",
+        "sale_percent",
         "kind",
         "material_service_id",
         "material_grams",
@@ -1282,6 +1310,10 @@ async def product_sale_edit_save(
     amount_from_client = _g_int(form, "amount_from_client", 0)
     if amount_from_client < 0:
         return _render_new(request, current_user, db, error="Сумма с клиента не может быть отрицательной.", fp={})
+    try:
+        sale_percent = _parse_sale_percent(_g_str(form, "sale_percent"))
+    except ValueError as e:
+        return _render_new(request, current_user, db, error=str(e), fp={})
 
     kind_raw = (_g_str(form, "kind") or "").strip().upper()
     try:
@@ -1306,6 +1338,7 @@ async def product_sale_edit_save(
     sale.performed_date = performed
     sale.amount_from_client = int(amount_from_client)
     sale.client_payment_kind = parse_client_payment_kind(_g_str(form, "client_payment_kind"))
+    sale.sale_percent = int(sale_percent)
     sale.kind = kind
 
     # reset all kind-specific fields
@@ -1373,17 +1406,15 @@ async def product_sale_edit_save(
         sale.rubber_description = desc
         override_raw = (_g_str(form, "rubber_price_override") or "").strip()
         if not override_raw:
-            return RedirectResponse(
-                url=f"/sales/products/{sale_id}/edit?err={quote('Для «Хвост/резинка» укажите себестоимость с учётом ЗП.')}",
-                status_code=303,
-            )
-        override = _g_int(form, "rubber_price_override", -1)
-        if override < 0:
-            return RedirectResponse(
-                url=f"/sales/products/{sale_id}/edit?err={quote('Себестоимость с учётом ЗП должна быть целым числом ≥ 0.')}",
-                status_code=303,
-            )
-        sale.rubber_price_override = int(override)
+            sale.rubber_price_override = None
+        else:
+            override = _g_int(form, "rubber_price_override", -1)
+            if override < 0:
+                return RedirectResponse(
+                    url=f"/sales/products/{sale_id}/edit?err={quote('Себестоимость с учётом ЗП должна быть целым числом ≥ 0.')}",
+                    status_code=303,
+                )
+            sale.rubber_price_override = int(override)
 
     elif kind == ProductSaleKind.OTHER:
         desc = (_g_str(form, "other_description") or "").strip()
@@ -1395,38 +1426,33 @@ async def product_sale_edit_save(
         sale.other_description = desc
         cost_raw = (_g_str(form, "other_cost") or "").strip()
         if not cost_raw:
-            return RedirectResponse(
-                url=f"/sales/products/{sale_id}/edit?err={quote('Для «Другое» укажите себестоимость.')}",
-                status_code=303,
-            )
-        try:
-            cost = parse_float(cost_raw, field_name="other_cost")
-        except ValueError:
-            return RedirectResponse(
-                url=f"/sales/products/{sale_id}/edit?err={quote('Себестоимость должна быть числом ≥ 0.')}",
-                status_code=303,
-            )
-        if cost < 0:
-            return RedirectResponse(
-                url=f"/sales/products/{sale_id}/edit?err={quote('Себестоимость должна быть числом ≥ 0.')}",
-                status_code=303,
-            )
-        sale.other_cost = float(cost)
+            sale.other_cost = None
+        else:
+            try:
+                cost = parse_float(cost_raw, field_name="other_cost")
+            except ValueError:
+                return RedirectResponse(
+                    url=f"/sales/products/{sale_id}/edit?err={quote('Себестоимость должна быть числом ≥ 0.')}",
+                    status_code=303,
+                )
+            if cost < 0:
+                return RedirectResponse(
+                    url=f"/sales/products/{sale_id}/edit?err={quote('Себестоимость должна быть числом ≥ 0.')}",
+                    status_code=303,
+                )
+            sale.other_cost = float(cost)
 
     if kind == ProductSaleKind.KIT and sale.kit_id:
         db.refresh(sale, attribute_names=["kit"])
     elif kind == ProductSaleKind.MATERIAL:
         db.refresh(sale, attribute_names=["material_service"])
     try:
-        if kind == ProductSaleKind.MATERIAL:
-            finalize_material_sale_fields(
-                db,
-                sale,
-                seller_user_id=current_user.id,
-                active_role=current_user.role,
-            )
-        else:
-            sale.studio_margin_amount = compute_product_sale_studio_margin(db, sale)
+        _apply_sale_studio_margin(
+            db,
+            sale,
+            seller_user_id=current_user.id,
+            active_role=current_user.role,
+        )
     except ValueError as e:
         db.rollback()
         return RedirectResponse(
@@ -1448,6 +1474,7 @@ async def product_sale_edit_save(
                 "client_id",
                 "performed_date",
                 "amount_from_client",
+                "sale_percent",
                 "kind",
                 "material_service_id",
                 "material_grams",
@@ -1541,6 +1568,7 @@ async def product_sale_new_post(
         "performed_date": _g_str(form, "performed_date") or date.today().isoformat(),
         "amount_from_client": _g_str(form, "amount_from_client"),
         "client_payment_kind": _g_str(form, "client_payment_kind"),
+        "sale_percent": _g_str(form, "sale_percent"),
         "kind": _g_str(form, "kind") or ProductSaleKind.MATERIAL.value,
         # material
         "material_subcategory_id": _g_str(form, "material_subcategory_id"),
@@ -1595,6 +1623,10 @@ async def product_sale_new_post(
     if amount_from_client < 0:
         return _fail("Сумма с клиента не может быть отрицательной.")
     client_payment_kind = parse_client_payment_kind(_g_str(form, "client_payment_kind"))
+    try:
+        sale_percent = _parse_sale_percent(fp.get("sale_percent"))
+    except ValueError as e:
+        return _fail(str(e))
 
     kind_raw = (fp["kind"] or "").strip().upper()
     try:
@@ -1608,6 +1640,7 @@ async def product_sale_new_post(
         client_id=client.id,
         amount_from_client=amount_from_client,
         client_payment_kind=client_payment_kind,
+        sale_percent=int(sale_percent),
         kind=kind,
     )
     bid_raw = (_g_str(form, "booking_id") or "").strip()
@@ -1652,11 +1685,12 @@ async def product_sale_new_post(
 
         override_raw = (fp["rubber_price_override"] or "").strip()
         if not override_raw:
-            return _fail("Для «Хвост/резинка» укажите себестоимость с учётом ЗП.")
-        override = _g_int(form, "rubber_price_override", -1)
-        if override < 0:
-            return _fail("Себестоимость с учётом ЗП должна быть целым числом ≥ 0.")
-        row.rubber_price_override = override
+            row.rubber_price_override = None
+        else:
+            override = _g_int(form, "rubber_price_override", -1)
+            if override < 0:
+                return _fail("Себестоимость с учётом ЗП должна быть целым числом ≥ 0.")
+            row.rubber_price_override = override
 
     elif kind == ProductSaleKind.OTHER:
         desc = (fp["other_description"] or "").strip()
@@ -1665,14 +1699,15 @@ async def product_sale_new_post(
         row.other_description = desc
         cost_raw = (fp.get("other_cost") or "").strip()
         if not cost_raw:
-            return _fail("Для «Другое» укажите себестоимость.")
-        try:
-            cost = parse_float(cost_raw, field_name="other_cost")
-        except ValueError:
-            return _fail("Себестоимость должна быть числом ≥ 0.")
-        if cost < 0:
-            return _fail("Себестоимость должна быть числом ≥ 0.")
-        row.other_cost = float(cost)
+            row.other_cost = None
+        else:
+            try:
+                cost = parse_float(cost_raw, field_name="other_cost")
+            except ValueError:
+                return _fail("Себестоимость должна быть числом ≥ 0.")
+            if cost < 0:
+                return _fail("Себестоимость должна быть числом ≥ 0.")
+            row.other_cost = float(cost)
 
     db.add(row)
     db.flush()
@@ -1681,15 +1716,12 @@ async def product_sale_new_post(
     elif kind == ProductSaleKind.MATERIAL:
         db.refresh(row, attribute_names=["material_service"])
     try:
-        if kind == ProductSaleKind.MATERIAL:
-            finalize_material_sale_fields(
-                db,
-                row,
-                seller_user_id=current_user.id,
-                active_role=current_user.role,
-            )
-        else:
-            row.studio_margin_amount = compute_product_sale_studio_margin(db, row)
+        _apply_sale_studio_margin(
+            db,
+            row,
+            seller_user_id=current_user.id,
+            active_role=current_user.role,
+        )
     except ValueError as e:
         db.rollback()
         return _fail(str(e))

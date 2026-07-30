@@ -34,6 +34,7 @@ from app.payroll_fund import (
     employee_payroll_net_in_period,
     employee_payouts_in_period,
     money_q2,
+    product_sale_seller_commission,
     sum_ledger_amounts_by_source,
 )
 
@@ -223,8 +224,12 @@ def _sale_discount_display(db: Session, sale: ProductSale) -> str:
 
 
 def _sale_cost_total(sale: ProductSale) -> float:
+    """Себестоимость товара: сумма − % оформившего − маржа студии (при наличии %)."""
     amt = float(sale.amount_from_client or 0)
+    commission = product_sale_seller_commission(sale)
     margin = float(sale.studio_margin_amount or 0)
+    if commission > 0 or (getattr(sale, "sale_percent", None) in (10, 15)):
+        return money_q2(max(0.0, amt - commission - margin))
     return money_q2(max(0.0, amt - margin))
 
 
@@ -355,8 +360,10 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
     )
     for sale in sales:
         master_pay = 0.0
+        if int(sale.created_by_user_id or 0) == master_id:
+            master_pay = money_q2(master_pay + product_sale_seller_commission(sale))
         if sale.material_mix_bonus_user_id and int(sale.material_mix_bonus_user_id) == master_id:
-            master_pay = money_q2(float(sale.material_mix_bonus_amount or 0))
+            master_pay = money_q2(master_pay + float(sale.material_mix_bonus_amount or 0))
         sales_out.append(
             MasterStatsSaleRow(
                 sale_id=int(sale.id),

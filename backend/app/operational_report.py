@@ -245,7 +245,14 @@ def _work_ops_funds(work: WorkForInventory) -> float:
 
 
 def _sale_ops_funds(sale: ProductSale) -> float:
-    return money_q2(float(sale.studio_margin_amount or 0))
+    """Все начисления по продаже: % оформившего + маржа студии + бонус смешки."""
+    from app.payroll_fund import product_sale_seller_commission
+
+    return money_q2(
+        product_sale_seller_commission(sale)
+        + float(sale.studio_margin_amount or 0)
+        + float(sale.material_mix_bonus_amount or 0)
+    )
 
 
 def _hourly_ops_funds(entry: HourlyWorkEntry) -> float:
@@ -754,7 +761,7 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
             work_masters = money_q2(work_masters + a)
             add_emp(int(s.user_id), "works", a)
 
-    retail_studio = money_q2(sum(float(s.studio_margin_amount or 0) for s in sales))
+    retail_studio = money_q2(sum(_sale_ops_funds(s) for s in sales))
 
     hourly_rows = list(
         db.scalars(

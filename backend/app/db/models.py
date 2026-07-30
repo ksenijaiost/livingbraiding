@@ -1074,6 +1074,9 @@ class ProductSale(Base):
 
     # Маржа в фонд студии (снимок для розницы; проводки ЗП по этому полю).
     studio_margin_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    # Процент с продажи от суммы с клиента (10 или 15) → начисление в фонд студии (ЗП).
+    # NULL у старых записей: маржа считается по прежней формуле (сумма − себестоимость).
+    sale_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
