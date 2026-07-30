@@ -55,6 +55,7 @@
               <th>Режим</th>
               <th>Вид</th>
               <th>Клиент</th>
+              <th>Сумма с клиента</th>
               <th>Мастера</th>
               <th>Материал (г)</th>
             </tr>
@@ -83,6 +84,13 @@
                 <td>
                   {% if w.client %}
                     {{ w.client.name }}
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if w.amount_from_client is not none %}
+                    {{ w.amount_from_client }} ₽
                   {% else %}
                     <span class="muted">—</span>
                   {% endif %}

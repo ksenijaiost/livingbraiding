@@ -168,6 +168,7 @@ legacy_admin_router = APIRouter(prefix="/admin/sales/work", tags=["work-products
 _VIEW = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _MASTER = Depends(require_role(UserRole.MASTER))
 _SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
+_EDIT = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 
 
 def _redirect_admin_sales_work_to_canon(request: Request, *, suffix: str = "") -> RedirectResponse:
@@ -199,7 +200,7 @@ def work_new_get_legacy_redirect(
 def work_edit_form_legacy_redirect(
     work_id: int,
     request: Request,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _EDIT,
 ):
     return _redirect_admin_sales_work_to_canon(request, suffix=f"/{int(work_id)}/edit")
 
@@ -292,23 +293,53 @@ def _work_edit_template_ctx(
     return ctx
 
 
+def _user_participates_in_work(work: WorkForInventory, user_id: int) -> bool:
+    if int(work.created_by_user_id or 0) == int(user_id):
+        return True
+    return any(int(s.user_id) == int(user_id) for s in (work.staff_rows or []))
+
+
+def _work_edit_window_block_message(days: int) -> str:
+    return (
+        f"Для админов и мастеров-участников редактирование доступно только в течение {days} дн. "
+        f"с даты создания (параметр «Окно редактирования» в настройках студии). "
+        f"Суперадмин может править, пока период ЗП не закрыт; техспец — всегда (в закрытом периоде с подтверждением)."
+    )
+
+
 def _work_edit_allowed(db: Session, work: WorkForInventory, user: AuthUser | None = None) -> tuple[bool, str]:
+    """Как у визитов: окно дней — для ADMIN/MASTER; SUPER/TECHSPEC вне окна; закрытый период — техспец."""
     if getattr(work, "is_voided", False):
         return False, "Работа аннулирована — редактирование запрещено."
-    if is_in_closed_payroll_period(db, work.performed_date or work.created_at):
+    event_at = work.performed_date or work.created_at
+    if is_in_closed_payroll_period(db, event_at):
         if user is not None and user_may_edit_closed_payroll_period(user):
             return True, ""
         return False, (
             "Работа относится к закрытому периоду ЗП — редактирование запрещено "
             "(исключение: техспец с двойным подтверждением)."
         )
+    if user is None:
+        return False, "Недостаточно прав."
+    if UserRole.ADMIN_SUPER in user.roles or UserRole.TECHSPEC in user.roles:
+        return True, ""
+
     days = edit_window_days(db)
-    if not within_edit_window(work, days):
-        return False, (
-            f"Редактирование доступно только в течение {days} дн. с даты создания "
-            "(параметр «Окно редактирования» в настройках студии)."
-        )
-    return True, ""
+    inside = within_edit_window(work, days)
+
+    if user.role == UserRole.ADMIN:
+        if inside:
+            return True, ""
+        return False, _work_edit_window_block_message(days)
+
+    if user.role == UserRole.MASTER:
+        if not inside:
+            return False, _work_edit_window_block_message(days)
+        if not _user_participates_in_work(work, user.id):
+            return False, "Редактировать работу может только создатель или мастер с долей в этой работе."
+        return True, ""
+
+    return False, "Недостаточно прав."
 
 
 def _g_str(form: Any, name: str, default: str = "") -> str:
@@ -1911,8 +1942,8 @@ def work_detail(
                 ),
                 status_code=403,
             )
-    can_edit = UserRole.ADMIN_SUPER in current_user.roles or UserRole.TECHSPEC in current_user.roles
-    edit_allowed, edit_block_msg = _work_edit_allowed(db, w, current_user) if can_edit else (False, "")
+    can_edit = True
+    edit_allowed, edit_block_msg = _work_edit_allowed(db, w, current_user)
     closed_period_confirm_required = bool(
         edit_allowed
         and is_in_closed_payroll_period(db, w.performed_date or w.created_at)
@@ -2027,10 +2058,14 @@ def _kit_has_any_usage(db: Session, kit_id: int) -> bool:
 @legacy_admin_router.post("/{work_id}/void")
 async def work_void(
     work_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _EDIT,
     db: Session = Depends(get_db),
 ):
-    w = db.get(WorkForInventory, work_id)
+    w = db.scalar(
+        select(WorkForInventory)
+        .options(selectinload(WorkForInventory.staff_rows))
+        .where(WorkForInventory.id == work_id)
+    )
     if not w:
         return RedirectResponse(url="/sales/work?msg=not_found", status_code=303)
     if w.is_voided:
@@ -2084,7 +2119,7 @@ async def work_void(
 def work_edit_form(
     request: Request,
     work_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _EDIT,
     db: Session = Depends(get_db),
 ):
     w = db.scalar(
@@ -2119,7 +2154,7 @@ def work_edit_form(
 async def work_edit_save(
     request: Request,
     work_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _EDIT,
     db: Session = Depends(get_db),
 ):
     w = db.scalar(
