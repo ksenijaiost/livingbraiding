@@ -103,6 +103,53 @@
       <a href="{{ export_print_url }}" target="_blank" rel="noopener">Версия для печати / PDF</a>
     </p>
 
+    <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Краткий обзор</h3>
+    <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
+      Сводка периода до детализации ниже.
+      Уравнение: <strong>выручка = материал (канекалон+кудри) + прочие затраты + в фонды (без ручных)</strong>.
+      «Прочие затраты» — всё, что не канекалон/кудри и не ушло в фонды: комплекты, доп.продажи, себестоимость работ/розницы, начисления без выручки клиента.
+    </p>
+    <div class="card" style="margin-bottom: 20px; background:#f8fafc; border:1px solid #e5e7eb;">
+      <div class="row" style="margin-bottom: 12px;">
+        <div class="card" style="flex:1; min-width:140px; border-left:4px solid #3b82f6;">
+          <div class="muted" style="font-size:12px;">Выручка</div>
+          <div style="font-size:1.25rem;font-weight:700;">{{ "%.2f"|format(revenue_total) }} <span class="muted" style="font-size:0.8rem;font-weight:500;">руб.</span></div>
+        </div>
+        <div class="card" style="flex:1; min-width:140px; border-left:4px solid #10b981;">
+          <div class="muted" style="font-size:12px;">В фонды (без ручных)</div>
+          <div style="font-size:1.25rem;font-weight:700;">{{ "%.2f"|format(total_to_funds_without_manual) }} <span class="muted" style="font-size:0.8rem;font-weight:500;">руб.</span></div>
+          <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.4;">
+            студия {{ "%.2f"|format(funds_to_studio) }} · сотрудники {{ "%.2f"|format(funds_to_employees) }}
+          </div>
+        </div>
+        <div class="card" style="flex:1; min-width:140px; border-left:4px solid #6366f1;">
+          <div class="muted" style="font-size:12px;">Материал (канекалон + кудри)</div>
+          <div style="font-size:1.25rem;font-weight:700;">{{ "%.2f"|format(hair_material_cost) }} <span class="muted" style="font-size:0.8rem;font-weight:500;">руб.</span></div>
+        </div>
+        <div class="card" style="flex:1; min-width:140px; border-left:4px solid #f59e0b;">
+          <div class="muted" style="font-size:12px;">Прочие затраты</div>
+          <div style="font-size:1.25rem;font-weight:700;">{{ "%.2f"|format(other_operating_costs) }} <span class="muted" style="font-size:0.8rem;font-weight:500;">руб.</span></div>
+          <div class="muted" style="font-size:11px;margin-top:6px;">выручка − материал − фонды</div>
+        </div>
+      </div>
+      <p class="muted" style="margin:0 0 8px;font-size:13px;"><strong>Из чего «прочие затраты»:</strong></p>
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <tr><td style="padding:4px 0;">Доп. продажи в визитах</td><td style="text-align:right;padding:4px 0;">{{ "%.2f"|format(other_costs_visit_addons) }}</td></tr>
+        <tr><td style="padding:4px 0;">Комплекты / коррекции / прочее по визитам</td><td style="text-align:right;padding:4px 0;">{{ "%.2f"|format(other_costs_visit_kits_etc) }}</td></tr>
+        <tr><td style="padding:4px 0;">Работы (себестоимость сверх материала)</td><td style="text-align:right;padding:4px 0;">{{ "%.2f"|format(other_costs_works) }}</td></tr>
+        <tr><td style="padding:4px 0;">Розница (себестоимость сверх материала)</td><td style="text-align:right;padding:4px 0;">{{ "%.2f"|format(other_costs_sales) }}</td></tr>
+        <tr><td style="padding:4px 0;">Начисления без выручки клиента (консультации, почасовые, работы в наличие)</td><td style="text-align:right;padding:4px 0;">{{ "%.2f"|format(other_costs_funds_without_revenue) }}</td></tr>
+        <tr><td style="padding:4px 0;">Неразложенный остаток</td><td style="text-align:right;padding:4px 0;">{{ "%.2f"|format(other_costs_unexplained) }}</td></tr>
+        <tr style="border-top:1px solid #e5e7eb;font-weight:600;"><td style="padding:6px 0;">Итого прочие</td><td style="text-align:right;padding:6px 0;">{{ "%.2f"|format(other_operating_costs) }}</td></tr>
+      </table>
+      <p class="muted" style="margin:12px 0 0;font-size:12px;line-height:1.45;">
+        Расходы студии (карточки): <strong>{{ "%.2f"|format(expenses_total) }}</strong> руб.
+        · расходы в журнале фондов: <strong>{{ "%.2f"|format(ledger_expense_abs) }}</strong> руб.
+        (не входят в уравнение выше — это отдельные списания из фондов).
+        Ручные проводки нетто: <strong>{{ "%.2f"|format(manual_to_fund) }}</strong> руб.
+      </p>
+    </div>
+
     <h3 style="margin: 0 0 12px; font-size: 15px; color: #374151;">Выручка</h3>
     <p class="muted" style="margin: -6px 0 12px; font-size: 13px;">
       Сколько клиенты заплатили за период. Берётся поле «сумма с клиента» у записей с датой события в периоде.

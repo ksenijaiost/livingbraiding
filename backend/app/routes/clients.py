@@ -655,9 +655,38 @@ def admin_client_detail(
             show_admin_actions=show_admin_actions,
             confirmed_banner=confirmed == "1",
             created_banner=msg == "created",
+            comment_saved_banner=msg == "comment_saved",
             display_tz=display_tz,
         ),
     )
+
+
+@router.post("/{client_id}/comment")
+@legacy_clients_admin_router.post("/{client_id}/comment")
+def admin_client_comment_post(
+    client_id: int,
+    comment: str = Form(""),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    """Комментарий к клиенту: правка с карточки, без полного «Изменить» (доступно мастерам)."""
+    client = db.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    before = SimpleNamespace(comment=client.comment)
+    client.comment = strip_or_none(comment) or None
+    client.updated_at = utcnow_naive()
+    client.updated_by_user_id = current_user.id
+    write_audit_rows(
+        db,
+        log_model=ClientAuditLog,
+        entity_field="client_id",
+        entity_id=client.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before, client, ("comment",)),
+    )
+    db.commit()
+    return RedirectResponse(url=f"/clients/{client_id}?msg=comment_saved", status_code=303)
 
 
 @router.post("/{client_id}/confirm")

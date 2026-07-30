@@ -851,8 +851,77 @@ def _product_sale_kit_line_price_deduction(
     return float(net_full * k)
 
 
+def _product_sale_kit_line_cost(
+    db: Session,
+    *,
+    kit: Kit,
+    pieces_sold: int,
+    breakdown: dict[str, int] | None,
+) -> float:
+    """Себестоимость списанных заготовок (cost_total комплекта, с учётом ЗП авторов)."""
+    n = int(pieces_sold)
+    if n <= 0:
+        return 0.0
+    kit_cost = max(0.0, float(kit.cost_total or 0.0))
+    if kit_inventory_is_keyed(db, int(kit.id)) and breakdown:
+        comp = parse_composition_totals(kit)
+        return float(keyed_cost_selected(breakdown, comp=comp, kit_cost_total=kit_cost))
+    total_pieces = max(int(kit.pieces_total or 0), 1)
+    return float(kit_cost * (float(n) / float(total_pieces)))
+
+
+def product_sale_seller_commission(sale: ProductSale) -> float:
+    """Доля оформившего продажу: сумма с клиента × 10% или 15%."""
+    pct_raw = getattr(sale, "sale_percent", None)
+    if pct_raw is None:
+        return 0.0
+    pct = int(pct_raw)
+    if pct not in (10, 15):
+        return 0.0
+    return money_q2(float(sale.amount_from_client or 0) * (pct / 100.0))
+
+
+def product_sale_goods_cost(db: Session, sale: ProductSale) -> float:
+    """Себестоимость товара в продаже (для вычета из остатка после % оформившего)."""
+    kind = sale.kind
+    if kind == ProductSaleKind.MATERIAL:
+        from app.product_sale_material import material_sale_goods_cost
+
+        return material_sale_goods_cost(sale)
+    if kind == ProductSaleKind.KIT:
+        from app.product_sales import _sale_kit_line_tuples_from_sale
+
+        lines = _sale_kit_line_tuples_from_sale(sale)
+        total = 0.0
+        for kid, ps, bd in lines:
+            kit = db.get(Kit, int(kid))
+            if not kit:
+                continue
+            total += _product_sale_kit_line_cost(
+                db, kit=kit, pieces_sold=int(ps), breakdown=bd
+            )
+        return money_q2(total)
+    if kind == ProductSaleKind.RUBBER:
+        return money_q2(float(sale.rubber_price_override or 0))
+    if kind == ProductSaleKind.OTHER:
+        return money_q2(float(getattr(sale, "other_cost", None) or 0))
+    return 0.0
+
+
 def compute_product_sale_studio_margin(db: Session, sale: ProductSale) -> float:
+    """Маржа в фонд студии.
+
+    С процентом с продажи: (сумма − % оформившего) − себестоимость товара.
+    Без процента (legacy): сумма − цена/себестоимость по старым правилам.
+    """
     amt = float(sale.amount_from_client or 0)
+    commission = product_sale_seller_commission(sale)
+    if commission > 0 or (getattr(sale, "sale_percent", None) in (10, 15)):
+        if sale.kind == ProductSaleKind.MATERIAL and bool(sale.material_cost_review_pending):
+            return 0.0
+        cost = product_sale_goods_cost(db, sale)
+        return money_q2(max(0.0, amt - commission - cost))
+
     kind = sale.kind
     if kind == ProductSaleKind.KIT:
         from app.product_sales import _sale_kit_line_tuples_from_sale
@@ -886,6 +955,23 @@ def _append_product_sale_ledger_rows(
     sale: ProductSale,
     created_by_user_id: int | None,
 ) -> None:
+    # % с продажи → личный фонд того, кто оформил.
+    commission = product_sale_seller_commission(sale)
+    seller_uid = int(sale.created_by_user_id) if sale.created_by_user_id else None
+    if commission > 0 and seller_uid:
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=seller_uid,
+            amount=commission,
+            source_kind=PayrollFundSourceKind.PRODUCT_SALE,
+            source_id=sale.id,
+            created_by_user_id=created_by_user_id,
+            effective_at=sale.performed_date,
+            comment=f"Процент с продажи {int(sale.sale_percent)}%",
+        )
+
     margin = money_q2(float(sale.studio_margin_amount or 0))
     if margin > 0:
         append_ledger(

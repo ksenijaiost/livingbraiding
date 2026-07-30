@@ -50,6 +50,19 @@
           </div>
         </div>
       </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label style="margin-bottom:6px;">Процент с продажи *</label>
+          {% set sp = (fp.get('sale_percent') or '')|string %}
+          <label style="display:inline-block;margin:0 14px 0 0;">
+            <input type="radio" name="sale_percent" value="10" required {% if sp == '10' %}checked{% endif %}/> 10%
+          </label>
+          <label style="display:inline-block;margin:0 14px 0 0;">
+            <input type="radio" name="sale_percent" value="15" {% if sp == '15' %}checked{% endif %}/> 15%
+          </label>
+          <p class="muted" style="font-size:12px;margin:6px 0 0;">В личный фонд того, кто оформляет; остаток минус себестоимость — в фонд студии.</p>
+        </div>
+      </div>
 
       <h3 style="margin-top: 18px;">Товар</h3>
       <div class="card" style="margin-top: 8px;">
@@ -151,7 +164,7 @@
             <textarea name="rubber_description" rows="3" maxlength="2000" placeholder="Например: хвост на резинке, цвет/длина, кол-во креплений">{{ fp.get('rubber_description', '') }}</textarea>
           </div>
           <div style="margin-top:10px;">
-            <label>Себестоимость с учётом ЗП *</label>
+            <label>Себестоимость с учётом ЗП <span class="muted" style="font-weight:normal;">(необязательно)</span></label>
             <input type="number" name="rubber_price_override" min="0" step="1" value="{{ fp.get('rubber_price_override', '') }}" />
           </div>
         </div>
@@ -163,7 +176,7 @@
             <textarea name="other_description" rows="3" maxlength="2000" placeholder="Опишите товар">{{ fp.get('other_description', '') }}</textarea>
           </div>
           <div style="margin-top:10px;">
-            <label>Себестоимость *</label>
+            <label>Себестоимость <span class="muted" style="font-weight:normal;">(необязательно)</span></label>
             <input type="number" name="other_cost" min="0" step="0.01" value="{{ fp.get('other_cost', '') }}" />
           </div>
         </div>
