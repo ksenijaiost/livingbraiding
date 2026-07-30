@@ -516,6 +516,20 @@ class OperationalReportResult:
     kudri_grams_total: float
     kudri_snapshot_rub: float
 
+    # Краткий обзор: выручка = материал + прочие затраты + в фонды (без ручных)
+    hair_material_cost: float
+    other_operating_costs: float
+    funds_to_studio: float
+    funds_to_employees: float
+    # Разложение «прочих затрат» (сумма + неразложенный ≈ other_operating_costs)
+    other_costs_visit_addons: float
+    other_costs_visit_kits_etc: float
+    other_costs_works: float
+    other_costs_sales: float
+    other_costs_funds_without_revenue: float
+    other_costs_unexplained: float
+    ledger_expense_abs: float
+
     visit_studio_to_fund: float
     visit_masters_to_fund: float
     work_studio_to_fund: float
@@ -1011,6 +1025,64 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
             )
         )
 
+    from app.payroll_fund import product_sale_goods_cost, product_sale_seller_commission
+
+    retail_seller = money_q2(sum(product_sale_seller_commission(s) for s in sales))
+    retail_margin = money_q2(sum(float(s.studio_margin_amount or 0) for s in sales))
+    retail_mix = money_q2(sum(float(s.material_mix_bonus_amount or 0) for s in sales))
+    funds_to_studio = money_q2(visit_studio + work_studio + retail_margin)
+    funds_to_employees = money_q2(
+        visit_masters + work_masters + consultation_masters + hourly_masters + retail_seller + retail_mix
+    )
+
+    hair_material_cost = money_q2(k_rub_total + u_rub_total)
+    other_operating_costs = money_q2(revenue_total - hair_material_cost - total_without_manual)
+
+    other_costs_visit_addons = money_q2(sum(float(v.addons_total or 0) for v in visits))
+    other_costs_visit_kits_etc = 0.0
+    for v in visits:
+        # Сумма − материал карточки − фонды − доп.продажи ≈ себестоимость комплектов / коррекции.
+        gap = (
+            float(v.amount_from_client or 0)
+            - float(v.materials_cost_total or 0)
+            - _visit_ops_funds(v)
+            - float(v.addons_total or 0)
+        )
+        other_costs_visit_kits_etc = money_q2(other_costs_visit_kits_etc + max(0.0, gap))
+
+    other_costs_works = 0.0
+    funds_no_rev_works = 0.0
+    for w in works:
+        funds_w = _work_ops_funds(w)
+        amt = float(w.amount_from_client) if w.amount_from_client is not None else None
+        mat = float(w.materials_cost_total or 0)
+        if amt is not None and amt > 0.009:
+            other_costs_works = money_q2(other_costs_works + max(0.0, amt - mat - funds_w))
+        elif funds_w > 0.009:
+            funds_no_rev_works = money_q2(funds_no_rev_works + funds_w)
+
+    other_costs_sales = 0.0
+    for s in sales:
+        goods = float(product_sale_goods_cost(db, s))
+        hair_s = 0.0
+        if s.kind == ProductSaleKind.MATERIAL:
+            # Материал продажи уже в блоке канекалон/кудри — в «прочие» не дублируем.
+            hair_s = goods
+        other_costs_sales = money_q2(other_costs_sales + max(0.0, goods - hair_s))
+
+    other_costs_funds_without_revenue = money_q2(
+        consultation_masters + hourly_masters + funds_no_rev_works
+    )
+    known_other = money_q2(
+        other_costs_visit_addons
+        + other_costs_visit_kits_etc
+        + other_costs_works
+        + other_costs_sales
+        + other_costs_funds_without_revenue
+    )
+    other_costs_unexplained = money_q2(other_operating_costs - known_other)
+    ledger_expense_abs = money_q2(abs(float(ledger_expense or 0)))
+
     return OperationalReportResult(
         date_from=d0,
         date_to=d1,
@@ -1035,6 +1107,17 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
         kanekalon_snapshot_rub=k_rub_total,
         kudri_grams_total=u_g_total,
         kudri_snapshot_rub=u_rub_total,
+        hair_material_cost=hair_material_cost,
+        other_operating_costs=other_operating_costs,
+        funds_to_studio=funds_to_studio,
+        funds_to_employees=funds_to_employees,
+        other_costs_visit_addons=other_costs_visit_addons,
+        other_costs_visit_kits_etc=other_costs_visit_kits_etc,
+        other_costs_works=other_costs_works,
+        other_costs_sales=other_costs_sales,
+        other_costs_funds_without_revenue=other_costs_funds_without_revenue,
+        other_costs_unexplained=other_costs_unexplained,
+        ledger_expense_abs=ledger_expense_abs,
         visit_studio_to_fund=visit_studio,
         visit_masters_to_fund=visit_masters,
         work_studio_to_fund=work_studio,
@@ -1084,6 +1167,17 @@ def result_to_template_dict(r: OperationalReportResult) -> dict[str, Any]:
         "kanekalon_snapshot_rub": r.kanekalon_snapshot_rub,
         "kudri_grams_total": r.kudri_grams_total,
         "kudri_snapshot_rub": r.kudri_snapshot_rub,
+        "hair_material_cost": r.hair_material_cost,
+        "other_operating_costs": r.other_operating_costs,
+        "funds_to_studio": r.funds_to_studio,
+        "funds_to_employees": r.funds_to_employees,
+        "other_costs_visit_addons": r.other_costs_visit_addons,
+        "other_costs_visit_kits_etc": r.other_costs_visit_kits_etc,
+        "other_costs_works": r.other_costs_works,
+        "other_costs_sales": r.other_costs_sales,
+        "other_costs_funds_without_revenue": r.other_costs_funds_without_revenue,
+        "other_costs_unexplained": r.other_costs_unexplained,
+        "ledger_expense_abs": r.ledger_expense_abs,
         "visit_studio_to_fund": r.visit_studio_to_fund,
         "visit_masters_to_fund": r.visit_masters_to_fund,
         "work_studio_to_fund": r.work_studio_to_fund,
@@ -1482,7 +1576,18 @@ def report_to_csv(r: OperationalReportResult) -> str:
     wr.writerow(["Уникальных клиентов", str(r.unique_clients)])
     wr.writerow(["Консультаций (с начислением)", str(r.consultations_count)])
     wr.writerow(["Почасовых работ", str(r.hourly_work_count)])
-    wr.writerow(["Расходы студии", f"{r.expenses_total:.2f}"])
+    wr.writerow(["Расходы студии (карточки)", f"{r.expenses_total:.2f}"])
+    wr.writerow(["Материал канекалон+кудри", f"{r.hair_material_cost:.2f}"])
+    wr.writerow(["Прочие затраты (выручка−материал−фонды без ручных)", f"{r.other_operating_costs:.2f}"])
+    wr.writerow(["  в т.ч. доп.продажи визитов", f"{r.other_costs_visit_addons:.2f}"])
+    wr.writerow(["  в т.ч. комплекты/прочее визитов", f"{r.other_costs_visit_kits_etc:.2f}"])
+    wr.writerow(["  в т.ч. работы", f"{r.other_costs_works:.2f}"])
+    wr.writerow(["  в т.ч. розница (себестоимость сверх материала)", f"{r.other_costs_sales:.2f}"])
+    wr.writerow(["  в т.ч. начисления без выручки клиента", f"{r.other_costs_funds_without_revenue:.2f}"])
+    wr.writerow(["  в т.ч. неразложенный остаток", f"{r.other_costs_unexplained:.2f}"])
+    wr.writerow(["В фонды без ручных", f"{r.total_to_funds_without_manual:.2f}"])
+    wr.writerow(["  из них студия", f"{r.funds_to_studio:.2f}"])
+    wr.writerow(["  из них сотрудники", f"{r.funds_to_employees:.2f}"])
     wr.writerow(["Канекалон г", f"{r.kanekalon_grams_total:.2f}"])
     wr.writerow(["Канекалон руб снимок", f"{r.kanekalon_snapshot_rub:.2f}"])
     wr.writerow(["Кудри г", f"{r.kudri_grams_total:.2f}"])
@@ -1501,6 +1606,7 @@ def report_to_csv(r: OperationalReportResult) -> str:
     wr.writerow(["Журнал нетто начисл+сторно", f"{r.ledger_net_accruals:.2f}"])
     wr.writerow(["Дельта операц минус нетто начисл", f"{r.reconciliation_delta:.2f}"])
     wr.writerow(["Журнал расходы", f"{r.ledger_expense:.2f}"])
+    wr.writerow(["Журнал расходы (модуль)", f"{r.ledger_expense_abs:.2f}"])
     wr.writerow(["Журнал выплаты", f"{r.ledger_payout:.2f}"])
     wr.writerow(["Журнал нетто все проводки", f"{r.ledger_net_all:.2f}"])
     wr.writerow([])

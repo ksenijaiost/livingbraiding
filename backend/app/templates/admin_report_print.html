@@ -27,6 +27,27 @@
     <div class="muted">Период: {{ period_label }}. Операционные показатели — по дате события; журнал — по учётной дате. Сохранение в PDF: печать из браузера (Ctrl+P) → «Сохранить как PDF».</div>
 
     <div class="section">
+      <strong>Краткий обзор</strong>
+      <p class="muted">Выручка = материал (канекалон+кудри) + прочие затраты + в фонды (без ручных).</p>
+      <table>
+        <tr><td>Выручка</td><td>{{ "%.2f"|format(revenue_total) }} руб.</td></tr>
+        <tr><td>Материал (канекалон + кудри)</td><td>{{ "%.2f"|format(hair_material_cost) }} руб.</td></tr>
+        <tr><td>Прочие затраты</td><td>{{ "%.2f"|format(other_operating_costs) }} руб.</td></tr>
+        <tr><td>— доп.продажи визитов</td><td>{{ "%.2f"|format(other_costs_visit_addons) }}</td></tr>
+        <tr><td>— комплекты/прочее визитов</td><td>{{ "%.2f"|format(other_costs_visit_kits_etc) }}</td></tr>
+        <tr><td>— работы</td><td>{{ "%.2f"|format(other_costs_works) }}</td></tr>
+        <tr><td>— розница сверх материала</td><td>{{ "%.2f"|format(other_costs_sales) }}</td></tr>
+        <tr><td>— начисления без выручки</td><td>{{ "%.2f"|format(other_costs_funds_without_revenue) }}</td></tr>
+        <tr><td>— неразложенный остаток</td><td>{{ "%.2f"|format(other_costs_unexplained) }}</td></tr>
+        <tr><td>В фонды (без ручных)</td><td>{{ "%.2f"|format(total_to_funds_without_manual) }} руб.</td></tr>
+        <tr><td>— студия</td><td>{{ "%.2f"|format(funds_to_studio) }}</td></tr>
+        <tr><td>— сотрудники</td><td>{{ "%.2f"|format(funds_to_employees) }}</td></tr>
+        <tr><td>Расходы студии (карточки)</td><td>{{ "%.2f"|format(expenses_total) }} руб.</td></tr>
+        <tr><td>Расходы в журнале фондов</td><td>{{ "%.2f"|format(ledger_expense_abs) }} руб.</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
       <strong>Выручка</strong>
       <table>
         <tr><td>Всего</td><td>{{ "%.2f"|format(revenue_total) }} руб.</td></tr>

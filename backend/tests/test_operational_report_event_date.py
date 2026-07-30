@@ -570,3 +570,23 @@ def test_report_hourly_expense_storno_does_not_inflate_ledger_net(memory_db) -> 
     assert by_key["hourly"].ops_amount == 200.0
     assert by_key["hourly"].ledger_amount == 0.0
     assert by_key["hourly"].delta == 200.0
+
+
+def test_overview_identity_revenue_equals_parts(memory_db):
+    db = memory_db
+    user, client = _seed_user_client(db)
+    _add_visit(
+        db,
+        user=user,
+        client=client,
+        performed_date=datetime(2026, 7, 10, 12, 0, 0),
+        created_at=datetime(2026, 7, 10, 12, 0, 0),
+        amount=1000.0,
+        masters_pool=400.0,
+        salon_profit=300.0,
+    )
+    db.commit()
+    r = build_operational_report(db, date(2026, 7, 1), date(2026, 7, 31))
+    assert r.revenue_total == 1000.0
+    assert money_q2(r.hair_material_cost + r.other_operating_costs + r.total_to_funds_without_manual) == r.revenue_total
+    assert money_q2(r.funds_to_studio + r.funds_to_employees) == r.total_to_funds_without_manual
