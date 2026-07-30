@@ -147,12 +147,13 @@ def kit_studio_profit_amount(
 ) -> float:
     """ЗП студии по комплекту.
 
-    Если есть сумма с клиента — студия = сумма − себестоимость − ЗП мастеров.
+    Если есть сумма с клиента (только «на заказ») — студия = сумма − себестоимость − ЗП мастеров.
     Если суммы с клиента нет (в т.ч. работы «в наличие») — студия = −ЗП мастеров
     (ЗП мастеров идёт из фонда студии).
     """
-    _ = scope
-    afc = float(amount_from_client) if amount_from_client is not None else 0.0
+    afc = 0.0
+    if scope == WorkScope.CUSTOM_ORDER and amount_from_client is not None:
+        afc = float(amount_from_client)
     if afc > 0:
         return afc - float(cost_total) - float(master_total)
     return -float(master_total)
