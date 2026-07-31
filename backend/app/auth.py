@@ -6,15 +6,19 @@ Auth helpers for a simple internal app.
 Signed cookie session fields:
 - user_id
 - active_role (UserRole.value) — текущий «кабинет» при нескольких ролях
+- remember (bool) — «запомнить меня»
+- iat (unix seconds) — время выдачи remember-cookie (для скользящего продления)
 """
 
 from dataclasses import dataclass
+import time
 from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, Request, Response, status
 from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.db.models import MasterLevel, User, UserRole
 from app.db.session import get_db
@@ -38,6 +42,8 @@ class AuthUser:
 COOKIE_NAME = "lb_session"
 SESSION_REMEMBER_DAYS = 30
 SESSION_REMEMBER_MAX_AGE = SESSION_REMEMBER_DAYS * 24 * 60 * 60
+# Продлевать cookie «запомнить», если с момента выдачи прошло столько секунд (или нет iat).
+SESSION_REMEMBER_RENEW_AFTER = 12 * 60 * 60
 
 
 def _serializer() -> URLSafeSerializer:
@@ -50,6 +56,7 @@ def _session_token(user_id: int, active_role: UserRole, *, remember: bool = Fals
     payload: dict[str, object] = {"user_id": user_id, "active_role": active_role.value}
     if remember:
         payload["remember"] = True
+        payload["iat"] = int(time.time())
     return s.dumps(payload)
 
 
@@ -88,6 +95,114 @@ def logout_response() -> Response:
     return resp
 
 
+def _load_session_data(request: Request) -> dict[str, object] | None:
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    try:
+        data = _serializer().loads(token)
+    except BadSignature:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _get_session_payload(request: Request) -> tuple[Optional[int], Optional[str], bool]:
+    data = _load_session_data(request)
+    if not data:
+        return None, None, False
+    user_id = data.get("user_id")
+    ar = data.get("active_role")
+    remember = bool(data.get("remember"))
+    if isinstance(user_id, int):
+        return user_id, ar if isinstance(ar, str) else None, remember
+    return None, None, False
+
+
+def session_remember_from_request(request: Request) -> bool:
+    _uid, _role, remember = _get_session_payload(request)
+    return remember
+
+
+def _session_iat(data: dict[str, object]) -> int | None:
+    raw = data.get("iat")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        return int(raw)
+    return None
+
+
+def remember_session_needs_renew(request: Request) -> bool:
+    """Нужно ли перевыпустить cookie «запомнить» (скользящее продление для Safari/iOS)."""
+    data = _load_session_data(request)
+    if not data or not bool(data.get("remember")):
+        return False
+    if not isinstance(data.get("user_id"), int):
+        return False
+    ar = data.get("active_role")
+    if not isinstance(ar, str):
+        return False
+    try:
+        UserRole(ar)
+    except ValueError:
+        return False
+    iat = _session_iat(data)
+    if iat is None:
+        return True
+    return (int(time.time()) - iat) >= SESSION_REMEMBER_RENEW_AFTER
+
+
+def _response_sets_session_cookie(response: Response) -> bool:
+    for name, value in response.raw_headers:
+        if name.lower() != b"set-cookie":
+            continue
+        if value.lower().startswith(b"lb_session="):
+            return True
+    return False
+
+
+def renew_remember_session_cookie_if_needed(request: Request, response: Response) -> bool:
+    """Если remember-сессия устарела по iat — перевыпустить cookie с новым Max-Age. True если обновили."""
+    if not remember_session_needs_renew(request):
+        return False
+    if _response_sets_session_cookie(response):
+        return False
+    data = _load_session_data(request)
+    if not data:
+        return False
+    user_id = data.get("user_id")
+    ar = data.get("active_role")
+    if not isinstance(user_id, int) or not isinstance(ar, str):
+        return False
+    try:
+        role = UserRole(ar)
+    except ValueError:
+        return False
+    issue_session_cookie(response, user_id, role, remember=True)
+    return True
+
+
+_REMEMBER_RENEW_SKIP_PREFIXES: tuple[str, ...] = ("/static/", "/media/")
+_REMEMBER_RENEW_SKIP_PATHS: frozenset[str] = frozenset({"/login", "/logout", "/favicon.ico"})
+
+
+class SessionRememberRenewMiddleware(BaseHTTPMiddleware):
+    """Продлевает lb_session с «запомнить меня», чтобы iOS/Safari реже вычищали cookie."""
+
+    async def dispatch(self, request: Request, call_next):  # noqa: ANN001
+        response = await call_next(request)
+        path = request.url.path
+        if path in _REMEMBER_RENEW_SKIP_PATHS or any(path.startswith(p) for p in _REMEMBER_RENEW_SKIP_PREFIXES):
+            return response
+        if request.method.upper() == "OPTIONS":
+            return response
+        try:
+            renew_remember_session_cookie_if_needed(request, response)
+        except Exception:
+            pass
+        return response
+
+
 def canonical_staff_phone(raw: str | None) -> str | None:
     """Нормализация номера для хранения и входа: только цифры, минимум 10."""
     if raw is None or not str(raw).strip():
@@ -124,28 +239,6 @@ def login_response(user: User, db: Session, *, remember: bool = False) -> Respon
     resp.headers["Location"] = "/"
     issue_session_cookie(resp, user.id, active, remember=remember)
     return resp
-
-
-def _get_session_payload(request: Request) -> tuple[Optional[int], Optional[str], bool]:
-    token = request.cookies.get(COOKIE_NAME)
-    if not token:
-        return None, None, False
-    s = _serializer()
-    try:
-        data = s.loads(token)
-    except BadSignature:
-        return None, None, False
-    user_id = data.get("user_id")
-    ar = data.get("active_role")
-    remember = bool(data.get("remember"))
-    if isinstance(user_id, int):
-        return user_id, ar if isinstance(ar, str) else None, remember
-    return None, None, False
-
-
-def session_remember_from_request(request: Request) -> bool:
-    _uid, _role, remember = _get_session_payload(request)
-    return remember
 
 
 def optional_session_user_id(request: Request) -> Optional[int]:
