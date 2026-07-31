@@ -555,6 +555,8 @@ class StockKitLineInput:
     use_entire: bool
     blanks_used: int
     usage_by_key: dict[str, int] | None = None
+    # None = взять посчитанную цену списания; число = сумма с клиента за комплект.
+    amount_from_client: float | None = None
 
 
 def _parse_stock_kit_lines_from_form(
@@ -594,12 +596,20 @@ def _parse_stock_kit_lines_from_form(
                 bu = 0
             bu = max(0, bu)
             ub = _usage_dict_from_json_val(item.get("breakdown"))
+            afc_raw = item.get("amount_from_client")
+            afc: float | None = None
+            if afc_raw is not None and str(afc_raw).strip() != "":
+                try:
+                    afc = max(0.0, float(afc_raw))
+                except (TypeError, ValueError):
+                    afc = None
             lines.append(
                 StockKitLineInput(
                     kit_id=kid,
                     use_entire=ue,
                     blanks_used=bu,
                     usage_by_key=ub,
+                    amount_from_client=afc,
                 )
             )
         if lines:
@@ -1119,7 +1129,13 @@ def validate_master_visit_step1(db: Session, inp: KitInlayFormInput) -> None:
             raise ValueError("Укажите сложность смешки")
 
     if inp.client_type != VisitClientType.SELF and inp.amount_from_client <= 0:
-        raise ValueError("Укажите сумму, взятую с клиента.")
+        has_stock_kit = (
+            (inp.kit_kind or "").upper() == "STOCK"
+            and bool(inp.stock_kit_lines)
+            and not bool(inp.kit_paid_separately)
+        )
+        if not has_stock_kit:
+            raise ValueError("Укажите сумму с клиента за услугу и/или за комплект.")
     if inp.client_discount_percent < 0 or inp.client_discount_percent > 100:
         raise ValueError("Скидка клиенту — от 0 до 100%.")
 

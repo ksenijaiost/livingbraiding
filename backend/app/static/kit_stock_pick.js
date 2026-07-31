@@ -35,16 +35,54 @@
   function breakdownWrapHtml() {
     return (
       '<div class="lb-kit-breakdown-wrap" style="margin-top:8px; display:none;">' +
-      '<label style="margin-bottom:4px; display:block;">Или заготовок списать</label>' +
+      '<label style="margin-bottom:4px; display:block;">Состав по видам</label>' +
       '<div style="overflow-x:auto;">' +
       '<table class="lb-kit-breakdown-table" style="width:100%; border-collapse:collapse; font-size:13px; min-width:320px;">' +
       "<thead><tr>" +
       '<th style="text-align:left; padding:4px 6px; border-bottom:1px solid #e5e7eb;">Вид</th>' +
-      '<th style="text-align:left; padding:4px 6px; border-bottom:1px solid #e5e7eb;">Списать</th>' +
+      '<th style="text-align:left; padding:4px 6px; border-bottom:1px solid #e5e7eb;">Сост. / % б/у</th>' +
       '<th style="text-align:left; padding:4px 6px; border-bottom:1px solid #e5e7eb;">Доступно</th>' +
-      '<th style="text-align:left; padding:4px 6px; border-bottom:1px solid #e5e7eb;">Сост.</th>' +
-      '<th style="text-align:left; padding:4px 6px; border-bottom:1px solid #e5e7eb;">% б/у</th>' +
+      '<th style="text-align:left; padding:4px 6px; border-bottom:1px solid #e5e7eb;">Списать</th>' +
       "</tr></thead><tbody></tbody></table></div></div>"
+    );
+  }
+
+  function modeAndPriceHtml(opts) {
+    var o = opts || {};
+    var entire = !!o.useEntire;
+    var afc = o.amountFromClient != null && o.amountFromClient !== "" ? String(o.amountFromClient) : "";
+    return (
+      '<div class="lb-kit-mode-wrap" style="margin-top:8px;">' +
+      '<div class="muted" style="margin-bottom:4px;">Списание</div>' +
+      '<label style="display:inline-flex;align-items:center;gap:6px;margin-right:14px;cursor:pointer;">' +
+      '<input type="radio" class="lb-kit-mode-radio" data-mode="entire" ' +
+      (entire ? "checked " : "") +
+      "/> Весь комплект (все доступные заготовки)</label>" +
+      '<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">' +
+      '<input type="radio" class="lb-kit-mode-radio" data-mode="piece" ' +
+      (!entire ? "checked " : "") +
+      "/> Поштучно</label>" +
+      '<input type="checkbox" class="lb-kit-use-entire vsk-use-entire" style="display:none;" ' +
+      (entire ? "checked " : "") +
+      "/>" +
+      "</div>" +
+      '<div data-lb-kit-simple-wrap class="lb-kit-blanks-simple-wrap" style="margin-top:8px;">' +
+      "<label>Сколько заготовок списать</label>" +
+      '<input type="number" class="lb-kit-blanks-simple vsk-blanks-used" min="0" step="1" value="' +
+      esc(o.blanksUsed != null ? o.blanksUsed : "") +
+      '" style="max-width:8rem;" />' +
+      "</div>" +
+      breakdownWrapHtml() +
+      '<div class="lb-kit-price-block" style="margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;">' +
+      '<div style="font-size:13px;">Посчитано: <strong class="lb-kit-calc-price">—</strong> ₽</div>' +
+      '<div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;">' +
+      "<label style=\"margin:0;\">С клиента, ₽</label>" +
+      '<input type="number" class="lb-kit-amount-from-client" min="0" step="1" value="' +
+      esc(afc) +
+      '" style="max-width:8rem;" placeholder="как посчитано" />' +
+      "</div>" +
+      '<p class="muted" style="font-size:12px;margin:6px 0 0;">Если пусто — берём посчитанную цену. Это отдельная сумма: в цену услуги не входит.</p>' +
+      "</div>"
     );
   }
 
@@ -77,16 +115,20 @@
       var tr = document.createElement("tr");
       tr.innerHTML =
         '<td style="padding:4px 6px;">' + esc(pk.label || key) + "</td>" +
+        '<td style="padding:4px 6px;" class="muted">' +
+        esc(conditionLabel(pk)) +
+        (usedPctLabel(pk) !== "—" ? " · " + esc(usedPctLabel(pk)) : "") +
+        "</td>" +
+        '<td style="padding:4px 6px;">' +
+        avail +
+        "</td>" +
         '<td style="padding:4px 6px;"><input type="number" class="lb-kit-bd-take" data-kit-key="' +
         esc(key) +
         '" min="0" max="' +
         avail +
         '" step="1" value="' +
         esc(takeVal) +
-        '" style="width:4.5rem;" /></td>' +
-        '<td style="padding:4px 6px;">' + avail + "</td>" +
-        '<td style="padding:4px 6px;">' + esc(conditionLabel(pk)) + "</td>" +
-        '<td style="padding:4px 6px;">' + esc(usedPctLabel(pk)) + "</td>";
+        '" style="width:4.5rem;" /></td>';
       tbody.appendChild(tr);
     });
     tbody.querySelectorAll(".lb-kit-bd-take").forEach(function (inp) {
@@ -123,13 +165,25 @@
     return rowEl.querySelector(".lb-kit-use-entire, .vsk-use-entire, input[name$=\"_stock_use_entire\"], input[name=\"visit_stock_use_entire\"], input[name=\"visit_extra_stock_use_entire\"], input[name=\"sale_stock_use_entire\"], input[name=\"own_extra_stock_use_entire\"]");
   }
 
+  function isEntireMode(rowEl) {
+    var entireRadio = rowEl.querySelector('.lb-kit-mode-radio[data-mode="entire"]');
+    if (entireRadio) return !!entireRadio.checked;
+    var ue = entireCheckbox(rowEl);
+    return !!(ue && ue.checked);
+  }
+
+  function syncModeHiddenCheckbox(rowEl) {
+    var ue = entireCheckbox(rowEl);
+    if (ue) ue.checked = isEntireMode(rowEl);
+  }
+
   function simpleBlanksInput(rowEl) {
     return rowEl.querySelector(".lb-kit-blanks-simple, .vsk-blanks-used, input[name$=\"_stock_kit_pieces\"], input[name$=\"_stock_blanks_used\"], input[name=\"visit_stock_kit_pieces\"], input[name=\"visit_extra_stock_kit_pieces\"], input[name=\"sale_stock_kit_pieces\"], input[name=\"own_extra_stock_blanks_used\"]");
   }
 
   function syncEntireUi(rowEl) {
-    var ue = entireCheckbox(rowEl);
-    var entire = !!(ue && ue.checked);
+    syncModeHiddenCheckbox(rowEl);
+    var entire = isEntireMode(rowEl);
     var kit = kitData(rowEl);
     var keyed = hasKeyedBreakdown(kit);
     var wrap = rowEl.querySelector(".lb-kit-breakdown-wrap");
@@ -156,7 +210,6 @@
   function stockKitRowHtml(opts) {
     var o = opts || {};
     var idx = o.index || 1;
-    var prefix = o.fieldPrefix || "";
     var searchClass = o.searchClass || "vsk-search-q";
     var title = o.title || "Комплект " + idx;
     var showRemove = !!o.showRemove;
@@ -188,18 +241,7 @@
       '<p class="vsk-selected-line lb-kit-selected-line" style="margin:0;"></p>' +
       '<p class="vsk-selected-reserve lb-kit-selected-reserve" style="margin:8px 0 0; padding:8px 10px; background:#fffbeb; border:1px solid #fbbf24; border-radius:8px; font-size:13px; color:#92400e; display:none;"></p>' +
       '<div data-lb-kit-pick-after-selected="1">' +
-      '<label style="display:block;margin-top:8px;"><input type="checkbox" class="lb-kit-use-entire vsk-use-entire"' +
-      (o.useEntire ? " checked" : "") +
-      " /> " +
-      esc(o.entireLabel || "Весь комплект (все доступные заготовки)") +
-      "</label>" +
-      '<div data-lb-kit-simple-wrap class="lb-kit-blanks-simple-wrap" style="margin-top:8px;">' +
-      "<label>Или заготовок списать</label>" +
-      '<input type="number" class="lb-kit-blanks-simple vsk-blanks-used" min="0" step="1" value="' +
-      esc(o.blanksUsed != null ? o.blanksUsed : "") +
-      '" style="max-width:8rem;" />' +
-      "</div>" +
-      breakdownWrapHtml() +
+      modeAndPriceHtml(o) +
       "</div></div></div>"
     );
   }
@@ -210,7 +252,7 @@
     (wrapEl ? wrapEl.querySelectorAll(sel) : document.querySelectorAll(sel)).forEach(function (row) {
       var kid = parseInt(String((row.querySelector(".lb-kit-id, .vsk-kit-id") || {}).value || "0"), 10) || 0;
       if (kid <= 0) return;
-      var ue = !!(entireCheckbox(row) || {}).checked;
+      var ue = isEntireMode(row);
       var bd = readBreakdown(row);
       var bu = 0;
       if (bd) {
@@ -220,7 +262,10 @@
       } else {
         bu = parseInt(String((simpleBlanksInput(row) || {}).value || "0"), 10) || 0;
       }
-      lines.push({ kit_id: kid, use_entire: ue, blanks_used: bu, breakdown: bd });
+      var afcEl = row.querySelector(".lb-kit-amount-from-client");
+      var afcRaw = afcEl ? String(afcEl.value || "").trim() : "";
+      var afc = afcRaw === "" ? null : Math.max(0, parseFloat(afcRaw.replace(",", ".")) || 0);
+      lines.push({ kit_id: kid, use_entire: ue, blanks_used: bu, breakdown: bd, amount_from_client: afc });
     });
     return lines;
   }
@@ -325,9 +370,32 @@
       });
     }
     if (findBtn) findBtn.addEventListener("click", doSuggest);
+    // Старый HTML (галочка без радио) — заменить блок выбора на новый до обработчиков.
+    var afterMigrate = rowEl.querySelector("[data-lb-kit-pick-after-selected]");
+    if (afterMigrate && !rowEl.querySelector(".lb-kit-mode-radio")) {
+      var ueOld = !!(entireCheckbox(rowEl) || {}).checked;
+      var buOld = (simpleBlanksInput(rowEl) || {}).value || "";
+      afterMigrate.innerHTML = modeAndPriceHtml({ useEntire: ueOld, blanksUsed: buOld });
+    }
+    rowEl.querySelectorAll(".lb-kit-mode-radio").forEach(function (r) {
+      r.addEventListener("change", function () {
+        if (!r.checked) return;
+        rowEl.querySelectorAll(".lb-kit-mode-radio").forEach(function (x) {
+          if (x !== r) x.checked = false;
+        });
+        syncEntireUi(rowEl);
+        if (rowEl._lbOnChange) rowEl._lbOnChange();
+      });
+    });
     var ue = entireCheckbox(rowEl);
     if (ue) {
       ue.addEventListener("change", function () {
+        var entireR = rowEl.querySelector('.lb-kit-mode-radio[data-mode="entire"]');
+        var pieceR = rowEl.querySelector('.lb-kit-mode-radio[data-mode="piece"]');
+        if (entireR && pieceR) {
+          entireR.checked = !!ue.checked;
+          pieceR.checked = !ue.checked;
+        }
         syncEntireUi(rowEl);
         if (rowEl._lbOnChange) rowEl._lbOnChange();
       });
@@ -338,6 +406,15 @@
         if (rowEl._lbOnChange) rowEl._lbOnChange();
       });
       simple.addEventListener("change", function () {
+        if (rowEl._lbOnChange) rowEl._lbOnChange();
+      });
+    }
+    var afc = rowEl.querySelector(".lb-kit-amount-from-client");
+    if (afc) {
+      afc.addEventListener("input", function () {
+        if (rowEl._lbOnChange) rowEl._lbOnChange();
+      });
+      afc.addEventListener("change", function () {
         if (rowEl._lbOnChange) rowEl._lbOnChange();
       });
     }
@@ -379,11 +456,21 @@
       }
       var ue = row.querySelector(".lb-kit-use-entire, .vsk-use-entire");
       if (ue) ue.checked = false;
+      var entireR = row.querySelector('.lb-kit-mode-radio[data-mode="entire"]');
+      var pieceR = row.querySelector('.lb-kit-mode-radio[data-mode="piece"]');
+      if (entireR && pieceR) {
+        entireR.checked = false;
+        pieceR.checked = true;
+      }
       var bu = row.querySelector(".lb-kit-blanks-simple, .vsk-blanks-used");
       if (bu) {
         bu.value = "";
         bu.disabled = false;
       }
+      var afcClr = row.querySelector(".lb-kit-amount-from-client");
+      if (afcClr) afcClr.value = "";
+      var calcClr = row.querySelector(".lb-kit-calc-price");
+      if (calcClr) calcClr.textContent = "—";
       row._lbKitData = null;
       row._visitStockKit = null;
       var tbody = row.querySelector(".lb-kit-breakdown-wrap tbody");
@@ -443,6 +530,7 @@
     bindStockKitRow: bindStockKitRow,
     addStockKitRow: addStockKitRow,
     initStockKitWrap: initStockKitWrap,
+    isEntireMode: isEntireMode,
     hasKeyedBreakdown: hasKeyedBreakdown,
     kitData: kitData,
   };
