@@ -200,7 +200,10 @@ def apply_hourly_help_to_visit(visit: Visit, rows: list[HourlyHelpRow]) -> float
 
     gross_pool = money_q2(sum(float(s.masters_pool or 0) for s in (visit.services or []) if not s.is_cancelled))
     if help_total > gross_pool + 0.01:
-        raise ValueError("Сумма почасовой помощи превышает пул ЗП мастеров визита.")
+        raise ValueError(
+            f"Сумма почасовой помощи превышает пул ЗП мастеров визита "
+            f"(помощь {help_total:.0f} ₽, пул {gross_pool:.0f} ₽)."
+        )
 
     if help_total <= 0 or gross_pool <= 0:
         visit.masters_pool = gross_pool
@@ -224,7 +227,10 @@ def apply_hourly_help_to_staff_profits(
     help_total = hourly_help_total(rows)
     primary_total = money_q2(sum(float(staff_profits.get(pid, 0.0)) for pid in participant_ids))
     if help_total > primary_total + 0.01:
-        raise ValueError("Сумма почасовой помощи превышает ЗП мастеров работы.")
+        raise ValueError(
+            f"Сумма почасовой помощи превышает ЗП мастеров работы "
+            f"(помощь {help_total:.0f} ₽, ЗП мастеров {primary_total:.0f} ₽)."
+        )
 
     helper_profits = {int(r.master_id): float(r.amount) for r in rows if float(r.amount) > 0}
     if help_total <= 0 or primary_total <= 0:
