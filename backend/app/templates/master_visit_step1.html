@@ -1300,7 +1300,12 @@
         });
         return lines;
       }
-      const needKit = !!(svc && svc.requires_kit_block);
+      const needKit = (function () {
+        if (svc && svc.requires_kit_block) return true;
+        const host = document.getElementById('visit_questionnaire_fields');
+        const st = questionnaireRevealState((svc && svc.questionnaire_fields) || [], host);
+        return !!st.blocks.kit;
+      })();
       if (needKit) {
         const kk = document.querySelector('input[name="kit_kind"]:checked');
         if (kk && kk.value === 'STOCK') {
@@ -2083,16 +2088,91 @@
       return null;
     }
 
-    function updateKitSectionVisibility() {
-      const wrap = document.getElementById('kit-section-wrap');
-      if (!wrap) return;
-      const svc = getSelectedService();
-      const need = !!(svc && svc.requires_kit_block);
-      wrap.style.display = need ? 'block' : 'none';
-      if (need) {
-        void prefetchVisitStockKitsIfReady('main');
-        void prefetchVisitStockKitsIfReady('extra');
+    function questionnaireRevealState(fields, rootEl) {
+      const blocks = {};
+      const fieldKeys = {};
+      for (const f of (fields || [])) {
+        const rev = f && f.reveal_on_check;
+        if (!rev) continue;
+        const name = (rootEl && rootEl.getAttribute('data-q-prefix'))
+          ? (rootEl.getAttribute('data-q-prefix') + f.field_key)
+          : ('q_' + f.field_key);
+        const inp = (rootEl || document).querySelector('input[type="checkbox"][name="' + name + '"]');
+        if (!inp || !inp.checked) continue;
+        for (const b of (rev.blocks || [])) blocks[b] = true;
+        for (const k of (rev.field_keys || [])) fieldKeys[k] = true;
       }
+      return { blocks: blocks, fieldKeys: fieldKeys };
+    }
+
+    function fieldsCanRevealBlock(fields, block) {
+      for (const f of (fields || [])) {
+        const rev = f && f.reveal_on_check;
+        if (rev && Array.isArray(rev.blocks) && rev.blocks.indexOf(block) >= 0) return true;
+      }
+      return false;
+    }
+
+    function applyQuestionnaireRevealsForRoot(rootEl, fields, opts) {
+      opts = opts || {};
+      const st = questionnaireRevealState(fields, rootEl);
+      const staticKit = !!opts.staticKit;
+      const staticTail = !!opts.staticTail;
+      const staticThermo = !!opts.staticThermo;
+      const needKit = staticKit || !!st.blocks.kit;
+      const needTail = staticTail || !!st.blocks.tail;
+      const needThermo = staticThermo || !!st.blocks.thermo;
+
+      if (opts.kitWrap) {
+        opts.kitWrap.style.display = needKit ? 'block' : 'none';
+        if (needKit && typeof prefetchVisitStockKitsIfReady === 'function') {
+          void prefetchVisitStockKitsIfReady('main');
+          void prefetchVisitStockKitsIfReady('extra');
+        }
+      }
+      if (opts.thermoWrap) {
+        opts.thermoWrap.style.display = needThermo ? 'block' : 'none';
+        if (needThermo && opts.onThermoShow) opts.onThermoShow();
+      }
+      if (opts.tailWrap) {
+        opts.tailWrap.style.display = needTail ? 'block' : 'none';
+      }
+
+      const scope = rootEl || document;
+      scope.querySelectorAll('[data-q-field-key]').forEach(function (el) {
+        const key = el.getAttribute('data-q-field-key') || '';
+        const hiddenDefault = el.getAttribute('data-q-hidden-default') === '1';
+        const show = (!hiddenDefault) || !!st.fieldKeys[key] || (key === 'material_description' && !!st.blocks.material_description);
+        el.style.display = show ? 'block' : 'none';
+        el.querySelectorAll('input, textarea, select').forEach(function (ctrl) {
+          if (show) {
+            if (ctrl.getAttribute('data-q-was-required') === '1') ctrl.required = true;
+          } else {
+            if (ctrl.required) ctrl.setAttribute('data-q-was-required', '1');
+            ctrl.required = false;
+          }
+        });
+      });
+      return { needKit: needKit, needTail: needTail, needThermo: needThermo };
+    }
+
+    function bindQuestionnaireRevealListeners(rootEl, fields, applyFn) {
+      if (!rootEl) return;
+      rootEl.querySelectorAll('input[type="checkbox"]').forEach(function (inp) {
+        if (inp.getAttribute('data-q-reveal-bound') === '1') return;
+        const name = String(inp.name || '');
+        const prefix = rootEl.getAttribute('data-q-prefix') || 'q_';
+        if (!name.startsWith(prefix)) return;
+        const fk = name.slice(prefix.length);
+        const field = (fields || []).find(function (f) { return f.field_key === fk; });
+        if (!field || !field.reveal_on_check) return;
+        inp.setAttribute('data-q-reveal-bound', '1');
+        inp.addEventListener('change', applyFn);
+      });
+    }
+
+    function updateKitSectionVisibility() {
+      applyLine0QuestionnaireReveals();
     }
 
     function visitClientDiscountPct() {
@@ -2188,9 +2268,11 @@
       if (!fields.length) {
         wrap.style.display = 'none';
         host.innerHTML = '';
+        applyLine0QuestionnaireReveals();
         return;
       }
       wrap.style.display = 'block';
+      host.setAttribute('data-q-prefix', 'q_');
       let html = '';
       for (const f of fields) {
         const qn = 'q_' + f.field_key;
@@ -2198,7 +2280,8 @@
           ? String(formPrefill[qn])
           : '';
         const reqMark = f.required ? ' *' : '';
-        html += '<div style="margin-bottom: 14px;">';
+        const hiddenDefault = !!f.hidden_by_default;
+        html += '<div style="margin-bottom: 14px;" data-q-field-key="' + escapeHtml(f.field_key) + '" data-q-hidden-default="' + (hiddenDefault ? '1' : '0') + '">';
         html += '<div style="font-weight: 600; margin-bottom: 6px;">' + escapeHtml(f.label || '') + reqMark + '</div>';
         if (f.field_type === 'TEXT') {
           const ph = f.placeholder ? ' placeholder="' + escapeHtml(f.placeholder) + '"' : '';
@@ -2232,6 +2315,32 @@
         html += '</div>';
       }
       host.innerHTML = html;
+      bindQuestionnaireRevealListeners(host, fields, applyLine0QuestionnaireReveals);
+      applyLine0QuestionnaireReveals();
+    }
+
+    function applyLine0QuestionnaireReveals() {
+      const svc = getSelectedService();
+      const fields = (svc && svc.questionnaire_fields) ? svc.questionnaire_fields : [];
+      const host = document.getElementById('visit_questionnaire_fields');
+      const kitWrap = document.getElementById('kit-section-wrap');
+      const thermoSec = document.getElementById('visit_thermo_section');
+      const line0Ed = document.getElementById('line0_service_feature_editor');
+      const tailWrap = line0Ed ? line0Ed.querySelector('[data-reveal-block="tail"]') : null;
+      applyQuestionnaireRevealsForRoot(host, fields, {
+        staticKit: !!(svc && svc.requires_kit_block),
+        staticTail: !!(svc && svc.requires_tail_block),
+        staticThermo: !!(svc && svc.requires_thermo),
+        kitWrap: kitWrap,
+        thermoWrap: thermoSec,
+        tailWrap: tailWrap,
+        onThermoShow: function () {
+          const cid = (document.getElementById('existing_client_id') || {}).value || '';
+          const id = parseInt(String(cid).trim(), 10) || 0;
+          loadThermoTemplates(id);
+          thermoModeUpdate();
+        }
+      });
     }
 
     function thermoModeUpdate() {
@@ -2270,17 +2379,7 @@
     }
 
     function syncVisitThermoSection() {
-      const sec = document.getElementById('visit_thermo_section');
-      if (!sec) return;
-      const svc = getSelectedService();
-      const show = !!(svc && svc.requires_thermo);
-      sec.style.display = show ? 'block' : 'none';
-      if (show) {
-        const cid = (document.getElementById('existing_client_id') || {}).value || '';
-        const id = parseInt(String(cid).trim(), 10) || 0;
-        loadThermoTemplates(id);
-        thermoModeUpdate();
-      }
+      applyLine0QuestionnaireReveals();
     }
 
     const serviceMetaById = {};
@@ -2402,9 +2501,15 @@
       function checkedAttr(name, truthyList) { return lineFeatureCheckedAttr(idx, name, truthyList); }
       let h = '';
 
-      if (includeKit && meta.requires_kit_block) {
+      const qFields = meta.questionnaire_fields || [];
+      const canKit = !!meta.requires_kit_block || fieldsCanRevealBlock(qFields, 'kit');
+      const canTail = !!meta.requires_tail_block || fieldsCanRevealBlock(qFields, 'tail');
+      const canThermo = !!meta.requires_thermo || fieldsCanRevealBlock(qFields, 'thermo');
+
+      if (includeKit && canKit) {
         const kk = (pf('kit_kind', 'STOCK') || 'STOCK').toUpperCase();
-        h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+        const kitDisp = meta.requires_kit_block ? 'block' : 'none';
+        h += '<div class="card" data-reveal-block="kit" style="background:#f8fafc; margin-top:8px; display:' + kitDisp + ';">' +
           '<div style="font-weight:600; margin-bottom:6px;">Комплект по услуге</div>' +
           '<div style="display:flex; gap:12px; flex-wrap:wrap;">' +
             '<label><input type="radio" name="line_' + String(idx) + '_kit_kind" value="STOCK"' + (kk === 'STOCK' ? ' checked' : '') + ' /> Из наличия</label>' +
@@ -2471,14 +2576,16 @@
           '<label style="display:flex; gap:8px; align-items:center; margin-top:8px;"><input type="checkbox" name="line_' + String(idx) + '_kit_paid_separately"' + checkedAttr('kit_paid_separately') + ' /> Комплект уже оплачен (не учитывать в «С клиента» и себестоимости)</label>' +
         '</div>';
       }
-      if (includeTail && meta.requires_tail_block) {
-        h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+      if (includeTail && canTail) {
+        const tailDisp = meta.requires_tail_block ? 'block' : 'none';
+        h += '<div class="card" data-reveal-block="tail" style="background:#f8fafc; margin-top:8px; display:' + tailDisp + ';">' +
           '<div style="font-weight:600; margin-bottom:6px;">Хвост/резинка</div>' +
           '<textarea rows="2" maxlength="600" data-line-tail-note="' + String(idx) + '" style="width:100%; box-sizing:border-box;" placeholder="Параметры/пожелания"></textarea>' +
         '</div>';
       }
-      if (includeThermo && meta.requires_thermo) {
-        h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+      if (includeThermo && canThermo) {
+        const thermoDisp = meta.requires_thermo ? 'block' : 'none';
+        h += '<div class="card" data-reveal-block="thermo" style="background:#f8fafc; margin-top:8px; display:' + thermoDisp + ';">' +
           '<div style="font-weight:600; margin-bottom:6px;">Термозамещения</div>' +
           '<div class="row">' +
             '<div><label>Материал</label><input type="text" name="line_' + String(idx) + '_thermo_curls" value="' + escapeHtml(pf('thermo_curls', '')) + '" /></div>' +
@@ -2518,12 +2625,13 @@
         '</div>';
       }
       if (includeQuestionnaire && (meta.questionnaire_count || 0) > 0) {
-        h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+        h += '<div class="card" style="background:#f8fafc; margin-top:8px;" data-line-q-root="' + String(idx) + '" data-q-prefix="line_' + String(idx) + '_q_">' +
           '<div style="font-weight:600; margin-bottom:6px;">Описание/вопросы по услуге</div>';
         for (const f of (meta.questionnaire_fields || [])) {
           const qn = 'line_' + String(idx) + '_q_' + String(f.field_key || '');
           const vv = pf('q_' + String(f.field_key || ''), '');
-          h += '<div style="margin-bottom:8px;">';
+          const hiddenDefault = !!f.hidden_by_default;
+          h += '<div style="margin-bottom:8px;" data-q-field-key="' + escapeHtml(String(f.field_key || '')) + '" data-q-hidden-default="' + (hiddenDefault ? '1' : '0') + '">';
           h += '<div style="font-size:12px; margin-bottom:4px;">' + escapeHtml(String(f.label || 'Вопрос')) + (f.required ? ' *' : '') + '</div>';
           if (String(f.field_type || '') === 'SELECT') {
             h += '<select name="' + qn + '" style="width:100%; box-sizing:border-box;">';
@@ -2554,6 +2662,33 @@
       return h;
     }
 
+    function applyExtraLineQuestionnaireReveals(idx) {
+      const row = document.querySelector('[data-extra-line-idx="' + String(idx) + '"]') || document;
+      const sid = parseInt((document.getElementById('line_' + idx + '_service_id') || {}).value || '0', 10) || 0;
+      const meta = sid ? resolveServiceMeta(sid) : null;
+      const fields = (meta && meta.questionnaire_fields) || [];
+      const qRoot = row.querySelector('[data-line-q-root="' + String(idx) + '"]');
+      const ed = row.querySelector('[data-extra-line-feature-editor]') || row;
+      applyQuestionnaireRevealsForRoot(qRoot, fields, {
+        staticKit: !!(meta && meta.requires_kit_block),
+        staticTail: !!(meta && meta.requires_tail_block),
+        staticThermo: !!(meta && meta.requires_thermo),
+        kitWrap: ed.querySelector('[data-reveal-block="kit"]'),
+        tailWrap: ed.querySelector('[data-reveal-block="tail"]'),
+        thermoWrap: ed.querySelector('[data-reveal-block="thermo"]'),
+      });
+    }
+
+    function bindExtraLineQuestionnaireReveals(idx) {
+      const sid = parseInt((document.getElementById('line_' + idx + '_service_id') || {}).value || '0', 10) || 0;
+      const meta = sid ? resolveServiceMeta(sid) : null;
+      const fields = (meta && meta.questionnaire_fields) || [];
+      const row = document.querySelector('[data-extra-line-idx="' + String(idx) + '"]') || document;
+      const qRoot = row.querySelector('[data-line-q-root="' + String(idx) + '"]');
+      bindQuestionnaireRevealListeners(qRoot, fields, function () { applyExtraLineQuestionnaireReveals(idx); });
+      applyExtraLineQuestionnaireReveals(idx);
+    }
+
     function renderLine0ServiceFlags() {
       const host = document.getElementById('line0_service_feature_flags');
       if (!host) return;
@@ -2568,6 +2703,7 @@
         ed.innerHTML = html;
         ed.style.display = html ? 'block' : 'none';
       }
+      applyLine0QuestionnaireReveals();
     }
 
     function updateExtraLinePriceHint(idx) {
@@ -2671,6 +2807,7 @@
         ed.innerHTML = html;
         ed.style.display = html ? 'block' : 'none';
         if (html) bindExtraLineFeatureEditors(idx, row, meta);
+        bindExtraLineQuestionnaireReveals(idx);
       }
       updateExtraLinePriceHint(idx);
     }
@@ -2754,7 +2891,8 @@
 
     function bindExtraLineFeatureEditors(idx, row, meta) {
       if (!row || !meta) return;
-      if (meta.requires_kit_block) {
+      const canKit = !!meta.requires_kit_block || fieldsCanRevealBlock(meta.questionnaire_fields || [], 'kit');
+      if (canKit) {
         const radios = row.querySelectorAll('input[name="line_' + idx + '_kit_kind"]');
         const stockBlk = row.querySelector('[data-line-kit-stock="' + idx + '"]');
         const ownBlk = row.querySelector('[data-line-kit-own="' + idx + '"]');

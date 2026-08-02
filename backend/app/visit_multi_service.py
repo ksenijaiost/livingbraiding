@@ -60,6 +60,7 @@ from app.kit_inlay_visit import (
     _parse_visit_master_allocations_from_form,
     _resolve_visit_master_allocations,
     build_payload_from_input,
+    effective_requires_kit_block,
     get_salon_cut_pct,
     read_visit_master_form_state,
     service_requires_kit_block,
@@ -76,7 +77,9 @@ from app.visit_stock import visit_service_revert_stock
 from app.questionnaire.answer_validate import (
     extract_line_questionnaire_raw_from_form,
     extract_questionnaire_raw_from_form,
+    validate_and_coerce_answers,
 )
+from app.questionnaire.runtime_merge import load_merged_questionnaire_specs
 from app.thermo_visit import parse_thermo_from_form, persist_new_thermo_template_if_needed
 from app.user_roles import user_has_role
 
@@ -353,7 +356,11 @@ def compute_visit_service_line(
     usages: list[tuple[int, int, float, dict[str, int] | None]] = []
     kit_studio_fund = 0.0
 
-    if service_requires_kit_block(service):
+    specs = load_merged_questionnaire_specs(db, int(service.id))
+    answers, _ = validate_and_coerce_answers(line.questionnaire_raw or {}, specs)
+    need_kit = effective_requires_kit_block(service, answers, specs)
+
+    if need_kit:
         kinp = _line_kit_inlay_adapter(line, header)
         kind = line.kit_kind.upper()
         exclude_main_stock_cost = kind == "STOCK" and bool(line.kit_paid_separately) and bool(line.stock_kit_lines)

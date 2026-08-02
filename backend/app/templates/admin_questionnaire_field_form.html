@@ -79,10 +79,39 @@
           </label>
         </div>
       </div>
+
+      <div id="reveal_on_check_block" style="margin-top: 16px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc;">
+        <div style="font-weight: 600; margin-bottom: 6px;">При отмеченной галочке показать</div>
+        <p class="muted" style="margin: 0 0 10px; font-size: 12px;">Только для типа «Галочка». Блоки открываются в форме визита у этой услуги (дополнительно к флагам подкатегории/услуги).</p>
+        {% set selected_blocks = form.reveal_blocks|default([]) %}
+        {% for val, title in reveal_block_choices %}
+          <label style="display:flex; align-items:center; gap:8px; margin-top: 6px; font-weight: normal;">
+            <input type="checkbox" name="reveal_block" value="{{ val }}" {% if val in selected_blocks %}checked{% endif %} />
+            {{ title }}
+          </label>
+        {% endfor %}
+        <label style="margin-top: 12px; display:block;">Доп. поля анкеты (ключи через запятую)
+          <input name="reveal_field_keys" value="{{ form.reveal_field_keys|default('') }}" maxlength="500" placeholder="например extra_comment, braid_count" />
+        </label>
+        <p class="muted" style="margin: 4px 0 0; font-size: 12px;">Эти поля должны уже существовать в анкете (категория/подкатегория/услуга). Пока галочка не отмечена — они скрыты.</p>
+      </div>
+
       <p style="margin-top: 16px;">
         <button type="submit">Сохранить</button>
         <a href="{{ back_url }}"><button type="button" class="secondary">Отмена</button></a>
       </p>
     </form>
   </div>
+  <script>
+    (function () {
+      var sel = document.querySelector('select[name="field_type"]');
+      var block = document.getElementById('reveal_on_check_block');
+      function sync() {
+        if (!sel || !block) return;
+        block.style.display = (sel.value === 'CHECKBOX') ? 'block' : 'none';
+      }
+      if (sel) sel.addEventListener('change', sync);
+      sync();
+    })();
+  </script>
 {% endblock %}

@@ -7,9 +7,13 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 from app.db.models import QuestionnaireFieldType
+from app.questionnaire.reveal import (
+    normalize_reveal_from_form,
+    reveal_on_check_to_visibility_json,
+)
 
 FIELD_KEY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,99}$")
 
@@ -27,6 +31,7 @@ class NormalizedQuestionnaireField:
     options_json: str | None
     min_value: float | None
     max_value: float | None
+    visibility_json: str | None = None
 
     def as_structure_dict(self) -> dict[str, Any]:
         """Каноническое JSON-подобное описание поля после валидации."""
@@ -44,6 +49,8 @@ class NormalizedQuestionnaireField:
             d["min_value"] = self.min_value
         if self.max_value is not None:
             d["max_value"] = self.max_value
+        if self.visibility_json is not None:
+            d["visibility"] = json.loads(self.visibility_json)
         return d
 
 
@@ -117,6 +124,8 @@ def validate_questionnaire_field_form(
     min_raw: str | None,
     max_raw: str | None,
     edit_field_key_locked: str | None = None,
+    reveal_blocks: Iterable[str] | None = None,
+    reveal_field_keys: str | None = None,
 ) -> tuple[NormalizedQuestionnaireField | None, list[str]]:
     """
     Валидация входа с формы суперадмина.
@@ -187,6 +196,15 @@ def validate_questionnaire_field_form(
         if (min_raw or "").strip() or (max_raw or "").strip():
             errors.append("Границы min/max задаются только для типа «число».")
 
+    reveal, reveal_errs = normalize_reveal_from_form(
+        field_type=ft,
+        reveal_blocks=reveal_blocks,
+        reveal_field_keys_raw=reveal_field_keys,
+    )
+    errors.extend(reveal_errs)
+    if key and key in reveal.field_keys:
+        errors.append("Галочка не может открывать сама себя (уберите свой ключ из доп. полей).")
+
     if errors:
         return None, errors
 
@@ -202,6 +220,7 @@ def validate_questionnaire_field_form(
             options_json=options_json,
             min_value=min_v,
             max_value=max_v,
+            visibility_json=reveal_on_check_to_visibility_json(reveal),
         ),
         [],
     )

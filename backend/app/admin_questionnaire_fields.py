@@ -31,6 +31,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.questionnaire_field_validate import NormalizedQuestionnaireField, validate_questionnaire_field_form
+from app.questionnaire.reveal import REVEAL_BLOCK_LABELS, REVEAL_BLOCKS
 from app.ru_labels import ru_master_level, ru_questionnaire_field_type, ru_user_role
 from app.time_utils import utcnow_naive
 
@@ -38,6 +39,7 @@ templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["ru_master_level"] = ru_master_level
 templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_type
 templates.env.globals["ru_user_role"] = ru_user_role
+templates.env.globals["reveal_block_choices"] = [(b, REVEAL_BLOCK_LABELS[b]) for b in REVEAL_BLOCKS]
 
 router = APIRouter(prefix="/admin/catalog", tags=["admin-questionnaire"])
 
@@ -218,6 +220,7 @@ def _apply_normalized_category(row: CategoryQuestionnaireField, n: NormalizedQue
     row.options_json = n.options_json
     row.min_value = n.min_value
     row.max_value = n.max_value
+    row.visibility_json = n.visibility_json
 
 
 def _apply_normalized_subcat(row: SubcategoryQuestionnaireField, n: NormalizedQuestionnaireField) -> None:
@@ -230,10 +233,63 @@ def _apply_normalized_subcat(row: SubcategoryQuestionnaireField, n: NormalizedQu
     row.options_json = n.options_json
     row.min_value = n.min_value
     row.max_value = n.max_value
+    row.visibility_json = n.visibility_json
 
 
 def _apply_normalized_service(row: ServiceQuestionnaireField, n: NormalizedQuestionnaireField) -> None:
     _apply_normalized_subcat(row, n)  # same attribute names
+
+
+def _reveal_form_values(
+    *,
+    reveal_block: list[str] | None = None,
+    reveal_field_keys: str | None = None,
+    visibility_json: str | None = None,
+) -> dict[str, object]:
+    from app.questionnaire.reveal import reveal_form_prefill
+
+    if reveal_block is not None or reveal_field_keys is not None:
+        return {
+            "reveal_blocks": list(reveal_block or []),
+            "reveal_field_keys": (reveal_field_keys or "").strip(),
+        }
+    return reveal_form_prefill(visibility_json)
+
+
+def _field_form_dict(
+    *,
+    field_key: str,
+    field_type: str,
+    label: str,
+    required: bool,
+    placeholder: str | None,
+    help_text: str | None,
+    options_json: str | None,
+    min_value: str | None,
+    max_value: str | None,
+    reveal_block: list[str] | None = None,
+    reveal_field_keys: str | None = None,
+    visibility_json: str | None = None,
+) -> dict[str, object]:
+    d: dict[str, object] = {
+        "field_key": field_key,
+        "field_type": field_type,
+        "label": label,
+        "required": required,
+        "placeholder": placeholder or "",
+        "help_text": help_text or "",
+        "options_json": options_json or "",
+        "min_value": min_value or "",
+        "max_value": max_value or "",
+    }
+    d.update(
+        _reveal_form_values(
+            reveal_block=reveal_block,
+            reveal_field_keys=reveal_field_keys,
+            visibility_json=visibility_json,
+        )
+    )
+    return d
 
 
 # --- Category fields ---
@@ -313,6 +369,8 @@ def category_field_new_save(
     options_json: str | None = Form(None),
     min_value: str | None = Form(None),
     max_value: str | None = Form(None),
+    reveal_block: list[str] = Form([]),
+    reveal_field_keys: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -330,6 +388,8 @@ def category_field_new_save(
         options_raw=options_json,
         min_raw=min_value,
         max_raw=max_value,
+        reveal_blocks=reveal_block,
+        reveal_field_keys=reveal_field_keys,
     )
     if norm is None:
         return templates.TemplateResponse(
@@ -354,6 +414,8 @@ def category_field_new_save(
                     "options_json": options_json or "",
                     "min_value": min_value or "",
                     "max_value": max_value or "",
+                    "reveal_blocks": list(reveal_block or []),
+                    "reveal_field_keys": (reveal_field_keys or "").strip(),
                 },
                 errors=errors,
             ),
@@ -384,6 +446,8 @@ def category_field_new_save(
                     "options_json": options_json or "",
                     "min_value": min_value or "",
                     "max_value": max_value or "",
+                    "reveal_blocks": list(reveal_block or []),
+                    "reveal_field_keys": (reveal_field_keys or "").strip(),
                 },
                 errors=errors,
             ),
@@ -416,6 +480,8 @@ def category_field_new_save(
                     "options_json": options_json or "",
                     "min_value": min_value or "",
                     "max_value": max_value or "",
+                    "reveal_blocks": list(reveal_block or []),
+                    "reveal_field_keys": (reveal_field_keys or "").strip(),
                 },
                 errors=errors,
             ),
@@ -465,6 +531,7 @@ def category_field_edit_form(
         "options_json": _options_for_textarea(field.options_json),
         "min_value": "" if field.min_value is None else str(field.min_value).replace(".", ","),
         "max_value": "" if field.max_value is None else str(field.max_value).replace(".", ","),
+        **_reveal_form_values(visibility_json=field.visibility_json),
     }
     return templates.TemplateResponse(
         "admin_questionnaire_field_form.html",
@@ -498,6 +565,8 @@ def category_field_edit_save(
     options_json: str | None = Form(None),
     min_value: str | None = Form(None),
     max_value: str | None = Form(None),
+    reveal_block: list[str] = Form([]),
+    reveal_field_keys: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -519,6 +588,8 @@ def category_field_edit_save(
         min_raw=min_value,
         max_raw=max_value,
         edit_field_key_locked=field_inst.field_key,
+        reveal_blocks=reveal_block,
+        reveal_field_keys=reveal_field_keys,
     )
     if norm is None:
         return templates.TemplateResponse(
@@ -543,6 +614,8 @@ def category_field_edit_save(
                     "options_json": options_json or "",
                     "min_value": min_value or "",
                     "max_value": max_value or "",
+                    "reveal_blocks": list(reveal_block or []),
+                    "reveal_field_keys": (reveal_field_keys or "").strip(),
                 },
                 errors=errors,
             ),
@@ -710,6 +783,8 @@ def subcategory_field_new_save(
     options_json: str | None = Form(None),
     min_value: str | None = Form(None),
     max_value: str | None = Form(None),
+    reveal_block: list[str] = Form([]),
+    reveal_field_keys: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -727,6 +802,8 @@ def subcategory_field_new_save(
         options_raw=options_json,
         min_raw=min_value,
         max_raw=max_value,
+        reveal_blocks=reveal_block,
+        reveal_field_keys=reveal_field_keys,
     )
     if norm is None:
         cat = db.get(ServiceCategory, sub.category_id)
@@ -752,6 +829,8 @@ def subcategory_field_new_save(
                     "options_json": options_json or "",
                     "min_value": min_value or "",
                     "max_value": max_value or "",
+                    "reveal_blocks": list(reveal_block or []),
+                    "reveal_field_keys": (reveal_field_keys or "").strip(),
                 },
                 errors=errors,
             ),
@@ -785,6 +864,8 @@ def subcategory_field_new_save(
                     "options_json": options_json or "",
                     "min_value": min_value or "",
                     "max_value": max_value or "",
+                    "reveal_blocks": list(reveal_block or []),
+                    "reveal_field_keys": (reveal_field_keys or "").strip(),
                 },
                 errors=errors,
             ),
@@ -818,6 +899,8 @@ def subcategory_field_new_save(
                     "options_json": options_json or "",
                     "min_value": min_value or "",
                     "max_value": max_value or "",
+                    "reveal_blocks": list(reveal_block or []),
+                    "reveal_field_keys": (reveal_field_keys or "").strip(),
                 },
                 errors=errors,
             ),
@@ -869,6 +952,7 @@ def subcategory_field_edit_form(
         "options_json": _options_for_textarea(field.options_json),
         "min_value": "" if field.min_value is None else str(field.min_value).replace(".", ","),
         "max_value": "" if field.max_value is None else str(field.max_value).replace(".", ","),
+        **_reveal_form_values(visibility_json=field.visibility_json),
     }
     return templates.TemplateResponse(
         "admin_questionnaire_field_form.html",
@@ -902,6 +986,8 @@ def subcategory_field_edit_save(
     options_json: str | None = Form(None),
     min_value: str | None = Form(None),
     max_value: str | None = Form(None),
+    reveal_block: list[str] = Form([]),
+    reveal_field_keys: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -923,6 +1009,8 @@ def subcategory_field_edit_save(
         min_raw=min_value,
         max_raw=max_value,
         edit_field_key_locked=field.field_key,
+        reveal_blocks=reveal_block,
+        reveal_field_keys=reveal_field_keys,
     )
     if norm is None:
         cat = db.get(ServiceCategory, sub.category_id)
@@ -948,6 +1036,8 @@ def subcategory_field_edit_save(
                     "options_json": options_json or "",
                     "min_value": min_value or "",
                     "max_value": max_value or "",
+                    "reveal_blocks": list(reveal_block or []),
+                    "reveal_field_keys": (reveal_field_keys or "").strip(),
                 },
                 errors=errors,
             ),
@@ -1117,6 +1207,8 @@ def service_field_new_save(
     options_json: str | None = Form(None),
     min_value: str | None = Form(None),
     max_value: str | None = Form(None),
+    reveal_block: list[str] = Form([]),
+    reveal_field_keys: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -1134,6 +1226,8 @@ def service_field_new_save(
         options_raw=options_json,
         min_raw=min_value,
         max_raw=max_value,
+        reveal_blocks=reveal_block,
+        reveal_field_keys=reveal_field_keys,
     )
     if norm is None:
         sub = db.get(ServiceSubcategory, svc.subcategory_id)
@@ -1160,6 +1254,8 @@ def service_field_new_save(
                     "options_json": options_json or "",
                     "min_value": min_value or "",
                     "max_value": max_value or "",
+                    "reveal_blocks": list(reveal_block or []),
+                    "reveal_field_keys": (reveal_field_keys or "").strip(),
                 },
                 errors=errors,
             ),
@@ -1194,6 +1290,8 @@ def service_field_new_save(
                     "options_json": options_json or "",
                     "min_value": min_value or "",
                     "max_value": max_value or "",
+                    "reveal_blocks": list(reveal_block or []),
+                    "reveal_field_keys": (reveal_field_keys or "").strip(),
                 },
                 errors=errors,
             ),
@@ -1226,6 +1324,8 @@ def service_field_new_save(
                     "options_json": options_json or "",
                     "min_value": min_value or "",
                     "max_value": max_value or "",
+                    "reveal_blocks": list(reveal_block or []),
+                    "reveal_field_keys": (reveal_field_keys or "").strip(),
                 },
                 errors=errors,
             ),
@@ -1274,6 +1374,7 @@ def service_field_edit_form(
         "options_json": _options_for_textarea(field.options_json),
         "min_value": "" if field.min_value is None else str(field.min_value).replace(".", ","),
         "max_value": "" if field.max_value is None else str(field.max_value).replace(".", ","),
+        **_reveal_form_values(visibility_json=field.visibility_json),
     }
     return templates.TemplateResponse(
         "admin_questionnaire_field_form.html",
@@ -1307,6 +1408,8 @@ def service_field_edit_save(
     options_json: str | None = Form(None),
     min_value: str | None = Form(None),
     max_value: str | None = Form(None),
+    reveal_block: list[str] = Form([]),
+    reveal_field_keys: str | None = Form(None),
     current_user: AuthUser = _SUPER,
     db: Session = Depends(get_db),
 ):
@@ -1328,6 +1431,8 @@ def service_field_edit_save(
         min_raw=min_value,
         max_raw=max_value,
         edit_field_key_locked=field_inst.field_key,
+        reveal_blocks=reveal_block,
+        reveal_field_keys=reveal_field_keys,
     )
     if norm is None:
         sub = db.get(ServiceSubcategory, svc.subcategory_id)
@@ -1354,6 +1459,8 @@ def service_field_edit_save(
                     "options_json": options_json or "",
                     "min_value": min_value or "",
                     "max_value": max_value or "",
+                    "reveal_blocks": list(reveal_block or []),
+                    "reveal_field_keys": (reveal_field_keys or "").strip(),
                 },
                 errors=errors,
             ),
