@@ -298,3 +298,17 @@ def master_hourly_help_pay_from_visit(visit: Visit, master_id: int) -> float:
         if int(row.master_id) == int(master_id):
             total = money_q2(total + float(row.amount or 0))
     return total
+
+
+def visit_hourly_help_master_clause(master_id: int):
+    """SQL: визит, где мастер указан в почасовой помощи (hourly_help_json)."""
+    from sqlalchemy import or_
+
+    mid = int(master_id)
+    # Границы после id, чтобы «5» не ловил «50».
+    return or_(
+        Visit.hourly_help_json.like(f'%"master_id": {mid},%'),
+        Visit.hourly_help_json.like(f'%"master_id": {mid}}}%'),
+        Visit.hourly_help_json.like(f'%"master_id":{mid},%'),
+        Visit.hourly_help_json.like(f'%"master_id":{mid}}}%'),
+    )

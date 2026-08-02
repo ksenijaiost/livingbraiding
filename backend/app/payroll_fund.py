@@ -66,6 +66,8 @@ def money_q2(x: float) -> float:
 
 def visit_ids_visible_to_master_clause(master_id: int):
     """Визиты, где участвует мастер (как в модалке дня календаря и статистике)."""
+    from app.hourly_help import visit_hourly_help_master_clause
+
     mid = int(master_id)
     return or_(
         Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == mid)),
@@ -91,6 +93,7 @@ def visit_ids_visible_to_master_clause(master_id: int):
         ),
         Visit.mix_bonus_master_id == mid,
         Visit.correction_master_id == mid,
+        visit_hourly_help_master_clause(mid),
     )
 
 

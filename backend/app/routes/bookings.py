@@ -56,7 +56,6 @@ from app.db.models import (
     User,
     UserRole,
     Visit,
-    VisitMaster,
     WorkForInventory,
     WorkForInventoryStaff,
     WorkKind,
@@ -3559,16 +3558,15 @@ def master_activity_archive(db: Session, master_id: int, *, days: int = 30, max_
     cutoff = utcnow_naive() - timedelta(days=days)
     items: list[dict[str, Any]] = []
 
+    from app.payroll_fund import visit_ids_visible_to_master_clause
+
     visits = list(
         db.scalars(
             select(Visit)
             .where(
                 Visit.performed_date >= cutoff,
                 Visit.is_cancelled.is_(False),
-                or_(
-                    Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == master_id)),
-                    Visit.mix_bonus_master_id == master_id,
-                ),
+                visit_ids_visible_to_master_clause(master_id),
             )
             .options(selectinload(Visit.client), selectinload(Visit.services))
         ).all()

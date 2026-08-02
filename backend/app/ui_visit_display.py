@@ -328,6 +328,7 @@ class VisitMasterPayRow:
     pool_share: float
     mix_bonus: float
     correction_bonus: float
+    hourly_help: float
     total: float
 
 
@@ -346,10 +347,12 @@ def _master_display_name(user: User | None, master_id: int, db: Session | None) 
 
 
 def visit_masters_fund_by_master(visit: Visit) -> dict[int, float]:
-    """ЗП в фонды по master_id (доля пула + коррекция), как в карточке и проводках.
+    """ЗП в фонды по master_id (доля пула + коррекция + почасовая помощь), как в карточке и проводках.
 
     Учитывает masters_scope: PER_SERVICE → доли с строк услуг, иначе — visit.masters.
     """
+    from app.hourly_help import hourly_help_rows_from_visit
+
     by_master: dict[int, float] = {}
 
     def add(mid: int, amount: float) -> None:
@@ -376,6 +379,8 @@ def visit_masters_fund_by_master(visit: Visit) -> dict[int, float]:
             add(int(m.master_id), pool * float(m.percent or 0) / 100.0)
         if getattr(visit, "correction_master_id", None):
             add(int(visit.correction_master_id), float(getattr(visit, "correction_master_amount", 0) or 0))
+    for row in hourly_help_rows_from_visit(visit):
+        add(int(row.master_id), float(row.amount or 0))
     return by_master
 
 
@@ -384,10 +389,13 @@ def visit_masters_fund_total(visit: Visit) -> float:
 
 
 def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list[VisitMasterPayRow]:
-    """ЗП каждого мастера по визиту: доля пула и, при наличии, коррекция."""
+    """ЗП каждого мастера по визиту: доля пула, коррекция и почасовая помощь."""
+    from app.hourly_help import hourly_help_rows_from_visit
+
     active_services = [vs for vs in (visit.services or []) if not vs.is_cancelled]
     pool_by_master: dict[int, float] = {}
     correction_by_master: dict[int, float] = {}
+    help_by_master: dict[int, float] = {}
     names: dict[int, str] = {}
 
     def add_pool(mid: int, amount: float, user: User | None) -> None:
@@ -401,6 +409,12 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
             return
         correction_by_master[mid] = money_q2(correction_by_master.get(mid, 0.0) + amount)
         names.setdefault(mid, _master_display_name(user, mid, db))
+
+    def add_help(mid: int, amount: float) -> None:
+        if amount <= 0:
+            return
+        help_by_master[mid] = money_q2(help_by_master.get(mid, 0.0) + amount)
+        names.setdefault(mid, _master_display_name(None, mid, db))
 
     if active_services:
         for vs in active_services:
@@ -426,12 +440,16 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
             mid = int(visit.correction_master_id)
             add_correction(mid, float(getattr(visit, "correction_master_amount", 0) or 0))
 
-    master_ids = sorted(set(pool_by_master) | set(correction_by_master))
+    for row in hourly_help_rows_from_visit(visit):
+        add_help(int(row.master_id), float(row.amount or 0))
+
+    master_ids = sorted(set(pool_by_master) | set(correction_by_master) | set(help_by_master))
     rows: list[VisitMasterPayRow] = []
     for mid in master_ids:
         pool_share = pool_by_master.get(mid, 0.0)
         mix_bonus = 0.0
         correction_bonus = correction_by_master.get(mid, 0.0)
+        hourly_help = help_by_master.get(mid, 0.0)
         rows.append(
             VisitMasterPayRow(
                 master_id=mid,
@@ -439,7 +457,8 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
                 pool_share=pool_share,
                 mix_bonus=mix_bonus,
                 correction_bonus=correction_bonus,
-                total=money_q2(pool_share + mix_bonus + correction_bonus),
+                hourly_help=hourly_help,
+                total=money_q2(pool_share + mix_bonus + correction_bonus + hourly_help),
             )
         )
     return rows
