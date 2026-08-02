@@ -151,9 +151,9 @@ def _payroll_fund_err_ru(code: str | None) -> str | None:
         "bad_user": "Выберите сотрудника.",
         "bad_payment": "Укажите тип оплаты.",
         "bad_mode": "Укажите корректный режим корректировки.",
-        "bad_date": "Укажите корректную дату выплаты.",
-        "bad_period": "Дата выплаты недопустима (закрытый период, будущее или раньше открытого периода).",
-        "bad_period_ack": "Для выплаты в закрытом периоде ЗП нужно двойное подтверждение (только техспец).",
+        "bad_date": "Укажите корректную учётную дату.",
+        "bad_period": "Дата недопустима (закрытый период, будущее или раньше открытого периода).",
+        "bad_period_ack": "Для проводки в закрытом периоде ЗП нужно двойное подтверждение (только техспец).",
         "bad_storno_id": "Укажите корректный ID проводки.",
         "storno_fail": "Не удалось отменить проводку.",
     }.get(code or "", code)
@@ -486,6 +486,24 @@ async def admin_payroll_fund_adjust(
         return RedirectResponse(url="/admin/payroll-fund?err=bad_amount", status_code=303)
 
     comment = str(form.get("comment") or "").strip()
+    date_raw = (str(form.get("adjust_date") or "")).strip()
+    try:
+        adjust_day = parse_date_iso(date_raw, field_name="adjust_date")
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_date", status_code=303)
+    effective_at = datetime.combine(adjust_day, datetime.min.time())
+    closed = is_in_closed_payroll_period(db, effective_at)
+    allow_closed = bool(closed and user_may_edit_closed_payroll_period(current_user))
+    if closed and not allow_closed:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_period", status_code=303)
+    try:
+        require_closed_period_ack(needed=allow_closed, form_ack=form.get("closed_period_ack"))
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_period_ack", status_code=303)
+    try:
+        ensure_event_date_in_open_payroll_period(db, effective_at, allow_closed=allow_closed)
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_period", status_code=303)
 
     try:
         if mode == "set":
@@ -500,6 +518,7 @@ async def admin_payroll_fund_adjust(
             amount_delta=delta,
             created_by_user_id=current_user.id,
             comment=comment or ("Начальный остаток" if mode == "set" else None),
+            effective_at=effective_at,
         )
     except ValueError:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_amount", status_code=303)

@@ -1069,10 +1069,12 @@ def post_manual_adjustment(
     amount_delta: float,
     created_by_user_id: int,
     comment: str | None,
+    effective_at: datetime | None = None,
 ) -> None:
     """Manual adjustment (including initial balances).
 
     Uses source_kind=MANUAL and entry_kind=ACCRUAL. The delta may be negative.
+    effective_at — учётная дата; по умолчанию момент записи.
     """
     amt = money_q2(float(amount_delta))
     if amt == 0:
@@ -1087,6 +1089,7 @@ def post_manual_adjustment(
         source_id=None,
         created_by_user_id=created_by_user_id,
         comment=(comment or "").strip() or None,
+        effective_at=effective_at,
     )
 
 
