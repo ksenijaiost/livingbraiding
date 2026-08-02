@@ -186,7 +186,14 @@
       <p class="muted" style="margin-top:-6px;">
         Для переноса балансов из «реального мира» можно внести ручную проводку (дельту) или установить баланс фонда в нужное значение (будет записана разница).
       </p>
-      <form method="post" action="/admin/payroll-fund/adjust">
+      {% if payout_techspec_closed_override %}
+        <p class="muted" style="margin-top:0;">Техспец: корректировка с датой в закрытом периоде ЗП — с двойным подтверждением.</p>
+      {% endif %}
+      <form method="post" action="/admin/payroll-fund/adjust"
+        {% if payout_techspec_closed_override %}class="js-closed-period-form" data-closed-action="Корректировка" data-closed-date-input="pf_adjust_date" data-closed-periods-el="pf-closed-periods-data"{% endif %}>
+        {% if payout_techspec_closed_override %}
+          <input type="hidden" name="closed_period_ack" value="" />
+        {% endif %}
         <div class="pf-adj-grid" style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 32px; align-items:start;">
           <div>
             <div class="muted" style="margin-bottom:6px;">Фонд</div>
@@ -222,6 +229,11 @@
             <div id="pf_adj_balance_hint" class="muted" style="margin-bottom:6px; min-height:1.35em;">Текущий баланс: —</div>
             <label for="pf_adj_amount">Сумма, руб.</label>
             <input type="text" name="amount" id="pf_adj_amount" required placeholder="0.00" style="width:100%; max-width:100%; box-sizing:border-box;" />
+          </div>
+          <div>
+            <label for="pf_adjust_date">Дата учёта *</label>
+            <input type="date" name="adjust_date" id="pf_adjust_date" required value="{{ payout_default_date }}" style="width:100%; max-width:100%; box-sizing:border-box;" />
+            <p class="muted" style="margin:6px 0 0;">По ней корректировка попадает в период ЗП.</p>
           </div>
           <div style="grid-column: 1 / -1;">
             <label for="pf_adj_comment">Комментарий</label>

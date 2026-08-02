@@ -177,15 +177,15 @@
       <tr><td>Амортизация</td><td>{{ "%.0f"|format(visit.amortization_amount or 0) }} ₽</td></tr>
       <tr><td>Доля салона</td><td>{{ visit.salon_cut_pct_at_time }}</td></tr>
       <tr><td>Заработок студии</td><td>{{ "%.0f"|format(visit.salon_profit) }} ₽</td></tr>
-      <tr><td>ЗП мастеров (суммарно)</td><td>{{ "%.0f"|format(visit.masters_pool) }} ₽</td></tr>
+      <tr><td>ЗП мастеров (суммарно)</td><td>{{ "%.0f"|format((visit.masters_pool or 0) + (visit.hourly_help_total or 0)) }} ₽</td></tr>
       {% if visit_master_pay_rows %}
         {% for row in visit_master_pay_rows %}
           <tr>
             <td style="padding-left: 1.25rem; color: #6b7280;">{{ row.master_name }}</td>
             <td>
               {{ "%.0f"|format(row.total) }} ₽
-              {% if row.mix_bonus > 0 or row.correction_bonus > 0 %}
-                <span class="muted" style="font-size: 12px;"> (пул {{ "%.0f"|format(row.pool_share) }}{% if row.mix_bonus > 0 %} + бонус {{ "%.0f"|format(row.mix_bonus) }}{% endif %}{% if row.correction_bonus > 0 %} + корр. {{ "%.0f"|format(row.correction_bonus) }}{% endif %})</span>
+              {% if row.mix_bonus > 0 or row.correction_bonus > 0 or row.hourly_help > 0 %}
+                <span class="muted" style="font-size: 12px;"> ({% if row.pool_share > 0 %}пул {{ "%.0f"|format(row.pool_share) }}{% endif %}{% if row.mix_bonus > 0 %}{% if row.pool_share > 0 %} + {% endif %}бонус {{ "%.0f"|format(row.mix_bonus) }}{% endif %}{% if row.correction_bonus > 0 %}{% if row.pool_share > 0 or row.mix_bonus > 0 %} + {% endif %}корр. {{ "%.0f"|format(row.correction_bonus) }}{% endif %}{% if row.hourly_help > 0 %}{% if row.pool_share > 0 or row.mix_bonus > 0 or row.correction_bonus > 0 %} + {% endif %}помощь {{ "%.0f"|format(row.hourly_help) }}{% endif %})</span>
               {% endif %}
             </td>
           </tr>

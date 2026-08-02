@@ -78,7 +78,7 @@
               {% set masters_label = (row_masters.get(v.id) or '') %}
               {% if masters_label %}{{ masters_label }}{% else %}<span class="muted">—</span>{% endif %}
             </td>
-            <td>{{ "%.0f"|format(v.masters_pool) }}</td>
+            <td>{{ "%.0f"|format((v.masters_pool or 0) + (v.hourly_help_total or 0)) }}</td>
           </tr>
         {% endfor %}
       </tbody>

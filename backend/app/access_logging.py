@@ -1,5 +1,5 @@
 """
-Access-лог HTTP: время, клиент, запрос, статус, длительность, логин по сессии.
+Access-лог HTTP: уровень, время, клиент, запрос, статус, длительность, логин по сессии.
 
 Стандартный `uvicorn.access` отключается, чтобы не дублировать строки без времени.
 """
@@ -18,7 +18,19 @@ from app.db.models import User
 from app.db.session import SessionLocal
 
 ACCESS_LOGGER_NAME = "livingbraiding.access"
+APP_LOGGER_NAME = "livingbraiding.app"
 _SKIP_USER_DB_PREFIXES: tuple[str, ...] = ("/static/", "/media/")
+
+
+def _stream_handler_with_level() -> logging.StreamHandler:
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s | %(levelname)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    return handler
 
 
 def configure_request_access_logging() -> None:
@@ -27,17 +39,28 @@ def configure_request_access_logging() -> None:
     log.handlers.clear()
     log.setLevel(logging.INFO)
     log.propagate = False
+    log.addHandler(_stream_handler_with_level())
 
-    handler = logging.StreamHandler()
-    handler.setFormatter(
-        logging.Formatter(
-            fmt="%(asctime)s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-    )
-    log.addHandler(handler)
+    app_log = logging.getLogger(APP_LOGGER_NAME)
+    if not any(isinstance(h, logging.StreamHandler) for h in app_log.handlers):
+        app_log.addHandler(_stream_handler_with_level())
+        app_log.setLevel(logging.INFO)
+        app_log.propagate = False
 
     logging.getLogger("uvicorn.access").disabled = True
+
+
+def access_log_level_for_status(status: int, *, has_validation_error: bool) -> int:
+    """
+    INFO — успех и редиректы;
+    WARNING — пользовательская валидация (как logger.warning в form_validation_log);
+    ERROR — прочие 4xx/5xx.
+    """
+    if 200 <= status < 400:
+        return logging.INFO
+    if has_validation_error and 400 <= status < 500:
+        return logging.WARNING
+    return logging.ERROR
 
 
 def _user_label_for_request(request: Request) -> str:
@@ -80,4 +103,5 @@ class AccessLogWithUserMiddleware(BaseHTTPMiddleware):
             validation_err = getattr(request.state, "validation_error", None)
             if validation_err:
                 line = f"{line} | err={validation_err}"
-            logging.getLogger(ACCESS_LOGGER_NAME).info(line)
+            level = access_log_level_for_status(status, has_validation_error=bool(validation_err))
+            logging.getLogger(ACCESS_LOGGER_NAME).log(level, line)

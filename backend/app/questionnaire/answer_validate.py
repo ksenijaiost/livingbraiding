@@ -21,29 +21,53 @@ def validate_and_coerce_answers(
     """
     `raw` — значения с формы без префикса q_ (ключ = field_key).
     Для чекбокса: ключ отсутствует = False; «on» / непустая строка = True.
+    Поля с hidden_by_default обязательны только если их открыла галочка.
     """
+    from app.questionnaire.reveal import answers_reveal_field_keys
+
     errors: list[str] = []
     out: dict[str, Any] = {}
 
+    # Сначала галочки — от них зависит видимость остальных полей.
     for spec in specs:
+        if spec.field_type != QuestionnaireFieldType.CHECKBOX:
+            continue
         key = spec.field_key
         sval = raw.get(key)
         if sval is None:
             sval = ""
         else:
             sval = str(sval).strip()
+        present = key in raw
+        if present:
+            sl = sval.lower()
+            checked = sl in ("on", "1", "true", "yes", "да")
+        else:
+            checked = False
+        if spec.required and not checked:
+            errors.append(f"«{spec.label}»: отметьте галочку (обязательное поле).")
+            continue
+        out[key] = bool(checked)
 
+    revealed_fields = answers_reveal_field_keys(out, specs)
+    from app.questionnaire.reveal import REVEAL_BLOCK_MATERIAL, answers_reveal_blocks
+
+    if REVEAL_BLOCK_MATERIAL in answers_reveal_blocks(out, specs):
+        revealed_fields.add(REVEAL_BLOCK_MATERIAL)
+
+    for spec in specs:
         if spec.field_type == QuestionnaireFieldType.CHECKBOX:
-            present = key in raw
-            if present:
-                sl = sval.lower()
-                checked = sl in ("on", "1", "true", "yes", "да")
-            else:
-                checked = False
-            if spec.required and not checked:
-                errors.append(f"«{spec.label}»: отметьте галочку (обязательное поле).")
-                continue
-            out[key] = bool(checked)
+            continue
+        key = spec.field_key
+        hidden = bool(getattr(spec, "hidden_by_default", False))
+        visible = (not hidden) or (key in revealed_fields)
+        sval = raw.get(key)
+        if sval is None:
+            sval = ""
+        else:
+            sval = str(sval).strip()
+
+        if not visible:
             continue
 
         if spec.required and not sval:
@@ -63,21 +87,21 @@ def validate_and_coerce_answers(
             except ValueError:
                 errors.append(f"«{spec.label}»: введите число.")
                 continue
-            if spec.min_value is not None and num < spec.min_value:
-                errors.append(f"«{spec.label}»: не меньше {spec.min_value}.")
+            if spec.min_value is not None and num < float(spec.min_value):
+                errors.append(f"«{spec.label}»: минимум {spec.min_value}.")
                 continue
-            if spec.max_value is not None and num > spec.max_value:
-                errors.append(f"«{spec.label}»: не больше {spec.max_value}.")
+            if spec.max_value is not None and num > float(spec.max_value):
+                errors.append(f"«{spec.label}»: максимум {spec.max_value}.")
                 continue
             out[key] = num
         elif spec.field_type == QuestionnaireFieldType.SELECT:
-            allowed = {o["value"] for o in spec.options}
-            if sval not in allowed:
+            opts = {o["value"] for o in (spec.options or [])}
+            if sval not in opts:
                 errors.append(f"«{spec.label}»: выберите значение из списка.")
                 continue
             out[key] = sval
         else:
-            errors.append(f"«{spec.label}»: неподдерживаемый тип поля.")
+            out[key] = sval
 
     return out, errors
 

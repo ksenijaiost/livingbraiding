@@ -226,7 +226,7 @@
               <summary>Работа</summary>
               <div class="dd">
                 {% if current_user.role.value == "MASTER" %}
-                  <a href="/master/bookings">Мои записи</a>
+                  <a href="/master/mywork">Моя работа</a>
                   <a href="/master/visit/new">Новый визит</a>
                   <a href="/consultations/new">Новая консультация</a>
                   <a href="/sales/work/new">Новая работа</a>
@@ -338,7 +338,7 @@
         <details>
           <summary><strong>Работа</strong></summary>
           {% if current_user.role.value == "MASTER" %}
-            <a class="md-link" href="/master/bookings" onclick="window.lbToggleMobileNav(false)">Мои записи</a>
+            <a class="md-link" href="/master/mywork" onclick="window.lbToggleMobileNav(false)">Моя работа</a>
             <a class="md-link" href="/master/visit/new" onclick="window.lbToggleMobileNav(false)">Новый визит</a>
             <a class="md-link" href="/consultations/new" onclick="window.lbToggleMobileNav(false)">Новая консультация</a>
             <a class="md-link" href="/sales/work/new" onclick="window.lbToggleMobileNav(false)">Новая работа</a>

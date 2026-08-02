@@ -60,6 +60,7 @@ from app.kit_inlay_visit import (
     _parse_visit_master_allocations_from_form,
     _resolve_visit_master_allocations,
     build_payload_from_input,
+    effective_requires_kit_block,
     get_salon_cut_pct,
     read_visit_master_form_state,
     service_requires_kit_block,
@@ -76,7 +77,9 @@ from app.visit_stock import visit_service_revert_stock
 from app.questionnaire.answer_validate import (
     extract_line_questionnaire_raw_from_form,
     extract_questionnaire_raw_from_form,
+    validate_and_coerce_answers,
 )
+from app.questionnaire.runtime_merge import load_merged_questionnaire_specs
 from app.thermo_visit import parse_thermo_from_form, persist_new_thermo_template_if_needed
 from app.user_roles import user_has_role
 
@@ -160,11 +163,19 @@ class VisitServiceLineInput:
 
 
 def effective_amount_from_client(line: VisitServiceLineInput) -> float:
-    """Сумма с клиента: основная услуга + доплата за коррекцию при «Своей сумме»."""
+    """Сумма с клиента за услугу (+ коррекция); комплект учитывается отдельно при расчёте строки."""
     base = float(line.amount_from_client or 0)
     if line.own_correction and line.own_corr_use_custom_amount:
         return base + float(line.own_corr_custom_amount or 0)
     return base
+
+
+def _line_may_defer_client_amount_to_kit(line: VisitServiceLineInput) -> bool:
+    return (
+        (line.kit_kind or "").upper() == "STOCK"
+        and bool(line.stock_kit_lines)
+        and not bool(line.kit_paid_separately)
+    )
 
 
 @dataclass
@@ -341,10 +352,15 @@ def compute_visit_service_line(
     salon_pct = get_salon_cut_pct(db, default_mix_bonus_master_id)
 
     kit_cost_total = 0.0
+    kit_client_total = 0.0
     usages: list[tuple[int, int, float, dict[str, int] | None]] = []
     kit_studio_fund = 0.0
 
-    if service_requires_kit_block(service):
+    specs = load_merged_questionnaire_specs(db, int(service.id))
+    answers, _ = validate_and_coerce_answers(line.questionnaire_raw or {}, specs)
+    need_kit = effective_requires_kit_block(service, answers, specs)
+
+    if need_kit:
         kinp = _line_kit_inlay_adapter(line, header)
         kind = line.kit_kind.upper()
         exclude_main_stock_cost = kind == "STOCK" and bool(line.kit_paid_separately) and bool(line.stock_kit_lines)
@@ -364,6 +380,11 @@ def compute_visit_service_line(
                 usages.append((sk.kit_id, n, usage_cost, bd))
                 kit_cost_total += usage_cost
                 kit_studio_fund += usage_sf
+                if not exclude_main_stock_cost:
+                    if sk.amount_from_client is not None and float(sk.amount_from_client) > 0:
+                        kit_client_total += float(sk.amount_from_client)
+                    else:
+                        kit_client_total += float(cost)
         if kind == "OWN" and line.own_extra_blanks:
             extra_lines = line.own_extra_stock_kit_lines or (
                 [
@@ -391,6 +412,10 @@ def compute_visit_service_line(
                 usages.append((sk.kit_id, n, cost, bd))
                 kit_cost_total += cost
                 kit_studio_fund += sf
+                if sk.amount_from_client is not None and float(sk.amount_from_client) > 0:
+                    kit_client_total += float(sk.amount_from_client)
+                else:
+                    kit_client_total += float(cost)
         _build_kit_block_from_input(kinp, db)
 
     addons = max(0.0, float(line.addon_sales_amount or 0.0))
@@ -422,7 +447,8 @@ def compute_visit_service_line(
 
     cost_total = mat_cost + kit_cost_total + addons + mix_cost + amort_amount
     base_amount_from_client = float(line.amount_from_client or 0)
-    amount_from_client = base_amount_from_client
+    # Сумма за услугу + сумма за комплект(ы) из наличия (если не «уже оплачены»).
+    amount_from_client = base_amount_from_client + float(kit_client_total or 0.0)
     client_payment_kind = line.client_payment_kind
     correction_master_id: int | None = None
     correction_master_amount = 0.0
@@ -449,13 +475,13 @@ def compute_visit_service_line(
             )
             cost_total += corr_fx
             corr_amount = float(line.own_corr_custom_amount or 0)
-            amount_from_client = base_amount_from_client + corr_amount
+            amount_from_client = base_amount_from_client + float(kit_client_total or 0.0) + corr_amount
             if base_amount_from_client <= 0:
                 client_payment_kind = line.own_corr_client_payment_kind
             if corr_amount <= 0:
                 raise ValueError("Укажите сумму с клиента для коррекции («Своя сумма»).")
             base_cost = cost_total - corr_fx
-            base_profit = base_amount_from_client - base_cost
+            base_profit = (base_amount_from_client + float(kit_client_total or 0.0)) - base_cost
             corr_profit = corr_amount - corr_fx
             if corr_profit < -0.01:
                 raise ValueError("Сумма с клиента меньше себестоимости коррекции.")
@@ -683,14 +709,20 @@ def save_visit_with_services(
         db.flush()
 
     for idx, line in enumerate(inp.lines):
-        if inp.header.client_type != VisitClientType.SELF and effective_amount_from_client(line) <= 0:
-            raise ValueError("Укажите сумму, взятую с клиента.")
+        if (
+            inp.header.client_type != VisitClientType.SELF
+            and effective_amount_from_client(line) <= 0
+            and not _line_may_defer_client_amount_to_kit(line)
+        ):
+            raise ValueError("Укажите сумму с клиента за услугу и/или за комплект.")
         computed = compute_visit_service_line(
             db,
             line,
             inp.header,
             default_mix_bonus_master_id=master_id,
         )
+        if inp.header.client_type != VisitClientType.SELF and float(computed.amount_from_client or 0) <= 0:
+            raise ValueError("Укажите сумму с клиента за услугу и/или за комплект.")
         kinp = _line_kit_inlay_adapter(line, inp.header)
         payload = build_payload_from_input(kinp, db)
         service = db.scalar(
@@ -1371,14 +1403,20 @@ def _insert_visit_service_from_line(
     editor_user_id: int,
     performed_dt: datetime,
 ) -> VisitService:
-    if inp.header.client_type != VisitClientType.SELF and effective_amount_from_client(line) <= 0:
-        raise ValueError("Укажите сумму, взятую с клиента.")
+    if (
+        inp.header.client_type != VisitClientType.SELF
+        and effective_amount_from_client(line) <= 0
+        and not _line_may_defer_client_amount_to_kit(line)
+    ):
+        raise ValueError("Укажите сумму с клиента за услугу и/или за комплект.")
     computed = compute_visit_service_line(
         db,
         line,
         inp.header,
         default_mix_bonus_master_id=editor_user_id,
     )
+    if inp.header.client_type != VisitClientType.SELF and float(computed.amount_from_client or 0) <= 0:
+        raise ValueError("Укажите сумму с клиента за услугу и/или за комплект.")
     kinp = _line_kit_inlay_adapter(line, inp.header)
     payload = build_payload_from_input(kinp, db)
     service = db.scalar(

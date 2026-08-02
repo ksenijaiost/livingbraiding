@@ -66,6 +66,8 @@ def money_q2(x: float) -> float:
 
 def visit_ids_visible_to_master_clause(master_id: int):
     """Визиты, где участвует мастер (как в модалке дня календаря и статистике)."""
+    from app.hourly_help import visit_hourly_help_master_clause
+
     mid = int(master_id)
     return or_(
         Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == mid)),
@@ -91,6 +93,7 @@ def visit_ids_visible_to_master_clause(master_id: int):
         ),
         Visit.mix_bonus_master_id == mid,
         Visit.correction_master_id == mid,
+        visit_hourly_help_master_clause(mid),
     )
 
 
@@ -1069,10 +1072,12 @@ def post_manual_adjustment(
     amount_delta: float,
     created_by_user_id: int,
     comment: str | None,
+    effective_at: datetime | None = None,
 ) -> None:
     """Manual adjustment (including initial balances).
 
     Uses source_kind=MANUAL and entry_kind=ACCRUAL. The delta may be negative.
+    effective_at — учётная дата; по умолчанию момент записи.
     """
     amt = money_q2(float(amount_delta))
     if amt == 0:
@@ -1087,6 +1092,7 @@ def post_manual_adjustment(
         source_id=None,
         created_by_user_id=created_by_user_id,
         comment=(comment or "").strip() or None,
+        effective_at=effective_at,
     )
 
 

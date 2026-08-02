@@ -101,6 +101,38 @@ def test_build_visit_master_pay_rows_per_service_ignores_mix_bonus() -> None:
     assert by_id[2].mix_bonus == 0.0
 
 
+def test_build_visit_master_pay_rows_includes_hourly_help() -> None:
+    visit = SimpleNamespace(
+        masters_scope=VisitMastersScope.VISIT,
+        masters_pool=700.0,
+        hourly_help_json=json.dumps(
+            [{"master_id": 3, "hours": 1, "minutes": 0, "amount": 300.0}],
+            ensure_ascii=False,
+        ),
+        mix_bonus_master_id=None,
+        mix_bonus_amount=0.0,
+        masters=[
+            SimpleNamespace(master_id=1, percent=100.0, master=SimpleNamespace(display_name="Аня", username="a")),
+        ],
+        services=[
+            SimpleNamespace(
+                is_cancelled=False,
+                masters_pool=700.0,
+                mix_bonus_master_id=None,
+                mix_bonus_amount=0.0,
+                masters=[],
+            ),
+        ],
+    )
+    rows = build_visit_master_pay_rows(visit)
+    by_id = {r.master_id: r for r in rows}
+    assert by_id[1].total == 700.0
+    assert by_id[1].hourly_help == 0.0
+    assert by_id[3].total == 300.0
+    assert by_id[3].hourly_help == 300.0
+    assert by_id[3].pool_share == 0.0
+
+
 def test_build_visit_masters_lines_per_service() -> None:
     visit = SimpleNamespace(
         masters_scope=VisitMastersScope.PER_SERVICE,

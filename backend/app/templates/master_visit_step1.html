@@ -17,7 +17,7 @@
     {% endif %}
     {% if draft_saved %}
       <div class="card" style="border-color:#86efac; background:#f0fdf4; margin-bottom: 12px; pointer-events: auto;">
-        <p style="margin:0;">Черновик сохранён. <a href="/master/bookings">Мои записи</a></p>
+        <p style="margin:0;">Черновик сохранён. <a href="/master/mywork">Моя работа</a></p>
       </div>
     {% endif %}
     {% if saved %}
@@ -286,7 +286,7 @@
               value="{{ fp.get('client_discount_percent', '0') }}" style="max-width: 8rem;" />
           </div>
           <div>
-            <label>Сумма с клиента, ₽</label>
+            <label>Сумма с клиента за услугу, ₽</label>
             <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px;">
               <div style="display:flex; align-items:center; gap:8px;">
                 <input id="amount_from_client" type="number" name="amount_from_client" min="0" step="1" inputmode="numeric" autocomplete="off"
@@ -434,10 +434,29 @@
               <p class="vsk-selected-line" style="margin:0;"></p>
               <p class="vsk-selected-reserve" style="margin:8px 0 0; padding:8px 10px; background:#fffbeb; border:1px solid #fbbf24; border-radius:8px; font-size:13px; color:#92400e; display:none;"></p>
               <div data-lb-kit-pick-after-selected="1">
-                <label style="display:block;margin-top:8px;"><input type="checkbox" class="vsk-use-entire lb-kit-use-entire" {% if line.use_entire %}checked{% endif %} /> Весь комплект (все доступные заготовки)</label>
+                <div class="lb-kit-mode-wrap" style="margin-top:8px;">
+                  <div class="muted" style="margin-bottom:4px;">Списание</div>
+                  <label style="display:inline-flex;align-items:center;gap:6px;margin-right:14px;cursor:pointer;">
+                    <input type="radio" class="lb-kit-mode-radio" data-mode="entire" {% if line.use_entire %}checked{% endif %} />
+                    Весь комплект (все доступные заготовки)
+                  </label>
+                  <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="radio" class="lb-kit-mode-radio" data-mode="piece" {% if not line.use_entire %}checked{% endif %} />
+                    Поштучно
+                  </label>
+                  <input type="checkbox" class="vsk-use-entire lb-kit-use-entire" style="display:none;" {% if line.use_entire %}checked{% endif %} />
+                </div>
                 <div data-lb-kit-simple-wrap class="lb-kit-blanks-simple-wrap" style="margin-top:8px;">
-                  <label>Или заготовок списать</label>
+                  <label>Сколько заготовок списать</label>
                   <input type="number" class="vsk-blanks-used lb-kit-blanks-simple" min="0" value="{% if line.blanks_used %}{{ line.blanks_used }}{% endif %}" style="max-width:8rem;" />
+                </div>
+                <div class="lb-kit-price-block" style="margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;">
+                  <div style="font-size:13px;">Посчитано: <strong class="lb-kit-calc-price">—</strong> ₽</div>
+                  <div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;">
+                    <label style="margin:0;">С клиента, ₽</label>
+                    <input type="number" class="lb-kit-amount-from-client" min="0" step="1" value="{% if line.amount_from_client is defined and line.amount_from_client is not none %}{{ line.amount_from_client }}{% endif %}" style="max-width:8rem;" placeholder="как посчитано" />
+                  </div>
+                  <p class="muted" style="font-size:12px;margin:6px 0 0;">Если пусто — берём посчитанную цену. Это отдельная сумма: в цену услуги не входит.</p>
                 </div>
               </div>
             </div>
@@ -450,7 +469,7 @@
         <div style="margin-top: 10px;">
           <label style="font-weight: normal; font-size: 14px;">
             <input type="checkbox" name="kit_paid_separately" id="kit_paid_separately_cb" {% if fp.get('kit_paid_separately') == 'on' %}checked{% endif %} />
-            Комплект(ы) из наличия уже оплачены (не включать их стоимость в себестоимость визита)
+            Комплект(ы) из наличия уже оплачены (не учитывать в «С клиента» и в себестоимости)
           </label>
         </div>
       </div>
@@ -659,7 +678,10 @@
         <h3 style="margin-top:0;">Предварительный расчёт</h3>
         <div id="visit_preview_client_total" style="font-size: 14px; font-weight: 600; margin-top: 4px;">С клиента (итого): —</div>
         <div id="visit_preview_master_lines" style="font-size: 13px; margin-top: 8px;">—</div>
-        <div id="visit_preview_cost_line" class="muted" style="font-size: 13px; margin-top: 8px;">—</div>
+        <div id="visit_preview_cost_block" class="muted" style="font-size: 13px; margin-top: 8px;">
+          <div id="visit_preview_cost_line">—</div>
+          <div id="visit_preview_cost_parts" style="margin-top:4px;"></div>
+        </div>
       </div>
 
       <p style="margin-top: 16px; pointer-events: auto;">
@@ -671,7 +693,7 @@
             {% endif %}
           {% endif %}
           {% if draft_id %}
-            <a href="/master/bookings"><button type="button" class="secondary">Мои записи</button></a>
+            <a href="/master/mywork"><button type="button" class="secondary">Моя работа</button></a>
             {% if not draft_readonly %}
               <button type="submit" class="secondary" form="visit-draft-unlock-form">Снять блокировку</button>
             {% endif %}
@@ -1248,11 +1270,13 @@
       const selfCb = document.querySelector('input[name="client_is_self"]');
       if (selfCb && !selfCb.checked) {
         const missing = visitLineIndicesForPreview().filter(function (idx) {
-          return effectiveAmountFromClient(idx) <= 0;
+          const meta = visitLineServiceMeta(idx);
+          const kit = lineKitCostParts(idx, meta);
+          return (effectiveAmountFromClient(idx) + (kit.kitClient || 0)) <= 0;
         });
         if (missing.length) {
           e.preventDefault();
-          alert('Укажите сумму, взятую с клиента.');
+          alert('Укажите сумму с клиента за услугу и/или за комплект.');
           return;
         }
       }
@@ -1276,7 +1300,12 @@
         });
         return lines;
       }
-      const needKit = !!(svc && svc.requires_kit_block);
+      const needKit = (function () {
+        if (svc && svc.requires_kit_block) return true;
+        const host = document.getElementById('visit_questionnaire_fields');
+        const st = questionnaireRevealState((svc && svc.questionnaire_fields) || [], host);
+        return !!st.blocks.kit;
+      })();
       if (needKit) {
         const kk = document.querySelector('input[name="kit_kind"]:checked');
         if (kk && kk.value === 'STOCK') {
@@ -1751,30 +1780,47 @@
     }
 
     function lineKitCostParts(idx, meta) {
-      const out = { kitCost: 0, stockParts: '', extraParts: '', warn: '' };
+      const out = { kitCost: 0, kitClient: 0, stockParts: '', extraParts: '', warn: '' };
       if (!meta || (!meta.requires_kit_block && !meta.requiresKit)) return out;
       const row = visitLineRow(idx);
       const kk = idx === 0
         ? ((document.querySelector('input[name="kit_kind"]:checked') || {}).value || '')
         : ((row && row.querySelector('input[name="line_' + idx + '_kit_kind"]:checked')) || {}).value || 'STOCK';
+      function kitRowClientAmt(kitRow, calcCost) {
+        const afcEl = kitRow.querySelector('.lb-kit-amount-from-client');
+        const raw = afcEl ? String(afcEl.value || '').trim() : '';
+        if (raw === '') return Math.max(0, calcCost);
+        const n = parseFloat(raw.replace(',', '.'));
+        return (!isNaN(n) && n >= 0) ? n : Math.max(0, calcCost);
+      }
+      function refreshCalcPriceUi(kitRow, calcCost) {
+        const el = kitRow.querySelector('.lb-kit-calc-price');
+        if (el) el.textContent = calcCost > 0 ? money2(calcCost) : '—';
+      }
       if (kk === 'STOCK') {
         const rows = idx === 0
           ? document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row')
           : (row ? row.querySelectorAll('[data-line-stock-kit-wrap="' + idx + '"] .visit-stock-kit-row') : []);
+        const paidSeparately = idx === 0
+          ? isChecked('#kit_paid_separately_cb')
+          : !!(row && row.querySelector('input[name="line_' + idx + '_kit_paid_separately"]') && row.querySelector('input[name="line_' + idx + '_kit_paid_separately"]').checked);
         rows.forEach(function (kitRow) {
           const kit = kitRow._visitStockKit || kitRow._lbKitData || null;
-          const ueEl = kitRow.querySelector('.lb-kit-use-entire, .vsk-use-entire');
+          const ue = window.LbKitStockPick && LbKitStockPick.isEntireMode
+            ? LbKitStockPick.isEntireMode(kitRow)
+            : !!((kitRow.querySelector('.lb-kit-use-entire, .vsk-use-entire') || {}).checked);
           const buEl = kitRow.querySelector('.lb-kit-blanks-simple, .vsk-blanks-used');
-          const ue = !!(ueEl && ueEl.checked);
           const bu = Math.max(0, parseInt(String(buEl && buEl.value || '0'), 10) || 0);
           const bd = window.LbKitStockPick ? LbKitStockPick.readBreakdown(kitRow) : null;
           const r = kitUsageCost(kit, ue, bu, bd);
-          let c = r.cost;
-          const paidSeparately = idx === 0
-            ? isChecked('#kit_paid_separately_cb')
-            : !!(row && row.querySelector('input[name="line_' + idx + '_kit_paid_separately"]') && row.querySelector('input[name="line_' + idx + '_kit_paid_separately"]').checked);
-          if (paidSeparately) c = 0;
-          out.kitCost += c;
+          refreshCalcPriceUi(kitRow, r.cost);
+          if (paidSeparately) {
+            if (r.warn) out.warn = r.warn;
+            if (r.kitParts) out.stockParts = out.stockParts ? (out.stockParts + ' · ' + r.kitParts) : r.kitParts;
+            return;
+          }
+          out.kitCost += r.cost;
+          out.kitClient += kitRowClientAmt(kitRow, r.cost);
           if (r.warn) out.warn = r.warn;
           if (r.kitParts) out.stockParts = out.stockParts ? (out.stockParts + ' · ' + r.kitParts) : r.kitParts;
         });
@@ -1788,12 +1834,16 @@
           : (row ? row.querySelectorAll('[data-line-own-extra-kit-wrap="' + idx + '"] .visit-stock-kit-row') : []);
         rows.forEach(function (kitRow) {
           const kit = kitRow._visitStockKit || kitRow._lbKitData || null;
-          const ue = !!((kitRow.querySelector('.lb-kit-use-entire, .vsk-use-entire') || {}).checked);
+          const ue = window.LbKitStockPick && LbKitStockPick.isEntireMode
+            ? LbKitStockPick.isEntireMode(kitRow)
+            : !!((kitRow.querySelector('.lb-kit-use-entire, .vsk-use-entire') || {}).checked);
           const buEl = kitRow.querySelector('.lb-kit-blanks-simple, .vsk-blanks-used');
           const bu = Math.max(0, parseInt(String(buEl && buEl.value || '0'), 10) || 0);
           const bd = window.LbKitStockPick ? LbKitStockPick.readBreakdown(kitRow) : null;
           const r2 = kitUsageCost(kit, ue, bu, bd);
+          refreshCalcPriceUi(kitRow, r2.cost);
           out.kitCost += r2.cost;
+          out.kitClient += kitRowClientAmt(kitRow, r2.cost);
           if (r2.warn) out.warn = r2.warn;
           if (r2.kitParts) out.extraParts = out.extraParts ? (out.extraParts + ' · ' + r2.kitParts) : r2.kitParts;
         });
@@ -1863,12 +1913,17 @@
     function syncVisitPreview() {
       const payEl = document.getElementById('visit_preview_master_lines');
       const costEl = document.getElementById('visit_preview_cost_line');
+      const costPartsEl = document.getElementById('visit_preview_cost_parts');
       const clientTotalEl = document.getElementById('visit_preview_client_total');
       if (!payEl || !costEl) return;
       syncHourlyHelpRowStates();
 
       const addons = Math.max(0, numVal('input[name="addon_sales_amount"]'));
       let amountTotal = 0;
+      let matTotal = 0;
+      let amortTotal = 0;
+      let kitTotal = 0;
+      let corrExtraTotal = 0;
       let costTotal = addons;
       let mixBonusTotal = 0;
       let stockKitParts = '';
@@ -1877,13 +1932,21 @@
 
       visitLineIndicesForPreview().forEach(function (idx) {
         amountTotal += effectiveAmountFromClient(idx);
-        costTotal += lineMaterialCost(idx) + lineAmortCost(idx) + lineCorrectionExtraCost(idx);
+        const mat = lineMaterialCost(idx);
+        const amort = lineAmortCost(idx);
+        const corrX = lineCorrectionExtraCost(idx);
+        matTotal += mat;
+        amortTotal += amort;
+        corrExtraTotal += corrX;
+        costTotal += mat + amort + corrX;
         const mix = lineMixCostAndBonus(idx);
         costTotal += mix.mixCost;
         mixBonusTotal += mix.mixBonus;
         const meta = visitLineServiceMeta(idx);
         const kit = lineKitCostParts(idx, meta);
         costTotal += kit.kitCost;
+        kitTotal += kit.kitCost;
+        amountTotal += kit.kitClient || 0;
         if (kit.stockParts) stockKitParts = stockKitParts ? (stockKitParts + ' · ' + kit.stockParts) : kit.stockParts;
         if (kit.extraParts) extraKitParts = extraKitParts ? (extraKitParts + ' · ' + kit.extraParts) : kit.extraParts;
         if (kit.warn) warn = kit.warn;
@@ -1906,13 +1969,14 @@
 
       if (scope === 'PER_SERVICE') {
         visitLineIndicesForPreview().forEach(function (idx) {
-          const lineAmount = effectiveAmountFromClient(idx);
+          let lineAmount = effectiveAmountFromClient(idx);
           let lineCost = lineMaterialCost(idx) + lineAmortCost(idx) + lineCorrectionExtraCost(idx);
           const mix = lineMixCostAndBonus(idx);
           lineCost += mix.mixCost;
           const meta = visitLineServiceMeta(idx);
           const kit = lineKitCostParts(idx, meta);
           lineCost += kit.kitCost;
+          lineAmount += kit.kitClient || 0;
           const profitBefore = lineAmount - lineCost;
           const mastersPool = profitBefore - profitBefore * salonRate;
           const alloc = readLineAllocationsForPreview(idx);
@@ -1976,15 +2040,20 @@
         payEl.innerHTML = lines.map((l) => '<div>' + l + '</div>').join('');
       }
 
-      let costLine = 'Себестоимость (итого): ' + money2(costTotal) + ' ₽ (материал + комплект + доп. продажи + амортизация)';
-      if (stockKitParts || extraKitParts) {
-        const bits = [];
-        if (stockKitParts) bits.push('комплект: ' + stockKitParts);
-        if (extraKitParts) bits.push('доп. из наличия: ' + extraKitParts);
-        costLine += ' · в т.ч. ' + bits.join(' · ');
+      costEl.textContent = 'Себестоимость (итого): ' + money2(costTotal) + ' ₽';
+      if (costPartsEl) {
+        const parts = [
+          'Материал: ' + money2(matTotal) + ' ₽',
+          'Комплект: ' + money2(kitTotal) + ' ₽' + (stockKitParts || extraKitParts
+            ? ' (' + [stockKitParts ? ('из наличия: ' + stockKitParts) : '', extraKitParts ? ('доп.: ' + extraKitParts) : ''].filter(Boolean).join('; ') + ')'
+            : ''),
+          'Доп. продажи: ' + money2(addons) + ' ₽',
+          'Амортизация: ' + money2(amortTotal) + ' ₽',
+        ];
+        if (corrExtraTotal > 0) parts.push('Коррекция (доп.): ' + money2(corrExtraTotal) + ' ₽');
+        if (warn) parts.push(warn);
+        costPartsEl.innerHTML = parts.map(function (p) { return '<div>' + p + '</div>'; }).join('');
       }
-      if (warn) costLine += ' · ' + warn;
-      costEl.textContent = costLine;
     }
 
     function getSelectedService() {
@@ -2019,16 +2088,91 @@
       return null;
     }
 
-    function updateKitSectionVisibility() {
-      const wrap = document.getElementById('kit-section-wrap');
-      if (!wrap) return;
-      const svc = getSelectedService();
-      const need = !!(svc && svc.requires_kit_block);
-      wrap.style.display = need ? 'block' : 'none';
-      if (need) {
-        void prefetchVisitStockKitsIfReady('main');
-        void prefetchVisitStockKitsIfReady('extra');
+    function questionnaireRevealState(fields, rootEl) {
+      const blocks = {};
+      const fieldKeys = {};
+      for (const f of (fields || [])) {
+        const rev = f && f.reveal_on_check;
+        if (!rev) continue;
+        const name = (rootEl && rootEl.getAttribute('data-q-prefix'))
+          ? (rootEl.getAttribute('data-q-prefix') + f.field_key)
+          : ('q_' + f.field_key);
+        const inp = (rootEl || document).querySelector('input[type="checkbox"][name="' + name + '"]');
+        if (!inp || !inp.checked) continue;
+        for (const b of (rev.blocks || [])) blocks[b] = true;
+        for (const k of (rev.field_keys || [])) fieldKeys[k] = true;
       }
+      return { blocks: blocks, fieldKeys: fieldKeys };
+    }
+
+    function fieldsCanRevealBlock(fields, block) {
+      for (const f of (fields || [])) {
+        const rev = f && f.reveal_on_check;
+        if (rev && Array.isArray(rev.blocks) && rev.blocks.indexOf(block) >= 0) return true;
+      }
+      return false;
+    }
+
+    function applyQuestionnaireRevealsForRoot(rootEl, fields, opts) {
+      opts = opts || {};
+      const st = questionnaireRevealState(fields, rootEl);
+      const staticKit = !!opts.staticKit;
+      const staticTail = !!opts.staticTail;
+      const staticThermo = !!opts.staticThermo;
+      const needKit = staticKit || !!st.blocks.kit;
+      const needTail = staticTail || !!st.blocks.tail;
+      const needThermo = staticThermo || !!st.blocks.thermo;
+
+      if (opts.kitWrap) {
+        opts.kitWrap.style.display = needKit ? 'block' : 'none';
+        if (needKit && typeof prefetchVisitStockKitsIfReady === 'function') {
+          void prefetchVisitStockKitsIfReady('main');
+          void prefetchVisitStockKitsIfReady('extra');
+        }
+      }
+      if (opts.thermoWrap) {
+        opts.thermoWrap.style.display = needThermo ? 'block' : 'none';
+        if (needThermo && opts.onThermoShow) opts.onThermoShow();
+      }
+      if (opts.tailWrap) {
+        opts.tailWrap.style.display = needTail ? 'block' : 'none';
+      }
+
+      const scope = rootEl || document;
+      scope.querySelectorAll('[data-q-field-key]').forEach(function (el) {
+        const key = el.getAttribute('data-q-field-key') || '';
+        const hiddenDefault = el.getAttribute('data-q-hidden-default') === '1';
+        const show = (!hiddenDefault) || !!st.fieldKeys[key] || (key === 'material_description' && !!st.blocks.material_description);
+        el.style.display = show ? 'block' : 'none';
+        el.querySelectorAll('input, textarea, select').forEach(function (ctrl) {
+          if (show) {
+            if (ctrl.getAttribute('data-q-was-required') === '1') ctrl.required = true;
+          } else {
+            if (ctrl.required) ctrl.setAttribute('data-q-was-required', '1');
+            ctrl.required = false;
+          }
+        });
+      });
+      return { needKit: needKit, needTail: needTail, needThermo: needThermo };
+    }
+
+    function bindQuestionnaireRevealListeners(rootEl, fields, applyFn) {
+      if (!rootEl) return;
+      rootEl.querySelectorAll('input[type="checkbox"]').forEach(function (inp) {
+        if (inp.getAttribute('data-q-reveal-bound') === '1') return;
+        const name = String(inp.name || '');
+        const prefix = rootEl.getAttribute('data-q-prefix') || 'q_';
+        if (!name.startsWith(prefix)) return;
+        const fk = name.slice(prefix.length);
+        const field = (fields || []).find(function (f) { return f.field_key === fk; });
+        if (!field || !field.reveal_on_check) return;
+        inp.setAttribute('data-q-reveal-bound', '1');
+        inp.addEventListener('change', applyFn);
+      });
+    }
+
+    function updateKitSectionVisibility() {
+      applyLine0QuestionnaireReveals();
     }
 
     function visitClientDiscountPct() {
@@ -2124,9 +2268,11 @@
       if (!fields.length) {
         wrap.style.display = 'none';
         host.innerHTML = '';
+        applyLine0QuestionnaireReveals();
         return;
       }
       wrap.style.display = 'block';
+      host.setAttribute('data-q-prefix', 'q_');
       let html = '';
       for (const f of fields) {
         const qn = 'q_' + f.field_key;
@@ -2134,7 +2280,8 @@
           ? String(formPrefill[qn])
           : '';
         const reqMark = f.required ? ' *' : '';
-        html += '<div style="margin-bottom: 14px;">';
+        const hiddenDefault = !!f.hidden_by_default;
+        html += '<div style="margin-bottom: 14px;" data-q-field-key="' + escapeHtml(f.field_key) + '" data-q-hidden-default="' + (hiddenDefault ? '1' : '0') + '">';
         html += '<div style="font-weight: 600; margin-bottom: 6px;">' + escapeHtml(f.label || '') + reqMark + '</div>';
         if (f.field_type === 'TEXT') {
           const ph = f.placeholder ? ' placeholder="' + escapeHtml(f.placeholder) + '"' : '';
@@ -2168,6 +2315,32 @@
         html += '</div>';
       }
       host.innerHTML = html;
+      bindQuestionnaireRevealListeners(host, fields, applyLine0QuestionnaireReveals);
+      applyLine0QuestionnaireReveals();
+    }
+
+    function applyLine0QuestionnaireReveals() {
+      const svc = getSelectedService();
+      const fields = (svc && svc.questionnaire_fields) ? svc.questionnaire_fields : [];
+      const host = document.getElementById('visit_questionnaire_fields');
+      const kitWrap = document.getElementById('kit-section-wrap');
+      const thermoSec = document.getElementById('visit_thermo_section');
+      const line0Ed = document.getElementById('line0_service_feature_editor');
+      const tailWrap = line0Ed ? line0Ed.querySelector('[data-reveal-block="tail"]') : null;
+      applyQuestionnaireRevealsForRoot(host, fields, {
+        staticKit: !!(svc && svc.requires_kit_block),
+        staticTail: !!(svc && svc.requires_tail_block),
+        staticThermo: !!(svc && svc.requires_thermo),
+        kitWrap: kitWrap,
+        thermoWrap: thermoSec,
+        tailWrap: tailWrap,
+        onThermoShow: function () {
+          const cid = (document.getElementById('existing_client_id') || {}).value || '';
+          const id = parseInt(String(cid).trim(), 10) || 0;
+          loadThermoTemplates(id);
+          thermoModeUpdate();
+        }
+      });
     }
 
     function thermoModeUpdate() {
@@ -2206,17 +2379,7 @@
     }
 
     function syncVisitThermoSection() {
-      const sec = document.getElementById('visit_thermo_section');
-      if (!sec) return;
-      const svc = getSelectedService();
-      const show = !!(svc && svc.requires_thermo);
-      sec.style.display = show ? 'block' : 'none';
-      if (show) {
-        const cid = (document.getElementById('existing_client_id') || {}).value || '';
-        const id = parseInt(String(cid).trim(), 10) || 0;
-        loadThermoTemplates(id);
-        thermoModeUpdate();
-      }
+      applyLine0QuestionnaireReveals();
     }
 
     const serviceMetaById = {};
@@ -2338,9 +2501,15 @@
       function checkedAttr(name, truthyList) { return lineFeatureCheckedAttr(idx, name, truthyList); }
       let h = '';
 
-      if (includeKit && meta.requires_kit_block) {
+      const qFields = meta.questionnaire_fields || [];
+      const canKit = !!meta.requires_kit_block || fieldsCanRevealBlock(qFields, 'kit');
+      const canTail = !!meta.requires_tail_block || fieldsCanRevealBlock(qFields, 'tail');
+      const canThermo = !!meta.requires_thermo || fieldsCanRevealBlock(qFields, 'thermo');
+
+      if (includeKit && canKit) {
         const kk = (pf('kit_kind', 'STOCK') || 'STOCK').toUpperCase();
-        h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+        const kitDisp = meta.requires_kit_block ? 'block' : 'none';
+        h += '<div class="card" data-reveal-block="kit" style="background:#f8fafc; margin-top:8px; display:' + kitDisp + ';">' +
           '<div style="font-weight:600; margin-bottom:6px;">Комплект по услуге</div>' +
           '<div style="display:flex; gap:12px; flex-wrap:wrap;">' +
             '<label><input type="radio" name="line_' + String(idx) + '_kit_kind" value="STOCK"' + (kk === 'STOCK' ? ' checked' : '') + ' /> Из наличия</label>' +
@@ -2404,17 +2573,19 @@
               '<p style="margin-top:8px;"><button type="button" class="secondary" data-line-add-own-extra-kit="' + String(idx) + '">+ Ещё комплект из наличия</button></p>' +
             '</div>' +
           '</div>' +
-          '<label style="display:flex; gap:8px; align-items:center; margin-top:8px;"><input type="checkbox" name="line_' + String(idx) + '_kit_paid_separately"' + checkedAttr('kit_paid_separately') + ' /> Комплект оплачен отдельно</label>' +
+          '<label style="display:flex; gap:8px; align-items:center; margin-top:8px;"><input type="checkbox" name="line_' + String(idx) + '_kit_paid_separately"' + checkedAttr('kit_paid_separately') + ' /> Комплект уже оплачен (не учитывать в «С клиента» и себестоимости)</label>' +
         '</div>';
       }
-      if (includeTail && meta.requires_tail_block) {
-        h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+      if (includeTail && canTail) {
+        const tailDisp = meta.requires_tail_block ? 'block' : 'none';
+        h += '<div class="card" data-reveal-block="tail" style="background:#f8fafc; margin-top:8px; display:' + tailDisp + ';">' +
           '<div style="font-weight:600; margin-bottom:6px;">Хвост/резинка</div>' +
           '<textarea rows="2" maxlength="600" data-line-tail-note="' + String(idx) + '" style="width:100%; box-sizing:border-box;" placeholder="Параметры/пожелания"></textarea>' +
         '</div>';
       }
-      if (includeThermo && meta.requires_thermo) {
-        h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+      if (includeThermo && canThermo) {
+        const thermoDisp = meta.requires_thermo ? 'block' : 'none';
+        h += '<div class="card" data-reveal-block="thermo" style="background:#f8fafc; margin-top:8px; display:' + thermoDisp + ';">' +
           '<div style="font-weight:600; margin-bottom:6px;">Термозамещения</div>' +
           '<div class="row">' +
             '<div><label>Материал</label><input type="text" name="line_' + String(idx) + '_thermo_curls" value="' + escapeHtml(pf('thermo_curls', '')) + '" /></div>' +
@@ -2454,12 +2625,13 @@
         '</div>';
       }
       if (includeQuestionnaire && (meta.questionnaire_count || 0) > 0) {
-        h += '<div class="card" style="background:#f8fafc; margin-top:8px;">' +
+        h += '<div class="card" style="background:#f8fafc; margin-top:8px;" data-line-q-root="' + String(idx) + '" data-q-prefix="line_' + String(idx) + '_q_">' +
           '<div style="font-weight:600; margin-bottom:6px;">Описание/вопросы по услуге</div>';
         for (const f of (meta.questionnaire_fields || [])) {
           const qn = 'line_' + String(idx) + '_q_' + String(f.field_key || '');
           const vv = pf('q_' + String(f.field_key || ''), '');
-          h += '<div style="margin-bottom:8px;">';
+          const hiddenDefault = !!f.hidden_by_default;
+          h += '<div style="margin-bottom:8px;" data-q-field-key="' + escapeHtml(String(f.field_key || '')) + '" data-q-hidden-default="' + (hiddenDefault ? '1' : '0') + '">';
           h += '<div style="font-size:12px; margin-bottom:4px;">' + escapeHtml(String(f.label || 'Вопрос')) + (f.required ? ' *' : '') + '</div>';
           if (String(f.field_type || '') === 'SELECT') {
             h += '<select name="' + qn + '" style="width:100%; box-sizing:border-box;">';
@@ -2490,6 +2662,33 @@
       return h;
     }
 
+    function applyExtraLineQuestionnaireReveals(idx) {
+      const row = document.querySelector('[data-extra-line-idx="' + String(idx) + '"]') || document;
+      const sid = parseInt((document.getElementById('line_' + idx + '_service_id') || {}).value || '0', 10) || 0;
+      const meta = sid ? resolveServiceMeta(sid) : null;
+      const fields = (meta && meta.questionnaire_fields) || [];
+      const qRoot = row.querySelector('[data-line-q-root="' + String(idx) + '"]');
+      const ed = row.querySelector('[data-extra-line-feature-editor]') || row;
+      applyQuestionnaireRevealsForRoot(qRoot, fields, {
+        staticKit: !!(meta && meta.requires_kit_block),
+        staticTail: !!(meta && meta.requires_tail_block),
+        staticThermo: !!(meta && meta.requires_thermo),
+        kitWrap: ed.querySelector('[data-reveal-block="kit"]'),
+        tailWrap: ed.querySelector('[data-reveal-block="tail"]'),
+        thermoWrap: ed.querySelector('[data-reveal-block="thermo"]'),
+      });
+    }
+
+    function bindExtraLineQuestionnaireReveals(idx) {
+      const sid = parseInt((document.getElementById('line_' + idx + '_service_id') || {}).value || '0', 10) || 0;
+      const meta = sid ? resolveServiceMeta(sid) : null;
+      const fields = (meta && meta.questionnaire_fields) || [];
+      const row = document.querySelector('[data-extra-line-idx="' + String(idx) + '"]') || document;
+      const qRoot = row.querySelector('[data-line-q-root="' + String(idx) + '"]');
+      bindQuestionnaireRevealListeners(qRoot, fields, function () { applyExtraLineQuestionnaireReveals(idx); });
+      applyExtraLineQuestionnaireReveals(idx);
+    }
+
     function renderLine0ServiceFlags() {
       const host = document.getElementById('line0_service_feature_flags');
       if (!host) return;
@@ -2504,6 +2703,7 @@
         ed.innerHTML = html;
         ed.style.display = html ? 'block' : 'none';
       }
+      applyLine0QuestionnaireReveals();
     }
 
     function updateExtraLinePriceHint(idx) {
@@ -2607,6 +2807,7 @@
         ed.innerHTML = html;
         ed.style.display = html ? 'block' : 'none';
         if (html) bindExtraLineFeatureEditors(idx, row, meta);
+        bindExtraLineQuestionnaireReveals(idx);
       }
       updateExtraLinePriceHint(idx);
     }
@@ -2690,7 +2891,8 @@
 
     function bindExtraLineFeatureEditors(idx, row, meta) {
       if (!row || !meta) return;
-      if (meta.requires_kit_block) {
+      const canKit = !!meta.requires_kit_block || fieldsCanRevealBlock(meta.questionnaire_fields || [], 'kit');
+      if (canKit) {
         const radios = row.querySelectorAll('input[name="line_' + idx + '_kit_kind"]');
         const stockBlk = row.querySelector('[data-line-kit-stock="' + idx + '"]');
         const ownBlk = row.querySelector('[data-line-kit-own="' + idx + '"]');
@@ -2942,7 +3144,7 @@
           '<p data-extra-line-price-hint class="muted" style="font-size:13px; margin:0 0 6px; min-height:1.25em;"></p>' +
           '<div class="row" style="align-items:flex-end;">' +
             '<div><label>Скидка клиенту, %</label><input type="number" name="line_' + idx + '_client_discount_percent" min="0" max="100" step="1" value="' + escAttr(prefill.client_discount_percent || '0') + '" /></div>' +
-            '<div><label>Сумма с клиента, ₽</label>' +
+            '<div><label>Сумма с клиента за услугу, ₽</label>' +
               '<div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px;">' +
                 '<div style="display:flex; align-items:center; gap:8px;">' +
                   '<input type="number" name="line_' + idx + '_amount_from_client" min="0" step="1" value="' + escAttr(prefill.amount_from_client || '') + '" style="max-width:12rem;" />' +

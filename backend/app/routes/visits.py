@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_assigned_roles, require_role
@@ -122,33 +122,9 @@ def admin_visits(
     if not visits_show_cancelled:
         stmt = stmt.where(Visit.is_cancelled.is_(False))
     if visits_mine_only:
-        stmt = stmt.where(
-            or_(
-                Visit.id.in_(select(VisitMaster.visit_id).where(VisitMaster.master_id == current_user.id)),
-                Visit.id.in_(
-                    select(VisitService.visit_id).where(
-                        VisitService.is_cancelled.is_(False),
-                        VisitService.mix_bonus_master_id == current_user.id,
-                    )
-                ),
-                Visit.id.in_(
-                    select(VisitService.visit_id).where(
-                        VisitService.is_cancelled.is_(False),
-                        VisitService.correction_master_id == current_user.id,
-                    )
-                ),
-                Visit.id.in_(
-                    select(VisitService.visit_id)
-                    .join(VisitServiceMaster, VisitServiceMaster.visit_service_id == VisitService.id)
-                    .where(
-                        VisitService.is_cancelled.is_(False),
-                        VisitServiceMaster.master_id == current_user.id,
-                    )
-                ),
-                Visit.mix_bonus_master_id == current_user.id,
-                Visit.correction_master_id == current_user.id,
-            )
-        )
+        from app.payroll_fund import visit_ids_visible_to_master_clause
+
+        stmt = stmt.where(visit_ids_visible_to_master_clause(current_user.id))
     if search_id is not None:
         stmt = stmt.where(Visit.id == search_id)
     stmt = stmt.order_by(Visit.performed_date.desc()).limit(200)

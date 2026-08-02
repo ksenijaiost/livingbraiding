@@ -142,6 +142,51 @@ def service_requires_tail_block(service: Service) -> bool:
     return bool(sub and getattr(sub, "show_tail_section", False))
 
 
+def effective_requires_kit_block(
+    service: Service,
+    answers: dict[str, Any] | None = None,
+    specs: list | None = None,
+) -> bool:
+    """Комплект нужен по флагу услуги/подкатегории или по отмеченной галочке анкеты."""
+    if service_requires_kit_block(service):
+        return True
+    if not answers or not specs:
+        return False
+    from app.questionnaire.reveal import REVEAL_BLOCK_KIT, answers_reveal_blocks
+
+    return REVEAL_BLOCK_KIT in answers_reveal_blocks(answers, specs)
+
+
+def effective_requires_tail_block(
+    service: Service,
+    answers: dict[str, Any] | None = None,
+    specs: list | None = None,
+) -> bool:
+    if service_requires_tail_block(service):
+        return True
+    if not answers or not specs:
+        return False
+    from app.questionnaire.reveal import REVEAL_BLOCK_TAIL, answers_reveal_blocks
+
+    return REVEAL_BLOCK_TAIL in answers_reveal_blocks(answers, specs)
+
+
+def effective_requires_thermo_block(
+    service: Service,
+    answers: dict[str, Any] | None = None,
+    specs: list | None = None,
+) -> bool:
+    from app.thermo_visit import service_requires_thermo_flow
+
+    if service_requires_thermo_flow(service):
+        return True
+    if not answers or not specs:
+        return False
+    from app.questionnaire.reveal import REVEAL_BLOCK_THERMO, answers_reveal_blocks
+
+    return REVEAL_BLOCK_THERMO in answers_reveal_blocks(answers, specs)
+
+
 def get_salon_cut_pct(db: Session, master_id: int | None = None) -> float:
     if master_id is not None and int(master_id) > 0:
         u = db.get(User, int(master_id))
@@ -555,6 +600,8 @@ class StockKitLineInput:
     use_entire: bool
     blanks_used: int
     usage_by_key: dict[str, int] | None = None
+    # None = взять посчитанную цену списания; число = сумма с клиента за комплект.
+    amount_from_client: float | None = None
 
 
 def _parse_stock_kit_lines_from_form(
@@ -594,12 +641,20 @@ def _parse_stock_kit_lines_from_form(
                 bu = 0
             bu = max(0, bu)
             ub = _usage_dict_from_json_val(item.get("breakdown"))
+            afc_raw = item.get("amount_from_client")
+            afc: float | None = None
+            if afc_raw is not None and str(afc_raw).strip() != "":
+                try:
+                    afc = max(0.0, float(afc_raw))
+                except (TypeError, ValueError):
+                    afc = None
             lines.append(
                 StockKitLineInput(
                     kit_id=kid,
                     use_entire=ue,
                     blanks_used=bu,
                     usage_by_key=ub,
+                    amount_from_client=afc,
                 )
             )
         if lines:
@@ -1058,27 +1113,31 @@ def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServic
 
     answer_labels, answer_display = _answers_labels_display_from_specs(specs, answers)
 
-    if service_requires_kit_block(service):
+    kit_block = None
+    if effective_requires_kit_block(service, answers, specs):
         kit_block = _build_kit_block_from_input(inp, db)
-        return parse_visit_service_details(
-            {
-                "service_fields": {},
-                "kit": kit_block.model_dump(mode="json"),
-                "answers": answers,
-                "answer_labels": answer_labels,
-                "answer_display": answer_display,
-            }
-        )
 
-    return parse_visit_service_details(
-        {
-            "service_fields": {},
-            "kit": None,
-            "answers": answers,
-            "answer_labels": answer_labels,
-            "answer_display": answer_display,
-        }
-    )
+    thermo_dump = None
+    if effective_requires_thermo_block(service, answers, specs) and not service_requires_thermo_flow(service):
+        # Галочка открыла термо поверх обычной анкеты (не полный thermo-only flow).
+        if inp.thermo_parsed is not None:
+            thermo = build_thermo_visit_details(
+                inp.thermo_parsed,
+                db,
+                client_id=inp.existing_client_id,
+            )
+            thermo_dump = thermo.model_dump(mode="json")
+
+    payload_data: dict[str, Any] = {
+        "service_fields": {},
+        "kit": kit_block.model_dump(mode="json") if kit_block is not None else None,
+        "answers": answers,
+        "answer_labels": answer_labels,
+        "answer_display": answer_display,
+    }
+    if thermo_dump is not None:
+        payload_data["thermo"] = thermo_dump
+    return parse_visit_service_details(payload_data)
 
 
 def validate_master_visit_step1(db: Session, inp: KitInlayFormInput) -> None:
@@ -1119,11 +1178,19 @@ def validate_master_visit_step1(db: Session, inp: KitInlayFormInput) -> None:
             raise ValueError("Укажите сложность смешки")
 
     if inp.client_type != VisitClientType.SELF and inp.amount_from_client <= 0:
-        raise ValueError("Укажите сумму, взятую с клиента.")
+        has_stock_kit = (
+            (inp.kit_kind or "").upper() == "STOCK"
+            and bool(inp.stock_kit_lines)
+            and not bool(inp.kit_paid_separately)
+        )
+        if not has_stock_kit:
+            raise ValueError("Укажите сумму с клиента за услугу и/или за комплект.")
     if inp.client_discount_percent < 0 or inp.client_discount_percent > 100:
         raise ValueError("Скидка клиенту — от 0 до 100%.")
 
-    if service_requires_kit_block(service):
+    specs = load_merged_questionnaire_specs(db, int(service.id))
+    answers, _q_errs = validate_and_coerce_answers(inp.questionnaire_raw or {}, specs)
+    if effective_requires_kit_block(service, answers, specs):
         _build_kit_block_from_input(inp, db)
 
 
