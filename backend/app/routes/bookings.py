@@ -47,6 +47,8 @@ from app.db.models import (
     BookingStatus,
     Client,
     Consultation,
+    HourlyWorkEntry,
+    PayrollFundSide,
     PayrollFundSourceKind,
     Kit,
     KitAuditLog,
@@ -56,6 +58,7 @@ from app.db.models import (
     User,
     UserRole,
     Visit,
+    VisitService,
     WorkForInventory,
     WorkForInventoryStaff,
     WorkKind,
@@ -95,7 +98,11 @@ from app.webui import templates, ctx as _ctx
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 # GET-алиас: /admin/bookings/... -> 308 -> /bookings/...
 legacy_bookings_admin_router = APIRouter(prefix="/admin/bookings", tags=["bookings-legacy"])
-master_bookings_page_router = APIRouter(prefix="/master/bookings", tags=["bookings-master"])
+master_mywork_page_router = APIRouter(prefix="/master/mywork", tags=["bookings-master"])
+# Старый URL «Мои записи»
+legacy_master_bookings_page_router = APIRouter(prefix="/master/bookings", tags=["bookings-master-legacy"])
+# Обратная совместимость импорта в main.py
+master_bookings_page_router = master_mywork_page_router
 
 
 def _redirect_admin_bookings_to_canon(request: Request, *, suffix: str = "") -> RedirectResponse:
@@ -3546,74 +3553,263 @@ def _work_activity_label(w: WorkForInventory) -> str:
     return f"Работа: {kind_l} ({scope})"
 
 
+_MASTER_ARCHIVE_KIND_OPTIONS: list[tuple[str, str]] = [
+    ("", "Все виды"),
+    ("visit", "Визит"),
+    ("work", "Работа с товарами"),
+    ("sale", "Продажа"),
+    ("hourly", "Почасовая"),
+    ("consultation", "Консультация"),
+]
+
+
+def _master_archive_kind_label(kind: str) -> str:
+    return {
+        "visit": "Визит",
+        "work": "Работа",
+        "sale": "Продажа",
+        "hourly": "Почасовая",
+        "consultation": "Консультация",
+    }.get(kind, kind)
+
+
+def _consultation_activity_label(cons: Consultation) -> str:
+    from app.consultation_types import format_types_display
+
+    types_l = format_types_display(cons.types_json)
+    if types_l and types_l != "—":
+        return f"Консультация: {types_l}"
+    return "Консультация"
+
+
+def _hourly_activity_label(entry: HourlyWorkEntry) -> str:
+    from app.hourly_work import duration_display
+
+    label = f"Почасовая · {duration_display(int(entry.duration_minutes or 0))}"
+    comment = (entry.comment or "").strip()
+    if comment:
+        short = comment if len(comment) <= 48 else comment[:45] + "…"
+        label = f"{label} — {short}"
+    return label
+
+
 def _master_activity_archive_row_id(row: dict[str, Any]) -> int:
-    if row["kind"] == "visit":
-        return row["visit"].id
-    if row["kind"] == "work":
-        return row["work"].id
-    return row["sale"].id
+    kind = row["kind"]
+    if kind == "visit":
+        return int(row["visit"].id)
+    if kind == "work":
+        return int(row["work"].id)
+    if kind == "sale":
+        return int(row["sale"].id)
+    if kind == "hourly":
+        return int(row["hourly"].id)
+    return int(row["consultation"].id)
 
 
-def master_activity_archive(db: Session, master_id: int, *, days: int = 30, max_rows: int = 50) -> tuple[list[dict[str, Any]], bool]:
-    cutoff = utcnow_naive() - timedelta(days=days)
-    items: list[dict[str, Any]] = []
+def _archive_master_pay(db: Session, master_id: int, row: dict[str, Any]) -> float:
+    from app.payroll_fund import money_q2, product_sale_seller_commission, sum_ledger_amounts_by_source
+    from app.ui_visit_display import visit_masters_fund_by_master
 
+    mid = int(master_id)
+    kind = row["kind"]
+    if kind == "visit":
+        return money_q2(float(visit_masters_fund_by_master(row["visit"]).get(mid, 0.0)))
+    if kind == "work":
+        staff = next((s for s in (row["work"].staff_rows or []) if int(s.user_id) == mid), None)
+        return money_q2(float(staff.master_profit_amount or 0) if staff else 0.0)
+    if kind == "sale":
+        sale = row["sale"]
+        pay = 0.0
+        if int(sale.created_by_user_id or 0) == mid:
+            pay = money_q2(pay + product_sale_seller_commission(sale))
+        if sale.material_mix_bonus_user_id and int(sale.material_mix_bonus_user_id) == mid:
+            pay = money_q2(pay + float(sale.material_mix_bonus_amount or 0))
+        return pay
+    if kind == "hourly":
+        return money_q2(float(row["hourly"].amount or 0))
+    if kind == "consultation":
+        cid = int(row["consultation"].id)
+        by_src = sum_ledger_amounts_by_source(
+            db,
+            side=PayrollFundSide.MASTER,
+            source_kind=PayrollFundSourceKind.CONSULTATION,
+            source_ids=[cid],
+            user_id=mid,
+        )
+        return money_q2(by_src.get(cid, 0.0))
+    return 0.0
+
+
+def master_activity_archive(
+    db: Session,
+    master_id: int,
+    *,
+    date_from: date,
+    date_to: date,
+    kind: str | None = None,
+    max_rows: int = 100,
+) -> tuple[list[dict[str, Any]], bool]:
     from app.payroll_fund import visit_ids_visible_to_master_clause
 
-    visits = list(
-        db.scalars(
-            select(Visit)
-            .where(
-                Visit.performed_date >= cutoff,
-                Visit.is_cancelled.is_(False),
-                visit_ids_visible_to_master_clause(master_id),
-            )
-            .options(selectinload(Visit.client), selectinload(Visit.services))
-        ).all()
-    )
-    for v in visits:
-        svc_l = sorted(v.services, key=lambda s: s.id)[0].service_name if v.services else "Визит"
-        items.append({"kind": "visit", "sort_at": v.performed_date, "visit": v, "label": svc_l, "client": v.client})
+    mid = int(master_id)
+    kind_filter = (kind or "").strip().lower()
+    start = datetime.combine(date_from, time.min)
+    end_excl = datetime.combine(date_to + timedelta(days=1), time.min)
+    items: list[dict[str, Any]] = []
 
-    works = list(
-        db.scalars(
-            select(WorkForInventory)
-            .where(
-                WorkForInventory.created_at >= cutoff,
-                WorkForInventory.is_voided.is_(False),
-                or_(
-                    WorkForInventory.created_by_user_id == master_id,
-                    WorkForInventory.id.in_(select(WorkForInventoryStaff.work_id).where(WorkForInventoryStaff.user_id == master_id)),
-                ),
+    want_all = not kind_filter
+    if want_all or kind_filter == "visit":
+        visits = list(
+            db.scalars(
+                select(Visit)
+                .where(
+                    Visit.performed_date >= start,
+                    Visit.performed_date < end_excl,
+                    Visit.is_cancelled.is_(False),
+                    visit_ids_visible_to_master_clause(mid),
+                )
+                .options(
+                    selectinload(Visit.client),
+                    selectinload(Visit.masters),
+                    selectinload(Visit.services).selectinload(VisitService.masters),
+                )
             )
-            .options(selectinload(WorkForInventory.client), selectinload(WorkForInventory.staff_rows).selectinload(WorkForInventoryStaff.user))
-        ).all()
-    )
-    for w in works:
-        items.append({"kind": "work", "sort_at": w.created_at, "work": w, "label": _work_activity_label(w), "client": w.client})
+            .unique()
+            .all()
+        )
+        for v in visits:
+            svc_l = sorted(v.services, key=lambda s: s.id)[0].service_name if v.services else "Визит"
+            items.append({"kind": "visit", "sort_at": v.performed_date, "visit": v, "label": svc_l, "client": v.client})
 
-    staff_on_booking = exists(select(1).where(BookingStaff.booking_id == ProductSale.booking_id, BookingStaff.user_id == master_id))
-    sales = list(
-        db.scalars(
-            select(ProductSale)
-            .where(
-                ProductSale.performed_date >= cutoff,
-                ProductSale.is_voided.is_(False),
-                or_(
-                    ProductSale.created_by_user_id == master_id,
-                    ProductSale.material_mix_bonus_user_id == master_id,
-                    staff_on_booking,
-                ),
+    if want_all or kind_filter == "work":
+        works = list(
+            db.scalars(
+                select(WorkForInventory)
+                .where(
+                    WorkForInventory.is_voided.is_(False),
+                    or_(
+                        WorkForInventory.created_by_user_id == mid,
+                        WorkForInventory.id.in_(
+                            select(WorkForInventoryStaff.work_id).where(WorkForInventoryStaff.user_id == mid)
+                        ),
+                    ),
+                    or_(
+                        and_(
+                            WorkForInventory.performed_date.is_not(None),
+                            WorkForInventory.performed_date >= start,
+                            WorkForInventory.performed_date < end_excl,
+                        ),
+                        and_(
+                            WorkForInventory.performed_date.is_(None),
+                            WorkForInventory.created_at >= start,
+                            WorkForInventory.created_at < end_excl,
+                        ),
+                    ),
+                )
+                .options(
+                    selectinload(WorkForInventory.client),
+                    selectinload(WorkForInventory.staff_rows).selectinload(WorkForInventoryStaff.user),
+                )
             )
-            .options(selectinload(ProductSale.client))
-        ).all()
-    )
-    for s in sales:
-        items.append({"kind": "sale", "sort_at": s.performed_date, "sale": s, "label": _product_sale_activity_label(s), "client": s.client})
+            .unique()
+            .all()
+        )
+        for w in works:
+            items.append(
+                {
+                    "kind": "work",
+                    "sort_at": w.performed_date or w.created_at,
+                    "work": w,
+                    "label": _work_activity_label(w),
+                    "client": w.client,
+                }
+            )
+
+    if want_all or kind_filter == "sale":
+        staff_on_booking = exists(
+            select(1).where(BookingStaff.booking_id == ProductSale.booking_id, BookingStaff.user_id == mid)
+        )
+        sales = list(
+            db.scalars(
+                select(ProductSale)
+                .where(
+                    ProductSale.performed_date >= start,
+                    ProductSale.performed_date < end_excl,
+                    ProductSale.is_voided.is_(False),
+                    or_(
+                        ProductSale.created_by_user_id == mid,
+                        ProductSale.material_mix_bonus_user_id == mid,
+                        staff_on_booking,
+                    ),
+                )
+                .options(selectinload(ProductSale.client))
+            ).all()
+        )
+        for s in sales:
+            items.append(
+                {
+                    "kind": "sale",
+                    "sort_at": s.performed_date,
+                    "sale": s,
+                    "label": _product_sale_activity_label(s),
+                    "client": s.client,
+                }
+            )
+
+    if want_all or kind_filter == "hourly":
+        hourly_entries = list(
+            db.scalars(
+                select(HourlyWorkEntry)
+                .where(
+                    HourlyWorkEntry.master_user_id == mid,
+                    HourlyWorkEntry.performed_date >= start,
+                    HourlyWorkEntry.performed_date < end_excl,
+                )
+                .order_by(HourlyWorkEntry.performed_date.desc(), HourlyWorkEntry.id.desc())
+            ).all()
+        )
+        for he in hourly_entries:
+            items.append(
+                {
+                    "kind": "hourly",
+                    "sort_at": he.performed_date,
+                    "hourly": he,
+                    "label": _hourly_activity_label(he),
+                    "client": None,
+                }
+            )
+
+    if want_all or kind_filter == "consultation":
+        consultations = list(
+            db.scalars(
+                select(Consultation)
+                .where(
+                    Consultation.created_by_user_id == mid,
+                    Consultation.consultation_date >= start,
+                    Consultation.consultation_date < end_excl,
+                )
+                .options(selectinload(Consultation.client))
+                .order_by(Consultation.consultation_date.desc(), Consultation.id.desc())
+            ).all()
+        )
+        for cons in consultations:
+            items.append(
+                {
+                    "kind": "consultation",
+                    "sort_at": cons.consultation_date,
+                    "consultation": cons,
+                    "label": _consultation_activity_label(cons),
+                    "client": cons.client,
+                }
+            )
 
     items.sort(key=lambda r: (r["sort_at"], str(r["kind"]), _master_activity_archive_row_id(r)), reverse=True)
     truncated = len(items) > max_rows
-    return items[:max_rows], truncated
+    out = items[:max_rows]
+    for row in out:
+        row["master_pay"] = _archive_master_pay(db, mid, row)
+        row["kind_label"] = _master_archive_kind_label(str(row["kind"]))
+    return out, truncated
 
 
 # --- Старые GET-URL: /admin/bookings/... -> 308 -> /bookings/... (query сохраняется) ---
@@ -3653,9 +3849,19 @@ def admin_bookings_list_legacy_redirect(
     return _redirect_admin_bookings_to_canon(request)
 
 
-@master_bookings_page_router.get("", response_class=HTMLResponse)
-def master_bookings(
+@legacy_master_bookings_page_router.get("")
+def master_bookings_legacy_redirect(request: Request, current_user: AuthUser = Depends(require_role(UserRole.MASTER))):
+    q = request.url.query
+    target = "/master/mywork" + (f"?{q}" if q else "")
+    return RedirectResponse(url=target, status_code=308)
+
+
+@master_mywork_page_router.get("", response_class=HTMLResponse)
+def master_mywork(
     request: Request,
+    kind: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
     current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
@@ -3734,11 +3940,34 @@ def master_bookings(
             else:
                 label = _sale_order_label(b)
             rows.append({"booking": b, "label": label})
-    archive_days = 30
-    archive_cap = 50
-    archive_rows, archive_truncated = master_activity_archive(db, current_user.id, days=archive_days, max_rows=archive_cap)
+
+    today = utcnow_naive().date()
+    default_from = today - timedelta(days=29)
+    archive_kind = (kind or "").strip().lower()
+    if archive_kind and archive_kind not in {k for k, _ in _MASTER_ARCHIVE_KIND_OPTIONS if k}:
+        archive_kind = ""
+    try:
+        archive_date_from = date.fromisoformat((date_from or "").strip()) if (date_from or "").strip() else default_from
+    except ValueError:
+        archive_date_from = default_from
+    try:
+        archive_date_to = date.fromisoformat((date_to or "").strip()) if (date_to or "").strip() else today
+    except ValueError:
+        archive_date_to = today
+    if archive_date_from > archive_date_to:
+        archive_date_from, archive_date_to = archive_date_to, archive_date_from
+
+    archive_cap = 100
+    archive_rows, archive_truncated = master_activity_archive(
+        db,
+        current_user.id,
+        date_from=archive_date_from,
+        date_to=archive_date_to,
+        kind=archive_kind or None,
+        max_rows=archive_cap,
+    )
     return templates.TemplateResponse(
-        "master_bookings.html",
+        "master_mywork.html",
         _ctx(
             request,
             current_user=current_user,
@@ -3746,9 +3975,12 @@ def master_bookings(
             draft_rows=draft_rows,
             display_tz=display_tz,
             archive_rows=archive_rows,
-            archive_days=archive_days,
             archive_cap=archive_cap,
             archive_truncated=archive_truncated,
+            archive_kind=archive_kind,
+            archive_kind_options=_MASTER_ARCHIVE_KIND_OPTIONS,
+            archive_date_from=archive_date_from.isoformat(),
+            archive_date_to=archive_date_to.isoformat(),
         ),
     )
 

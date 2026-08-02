@@ -801,7 +801,7 @@ def master_visit_draft_get(
         .options(selectinload(VisitDraft.participants))
     )
     if not draft or not user_can_view_draft(current_user, draft, db):
-        return RedirectResponse("/master/bookings", status_code=303)
+        return RedirectResponse("/master/mywork", status_code=303)
     fp, vm_on_ids, vm_pct_str, client, readonly, lock_banner = _load_draft_form_context(
         db, draft, current_user=current_user, acquire_lock=True
     )
@@ -881,7 +881,7 @@ async def master_visit_draft_update_post(
                 "role": ru_user_role(holder.role),
             }
     if not draft or not user_can_edit_draft(current_user, draft, db):
-        return RedirectResponse("/master/bookings", status_code=303)
+        return RedirectResponse("/master/mywork", status_code=303)
     lock = acquire_draft_lock(db, draft, current_user.id)
     readonly = lock.readonly
     if lock.lock_holder:
@@ -941,7 +941,7 @@ async def master_visit_draft_finalize_post(
     draft = db.get(VisitDraft, int(draft_id))
     lock_banner = None
     if not draft or not user_can_edit_draft(current_user, draft, db):
-        return RedirectResponse("/master/bookings", status_code=303)
+        return RedirectResponse("/master/mywork", status_code=303)
     lock = acquire_draft_lock(db, draft, current_user.id)
     if lock.readonly:
         db.rollback()

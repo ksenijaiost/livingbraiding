@@ -55,12 +55,14 @@ app.include_router(clients_router)
 app.include_router(legacy_clients_admin_router)
 from app.routes.bookings import (  # noqa: E402
     legacy_bookings_admin_router,
-    master_bookings_page_router,
+    legacy_master_bookings_page_router,
+    master_mywork_page_router,
     router as bookings_router,
 )
 app.include_router(bookings_router)
 app.include_router(legacy_bookings_admin_router)
-app.include_router(master_bookings_page_router)
+app.include_router(master_mywork_page_router)
+app.include_router(legacy_master_bookings_page_router)
 from app.routes.kits import (  # noqa: E402
     legacy_kits_admin_router,
     master_kits_router,

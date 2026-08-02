@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
   <div class="card">
-    <h2 style="margin-top:0;">Мои записи</h2>
+    <h2 style="margin-top:0;">Моя работа</h2>
 
     <h3 style="margin:18px 0 8px;font-size:1.05rem;">Черновики</h3>
     <p class="muted" style="margin-top:0;">Незавершённые визиты, где вы участвуете как мастер.</p>
@@ -70,13 +70,37 @@
 
     <hr style="border:0;border-top:1px solid #e5e7eb;margin:28px 0 16px;" />
 
-    <h3 style="margin:0 0 8px;font-size:1.05rem;">Архив за {{ archive_days }} дней</h3>
+    <h3 style="margin:0 0 8px;font-size:1.05rem;">Архив</h3>
     <p class="muted" style="margin-top:0;">
-      Визиты, работы с товарами и продажи, где вы участвовали (мастер визита, в долях работы, оформление/бонус по продаже или назначение по брони).
+      Визиты, работы с товарами, продажи, почасовая и консультации, где вы участвовали.
+      Колонка «Ваша ЗП» — начисление именно вам по этой записи.
       {% if archive_truncated %}
-        Показано не более {{ archive_cap }} последних событий — откройте <a href="/visits?mine=1">визиты</a> или <a href="/sales/work?mine=1">работы</a> для полного списка.
+        Показано не более {{ archive_cap }} последних событий — сузьте фильтр по датам или виду.
       {% endif %}
     </p>
+
+    <form method="get" action="/master/mywork" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin:12px 0 16px;">
+      <div>
+        <label for="archive_kind">Вид работы</label>
+        <select id="archive_kind" name="kind">
+          {% for value, label in archive_kind_options %}
+            <option value="{{ value }}" {% if archive_kind == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="archive_date_from">С даты</label>
+        <input type="date" id="archive_date_from" name="date_from" value="{{ archive_date_from }}" />
+      </div>
+      <div>
+        <label for="archive_date_to">По дату</label>
+        <input type="date" id="archive_date_to" name="date_to" value="{{ archive_date_to }}" />
+      </div>
+      <div>
+        <button type="submit">Показать</button>
+        <a href="/master/mywork" style="margin-left:8px;"><button type="button" class="secondary">Сбросить</button></a>
+      </div>
+    </form>
 
     {% if not archive_rows %}
       <p class="muted">За выбранный период записей нет.</p>
@@ -88,6 +112,7 @@
             <th>Тип</th>
             <th>Суть</th>
             <th>Клиент</th>
+            <th>Ваша ЗП</th>
             <th></th>
           </tr>
         </thead>
@@ -98,17 +123,16 @@
                 {% if row.kind == 'visit' %}
                   {{ format_naive_utc_datetime(row.visit.performed_date, display_tz) }}
                 {% elif row.kind == 'work' %}
-                  {{ format_naive_utc_datetime(row.work.created_at, display_tz) }}
-                {% else %}
+                  {{ format_naive_utc_datetime(row.work.performed_date or row.work.created_at, display_tz) }}
+                {% elif row.kind == 'sale' %}
                   {{ format_naive_utc_datetime(row.sale.performed_date, display_tz) }}
+                {% elif row.kind == 'hourly' %}
+                  {{ format_naive_utc_datetime(row.hourly.performed_date, display_tz) }}
+                {% else %}
+                  {{ format_naive_utc_datetime(row.consultation.consultation_date, display_tz) }}
                 {% endif %}
               </td>
-              <td>
-                {% if row.kind == 'visit' %}Визит
-                {% elif row.kind == 'work' %}Работа
-                {% else %}Продажа
-                {% endif %}
-              </td>
+              <td>{{ row.kind_label }}</td>
               <td>{{ row.label }}</td>
               <td>
                 {% if row.client %}
@@ -117,13 +141,18 @@
                   <span class="muted">—</span>
                 {% endif %}
               </td>
+              <td>{{ "%.0f"|format(row.master_pay or 0) }} ₽</td>
               <td style="white-space:nowrap;">
                 {% if row.kind == 'visit' %}
                   <a href="/visits/{{ row.visit.id }}"><button type="button" class="secondary">Открыть</button></a>
                 {% elif row.kind == 'work' %}
                   <a href="/sales/work/{{ row.work.id }}"><button type="button" class="secondary">Открыть</button></a>
-                {% else %}
+                {% elif row.kind == 'sale' %}
                   <a href="/sales/products/{{ row.sale.id }}"><button type="button" class="secondary">Открыть</button></a>
+                {% elif row.kind == 'hourly' %}
+                  <a href="/hourly-work/{{ row.hourly.id }}"><button type="button" class="secondary">Открыть</button></a>
+                {% else %}
+                  <a href="/consultations/{{ row.consultation.id }}"><button type="button" class="secondary">Открыть</button></a>
                 {% endif %}
               </td>
             </tr>

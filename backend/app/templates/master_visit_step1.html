@@ -17,7 +17,7 @@
     {% endif %}
     {% if draft_saved %}
       <div class="card" style="border-color:#86efac; background:#f0fdf4; margin-bottom: 12px; pointer-events: auto;">
-        <p style="margin:0;">Черновик сохранён. <a href="/master/bookings">Мои записи</a></p>
+        <p style="margin:0;">Черновик сохранён. <a href="/master/mywork">Моя работа</a></p>
       </div>
     {% endif %}
     {% if saved %}
@@ -693,7 +693,7 @@
             {% endif %}
           {% endif %}
           {% if draft_id %}
-            <a href="/master/bookings"><button type="button" class="secondary">Мои записи</button></a>
+            <a href="/master/mywork"><button type="button" class="secondary">Моя работа</button></a>
             {% if not draft_readonly %}
               <button type="submit" class="secondary" form="visit-draft-unlock-form">Снять блокировку</button>
             {% endif %}
