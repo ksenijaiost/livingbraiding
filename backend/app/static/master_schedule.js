@@ -53,7 +53,7 @@
     if (!bd || !md || !tt) return;
     tt.textContent = isoDay;
     bd.style.display = 'block';
-    md.style.display = 'block';
+    md.style.display = 'flex';
     document.body.style.overflow = 'hidden';
 
     // Defaults: treat as a working day with default hours.
@@ -151,7 +151,7 @@
     dateEl.value = isoDay || todayIso;
     if (commentEl) commentEl.value = '';
     bd.style.display = 'block';
-    md.style.display = 'block';
+    md.style.display = 'flex';
     document.body.style.overflow = 'hidden';
     loadBlocksForDay(dateEl.value);
   };
@@ -618,7 +618,7 @@
     var md = document.getElementById('lbMsBulkModal');
     if (!bd || !md) return;
     bd.style.display = 'block';
-    md.style.display = 'block';
+    md.style.display = 'flex';
     document.body.style.overflow = 'hidden';
   };
 
