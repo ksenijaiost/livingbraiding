@@ -199,7 +199,13 @@ def apply_hourly_help_to_visit(visit: Visit, rows: list[HourlyHelpRow]) -> float
     visit.hourly_help_total = help_total
 
     gross_pool = money_q2(sum(float(s.masters_pool or 0) for s in (visit.services or []) if not s.is_cancelled))
-    if help_total > gross_pool + 0.01:
+    if gross_pool < -0.01:
+        raise ValueError(
+            f"Пул ЗП мастеров визита отрицательный ({gross_pool:.0f} ₽): "
+            "сумма с клиента меньше себестоимости (услуга + комплект + материал + амортизация). "
+            "Проверьте суммы и списание комплекта."
+        )
+    if help_total > 0 and help_total > gross_pool + 0.01:
         raise ValueError(
             f"Сумма почасовой помощи превышает пул ЗП мастеров визита "
             f"(помощь {help_total:.0f} ₽, пул {gross_pool:.0f} ₽)."
@@ -226,7 +232,12 @@ def apply_hourly_help_to_staff_profits(
     """Уменьшить ЗП участников работы; вернуть (новые доли участников, ЗП помощников)."""
     help_total = hourly_help_total(rows)
     primary_total = money_q2(sum(float(staff_profits.get(pid, 0.0)) for pid in participant_ids))
-    if help_total > primary_total + 0.01:
+    if primary_total < -0.01:
+        raise ValueError(
+            f"ЗП мастеров работы отрицательная ({primary_total:.0f} ₽): "
+            "проверьте суммы с клиента и себестоимость."
+        )
+    if help_total > 0 and help_total > primary_total + 0.01:
         raise ValueError(
             f"Сумма почасовой помощи превышает ЗП мастеров работы "
             f"(помощь {help_total:.0f} ₽, ЗП мастеров {primary_total:.0f} ₽)."

@@ -74,7 +74,8 @@
       "</div>" +
       breakdownWrapHtml() +
       '<div class="lb-kit-price-block" style="margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;">' +
-      '<div style="font-size:13px;">Посчитано: <strong class="lb-kit-calc-price">—</strong> ₽</div>' +
+      '<div style="font-size:13px;">Посчитано: <strong class="lb-kit-calc-price">—</strong> ₽' +
+      ' <span class="lb-kit-stock-price-note muted" style="font-size:12px;margin-left:6px;"></span></div>' +
       '<div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;">' +
       "<label style=\"margin:0;\">С клиента, ₽</label>" +
       '<input type="number" class="lb-kit-amount-from-client" min="0" step="1" value="' +
@@ -144,7 +145,7 @@
     syncEntireUi(rowEl);
   }
 
-  function readBreakdown(rowEl) {
+  function readBreakdownFromInputs(rowEl) {
     var out = {};
     rowEl.querySelectorAll(".lb-kit-bd-take").forEach(function (inp) {
       var k = inp.getAttribute("data-kit-key") || "";
@@ -154,11 +155,37 @@
     return Object.keys(out).length ? out : null;
   }
 
+  function readBreakdownFromHidden(rowEl) {
+    var hid = rowEl.querySelector(".vsk-breakdown, .lb-kit-breakdown-hidden, [data-lb-kit-breakdown-hidden]");
+    if (!hid || !String(hid.value || "").trim()) return null;
+    try {
+      var parsed = JSON.parse(hid.value);
+      var out = {};
+      if (parsed && typeof parsed === "object") {
+        Object.keys(parsed).forEach(function (k) {
+          var v = parseInt(String(parsed[k] || 0), 10) || 0;
+          if (k && v > 0) out[k] = v;
+        });
+      }
+      return Object.keys(out).length ? out : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function readBreakdown(rowEl) {
+    return readBreakdownFromInputs(rowEl) || readBreakdownFromHidden(rowEl);
+  }
+
   function syncRowBreakdownHidden(rowEl) {
     var hid = rowEl.querySelector(".vsk-breakdown, .lb-kit-breakdown-hidden, [data-lb-kit-breakdown-hidden]");
     if (!hid) return;
-    var bd = readBreakdown(rowEl);
-    hid.value = bd ? JSON.stringify(bd) : "";
+    var fromInputs = readBreakdownFromInputs(rowEl);
+    if (fromInputs) {
+      hid.value = JSON.stringify(fromInputs);
+      return;
+    }
+    // Не затираем hidden, если инпуты пусты (например, ещё не отрисована таблица).
   }
 
   function entireCheckbox(rowEl) {
@@ -204,7 +231,12 @@
       inp.disabled = entire;
       if (entire) inp.value = "";
     });
-    syncRowBreakdownHidden(rowEl);
+    if (entire) {
+      var hidClr = rowEl.querySelector(".vsk-breakdown, .lb-kit-breakdown-hidden, [data-lb-kit-breakdown-hidden]");
+      if (hidClr) hidClr.value = "";
+    } else {
+      syncRowBreakdownHidden(rowEl);
+    }
   }
 
   function stockKitRowHtml(opts) {
@@ -253,14 +285,27 @@
       var kid = parseInt(String((row.querySelector(".lb-kit-id, .vsk-kit-id") || {}).value || "0"), 10) || 0;
       if (kid <= 0) return;
       var ue = isEntireMode(row);
-      var bd = readBreakdown(row);
+      var kit = kitData(row);
+      var bd = ue ? null : readBreakdown(row);
       var bu = 0;
       if (bd) {
         Object.keys(bd).forEach(function (k) {
           bu += parseInt(String(bd[k] || 0), 10) || 0;
         });
-      } else {
+      } else if (!ue) {
         bu = parseInt(String((simpleBlanksInput(row) || {}).value || "0"), 10) || 0;
+        // Один вид в комплекте + введено общее кол-во → собрать breakdown явно.
+        if (bu > 0 && hasKeyedBreakdown(kit) && kit.per_key.length === 1) {
+          var onlyKey = String(kit.per_key[0].key || "");
+          if (onlyKey) {
+            bd = {};
+            bd[onlyKey] = bu;
+          }
+        }
+      }
+      if (!ue && bd) {
+        var hid = row.querySelector(".vsk-breakdown, .lb-kit-breakdown-hidden, [data-lb-kit-breakdown-hidden]");
+        if (hid) hid.value = JSON.stringify(bd);
       }
       var afcEl = row.querySelector(".lb-kit-amount-from-client");
       var afcRaw = afcEl ? String(afcEl.value || "").trim() : "";

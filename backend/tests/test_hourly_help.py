@@ -77,6 +77,29 @@ def test_apply_hourly_help_to_visit_rejects_excess_amount():
         apply_hourly_help_to_visit(visit, rows)
 
 
+def test_apply_hourly_help_to_visit_rejects_negative_pool_without_help():
+    visit = SimpleNamespace(
+        services=[SimpleNamespace(is_cancelled=False, masters_pool=-185.0)],
+        masters_pool=0.0,
+        hourly_help_json=None,
+        hourly_help_total=0.0,
+    )
+    with pytest.raises(ValueError, match="отрицательный"):
+        apply_hourly_help_to_visit(visit, [])
+
+
+def test_apply_hourly_help_to_visit_zero_help_ok_with_positive_pool():
+    visit = SimpleNamespace(
+        services=[SimpleNamespace(is_cancelled=False, masters_pool=500.0)],
+        masters_pool=0.0,
+        hourly_help_json=None,
+        hourly_help_total=0.0,
+    )
+    total = apply_hourly_help_to_visit(visit, [])
+    assert total == 0.0
+    assert visit.masters_pool == 500.0
+
+
 def test_apply_hourly_help_to_staff_profits_keeps_total():
     staff = {10: 700.0, 20: 300.0}
     rows = [HourlyHelpRow(master_id=99, hours=1, minutes=15, amount=200.0)]
