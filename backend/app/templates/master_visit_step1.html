@@ -1107,7 +1107,7 @@
       };
     }
     function bindVisitStockKitRow(row) {
-      if (!window.LbKitStockPick) return;
+      if (!window.LbKitStockPick || !row) return;
       LbKitStockPick.bindStockKitRow(row, Object.assign({}, kitPickOpts(), {
         wrapEl: document.getElementById('stock_kit_rows_wrap'),
         onPick: function (k) {
@@ -1126,12 +1126,12 @@
       if (!window.LbKitStockPick) return;
       LbKitStockPick.addStockKitRow(document.getElementById('stock_kit_rows_wrap'), kitPickOpts());
     }
-    const addStockRowBtn = document.getElementById('visit_add_stock_kit_row');
-    if (addStockRowBtn) addStockRowBtn.addEventListener('click', addVisitStockKitRow);
-    document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row').forEach(bindVisitStockKitRow);
     function initOwnExtraStockKitRows() {
       var wrap = document.getElementById('own_extra_stock_kit_rows_wrap');
       if (!wrap || !window.LbKitStockPick) return;
+      wrap.querySelectorAll('.visit-stock-kit-row, .lb-kit-stock-row').forEach(function (row) {
+        row.removeAttribute('data-lb-kit-bound');
+      });
       LbKitStockPick.initStockKitWrap(wrap, Object.assign({}, kitPickOpts(), {
         initialLines: extraStockKitPreviewInitial ? [{ kit_id: extraStockKitPreviewInitial.id, _kit_initial: extraStockKitPreviewInitial }] : [],
         onPick: function (k, r) {
@@ -1142,10 +1142,57 @@
         },
       }));
     }
-    initOwnExtraStockKitRows();
+    /** kit_stock_pick.js подключён с defer — биндить строки только после его загрузки. */
+    function initVisitStockKitEditors() {
+      if (!window.LbKitStockPick) return;
+      document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row').forEach(function (row) {
+        row.removeAttribute('data-lb-kit-bound');
+        bindVisitStockKitRow(row);
+      });
+      initOwnExtraStockKitRows();
+      if (typeof initVisitStockRowsFromPreview === 'function') initVisitStockRowsFromPreview();
+      syncVisitPreview();
+    }
+    const addStockRowBtn = document.getElementById('visit_add_stock_kit_row');
+    if (addStockRowBtn) addStockRowBtn.addEventListener('click', addVisitStockKitRow);
     var addOwnExtraBtn = document.getElementById('visit_add_own_extra_kit_row');
     if (addOwnExtraBtn) addOwnExtraBtn.addEventListener('click', function () {
       if (window.LbKitStockPick) LbKitStockPick.addStockKitRow(document.getElementById('own_extra_stock_kit_rows_wrap'), kitPickOpts());
+    });
+    document.addEventListener('DOMContentLoaded', initVisitStockKitEditors);
+    // Страховка: пересчёт превью при любых правках комплекта (в т.ч. если строка не успела забиндиться).
+    document.addEventListener('input', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      if (!t.closest('#stock_kit_rows_wrap, #own_extra_stock_kit_rows_wrap, [data-line-stock-kit-wrap], [data-line-own-extra-kit-wrap]')) return;
+      if (
+        t.classList.contains('lb-kit-amount-from-client') ||
+        t.classList.contains('lb-kit-bd-take') ||
+        t.classList.contains('lb-kit-blanks-simple') ||
+        t.classList.contains('vsk-blanks-used') ||
+        t.classList.contains('lb-kit-mode-radio') ||
+        t.classList.contains('lb-kit-use-entire') ||
+        t.classList.contains('vsk-use-entire')
+      ) {
+        syncVisitPreview();
+      }
+    });
+    document.addEventListener('change', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      if (!t.closest('#stock_kit_rows_wrap, #own_extra_stock_kit_rows_wrap, [data-line-stock-kit-wrap], [data-line-own-extra-kit-wrap]')) return;
+      if (
+        t.classList.contains('lb-kit-amount-from-client') ||
+        t.classList.contains('lb-kit-bd-take') ||
+        t.classList.contains('lb-kit-blanks-simple') ||
+        t.classList.contains('vsk-blanks-used') ||
+        t.classList.contains('lb-kit-mode-radio') ||
+        t.classList.contains('lb-kit-use-entire') ||
+        t.classList.contains('vsk-use-entire') ||
+        (t.name && String(t.name).indexOf('kit_paid_separately') >= 0)
+      ) {
+        syncVisitPreview();
+      }
     });
 
     document.querySelectorAll('input[name="mix_source"]').forEach(function (el) {
@@ -1385,7 +1432,7 @@
     const extraStockKitPreviewInitial = {{ extra_stock_kit_preview | tojson }};
 
     let selectedExtraStockKit = extraStockKitPreviewInitial;
-    (function initVisitStockRowsFromPreview() {
+    function initVisitStockRowsFromPreview() {
       const rows = document.querySelectorAll('#stock_kit_rows_wrap .visit-stock-kit-row');
       const prev = stockKitLinesPreviewInitial || [];
       rows.forEach(function (row, i) {
@@ -1396,7 +1443,7 @@
         syncVisitStockRowEntireUi(row);
       });
       syncVisitStockEntireUi();
-    })();
+    }
 
     function money2(x) { return Math.round((parseFloat(x) || 0) * 100) / 100; }
     function numVal(sel) {
@@ -1779,19 +1826,39 @@
       return { mixCost: 0, mixBonus: 0, bonusMasterId: bonusMasterId > 0 ? bonusMasterId : (mixSource === 'SELF_MIXED' ? currentUserId : 0) };
     }
 
+    function lineKitSectionVisible(idx) {
+      if (idx === 0) {
+        const wrap = document.getElementById('kit-section-wrap');
+        if (!wrap) return false;
+        if (wrap.style.display === 'none') return false;
+        return true;
+      }
+      const row = visitLineRow(idx);
+      const kitWrap = row ? row.querySelector('[data-reveal-block="kit"]') : null;
+      if (!kitWrap) return false;
+      if (kitWrap.style.display === 'none') return false;
+      return true;
+    }
+
     function lineKitCostParts(idx, meta) {
       const out = { kitCost: 0, kitClient: 0, stockParts: '', extraParts: '', warn: '' };
-      if (!meta || (!meta.requires_kit_block && !meta.requiresKit)) return out;
+      const metaNeedsKit = !!(meta && (meta.requires_kit_block || meta.requiresKit));
+      if (!metaNeedsKit && !lineKitSectionVisible(idx)) return out;
       const row = visitLineRow(idx);
       const kk = idx === 0
         ? ((document.querySelector('input[name="kit_kind"]:checked') || {}).value || '')
         : ((row && row.querySelector('input[name="line_' + idx + '_kit_kind"]:checked')) || {}).value || 'STOCK';
       function kitRowClientAmt(kitRow, calcCost) {
-        const afcEl = kitRow.querySelector('.lb-kit-amount-from-client');
-        const raw = afcEl ? String(afcEl.value || '').trim() : '';
-        if (raw === '') return Math.max(0, calcCost);
-        const n = parseFloat(raw.replace(',', '.'));
-        return (!isNaN(n) && n >= 0) ? n : Math.max(0, calcCost);
+        // Берём последнее непустое поле (на случай дублей в DOM).
+        let raw = '';
+        kitRow.querySelectorAll('.lb-kit-amount-from-client').forEach(function (el) {
+          const v = String(el.value || '').trim();
+          if (v !== '') raw = v;
+        });
+        if (raw === '') return Math.max(0, calcCost || 0);
+        const n = parseFloat(raw.replace(',', '.').replace(/\s/g, ''));
+        if (!isNaN(n) && n >= 0) return n;
+        return Math.max(0, calcCost || 0);
       }
       function refreshCalcPriceUi(kitRow, calcCost) {
         const el = kitRow.querySelector('.lb-kit-calc-price');
