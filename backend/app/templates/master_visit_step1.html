@@ -1931,8 +1931,10 @@
             if (r.kitParts) out.stockParts = out.stockParts ? (out.stockParts + ' · ' + r.kitParts) : r.kitParts;
             return;
           }
-          out.kitCost += r.cost;
-          out.kitClient += kitRowClientAmt(kitRow, r.cost);
+          // Если «С клиента» заполнено — оно же идёт в себестоимость/ЗП; иначе «Посчитано».
+          const amt = kitRowClientAmt(kitRow, r.cost);
+          out.kitCost += amt;
+          out.kitClient += amt;
           if (r.warn) out.warn = r.warn;
           if (r.kitParts) out.stockParts = out.stockParts ? (out.stockParts + ' · ' + r.kitParts) : r.kitParts;
         });
@@ -1961,8 +1963,9 @@
           }
           const r2 = kitUsageCost(kit, ue, bu, bd);
           refreshCalcPriceUi(kitRow, r2.cost, r2.piecesUsed, kit);
-          out.kitCost += r2.cost;
-          out.kitClient += kitRowClientAmt(kitRow, r2.cost);
+          const amt2 = kitRowClientAmt(kitRow, r2.cost);
+          out.kitCost += amt2;
+          out.kitClient += amt2;
           if (r2.warn) out.warn = r2.warn;
           if (r2.kitParts) out.extraParts = out.extraParts ? (out.extraParts + ' · ' + r2.kitParts) : r2.kitParts;
         });
