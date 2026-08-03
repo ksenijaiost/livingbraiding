@@ -375,16 +375,18 @@ def compute_visit_service_line(
                     client_id=header.existing_client_id,
                     usage_by_key=sk.usage_by_key,
                 )
-                usage_cost = 0.0 if exclude_main_stock_cost else cost
-                usage_sf = 0.0 if exclude_main_stock_cost else sf
-                usages.append((sk.kit_id, n, usage_cost, bd))
-                kit_cost_total += usage_cost
-                kit_studio_fund += usage_sf
-                if not exclude_main_stock_cost:
-                    if sk.amount_from_client is not None and float(sk.amount_from_client) > 0:
-                        kit_client_total += float(sk.amount_from_client)
-                    else:
-                        kit_client_total += float(cost)
+                if exclude_main_stock_cost:
+                    usages.append((sk.kit_id, n, 0.0, bd))
+                    continue
+                # Заполненное «С клиента» у комплекта — и в выручку, и в себестоимость/ЗП.
+                if sk.amount_from_client is not None:
+                    effective = max(0.0, float(sk.amount_from_client))
+                else:
+                    effective = float(cost)
+                usages.append((sk.kit_id, n, effective, bd))
+                kit_cost_total += effective
+                kit_client_total += effective
+                kit_studio_fund += float(sf)
         if kind == "OWN" and line.own_extra_blanks:
             extra_lines = line.own_extra_stock_kit_lines or (
                 [
@@ -393,6 +395,7 @@ def compute_visit_service_line(
                         use_entire=line.own_extra_stock_use_entire,
                         blanks_used=line.own_extra_stock_blanks_used,
                         usage_by_key=line.own_extra_stock_usage_by_key,
+                        amount_from_client=None,
                     )
                 ]
                 if line.own_extra_stock_kit_id
@@ -409,13 +412,14 @@ def compute_visit_service_line(
                     client_id=header.existing_client_id,
                     usage_by_key=sk.usage_by_key,
                 )
-                usages.append((sk.kit_id, n, cost, bd))
-                kit_cost_total += cost
-                kit_studio_fund += sf
-                if sk.amount_from_client is not None and float(sk.amount_from_client) > 0:
-                    kit_client_total += float(sk.amount_from_client)
+                if sk.amount_from_client is not None:
+                    effective = max(0.0, float(sk.amount_from_client))
                 else:
-                    kit_client_total += float(cost)
+                    effective = float(cost)
+                usages.append((sk.kit_id, n, effective, bd))
+                kit_cost_total += effective
+                kit_client_total += effective
+                kit_studio_fund += float(sf)
         _build_kit_block_from_input(kinp, db)
 
     addons = max(0.0, float(line.addon_sales_amount or 0.0))
