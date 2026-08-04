@@ -31,6 +31,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 
+def _enum_values(enum_cls: type[enum.Enum]) -> list[str]:
+    """Persist/read PEP-435 enums by .value (DB), not by member name."""
+    return [m.value for m in enum_cls]
+
+
 class UserRole(str, enum.Enum):
     ADMIN_SUPER = "ADMIN_SUPER"
     ADMIN = "ADMIN"
@@ -186,7 +191,10 @@ class Client(Base):
     vk: Mapped[str | None] = mapped_column(String(120), nullable=True)
     instagram: Mapped[str | None] = mapped_column(String(120), nullable=True)
     other_contact: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    age_group: Mapped[ClientAgeGroup | None] = mapped_column(Enum(ClientAgeGroup), nullable=True)
+    age_group: Mapped[ClientAgeGroup | None] = mapped_column(
+        Enum(ClientAgeGroup, values_callable=_enum_values),
+        nullable=True,
+    )
     source: Mapped[str | None] = mapped_column(String(120), nullable=True)
     source_other: Mapped[str | None] = mapped_column(String(200), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -1361,7 +1369,10 @@ class Visit(Base):
     client_type: Mapped[VisitClientType] = mapped_column(Enum(VisitClientType), nullable=False)
     price_type: Mapped[VisitPriceType] = mapped_column(Enum(VisitPriceType), nullable=False)
     # snapshot from client card at time of visit
-    client_age_group: Mapped[ClientAgeGroup | None] = mapped_column(Enum(ClientAgeGroup), nullable=True)
+    client_age_group: Mapped[ClientAgeGroup | None] = mapped_column(
+        Enum(ClientAgeGroup, values_callable=_enum_values),
+        nullable=True,
+    )
 
     kanekalon_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     kudri_grams: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
