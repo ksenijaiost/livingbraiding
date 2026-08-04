@@ -401,6 +401,13 @@
       </aside>
     {% endif %}
     <div class="container">
+      {% if request is defined and request.query_params.get('tech_err') in ('1', 'true', 'yes') %}
+        <div class="error" style="margin-bottom: 14px;" role="alert">
+          Произошла техническая ошибка. Напишите техническому специалисту и опишите все ваши действия.
+          Можно повторить один раз, записав видео с экрана.
+          Не нажимайте «сохранить» много раз подряд — это засоряет логи и не помогает.
+        </div>
+      {% endif %}
       {% block content %}{% endblock %}
     </div>
 

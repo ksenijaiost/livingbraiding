@@ -29,7 +29,10 @@ from app import admin_studio_expenses as admin_studio_expenses_routes
 from app import product_sales as product_sales_routes
 from app import work_products as work_products_routes
 
+from app.tech_error import register_tech_error_handlers  # noqa: E402
+
 app = FastAPI(title="livingbraiding")
+register_tech_error_handlers(app)
 app.add_middleware(AccessLogWithUserMiddleware)
 app.add_middleware(DisplayTimezoneMiddleware)
 app.add_middleware(SessionRememberRenewMiddleware)
