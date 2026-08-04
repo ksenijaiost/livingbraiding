@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top:0;">Техническая ошибка</h2>
+    <div class="error" style="margin: 12px 0;">{{ message }}</div>
+    <p class="muted" style="margin: 0 0 14px;">
+      Ошибка уже записана в журнал. Повторные попытки без записи экрана обычно не помогают.
+    </p>
+    <div style="display:flex; flex-wrap:wrap; gap:10px;">
+      <button type="button" class="secondary" onclick="history.back()">Вернуться назад</button>
+      <a href="/"><button type="button" class="secondary">На главную</button></a>
+    </div>
+  </div>
+{% endblock %}

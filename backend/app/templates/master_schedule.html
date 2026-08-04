@@ -15,13 +15,12 @@
       align-items: flex-start;
       justify-content: center;
     }
-    .lb-ms-overlay.is-open {
-      display: flex;
-    }
+    .lb-ms-overlay.is-open { display: flex; }
     .lb-ms-dialog {
       pointer-events: auto;
       width: 100%;
-      max-width: 760px;
+      max-width: 520px;
+      min-width: 0;
       margin: 0 auto;
       background: #fff;
       border: 1px solid #e5e7eb;
@@ -33,7 +32,7 @@
       flex-direction: column;
       overflow: hidden;
     }
-    .lb-ms-dialog--sm { max-width: 520px; }
+    .lb-ms-dialog--sm { max-width: 420px; }
     .lb-ms-dialog-head {
       flex: 0 0 auto;
       display: flex;
@@ -41,17 +40,22 @@
       align-items: flex-start;
       gap: 12px;
       padding: 14px 16px 0;
+      min-width: 0;
     }
+    .lb-ms-dialog-head > div { min-width: 0; flex: 1 1 auto; }
+    .lb-ms-dialog-head h3 { word-break: break-word; }
     .lb-ms-dialog-body {
       flex: 1 1 auto;
       min-height: 0;
+      min-width: 0;
+      overflow-x: hidden;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       overscroll-behavior: contain;
       padding: 12px 16px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 14px;
       box-sizing: border-box;
     }
     .lb-ms-dialog-foot {
@@ -64,25 +68,67 @@
       border-top: 1px solid #e5e7eb;
       background: #fff;
     }
-    /* Глобально .row > * { min-width: 260px } ломает узкие модалки */
-    .lb-ms-dialog .row > * {
+    /* Свои ряды — без глобального .row > * { min-width: 260px } */
+    .lb-ms-fields {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 12px;
+      align-items: flex-end;
+      min-width: 0;
+    }
+    .lb-ms-field {
       flex: 1 1 140px;
       min-width: 0;
       max-width: 100%;
     }
-    .lb-ms-dialog .row-compact > * {
-      flex: 0 1 auto;
-      min-width: 0;
+    .lb-ms-field--time { flex: 0 1 9.5rem; max-width: 9.5rem; }
+    .lb-ms-field--date { flex: 1 1 10.5rem; max-width: 100%; }
+    .lb-ms-field--mode { flex: 1 1 100%; max-width: 100%; }
+    @media (min-width: 420px) {
+      .lb-ms-field--mode { flex: 1 1 160px; }
     }
-    .lb-ms-dialog input,
-    .lb-ms-dialog select,
-    .lb-ms-dialog textarea {
+    .lb-ms-field .muted { margin-bottom: 4px; }
+    .lb-ms-dialog .lb-ms-field input,
+    .lb-ms-dialog .lb-ms-field select,
+    .lb-ms-dialog .lb-ms-field textarea,
+    .lb-ms-dialog-body > div > select,
+    .lb-ms-dialog-body textarea {
       width: 100%;
       max-width: 100%;
       box-sizing: border-box;
     }
-    .lb-ms-dialog label {
+    .lb-ms-days {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 10px;
+      min-width: 0;
+    }
+    .lb-ms-check {
+      display: inline-flex !important;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      margin: 0 !important;
+      width: auto !important;
       max-width: 100%;
+      font-weight: normal;
+      white-space: normal;
+    }
+    .lb-ms-check input[type="checkbox"],
+    .lb-ms-check input[type="radio"] {
+      width: auto !important;
+      max-width: none;
+      flex: 0 0 auto;
+      margin: 0;
+    }
+    .lb-ms-check span {
+      flex: 0 1 auto;
+      min-width: 0;
+    }
+    .lb-ms-section {
+      border-top: 1px solid #e5e7eb;
+      padding-top: 12px;
+      min-width: 0;
     }
   </style>
   <script type="application/json" id="lb-ms-config">{{ {"isAdmin": is_admin_super, "masterId": master_id, "todayIso": today_iso, "defaultTimeFrom": ("%02d:00" % hour_from), "defaultTimeTo": ("%02d:00" % hour_to)} | tojson }}</script>
@@ -162,41 +208,41 @@
       </div>
 
       <div class="lb-ms-dialog-body">
-        <label style="display:flex; gap:10px; align-items:center;">
+        <label class="lb-ms-check">
           <input type="checkbox" id="lbMsDayOffChk" />
           <span>Выходной</span>
         </label>
 
-        <div id="lbMsWorkingBlock" style="display:none; padding-top:6px; border-top:1px solid #e5e7eb;">
-          <label style="display:flex; gap:10px; align-items:center;">
+        <div id="lbMsWorkingBlock" class="lb-ms-section" style="display:none;">
+          <label class="lb-ms-check">
             <input type="checkbox" id="lbMsAllDayChk" />
             <span>Весь рабочий день (часы по умолчанию)</span>
           </label>
 
-          <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end;">
-            <div>
-              <div class="muted" style="font-size:12px; margin-bottom:4px;">С начала</div>
+          <div class="lb-ms-fields" style="margin-top:10px;">
+            <div class="lb-ms-field lb-ms-field--time">
+              <div class="muted" style="font-size:12px;">С начала</div>
               <input id="lbMsTimeFrom" type="time" step="60" />
             </div>
-            <div>
-              <div class="muted" style="font-size:12px; margin-bottom:4px;">До</div>
+            <div class="lb-ms-field lb-ms-field--time">
+              <div class="muted" style="font-size:12px;">До</div>
               <input id="lbMsTimeTo" type="time" step="60" />
             </div>
           </div>
 
-          <label style="display:flex; gap:10px; align-items:center; margin-top:8px;">
+          <label class="lb-ms-check" style="margin-top:10px !important;">
             <input type="checkbox" id="lbMsBreakChk" />
             <span>Перерыв</span>
           </label>
 
-          <div id="lbMsBreakBlock" style="display:none; padding-top:6px; border-top:1px dashed #e5e7eb;">
-            <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end; margin-top:8px;">
-              <div>
-                <div class="muted" style="font-size:12px; margin-bottom:4px;">С</div>
+          <div id="lbMsBreakBlock" style="display:none; padding-top:10px; border-top:1px dashed #e5e7eb; margin-top:10px;">
+            <div class="lb-ms-fields">
+              <div class="lb-ms-field lb-ms-field--time">
+                <div class="muted" style="font-size:12px;">С</div>
                 <input id="lbMsBreakFrom" type="time" step="60" />
               </div>
-              <div>
-                <div class="muted" style="font-size:12px; margin-bottom:4px;">До</div>
+              <div class="lb-ms-field lb-ms-field--time">
+                <div class="muted" style="font-size:12px;">До</div>
                 <input id="lbMsBreakTo" type="time" step="60" />
               </div>
             </div>
@@ -224,25 +270,25 @@
       </div>
 
       <div class="lb-ms-dialog-body">
-        <div>
-          <div class="muted" style="font-size:12px; margin-bottom:4px;">Дата</div>
+        <div class="lb-ms-field lb-ms-field--date" style="flex:1 1 100%; max-width:100%;">
+          <div class="muted" style="font-size:12px;">Дата</div>
           <input id="lbMsBlockDate" type="date" />
         </div>
-        <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end;">
-          <div>
-            <div class="muted" style="font-size:12px; margin-bottom:4px;">С</div>
+        <div class="lb-ms-fields">
+          <div class="lb-ms-field lb-ms-field--time">
+            <div class="muted" style="font-size:12px;">С</div>
             <input id="lbMsBlockTimeFrom" type="time" step="60" value="{{ '%02d:00' % hour_from }}" />
           </div>
-          <div>
-            <div class="muted" style="font-size:12px; margin-bottom:4px;">До</div>
+          <div class="lb-ms-field lb-ms-field--time">
+            <div class="muted" style="font-size:12px;">До</div>
             <input id="lbMsBlockTimeTo" type="time" step="60" value="{{ '%02d:00' % (hour_from + 1) }}" />
           </div>
         </div>
         <div>
           <div class="muted" style="font-size:12px; margin-bottom:4px;">Комментарий</div>
-          <textarea id="lbMsBlockComment" rows="3" style="resize:vertical;" placeholder="Например: работы, подготовка"></textarea>
+          <textarea id="lbMsBlockComment" rows="3" style="resize:vertical; width:100%; box-sizing:border-box;" placeholder="Например: работы, подготовка"></textarea>
         </div>
-        <div id="lbMsBlockListWrap" style="display:none; border-top:1px solid #e5e7eb; padding-top:10px;">
+        <div id="lbMsBlockListWrap" class="lb-ms-section" style="display:none;">
           <div class="muted" style="font-size:12px; margin-bottom:6px;">Уже занято в этот день</div>
           <div id="lbMsBlockList"></div>
         </div>
@@ -267,39 +313,39 @@
       </div>
 
       <div class="lb-ms-dialog-body">
-        <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end;">
-          <div>
-            <div class="muted" style="font-size:12px; margin-bottom:4px;">Режим</div>
+        <div class="lb-ms-fields">
+          <div class="lb-ms-field lb-ms-field--mode">
+            <div class="muted" style="font-size:12px;">Режим</div>
             <select id="lbMsBulkMode">
               <option value="WEEKDAY">По дням недели</option>
               <option value="CYCLIC">Цикличный</option>
             </select>
           </div>
-          <div>
-            <div class="muted" style="font-size:12px; margin-bottom:4px;">С</div>
+          <div class="lb-ms-field lb-ms-field--date">
+            <div class="muted" style="font-size:12px;">С</div>
             <input id="lbMsBulkDateFrom" type="date" />
           </div>
-          <div>
-            <div class="muted" style="font-size:12px; margin-bottom:4px;">По</div>
+          <div class="lb-ms-field lb-ms-field--date">
+            <div class="muted" style="font-size:12px;">По</div>
             <input id="lbMsBulkDateTo" type="date" />
           </div>
         </div>
 
-        <div id="lbMsBulkWeekdayBlock" style="border-top:1px solid #e5e7eb; padding-top:12px;">
-          <div class="muted" style="font-size:12px; margin-bottom:6px;">Рабочие дни (выбор)</div>
-          <div class="row row-compact" style="gap:10px; flex-wrap:wrap;">
-            <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" id="lbMsW0" /> Пн</label>
-            <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" id="lbMsW1" /> Вт</label>
-            <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" id="lbMsW2" /> Ср</label>
-            <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" id="lbMsW3" /> Чт</label>
-            <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" id="lbMsW4" /> Пт</label>
-            <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" id="lbMsW5" /> Сб</label>
-            <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" id="lbMsW6" /> Вс</label>
+        <div id="lbMsBulkWeekdayBlock" class="lb-ms-section">
+          <div class="muted" style="font-size:12px; margin-bottom:8px;">Рабочие дни (выбор)</div>
+          <div class="lb-ms-days">
+            <label class="lb-ms-check"><input type="checkbox" id="lbMsW0" /> <span>Пн</span></label>
+            <label class="lb-ms-check"><input type="checkbox" id="lbMsW1" /> <span>Вт</span></label>
+            <label class="lb-ms-check"><input type="checkbox" id="lbMsW2" /> <span>Ср</span></label>
+            <label class="lb-ms-check"><input type="checkbox" id="lbMsW3" /> <span>Чт</span></label>
+            <label class="lb-ms-check"><input type="checkbox" id="lbMsW4" /> <span>Пт</span></label>
+            <label class="lb-ms-check"><input type="checkbox" id="lbMsW5" /> <span>Сб</span></label>
+            <label class="lb-ms-check"><input type="checkbox" id="lbMsW6" /> <span>Вс</span></label>
           </div>
         </div>
 
-        <div id="lbMsBulkCyclicBlock" style="border-top:1px solid #e5e7eb; padding-top:12px; display:none;">
-          <div class="muted" style="font-size:12px; margin-bottom:6px;">Схема</div>
+        <div id="lbMsBulkCyclicBlock" class="lb-ms-section" style="display:none;">
+          <div class="muted" style="font-size:12px; margin-bottom:4px;">Схема</div>
           <select id="lbMsBulkScheme">
             <option value="ALL_DAYS">Все дни</option>
             <option value="WEEKDAYS">Будни</option>
@@ -308,13 +354,13 @@
           </select>
 
           <div id="lbMsBulkOddEvenBlock" style="margin-top:10px; display:none;">
-            <div class="muted" style="font-size:12px; margin-bottom:6px;">Чередование</div>
-            <div class="row row-compact" style="gap:12px; flex-wrap:wrap;">
-              <label style="display:flex; gap:10px; align-items:center; margin:0;">
+            <div class="muted" style="font-size:12px; margin-bottom:8px;">Чередование</div>
+            <div class="lb-ms-days" style="flex-direction:column; align-items:flex-start;">
+              <label class="lb-ms-check">
                 <input type="radio" name="lbMsOddEvenMode" id="lbMsOddMode" value="ODD" checked />
                 <span>Нечётные (1, 3, 5…)</span>
               </label>
-              <label style="display:flex; gap:10px; align-items:center; margin:0;">
+              <label class="lb-ms-check">
                 <input type="radio" name="lbMsOddEvenMode" id="lbMsEvenMode" value="EVEN" />
                 <span>Чётные (2, 4, 6…)</span>
               </label>
@@ -322,13 +368,13 @@
           </div>
 
           <div id="lbMsBulkCustomBlock" style="margin-top:10px; display:none;">
-            <div class="row" style="gap:12px; flex-wrap:wrap;">
-              <div>
-                <div class="muted" style="font-size:12px; margin-bottom:4px;">Рабочие дни подряд</div>
+            <div class="lb-ms-fields">
+              <div class="lb-ms-field">
+                <div class="muted" style="font-size:12px;">Рабочие дни подряд</div>
                 <input id="lbMsBulkCustomWork" type="number" min="1" step="1" value="2" />
               </div>
-              <div>
-                <div class="muted" style="font-size:12px; margin-bottom:4px;">Выходные дни подряд</div>
+              <div class="lb-ms-field">
+                <div class="muted" style="font-size:12px;">Выходные дни подряд</div>
                 <input id="lbMsBulkCustomOff" type="number" min="1" step="1" value="2" />
               </div>
             </div>
@@ -338,36 +384,36 @@
           </div>
         </div>
 
-        <div style="border-top:1px solid #e5e7eb; padding-top:12px;">
-          <label style="display:flex; gap:10px; align-items:center;">
+        <div class="lb-ms-section">
+          <label class="lb-ms-check">
             <input type="checkbox" id="lbMsBulkAllDayChk" checked />
             <span>Весь рабочий день (часы по умолчанию)</span>
           </label>
 
-          <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end; margin-top:8px;">
-            <div>
-              <div class="muted" style="font-size:12px; margin-bottom:4px;">С</div>
+          <div class="lb-ms-fields" style="margin-top:10px;">
+            <div class="lb-ms-field lb-ms-field--time">
+              <div class="muted" style="font-size:12px;">С</div>
               <input id="lbMsBulkTimeFrom" type="time" step="60" value="{{ '%02d' % hour_from }}:00" />
             </div>
-            <div>
-              <div class="muted" style="font-size:12px; margin-bottom:4px;">До</div>
+            <div class="lb-ms-field lb-ms-field--time">
+              <div class="muted" style="font-size:12px;">До</div>
               <input id="lbMsBulkTimeTo" type="time" step="60" value="{{ '%02d' % hour_to }}:00" />
             </div>
           </div>
 
-          <label style="display:flex; gap:10px; align-items:center; margin-top:10px;">
+          <label class="lb-ms-check" style="margin-top:12px !important;">
             <input type="checkbox" id="lbMsBulkBreakChk" />
             <span>Перерыв</span>
           </label>
 
-          <div id="lbMsBulkBreakBlock" style="display:none; padding-top:10px; border-top:1px dashed #e5e7eb;">
-            <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end; margin-top:8px;">
-              <div>
-                <div class="muted" style="font-size:12px; margin-bottom:4px;">С</div>
+          <div id="lbMsBulkBreakBlock" style="display:none; padding-top:10px; border-top:1px dashed #e5e7eb; margin-top:10px;">
+            <div class="lb-ms-fields">
+              <div class="lb-ms-field lb-ms-field--time">
+                <div class="muted" style="font-size:12px;">С</div>
                 <input id="lbMsBulkBreakFrom" type="time" step="60" />
               </div>
-              <div>
-                <div class="muted" style="font-size:12px; margin-bottom:4px;">До</div>
+              <div class="lb-ms-field lb-ms-field--time">
+                <div class="muted" style="font-size:12px;">До</div>
                 <input id="lbMsBulkBreakTo" type="time" step="60" />
               </div>
             </div>
@@ -381,5 +427,5 @@
     </div>
   </div>
 
-  <script src="/static/master_schedule.js?v=82"></script>
+  <script src="/static/master_schedule.js?v=83"></script>
 {% endblock %}
