@@ -188,15 +188,35 @@ def master_interval_overlaps_occupancy(
     start_m: int,
     end_m: int,
     exclude_plan_id: int | None = None,
+    exclude_booking_id: int | None = None,
 ) -> bool:
+    """Пересечение с бронями/консультациями/планами (segments) и блоками «Занять время»."""
     from app.calendar_occupancy import build_occupancy_for_day
 
-    occ = build_occupancy_for_day(db, day=d, hour_from=0, hour_to=24, exclude_work_plan_id=exclude_plan_id)
+    occ = build_occupancy_for_day(
+        db,
+        day=d,
+        hour_from=0,
+        hour_to=24,
+        exclude_work_plan_id=exclude_plan_id,
+        exclude_booking_id=exclude_booking_id,
+    )
     service_range = TimeRangeMinutes(start_minutes=start_m, end_minutes=end_m)
     for seg in occ.get("segments") or []:
         if int(seg.get("master_id") or 0) != int(master_id):
             continue
         if exclude_plan_id and int(seg.get("work_plan_id") or 0) == int(exclude_plan_id):
+            continue
+        if exclude_booking_id and int(seg.get("booking_id") or 0) == int(exclude_booking_id):
+            continue
+        seg_range = TimeRangeMinutes(
+            start_minutes=int(seg["start_minutes"]),
+            end_minutes=int(seg["end_minutes"]),
+        )
+        if _interval_overlaps(service_range, seg_range):
+            return True
+    for seg in occ.get("block_segments") or []:
+        if int(seg.get("master_id") or 0) != int(master_id):
             continue
         seg_range = TimeRangeMinutes(
             start_minutes=int(seg["start_minutes"]),
@@ -230,6 +250,34 @@ def is_master_available_for_work_plan(
         start_m=start_m,
         end_m=end_m,
         exclude_plan_id=exclude_plan_id,
+    ):
+        return False
+    return True
+
+
+def is_master_available_for_booking(
+    db: Session,
+    *,
+    master_id: int,
+    start_dt: datetime,
+    end_dt: datetime,
+    exclude_booking_id: int | None = None,
+) -> bool:
+    """
+    Доступность мастера для брони/консультации:
+    график смены + перерыв + «Занять время» + другие брони/консультации + планы работ.
+    """
+    if not is_master_available_for_interval(db, master_id=master_id, start_dt=start_dt, end_dt=end_dt):
+        return False
+    start_m = start_dt.hour * 60 + start_dt.minute
+    end_m = end_dt.hour * 60 + end_dt.minute
+    if master_interval_overlaps_occupancy(
+        db,
+        master_id=master_id,
+        d=start_dt.date(),
+        start_m=start_m,
+        end_m=end_m,
+        exclude_booking_id=exclude_booking_id,
     ):
         return False
     return True

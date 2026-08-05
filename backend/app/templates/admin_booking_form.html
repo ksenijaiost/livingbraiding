@@ -1663,6 +1663,9 @@
         return readDurationMinutesFromInputs(els.on, els.h, els.m);
       }
 
+      var bookingFormEl = document.querySelector('form[data-initial-master-ids]') || bookingForm;
+      var editingBookingId = bookingFormEl ? toInt(bookingFormEl.getAttribute('data-booking-id')) : 0;
+
       async function fetchAllowSet(day, t, sid, durationMinutes) {
         if (!day || !t || !sid) return new Set();
         var url =
@@ -1670,6 +1673,7 @@
           '\x26t=' + encodeURIComponent(t) +
           '\x26service_id=' + encodeURIComponent(String(sid));
         if (durationMinutes != null) url += '\x26duration_minutes=' + encodeURIComponent(String(durationMinutes));
+        if (editingBookingId > 0) url += '\x26exclude_booking_id=' + encodeURIComponent(String(editingBookingId));
         var res = await fetch(url);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         var data = await res.json();
@@ -1683,6 +1687,7 @@
           '\x26t=' + encodeURIComponent(t) +
           '\x26for_consultation=1';
         if (durationMinutes != null) url += '\x26duration_minutes=' + encodeURIComponent(String(durationMinutes));
+        if (editingBookingId > 0) url += '\x26exclude_booking_id=' + encodeURIComponent(String(editingBookingId));
         var res = await fetch(url);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         var data = await res.json();
@@ -1699,18 +1704,6 @@
         }
         return 60;
       }
-
-      var bookingFormEl = document.querySelector('form[data-initial-master-ids]') || bookingForm;
-      var initialMasterIds = new Set(
-        String((bookingFormEl && bookingFormEl.getAttribute('data-initial-master-ids')) || '')
-          .split(',')
-          .map(function (x) { return String(x).trim(); })
-          .filter(function (x) { return !!x; })
-      );
-      var initialConsultMasterId = String(
-        (bookingFormEl && bookingFormEl.getAttribute('data-initial-consultation-master-id')) || ''
-      ).trim();
-      var editingBookingId = bookingFormEl ? toInt(bookingFormEl.getAttribute('data-booking-id')) : 0;
 
       async function refreshAvailableMasters() {
         var kindVisit = !!((document.querySelector('input[name="kind"][value="VISIT"]') || {}).checked);
@@ -1735,15 +1728,14 @@
             var radios = Array.from(document.querySelectorAll('input[name="consultation_master_id"]'));
             for (var ri = 0; ri < radios.length; ri++) {
               var rb = radios[ri];
-              var keepAssigned = editingBookingId > 0 && initialConsultMasterId && initialConsultMasterId === String(rb.value);
-              var ok = allow.has(String(rb.value)) || keepAssigned;
+              var ok = allow.has(String(rb.value));
               rb.disabled = !ok;
-              if (!ok && !keepAssigned) rb.checked = false;
+              if (!ok) rb.checked = false;
             }
             if (msgConsult) msgConsult.textContent = allow.size ? '' : 'На выбранное время доступных мастеров нет.';
           } catch (e) {
             console.error('refreshAvailableMasters (consultation) failed', e);
-            var errTxt = 'Не удалось проверить график мастеров.';
+            var errTxt = 'Не удалось проверить занятость мастеров.';
             if (e && e.message) errTxt += ' (' + String(e.message) + ')';
             if (msgConsult) msgConsult.textContent = errTxt;
           }
@@ -1796,7 +1788,7 @@
           }
         } catch (e) {
           console.error('refreshAvailableMasters failed', e);
-          var errTxt = 'Не удалось проверить график мастеров.';
+          var errTxt = 'Не удалось проверить занятость мастеров.';
           if (e && e.message) errTxt += ' (' + String(e.message) + ')';
           if (msgAll) msgAll.textContent = errTxt;
           if (msgLine0) msgLine0.textContent = errTxt;
@@ -1824,10 +1816,9 @@
           if (!intersect) intersect = new Set();
           for (var ci = 0; ci < allCbs.length; ci++) {
             var cb = allCbs[ci];
-            var keepAssigned = editingBookingId > 0 && initialMasterIds.has(String(cb.value));
-            var ok = intersect.has(String(cb.value)) || keepAssigned;
+            var ok = intersect.has(String(cb.value));
             cb.disabled = !ok;
-            if (!ok && !keepAssigned) cb.checked = false;
+            if (!ok) cb.checked = false;
           }
           if (msgAll) msgAll.textContent = intersect.size ? '' : 'На выбранные услуги/время доступных мастеров нет.';
         } else {
@@ -1838,10 +1829,9 @@
             var cbs = Array.from(document.querySelectorAll('input[data-line-master="' + lid + '"]'));
             for (var cc = 0; cc < cbs.length; cc++) {
               var cb2 = cbs[cc];
-              var keepAssigned2 = editingBookingId > 0 && initialMasterIds.has(String(cb2.value));
-              var ok2 = (allow ? allow.has(String(cb2.value)) : false) || keepAssigned2;
+              var ok2 = allow ? allow.has(String(cb2.value)) : false;
               cb2.disabled = !ok2;
-              if (!ok2 && !keepAssigned2) cb2.checked = false;
+              if (!ok2) cb2.checked = false;
             }
             var msg = (lid === 0) ? msgLine0 : ((function () {
               var row = lineRowEl(lid);
@@ -2286,7 +2276,7 @@
     </div>
   </div>
 
-  <script src="/static/calendar_occupancy_grid.js?v=20260723"></script>
+  <script src="/static/calendar_occupancy_grid.js?v=20260805"></script>
   <script>
     (function () {
       function esc(s) {
