@@ -90,7 +90,7 @@ from app.media_store import delete_media_by_url, get_nonempty_upload, save_uploa
 from app.time_utils import utcnow_naive
 from app.user_roles import select_users_with_any_role, select_users_with_role
 from app.work_products import _rubber_type_items
-from app.master_schedule import is_master_available_for_interval
+from app.work_plan import is_master_available_for_booking
 from app.ui_service_display import booking_list_detail_parts
 from app.webui import templates, ctx as _ctx
 
@@ -808,23 +808,30 @@ def _validate_consultation_booking_availability(
     planned_time: str,
     master_id: int,
     duration_minutes: int,
+    exclude_booking_id: int | None = None,
 ) -> str | None:
     tm = _parse_hhmm_to_time(planned_time)
     if tm is None:
         return "Укажите время консультации."
     dur = int(duration_minutes or 0) or CONSULTATION_BOOKING_DEFAULT_DURATION_MINUTES
+    if dur <= 0:
+        return "Укажите длительность консультации (мин)."
     start_dt = datetime.combine(local_day, tm)
     end_dt = start_dt + timedelta(minutes=dur)
-    if is_master_available_for_interval(
+    if is_master_available_for_booking(
         db,
         master_id=master_id,
         start_dt=start_dt,
         end_dt=end_dt,
+        exclude_booking_id=exclude_booking_id,
     ):
         return None
     u = db.get(User, master_id)
     name = (u.display_name or u.username) if u else f"#{master_id}"
-    return f"Мастер недоступен по графику на выбранное время: {name}"
+    return (
+        f"Мастер недоступен на выбранное время (график, другая бронь/консультация, "
+        f"план работ или занятость): {name}"
+    )
 
 
 def _consultation_types_data_from_booking_details(details: dict[str, Any]) -> dict[str, Any]:
@@ -1120,6 +1127,7 @@ def _validate_booking_visit_line_availability(
     local_day: date,
     line_specs: list[dict[str, Any]],
     duration_override_minutes: int = 0,
+    exclude_booking_id: int | None = None,
 ) -> str | None:
     unavailable_names: list[str] = []
     seen_mid: set[int] = set()
@@ -1135,7 +1143,7 @@ def _validate_booking_visit_line_availability(
         elif duration_override_minutes > 0 and len(line_specs) == 1:
             dur = int(duration_override_minutes)
         if dur <= 0:
-            continue
+            return "Укажите длительность услуги (мин) — без неё нельзя проверить занятость мастера."
         start_dt, end_dt, master_start_dt = _line_master_time_info(
             spec,
             local_day=local_day,
@@ -1145,11 +1153,12 @@ def _validate_booking_visit_line_availability(
             mid_start_dt = master_start_dt.get(mid, start_dt)
             if mid_start_dt >= end_dt:
                 return "Индивидуальное время мастера должно быть раньше общего окончания услуги."
-            if is_master_available_for_interval(
+            if is_master_available_for_booking(
                 db,
                 master_id=mid,
                 start_dt=mid_start_dt,
                 end_dt=end_dt,
+                exclude_booking_id=exclude_booking_id,
             ):
                 continue
             if mid in seen_mid:
@@ -1158,7 +1167,10 @@ def _validate_booking_visit_line_availability(
             u = db.get(User, mid)
             unavailable_names.append((u.display_name or u.username) if u else f"#{mid}")
     if unavailable_names:
-        return "Следующие мастера недоступны по графику на выбранное время: " + ", ".join(unavailable_names)
+        return (
+            "Следующие мастера недоступны на выбранное время (график, другая бронь/консультация, "
+            "план работ или занятость): " + ", ".join(unavailable_names)
+        )
     return None
 
 
@@ -3037,6 +3049,7 @@ async def admin_booking_edit_post(
             local_day=local_day,
             line_specs=planned_service_lines,
             duration_override_minutes=dur_override,
+            exclude_booking_id=int(b.id),
         )
     elif (
         not err
@@ -3052,6 +3065,7 @@ async def admin_booking_edit_post(
             planned_time=str(fp.get("planned_time") or ""),
             master_id=consultation_master_id,
             duration_minutes=_consultation_booking_duration_minutes(fp),
+            exclude_booking_id=int(b.id),
         )
 
     if err:

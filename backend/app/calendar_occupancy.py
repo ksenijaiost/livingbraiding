@@ -180,6 +180,7 @@ def build_occupancy_for_day(
     hour_to: int,
     bookings: list[Booking] | None = None,
     exclude_work_plan_id: int | None = None,
+    exclude_booking_id: int | None = None,
 ) -> dict[str, Any]:
     tz_name = get_display_timezone(db)
     tz = ZoneInfo(tz_name)
@@ -214,6 +215,8 @@ def build_occupancy_for_day(
 
     for b in bookings:
         if b.kind not in (BookingKind.VISIT, BookingKind.CONSULTATION) or b.status == BookingStatus.CANCELLED:
+            continue
+        if exclude_booking_id and int(b.id) == int(exclude_booking_id):
             continue
         status = b.status
         color = occupancy_color_for_booking(status, kind=b.kind)

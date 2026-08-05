@@ -13,7 +13,7 @@ from app.consultation_booking import booking_status_label
 from app.consultation_types import format_types_display
 from app.calendar_display import get_calendar_display_hours
 from app.calendar_occupancy import build_occupancy_for_day, list_calendar_masters
-from app.master_schedule import is_master_available_for_interval
+from app.work_plan import is_master_available_for_booking
 from app.db.models import (
     Booking,
     BookingKind,
@@ -527,13 +527,14 @@ def api_booking_available_masters(
     service_id: int | None = Query(None),
     duration_minutes: int | None = None,
     for_consultation: int | None = Query(None),
+    exclude_booking_id: int | None = Query(None),
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     """
-    Для админ-формы брони: какие мастера доступны по графику на выбранную дату/время.
-    Для визита — интервал из estimated_duration_minutes услуги (или duration_minutes).
-    Для консультации — for_consultation=1, по умолчанию 60 мин.
+    Для админ-формы брони: какие мастера доступны на выбранную дату/время.
+    Учитывает график, другие брони/консультации, планы работ и «Занять время».
+    exclude_booking_id — при редактировании не считать конфликт с самой редактируемой бронью.
     """
     try:
         day = date.fromisoformat((d or "").strip())
@@ -560,15 +561,22 @@ def api_booking_available_masters(
             raise HTTPException(status_code=400, detail="service not found")
         dur_min = int(duration_minutes or 0) or int(svc.estimated_duration_minutes or 0)
     if dur_min <= 0:
-        return JSONResponse({"available_master_ids": []})
+        return JSONResponse({"available_master_ids": [], "error": "duration_required"})
 
     start_dt = datetime.combine(day, tm)
     end_dt = start_dt + timedelta(minutes=dur_min)
+    excl = int(exclude_booking_id) if exclude_booking_id else None
 
     available: list[int] = []
     for m in list_calendar_masters(db):
         mid = int(m["id"])
-        if is_master_available_for_interval(db, master_id=mid, start_dt=start_dt, end_dt=end_dt):
+        if is_master_available_for_booking(
+            db,
+            master_id=mid,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            exclude_booking_id=excl,
+        ):
             available.append(mid)
 
     return JSONResponse({"available_master_ids": available})
