@@ -1339,9 +1339,14 @@ class HourlyWorkEntry(Base):
     master_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     work_plan_id: Mapped[int | None] = mapped_column(ForeignKey("work_plans.id"), nullable=True)
 
+    is_voided: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
     created_by_user: Mapped["User | None"] = relationship(foreign_keys=[created_by_user_id])
     master_user: Mapped["User"] = relationship(foreign_keys=[master_user_id])
     work_plan: Mapped["WorkPlan | None"] = relationship(foreign_keys=[work_plan_id])
+    voided_by_user: Mapped["User | None"] = relationship(foreign_keys=[voided_by_user_id])
 
 
 class Visit(Base):

@@ -3778,6 +3778,7 @@ def master_activity_archive(
                     HourlyWorkEntry.master_user_id == mid,
                     HourlyWorkEntry.performed_date >= start,
                     HourlyWorkEntry.performed_date < end_excl,
+                    HourlyWorkEntry.is_voided.is_(False),
                 )
                 .order_by(HourlyWorkEntry.performed_date.desc(), HourlyWorkEntry.id.desc())
             ).all()

@@ -11,6 +11,7 @@ from app.db.models import (
     Booking,
     Client,
     Consultation,
+    HourlyWorkEntry,
     Kit,
     KitAuditLog,
     KitReserve,
@@ -21,6 +22,8 @@ from app.db.models import (
     VisitAuditLog,
     VisitKitUsage,
     WorkForInventory,
+    WorkPlan,
+    WorkPlanStatus,
 )
 from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.forms_parse import parse_int
@@ -148,10 +151,10 @@ def purge_work_hard(db: Session, work_id: int, *, actor_user_id: int | None) -> 
 
 
 def purge_consultation_hard(db: Session, consultation_id: int, *, actor_user_id: int | None) -> None:
-    """Сторно ЗП и удаление консультации (для каскада клиента)."""
+    """Сторно ЗП и удаление консультации."""
     cons = db.get(Consultation, int(consultation_id))
     if cons is None:
-        return
+        raise ValueError("Консультация не найдена.")
     _storno_consultation(db, int(cons.id), actor_user_id)
     db.execute(
         update(Booking).where(Booking.consultation_id == int(cons.id)).values(consultation_id=None)
@@ -159,6 +162,30 @@ def purge_consultation_hard(db: Session, consultation_id: int, *, actor_user_id:
     cons.source_booking_id = None
     db.flush()
     db.delete(cons)
+
+
+def purge_hourly_work_hard(db: Session, entry_id: int, *, actor_user_id: int | None) -> None:
+    """Сторно ЗП и удаление почасовой работы."""
+    entry = db.get(HourlyWorkEntry, int(entry_id))
+    if entry is None:
+        raise ValueError("Почасовая работа не найдена.")
+    plan_id = int(entry.work_plan_id) if entry.work_plan_id else None
+    storno_source_accruals(db, PayrollFundSourceKind.HOURLY_WORK, int(entry.id), actor_user_id)
+    db.delete(entry)
+    db.flush()
+    if plan_id is not None:
+        plan = db.get(WorkPlan, plan_id)
+        if plan is not None and plan.status == WorkPlanStatus.COMPLETED:
+            still = db.scalar(
+                select(HourlyWorkEntry.id).where(
+                    HourlyWorkEntry.work_plan_id == plan_id,
+                    HourlyWorkEntry.is_voided.is_(False),
+                ).limit(1)
+            )
+            if still is None:
+                plan.status = WorkPlanStatus.PLANNED
+                plan.completed_at = None
+                plan.updated_at = utcnow_naive()
 
 
 def purge_client_hard(db: Session, client_id: int, *, actor_user_id: int | None) -> None:
@@ -221,6 +248,10 @@ def run_purge(
         purge_product_sale_hard(db, int(entity_id), actor_user_id=actor_user_id)
     elif kind == "work":
         purge_work_hard(db, int(entity_id), actor_user_id=actor_user_id)
+    elif kind == "consultation":
+        purge_consultation_hard(db, int(entity_id), actor_user_id=actor_user_id)
+    elif kind == "hourly_work":
+        purge_hourly_work_hard(db, int(entity_id), actor_user_id=actor_user_id)
     elif kind == "client":
         purge_client_hard(db, int(entity_id), actor_user_id=actor_user_id)
     elif kind == "kit":
@@ -394,6 +425,55 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
             lines.append(f"Созданный комплект (kit id): {w.created_kit_id}")
         return {"ok": True, "heading": f"Работа с товарами #{eid}", "lines": lines}
 
+    if kind == "consultation":
+        cons = db.scalar(
+            select(Consultation)
+            .options(selectinload(Consultation.client), selectinload(Consultation.created_by_user))
+            .where(Consultation.id == eid)
+        )
+        if cons is None:
+            return {"ok": False, "error": "Консультация не найдена."}
+        cname = (cons.client.name or "").strip() if cons.client else "—"
+        phone = (cons.client.phone or "").strip() if cons.client else ""
+        master = "—"
+        if cons.created_by_user:
+            master = (cons.created_by_user.display_name or cons.created_by_user.username or "").strip() or "—"
+        lines = [
+            f"Клиент: {cname}" + (f", {phone}" if phone else ""),
+            f"Дата: {_fmt_dt(cons.consultation_date, tz)}",
+            f"Мастер (создал): {master}",
+        ]
+        if cons.duration_minutes:
+            lines.append(f"Длительность: {int(cons.duration_minutes)} мин")
+        if (cons.preliminary_cost_text or "").strip():
+            lines.append(f"Ориентир: {(cons.preliminary_cost_text or '').strip()}")
+        return {"ok": True, "heading": f"Консультация #{eid}", "lines": lines}
+
+    if kind == "hourly_work":
+        entry = db.scalar(
+            select(HourlyWorkEntry)
+            .options(selectinload(HourlyWorkEntry.master_user))
+            .where(HourlyWorkEntry.id == eid)
+        )
+        if entry is None:
+            return {"ok": False, "error": "Почасовая работа не найдена."}
+        master = "—"
+        if entry.master_user:
+            master = (entry.master_user.display_name or entry.master_user.username or "").strip() or "—"
+        voided = "да" if entry.is_voided else "нет"
+        lines = [
+            f"Мастер: {master}",
+            f"Дата: {_fmt_dt(entry.performed_date, tz)}",
+            f"Длительность: {int(entry.duration_minutes or 0)} мин",
+            f"Сумма: {float(entry.amount or 0):.0f} ₽",
+            f"Аннулирована: {voided}",
+        ]
+        if entry.work_plan_id:
+            lines.append(f"План работ: #{int(entry.work_plan_id)}")
+        if (entry.comment or "").strip():
+            lines.append(f"Комментарий: {(entry.comment or '').strip()}")
+        return {"ok": True, "heading": f"Почасовая работа #{eid}", "lines": lines}
+
     if kind == "client":
         c = db.get(Client, eid)
         if c is None:
@@ -409,8 +489,9 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
         b_n = int(db.scalar(select(func.count()).select_from(Booking).where(Booking.client_id == cid)) or 0)
         s_n = int(db.scalar(select(func.count()).select_from(ProductSale).where(ProductSale.client_id == cid)) or 0)
         w_n = int(db.scalar(select(func.count()).select_from(WorkForInventory).where(WorkForInventory.client_id == cid)) or 0)
+        cons_n = int(db.scalar(select(func.count()).select_from(Consultation).where(Consultation.client_id == cid)) or 0)
         lines.append(
-            f"Связано (будет удалено/отвязано): визитов {v_n}, броней {b_n}, продаж {s_n}, работ {w_n}"
+            f"Связано (будет удалено/отвязано): визитов {v_n}, броней {b_n}, продаж {s_n}, работ {w_n}, консультаций {cons_n}"
         )
         return {"ok": True, "heading": f"Клиент #{eid}", "lines": lines}
 

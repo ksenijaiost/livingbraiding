@@ -6,11 +6,26 @@
       <a href="/hourly-work/new"><button type="button">Добавить</button></a>
     </div>
 
+    <p style="margin:12px 0 0;font-size:13px;">
+      {% if show_voided %}
+        <strong>С аннулированными</strong>
+        <span class="muted">·</span>
+        <a href="{{ list_url_active_only }}">Только действующие</a>
+      {% else %}
+        <strong>Только действующие</strong>
+        <span class="muted">·</span>
+        <a href="{{ list_url_include_voided }}">Показать с аннулированными</a>
+      {% endif %}
+    </p>
+
     {% if msg == 'created' %}
       <div class="ok" style="margin-top:12px;">Запись сохранена, ЗП начислена.</div>
     {% endif %}
     {% if msg == 'saved' %}
       <div class="ok" style="margin-top:12px;">Изменения сохранены.</div>
+    {% endif %}
+    {% if msg == 'voided' %}
+      <div class="ok" style="margin-top:12px;">Запись аннулирована.</div>
     {% endif %}
 
     {% if rows %}
@@ -27,13 +42,14 @@
           </thead>
           <tbody>
             {% for row in rows %}
-              <tr style="border-bottom:1px solid #f1f5f9;">
+              <tr style="border-bottom:1px solid #f1f5f9;{% if row.is_voided %} opacity:0.55;{% endif %}">
                 <td style="padding:8px; white-space:nowrap;">
                   <a href="/hourly-work/{{ row.id }}">{{ row.performed_date.strftime('%d.%m.%Y') }}</a>
+                  {% if row.is_voided %}<span class="muted" style="font-size:12px;"> (аннулировано)</span>{% endif %}
                 </td>
                 <td style="padding:8px; white-space:nowrap;">{{ row.master_user.display_name or row.master_user.username }}</td>
-                <td style="padding:8px; white-space:nowrap;">{{ duration_display(row.duration_minutes) }}</td>
-                <td style="padding:8px; white-space:nowrap;">{{ "%.0f"|format(row.amount) }} ₽</td>
+                <td style="padding:8px; white-space:nowrap;{% if row.is_voided %} text-decoration:line-through;{% endif %}">{{ duration_display(row.duration_minutes) }}</td>
+                <td style="padding:8px; white-space:nowrap;{% if row.is_voided %} text-decoration:line-through;{% endif %}">{{ "%.0f"|format(row.amount) }} ₽</td>
                 <td style="padding:8px;" class="muted">{{ row.comment or '—' }}</td>
               </tr>
             {% endfor %}

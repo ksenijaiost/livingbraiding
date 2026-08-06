@@ -427,6 +427,7 @@ def api_calendar_day(
         .where(
             HourlyWorkEntry.performed_date >= day_start,
             HourlyWorkEntry.performed_date < day_end,
+            HourlyWorkEntry.is_voided.is_(False),
         )
         .order_by(HourlyWorkEntry.performed_date.asc(), HourlyWorkEntry.id.asc())
     )

@@ -782,6 +782,7 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
             select(HourlyWorkEntry).where(
                 HourlyWorkEntry.performed_date >= start,
                 HourlyWorkEntry.performed_date < end_excl,
+                HourlyWorkEntry.is_voided.is_(False),
             )
         ).all()
     )
@@ -1499,6 +1500,7 @@ def list_report_hourly(db: Session, d0: date, d1: date) -> list[ReportFundCompar
             .where(
                 HourlyWorkEntry.performed_date >= start,
                 HourlyWorkEntry.performed_date < end_excl,
+                HourlyWorkEntry.is_voided.is_(False),
             )
         ).all()
     )

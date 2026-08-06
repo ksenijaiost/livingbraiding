@@ -206,3 +206,62 @@ def test_can_access_hourly_work_entry():
     assert can_access_hourly_work_entry(entry, current_user_id=10, is_admin=False) is True
     assert can_access_hourly_work_entry(entry, current_user_id=11, is_admin=False) is False
     assert can_access_hourly_work_entry(entry, current_user_id=11, is_admin=True) is True
+
+
+def test_void_hourly_work_stornos_ledger(memory_db):
+    from app.hourly_work import void_hourly_work_entry
+
+    master = _seed_master(memory_db, uid=10)
+    admin = User(
+        id=1,
+        username="admin",
+        display_name="Admin",
+        password_hash="x",
+        role=UserRole.ADMIN_SUPER,
+        is_active=True,
+    )
+    memory_db.add(admin)
+    memory_db.flush()
+    memory_db.add(UserRoleAssignment(user_id=admin.id, role=UserRole.ADMIN_SUPER))
+    memory_db.add(
+        PayrollPeriod(
+            date_from=datetime(2020, 1, 1),
+            date_to=datetime(2030, 12, 31, 23, 59, 59),
+            closed_at=None,
+        )
+    )
+    memory_db.commit()
+
+    entry = HourlyWorkEntry(
+        performed_date=datetime(2026, 7, 20),
+        duration_minutes=60,
+        amount=500.0,
+        comment=None,
+        master_user_id=int(master.id),
+    )
+    saved = create_hourly_work_entry(memory_db, entry, created_by_user_id=int(admin.id))
+    voided = void_hourly_work_entry(memory_db, saved, voided_by_user_id=int(admin.id))
+    assert voided.is_voided is True
+    assert voided.voided_at is not None
+
+    accruals = list(
+        memory_db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.HOURLY_WORK,
+                PayrollFundLedger.source_id == int(saved.id),
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+            )
+        ).all()
+    )
+    assert len(accruals) >= 1
+    # после сторно чистый ACCRUAL по мастеру с учётом сторно = 0 (есть storno_of)
+    stornos = list(
+        memory_db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.HOURLY_WORK,
+                PayrollFundLedger.source_id == int(saved.id),
+                PayrollFundLedger.storno_of_id.is_not(None),
+            )
+        ).all()
+    )
+    assert len(stornos) >= 1

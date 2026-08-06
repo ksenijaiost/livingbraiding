@@ -414,6 +414,7 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
                 HourlyWorkEntry.master_user_id == master_id,
                 HourlyWorkEntry.performed_date >= visit_start,
                 HourlyWorkEntry.performed_date < visit_end,
+                HourlyWorkEntry.is_voided.is_(False),
             )
             .order_by(HourlyWorkEntry.performed_date.desc(), HourlyWorkEntry.id.desc())
         ).all()

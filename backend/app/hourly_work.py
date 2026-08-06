@@ -8,13 +8,19 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import HourlyWorkEntry, User, UserRole
+from app.db.models import HourlyWorkEntry, User, UserRole, WorkPlan, WorkPlanStatus
 from app.forms_parse import parse_date_iso, parse_float, parse_int
 from app.hourly_help import format_hourly_help_duration
-from app.payroll_fund import post_hourly_work_accruals, replace_hourly_work_accruals
+from app.payroll_fund import (
+    PayrollFundSourceKind,
+    post_hourly_work_accruals,
+    replace_hourly_work_accruals,
+    storno_source_accruals,
+)
+from app.time_utils import utcnow_naive
 from app.user_roles import select_users_with_role, user_has_role
 from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
-from app.work_plan import complete_work_plan_from_hourly_work, validate_work_plan_for_hourly_entry
+from app.work_plan import complete_work_plan_from_hourly_work, linked_hourly_work_for_plan, validate_work_plan_for_hourly_entry
 
 
 def list_masters_for_hourly_work_form(db: Session) -> list[User]:
@@ -171,6 +177,8 @@ def update_hourly_work_entry(
     is_admin: bool,
 ) -> HourlyWorkEntry:
     """Обновить запись и пересчитать проводки ЗП/фонда студии."""
+    if entry.is_voided:
+        raise ValueError("Запись аннулирована — редактирование недоступно.")
     ensure_event_date_in_open_payroll_period(db, draft.performed_date)
     master_id = int(draft.master_user_id) if is_admin else int(entry.master_user_id)
     err = validate_hourly_work_master(db, master_id)
@@ -185,6 +193,39 @@ def update_hourly_work_entry(
     # Связь с планом не меняем при правке.
     db.flush()
     replace_hourly_work_accruals(db, entry, updated_by_user_id)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+def void_hourly_work_entry(
+    db: Session,
+    entry: HourlyWorkEntry,
+    *,
+    voided_by_user_id: int,
+) -> HourlyWorkEntry:
+    """Аннулировать почасовую работу: сторно ЗП, при необходимости открыть план работ."""
+    if entry.is_voided:
+        raise ValueError("Запись уже аннулирована.")
+    ensure_event_date_in_open_payroll_period(db, entry.performed_date)
+    storno_source_accruals(
+        db,
+        PayrollFundSourceKind.HOURLY_WORK,
+        int(entry.id),
+        voided_by_user_id,
+    )
+    entry.is_voided = True
+    entry.voided_at = utcnow_naive()
+    entry.voided_by_user_id = int(voided_by_user_id)
+    db.flush()
+    if entry.work_plan_id is not None:
+        plan = db.get(WorkPlan, int(entry.work_plan_id))
+        if plan is not None and plan.status == WorkPlanStatus.COMPLETED:
+            still_linked = linked_hourly_work_for_plan(db, int(plan.id))
+            if still_linked is None:
+                plan.status = WorkPlanStatus.PLANNED
+                plan.completed_at = None
+                plan.updated_at = utcnow_naive()
     db.commit()
     db.refresh(entry)
     return entry

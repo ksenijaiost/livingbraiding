@@ -390,7 +390,10 @@ def linked_work_for_plan(db: Session, plan_id: int) -> WorkForInventory | None:
 def linked_hourly_work_for_plan(db: Session, plan_id: int) -> HourlyWorkEntry | None:
     return db.scalar(
         select(HourlyWorkEntry)
-        .where(HourlyWorkEntry.work_plan_id == plan_id)
+        .where(
+            HourlyWorkEntry.work_plan_id == plan_id,
+            HourlyWorkEntry.is_voided.is_(False),
+        )
         .order_by(HourlyWorkEntry.id.desc())
         .limit(1)
     )
