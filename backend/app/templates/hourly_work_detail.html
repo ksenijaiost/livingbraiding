@@ -2,7 +2,7 @@
 {% block content %}
   <div class="card lb-card-max-980">
     <p class="muted" style="margin-top:0;"><a href="/hourly-work">← Почасовая работа</a></p>
-    <h2 style="margin-top:0;">Почасовая работа #{{ entry.id }}</h2>
+    <h2 style="margin-top:0;">Почасовая работа #{{ entry.id }}{% if entry.is_voided %} <span class="muted" style="font-size:1rem;">(аннулировано)</span>{% endif %}</h2>
 
     {% if msg == 'created' %}
       <div class="ok" style="margin-bottom:12px;">Запись сохранена, ЗП начислена.</div>
@@ -10,8 +10,14 @@
     {% if msg == 'saved' %}
       <div class="ok" style="margin-bottom:12px;">Изменения сохранены, ЗП пересчитана.</div>
     {% endif %}
+    {% if msg == 'voided' %}
+      <div class="ok" style="margin-bottom:12px;">Запись аннулирована, начисления ЗП сторнированы.</div>
+    {% endif %}
+    {% if msg == 'void_error' %}
+      <div class="error" style="margin-bottom:12px;">Не удалось аннулировать. Проверьте, что дата в открытом периоде ЗП.</div>
+    {% endif %}
     {% if error %}
-      <p style="background:#fee2e2;border:1px solid #fecaca;color:#991b1b;padding:10px 12px;border-radius:8px;">{{ error }}</p>
+      <p class="error">{{ error }}</p>
     {% endif %}
 
     <table style="margin:12px 0; width:100%;">
@@ -30,8 +36,20 @@
           <td><a href="/work-plans/{{ entry.work_plan_id }}">#{{ entry.work_plan_id }}</a></td>
         </tr>
       {% endif %}
+      {% if entry.is_voided %}
+        <tr>
+          <td class="muted">Аннулировано</td>
+          <td>
+            {{ entry.voided_at|dt_local if entry.voided_at else '—' }}
+            {% if entry.voided_by_user %}
+              · {{ entry.voided_by_user.display_name or entry.voided_by_user.username }}
+            {% endif %}
+          </td>
+        </tr>
+      {% endif %}
     </table>
 
+    {% if can_edit %}
     <form method="post" action="/hourly-work/{{ entry.id }}">
       <div class="row" style="align-items:flex-end;">
         <div>
@@ -80,10 +98,46 @@
         При сохранении ЗП мастера и списание с фонда студии пересчитываются.
       </p>
 
-      <p style="margin-top:16px;">
+      <p style="margin-top:16px; display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
         <button type="submit">Сохранить</button>
         <a href="/hourly-work"><button type="button" class="secondary">К списку</button></a>
       </p>
     </form>
+
+    <form method="post" action="/hourly-work/{{ entry.id }}/void" style="margin-top:20px; padding-top:16px; border-top:1px solid #e5e7eb;"
+          onsubmit="return confirm('Аннулировать запись? Начисления ЗП будут сторнированы.');">
+      <button type="submit" class="secondary" style="color:#991b1b;">Аннулировать</button>
+    </form>
+    {% else %}
+      <div class="card" style="margin-top:14px; background:#f8fafc;">
+        <div class="row" style="align-items:flex-end;">
+          <div>
+            <div class="muted" style="font-size:12px;">Дата</div>
+            <div>{{ fp.get('performed_date','') }}</div>
+          </div>
+          <div>
+            <div class="muted" style="font-size:12px;">Длительность</div>
+            <div>{{ duration_display(entry.duration_minutes) }}</div>
+          </div>
+          <div>
+            <div class="muted" style="font-size:12px;">Сумма</div>
+            <div>{{ "%.0f"|format(entry.amount) }} ₽</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;">
+          <div class="muted" style="font-size:12px;">Мастер</div>
+          <div>{{ entry.master_user.display_name or entry.master_user.username }}</div>
+        </div>
+        {% if entry.comment %}
+          <div style="margin-top:12px;">
+            <div class="muted" style="font-size:12px;">Комментарий</div>
+            <div>{{ entry.comment }}</div>
+          </div>
+        {% endif %}
+      </div>
+      <p style="margin-top:16px;">
+        <a href="/hourly-work"><button type="button" class="secondary">К списку</button></a>
+      </p>
+    {% endif %}
   </div>
 {% endblock %}

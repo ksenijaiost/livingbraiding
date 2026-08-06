@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth import AuthUser, require_role
 from app.db.models import HourlyWorkEntry, UserRole
 from app.db.session import get_db
+from app.forms_parse import parse_bool
 from app.hourly_work import (
     can_access_hourly_work_entry,
     create_hourly_work_entry,
@@ -18,6 +20,7 @@ from app.hourly_work import (
     list_masters_for_hourly_work_form,
     parse_hourly_work_form,
     update_hourly_work_entry,
+    void_hourly_work_entry,
 )
 from app.webui import ctx as _ctx
 from app.webui import templates
@@ -31,7 +34,21 @@ def _is_admin_user(user: AuthUser) -> bool:
     return UserRole.ADMIN in user.roles or UserRole.ADMIN_SUPER in user.roles
 
 
-def _list_entries(db: Session, current_user: AuthUser, *, limit: int = 100) -> list[HourlyWorkEntry]:
+def _hourly_list_url(*, show_voided: bool) -> str:
+    qparams: dict[str, str] = {}
+    if show_voided:
+        qparams["show_voided"] = "1"
+    qs = urlencode(qparams)
+    return "/hourly-work" + (("?" + qs) if qs else "")
+
+
+def _list_entries(
+    db: Session,
+    current_user: AuthUser,
+    *,
+    show_voided: bool,
+    limit: int = 100,
+) -> list[HourlyWorkEntry]:
     stmt = (
         select(HourlyWorkEntry)
         .options(
@@ -41,6 +58,8 @@ def _list_entries(db: Session, current_user: AuthUser, *, limit: int = 100) -> l
         .order_by(HourlyWorkEntry.performed_date.desc(), HourlyWorkEntry.id.desc())
         .limit(limit)
     )
+    if not show_voided:
+        stmt = stmt.where(HourlyWorkEntry.is_voided.is_(False))
     if UserRole.MASTER in current_user.roles and not _is_admin_user(current_user):
         stmt = stmt.where(HourlyWorkEntry.master_user_id == int(current_user.id))
     return list(db.scalars(stmt).all())
@@ -53,6 +72,7 @@ def _get_entry(db: Session, entry_id: int) -> HourlyWorkEntry | None:
             selectinload(HourlyWorkEntry.master_user),
             selectinload(HourlyWorkEntry.created_by_user),
             selectinload(HourlyWorkEntry.work_plan),
+            selectinload(HourlyWorkEntry.voided_by_user),
         )
         .where(HourlyWorkEntry.id == entry_id)
     )
@@ -61,10 +81,12 @@ def _get_entry(db: Session, entry_id: int) -> HourlyWorkEntry | None:
 @router.get("", response_class=HTMLResponse)
 def hourly_work_list(
     request: Request,
+    show_voided: str | None = Query(None),
     current_user: AuthUser = _ACCESS,
     db: Session = Depends(get_db),
 ):
-    rows = _list_entries(db, current_user)
+    include_voided = parse_bool(show_voided)
+    rows = _list_entries(db, current_user, show_voided=include_voided)
     return templates.TemplateResponse(
         "hourly_work_list.html",
         _ctx(
@@ -73,6 +95,9 @@ def hourly_work_list(
             rows=rows,
             duration_display=duration_display,
             msg=request.query_params.get("msg"),
+            show_voided=include_voided,
+            list_url_active_only=_hourly_list_url(show_voided=False),
+            list_url_include_voided=_hourly_list_url(show_voided=True),
         ),
     )
 
@@ -197,8 +222,34 @@ def hourly_work_detail(
             duration_display=duration_display,
             error=None,
             msg=request.query_params.get("msg"),
+            can_edit=not bool(entry.is_voided),
         ),
     )
+
+
+@router.post("/{entry_id}/void")
+async def hourly_work_void(
+    entry_id: int,
+    request: Request,
+    current_user: AuthUser = _ACCESS,
+    db: Session = Depends(get_db),
+):
+    entry = _get_entry(db, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    is_admin = _is_admin_user(current_user)
+    if not can_access_hourly_work_entry(
+        entry, current_user_id=int(current_user.id), is_admin=is_admin
+    ):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    try:
+        void_hourly_work_entry(db, entry, voided_by_user_id=int(current_user.id))
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/hourly-work/{entry_id}?msg=void_error&err={str(exc)}",
+            status_code=303,
+        )
+    return RedirectResponse(url=f"/hourly-work/{entry_id}?msg=voided", status_code=303)
 
 
 @router.post("/{entry_id}")
@@ -237,6 +288,7 @@ async def hourly_work_detail_save(
                 duration_display=duration_display,
                 error=err or "Некорректные данные.",
                 msg=None,
+                can_edit=not bool(entry.is_voided),
             ),
             status_code=400,
         )
@@ -261,6 +313,7 @@ async def hourly_work_detail_save(
                 duration_display=duration_display,
                 error=str(exc),
                 msg=None,
+                can_edit=not bool(entry.is_voided),
             ),
             status_code=400,
         )
