@@ -2,8 +2,8 @@
 {% block content %}
   {% set fp = form_prefill %}
   <div class="card" {% if draft_readonly %}style="pointer-events: none; opacity: 0.92;"{% endif %}>
-    <h2 style="margin-top: 0;">{% if is_edit %}Редактирование визита #{{ edit_visit_id }}{% elif is_draft %}{% if draft_id %}Черновик визита #{{ draft_id }}{% else %}Новый черновик визита{% endif %}{% else %}Новый визит{% endif %}</h2>
-    <p class="muted">Клиент, работа, услуга, материал и анкета по услуге на одной странице. Блок «Комплект» показывается, если это включено для услуги в каталоге.{% if is_draft %} Склад и финальный визит — только при «Сохранить визит».{% elif is_edit %} При сохранении склад и проводки ЗП пересчитываются при изменении комплектов или финансов.{% endif %}</p>
+    <h2 style="margin-top: 0;">{% if is_edit %}Редактирование визита #{{ edit_visit_id }}{% elif draft_id %}Черновик визита #{{ draft_id }}{% else %}Новый визит{% endif %}</h2>
+    <p class="muted">Клиент, работа, услуга, материал и анкета по услуге на одной странице. Блок «Комплект» показывается, если это включено для услуги в каталоге.{% if draft_id %} Склад и финальный визит — только при «Сохранить визит».{% elif is_edit %} При сохранении склад и проводки ЗП пересчитываются при изменении комплектов или финансов.{% else %} «В черновик» сохраняет форму без склада и ЗП.{% endif %}</p>
     {% if closed_period_confirm_required %}
       <div class="card" style="border-color:#f59e0b; background:#fffbeb; margin-bottom: 14px;">
         <strong>Закрытый период ЗП.</strong>
@@ -39,7 +39,7 @@
       </div>
     {% endif %}
     <form method="post"
-      action="{% if is_edit %}/visits/{{ edit_visit_id }}/edit{% elif is_draft %}{% if draft_id %}/master/visit/draft/{{ draft_id }}{% else %}/master/visit/draft{% endif %}{% else %}/master/visit/new{% endif %}"
+      action="{% if is_edit %}/visits/{{ edit_visit_id }}/edit{% elif draft_id %}/master/visit/draft/{{ draft_id }}{% else %}/master/visit/new{% endif %}"
       id="visit-form" enctype="multipart/form-data"
       {% if closed_period_confirm_required %}class="js-closed-period-form" data-closed-action="Сохранение визита"{% endif %}>
       {% if closed_period_confirm_required %}
@@ -701,29 +701,24 @@
       </div>
 
       <p style="margin-top: 16px; pointer-events: auto;">
-        {% if is_draft %}
+        {% if draft_id %}
           {% if not draft_readonly %}
             <button type="submit">Сохранить черновик</button>
-            {% if draft_id %}
-              <button type="submit" formaction="/master/visit/draft/{{ draft_id }}/finalize" formmethod="post" onclick="return confirm('Сохранить визит? Склад будет списан, начисления ЗП созданы.');">Сохранить визит</button>
-            {% endif %}
+            <button type="submit" formaction="/master/visit/draft/{{ draft_id }}/finalize" formmethod="post" onclick="return confirm('Сохранить визит? Склад будет списан, начисления ЗП созданы.');">Сохранить визит</button>
+            <button type="submit" class="secondary" form="visit-draft-unlock-form">Снять блокировку</button>
           {% endif %}
-          {% if draft_id %}
-            <a href="/master/mywork"><button type="button" class="secondary">Моя работа</button></a>
-            {% if not draft_readonly %}
-              <button type="submit" class="secondary" form="visit-draft-unlock-form">Снять блокировку</button>
-            {% endif %}
-          {% endif %}
+          <a href="/master/mywork"><button type="button" class="secondary">Моя работа</button></a>
         {% elif is_edit %}
           <button type="submit">Сохранить изменения</button>
           <a href="{{ cancel_url or ('/visits/' ~ edit_visit_id) }}"><button type="button" class="secondary">Отмена</button></a>
         {% else %}
           <button type="submit">Сохранить визит</button>
+          <button type="submit" class="secondary" formaction="/master/visit/draft" formmethod="post">В черновик</button>
           <a href="/"><button type="button" class="secondary">Отмена</button></a>
         {% endif %}
       </p>
     </form>
-    {% if is_draft and draft_id and not draft_readonly %}
+    {% if draft_id and not draft_readonly %}
       <form id="visit-draft-unlock-form" method="post" action="/master/visit/draft/{{ draft_id }}/unlock"></form>
     {% endif %}
   </div>

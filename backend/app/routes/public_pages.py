@@ -212,6 +212,7 @@ def home(
                 bookings_by_day[_utc_naive_to_local_date(dt0)] += 1
 
         from app.visit_draft import draft_counts_by_day
+        from app.work_draft import draft_counts_by_day as work_draft_counts_by_day
 
         month_end_date = next_month_local_start.date()
         draft_day_counts = draft_counts_by_day(
@@ -222,6 +223,14 @@ def home(
         )
         for d0, cnt in draft_day_counts.items():
             drafts_by_day[d0] = int(cnt)
+        work_draft_day_counts = work_draft_counts_by_day(
+            db,
+            user=current_user,
+            day_from=month_local_start.date(),
+            day_to_excl=month_end_date,
+        )
+        for d0, cnt in work_draft_day_counts.items():
+            drafts_by_day[d0] = int(drafts_by_day.get(d0, 0)) + int(cnt)
 
         if visit_ids:
             if current_user.role == UserRole.MASTER:

@@ -287,7 +287,6 @@
               {% if sections_ctx.is_master %}
                 <a href="/master/mywork"><button type="button" class="secondary">Моя работа</button></a>
                 <a href="/master/visit/new"><button type="button" class="secondary">Новый визит</button></a>
-                <a href="/master/visit/draft/new"><button type="button" class="secondary">Черновик визита</button></a>
                 <a href="/consultations/new"><button type="button" class="secondary">Новая консультация</button></a>
                 <a href="/sales/work/new"><button type="button" class="secondary">Новая работа</button></a>
               {% elif sections_ctx.is_admin %}
@@ -466,6 +465,9 @@
           html += block('Работа', data.works, 'works');
           if (data.drafts && data.drafts.count) {
             html += block('Черновики визита', data.drafts, 'drafts');
+          }
+          if (data.work_drafts && data.work_drafts.count) {
+            html += block('Черновики работы', data.work_drafts, 'work_drafts');
           }
           body.innerHTML = html;
           tt.textContent = data.date || isoDay || '—';

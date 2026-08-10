@@ -1431,6 +1431,120 @@ def _booking_work_new_query_params(db: Session, b: Booking, details: dict[str, A
     return q
 
 
+def _parse_booking_suggest_date(raw: str) -> date | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y", "%d/%m/%Y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def suggest_bookings_for_work_order(db: Session, q: str, *, limit: int = 30) -> list[dict[str, Any]]:
+    """Поиск броней для привязки «работы на заказ»: номер, клиент, дата."""
+    from app.display_time import format_naive_utc_datetime
+
+    needle = (q or "").strip()
+    tz = get_display_timezone(db)
+    no_linked_work = ~exists(
+        select(1).where(
+            WorkForInventory.booking_id == Booking.id,
+            WorkForInventory.is_voided.is_(False),
+        )
+    )
+    stmt = (
+        select(Booking)
+        .options(
+            selectinload(Booking.client),
+            selectinload(Booking.planned_service)
+            .selectinload(Service.subcategory)
+            .selectinload(ServiceSubcategory.category),
+            selectinload(Booking.planned_services).selectinload(BookingPlannedService.service),
+        )
+        .where(
+            Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)),
+            no_linked_work,
+        )
+        .order_by(Booking.planned_date.desc(), Booking.id.desc())
+        .limit(max(1, min(int(limit), 50)))
+    )
+    day = _parse_booking_suggest_date(needle)
+    if day is not None:
+        start_utc = _local_naive_to_utc_naive(datetime.combine(day, time.min), tz)
+        end_utc = _local_naive_to_utc_naive(datetime.combine(day + timedelta(days=1), time.min), tz)
+        stmt = stmt.where(Booking.planned_date >= start_utc, Booking.planned_date < end_utc)
+    elif needle:
+        digits = "".join(ch for ch in needle if ch.isdigit())
+        phone_norm = func.replace(
+            func.replace(
+                func.replace(
+                    func.replace(
+                        func.replace(func.replace(func.coalesce(Client.phone, ""), "+", ""), " ", ""),
+                        "-",
+                        "",
+                    ),
+                    "(",
+                    "",
+                ),
+                ")",
+                "",
+            ),
+            ".",
+            "",
+        )
+        conds: list[Any] = [
+            Client.name.ilike(f"%{needle}%"),
+        ]
+        if digits:
+            conds.append(phone_norm.ilike(f"%{digits}%"))
+            try:
+                bid = int(digits)
+                if bid > 0:
+                    conds.append(Booking.id == bid)
+            except ValueError:
+                pass
+        stmt = stmt.join(Client, Client.id == Booking.client_id).where(or_(*conds))
+
+    rows = list(db.scalars(stmt).all())
+    out: list[dict[str, Any]] = []
+    for b in rows:
+        details_obj: dict[str, Any] = {}
+        if b.details_json:
+            try:
+                raw = json.loads(b.details_json)
+                if isinstance(raw, dict):
+                    details_obj = raw
+            except Exception:
+                details_obj = {}
+        detail_parts = booking_list_detail_parts(
+            b,
+            linked_work=None,
+            linked_visit=None,
+            linked_sale=None,
+            product_kind_label_fn=_product_kind_label,
+        )
+        prefill = _booking_work_new_query_params(db, b, details_obj)
+        date_label = format_naive_utc_datetime(b.planned_date, tz, "%d.%m.%Y %H:%M") if b.planned_date else "—"
+        client_name = b.client.name if b.client else "—"
+        out.append(
+            {
+                "id": int(b.id),
+                "client_id": int(b.client_id) if b.client_id else None,
+                "client_name": client_name,
+                "date_label": date_label,
+                "kind_label": _booking_kind_label(b.kind.value if b.kind else ""),
+                "status_label": _booking_status_label(b.status.value if b.status else ""),
+                "details": detail_parts,
+                "details_text": " · ".join(detail_parts) if detail_parts else "—",
+                "prefill": prefill,
+            }
+        )
+    return out
+
+
 # Поля комплекта/коррекции брони визита — только для услуг с блоком комплекта (иначе из скрытой формы уезжали дефолты).
 _LINE_SERVICE_KIT_FP_RE = re.compile(
     r"^line_(\d+)_(kit_mode|stock_kit_id|stock_kit_pieces|stock_use_entire|stock_breakdown_json|stock_kit_lines_json|"
@@ -3881,6 +3995,11 @@ def master_mywork(
     db: Session = Depends(get_db),
 ):
     from app.visit_draft import draft_summary_label, list_open_drafts_for_master, preview_dict_from_json
+    from app.work_draft import (
+        draft_summary_label as work_draft_summary_label,
+        list_open_drafts_for_master as list_open_work_drafts_for_master,
+        preview_dict_from_json as work_preview_dict_from_json,
+    )
 
     draft_rows: list[dict[str, object]] = []
     for d in list_open_drafts_for_master(db, current_user.id):
@@ -3890,6 +4009,16 @@ def master_mywork(
                 "draft": d,
                 "services_label": draft_summary_label(preview),
                 "amount_total": preview.get("amount_from_client_total"),
+            }
+        )
+    work_draft_rows: list[dict[str, object]] = []
+    for d in list_open_work_drafts_for_master(db, current_user.id):
+        preview = work_preview_dict_from_json(d.preview_json)
+        work_draft_rows.append(
+            {
+                "draft": d,
+                "kind_label": work_draft_summary_label(preview),
+                "amount_total": preview.get("amount_from_client"),
             }
         )
     visit_ids = list(
@@ -3988,6 +4117,7 @@ def master_mywork(
             current_user=current_user,
             rows=rows,
             draft_rows=draft_rows,
+            work_draft_rows=work_draft_rows,
             display_tz=display_tz,
             archive_rows=archive_rows,
             archive_cap=archive_cap,
