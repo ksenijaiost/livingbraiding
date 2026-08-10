@@ -111,7 +111,7 @@ def _sum_ledger(
 def api_calendar_day(
     d: str,
     view: str | None = Query(None),
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.HELPER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     try:
@@ -122,57 +122,62 @@ def api_calendar_day(
     day_start, day_end = _day_bounds_utc(day)
 
     is_master = current_user.role == UserRole.MASTER
+    is_helper = current_user.role == UserRole.HELPER
+    is_self_scoped = is_master or is_helper
     is_super = current_user.role == UserRole.ADMIN_SUPER
 
-    # ---- Bookings ----
-    b_stmt = (
-        select(Booking)
-        .options(
-            selectinload(Booking.client),
-            selectinload(Booking.masters),
-            selectinload(Booking.planned_service)
-            .selectinload(Service.subcategory)
-            .selectinload(ServiceSubcategory.category),
-            selectinload(Booking.planned_services)
-            .selectinload(BookingPlannedService.service)
-            .selectinload(Service.subcategory)
-            .selectinload(ServiceSubcategory.category),
-            selectinload(Booking.planned_services).selectinload(BookingPlannedService.masters),
-        )
-        .where(Booking.planned_date >= day_start, Booking.planned_date < day_end)
-        .order_by(Booking.planned_date.asc(), Booking.id.asc())
-    )
-    if is_master:
-        b_stmt = b_stmt.where(
-            or_(
-                Booking.id.in_(select(BookingMaster.booking_id).where(BookingMaster.master_id == current_user.id)),
-                Booking.id.in_(select(BookingStaff.booking_id).where(BookingStaff.user_id == current_user.id)),
-            )
-        )
-    bookings = list(db.scalars(b_stmt).all())
+    from app.hourly_help import visit_hourly_help_master_clause
 
+    # ---- Bookings ----
     booking_items: list[dict[str, Any]] = []
     tz = get_display_timezone(db)
-    for b in bookings:
-        kind_l = _booking_kind_label(b.kind.value)
-        time_l = format_naive_utc_datetime(b.planned_date, tz)
-        svc_label = ""
-        if b.kind == BookingKind.VISIT:
-            svc_label = booking_service_labels_from_booking(b, prefer_short=True)
-        booking_items.append(
-            {
-                "id": int(b.id),
-                "client": (b.client.name if b.client else "—"),
-                "kind": kind_l,
-                "label": f"{kind_l} · {time_l}",
-                "service_label": svc_label,
-                "status": booking_status_label(b.status),
-                "time": time_l,
-                "url": f"/bookings/{int(b.id)}",
-                "payout_sum": 0.0,
-                "studio_sum": 0.0,
-            }
+    if not is_helper:
+        b_stmt = (
+            select(Booking)
+            .options(
+                selectinload(Booking.client),
+                selectinload(Booking.masters),
+                selectinload(Booking.planned_service)
+                .selectinload(Service.subcategory)
+                .selectinload(ServiceSubcategory.category),
+                selectinload(Booking.planned_services)
+                .selectinload(BookingPlannedService.service)
+                .selectinload(Service.subcategory)
+                .selectinload(ServiceSubcategory.category),
+                selectinload(Booking.planned_services).selectinload(BookingPlannedService.masters),
+            )
+            .where(Booking.planned_date >= day_start, Booking.planned_date < day_end)
+            .order_by(Booking.planned_date.asc(), Booking.id.asc())
         )
+        if is_master:
+            b_stmt = b_stmt.where(
+                or_(
+                    Booking.id.in_(select(BookingMaster.booking_id).where(BookingMaster.master_id == current_user.id)),
+                    Booking.id.in_(select(BookingStaff.booking_id).where(BookingStaff.user_id == current_user.id)),
+                )
+            )
+        bookings = list(db.scalars(b_stmt).all())
+
+        for b in bookings:
+            kind_l = _booking_kind_label(b.kind.value)
+            time_l = format_naive_utc_datetime(b.planned_date, tz)
+            svc_label = ""
+            if b.kind == BookingKind.VISIT:
+                svc_label = booking_service_labels_from_booking(b, prefer_short=True)
+            booking_items.append(
+                {
+                    "id": int(b.id),
+                    "client": (b.client.name if b.client else "—"),
+                    "kind": kind_l,
+                    "label": f"{kind_l} · {time_l}",
+                    "service_label": svc_label,
+                    "status": booking_status_label(b.status),
+                    "time": time_l,
+                    "url": f"/bookings/{int(b.id)}",
+                    "payout_sum": 0.0,
+                    "studio_sum": 0.0,
+                }
+            )
 
     wp_stmt = (
         select(WorkPlan)
@@ -184,7 +189,7 @@ def api_calendar_day(
         )
         .order_by(WorkPlan.planned_date.asc(), WorkPlan.id.asc())
     )
-    if is_master:
+    if is_self_scoped:
         wp_stmt = wp_stmt.where(WorkPlan.master_id == current_user.id)
     from app.work_plan import work_plan_status_label, work_plan_type_display
 
@@ -208,39 +213,40 @@ def api_calendar_day(
         )
 
     # ---- Consultations (карточки консультаций, не брони вида CONSULTATION) ----
-    c_stmt = (
-        select(Consultation)
-        .options(
-            selectinload(Consultation.client),
-            selectinload(Consultation.booking),
-        )
-        .where(
-            Consultation.consultation_date >= day_start,
-            Consultation.consultation_date < day_end,
-        )
-        .order_by(Consultation.consultation_date.asc(), Consultation.id.asc())
-    )
-    if is_master:
-        c_stmt = c_stmt.where(Consultation.created_by_user_id == current_user.id)
     consultation_items: list[dict[str, Any]] = []
-    for c in db.scalars(c_stmt).all():
-        time_l = format_naive_utc_datetime(c.consultation_date, tz)
-        types_l = (format_types_display(c.types_json) or "").strip() or "Консультация"
-        linked = c.booking
-        consultation_items.append(
-            {
-                "id": int(c.id),
-                "client": (c.client.name if c.client else "—"),
-                "kind": "Консультация",
-                "label": f"{types_l} · {time_l}",
-                "service_label": types_l,
-                "status": booking_status_label(linked.status if linked else None),
-                "time": time_l,
-                "url": f"/consultations/{int(c.id)}",
-                "payout_sum": 0.0,
-                "studio_sum": 0.0,
-            }
+    if not is_helper:
+        c_stmt = (
+            select(Consultation)
+            .options(
+                selectinload(Consultation.client),
+                selectinload(Consultation.booking),
+            )
+            .where(
+                Consultation.consultation_date >= day_start,
+                Consultation.consultation_date < day_end,
+            )
+            .order_by(Consultation.consultation_date.asc(), Consultation.id.asc())
         )
+        if is_master:
+            c_stmt = c_stmt.where(Consultation.created_by_user_id == current_user.id)
+        for c in db.scalars(c_stmt).all():
+            time_l = format_naive_utc_datetime(c.consultation_date, tz)
+            types_l = (format_types_display(c.types_json) or "").strip() or "Консультация"
+            linked = c.booking
+            consultation_items.append(
+                {
+                    "id": int(c.id),
+                    "client": (c.client.name if c.client else "—"),
+                    "kind": "Консультация",
+                    "label": f"{types_l} · {time_l}",
+                    "service_label": types_l,
+                    "status": booking_status_label(linked.status if linked else None),
+                    "time": time_l,
+                    "url": f"/consultations/{int(c.id)}",
+                    "payout_sum": 0.0,
+                    "studio_sum": 0.0,
+                }
+            )
 
     # ---- Visits ----
     v_stmt = (
@@ -249,7 +255,9 @@ def api_calendar_day(
         .where(Visit.is_cancelled.is_(False), Visit.performed_date >= day_start, Visit.performed_date < day_end)
         .order_by(Visit.performed_date.asc(), Visit.id.asc())
     )
-    if is_master:
+    if is_helper:
+        v_stmt = v_stmt.where(visit_hourly_help_master_clause(current_user.id))
+    elif is_master:
         v_stmt = v_stmt.where(visit_ids_visible_to_master_clause(current_user.id))
     visits = list(db.scalars(v_stmt).all())
     vs_ids: list[int] = []
@@ -263,14 +271,14 @@ def api_calendar_day(
         side=PayrollFundSide.MASTER,
         source_kind=PayrollFundSourceKind.VISIT_SERVICE,
         source_ids=vs_ids,
-        user_id=current_user.id if is_master else None,
+        user_id=current_user.id if is_self_scoped else None,
     )
     visit_payout_legacy = _sum_ledger(
         db,
         side=PayrollFundSide.MASTER,
         source_kind=PayrollFundSourceKind.VISIT,
         source_ids=visit_ids,
-        user_id=current_user.id if is_master else None,
+        user_id=current_user.id if is_self_scoped else None,
     )
     visit_studio_vs = (
         _sum_ledger(
@@ -303,6 +311,24 @@ def api_calendar_day(
             [s for s in (v.services or []) if not s.is_cancelled],
             key=lambda x: (int(x.sort_order or 0), int(x.id or 0)),
         )
+        if is_helper:
+            payout = float(visit_payout_legacy.get(vid, 0.0))
+            if active_services:
+                for svc in active_services:
+                    payout += float(visit_payout_vs.get(int(svc.id), 0.0))
+            label = active_services[0].service_name if active_services else "—"
+            visit_items.append(
+                {
+                    "id": vid,
+                    "client": client_name,
+                    "label": label,
+                    "service_label": format_visit_service_catalog_path(active_services[0]) if active_services else "",
+                    "url": f"/visits/{vid}",
+                    "payout_sum": payout,
+                    "studio_sum": 0.0,
+                }
+            )
+            continue
         if not active_services:
             visit_items.append(
                 {
@@ -368,7 +394,13 @@ def api_calendar_day(
         .where(WorkForInventory.is_voided.is_(False), w_day >= day_start, w_day < day_end)
         .order_by(w_day.asc(), WorkForInventory.id.asc())
     )
-    if is_master:
+    if is_helper:
+        w_stmt = w_stmt.where(
+            WorkForInventory.id.in_(
+                select(WorkForInventoryStaff.work_id).where(WorkForInventoryStaff.user_id == current_user.id)
+            )
+        )
+    elif is_master:
         w_stmt = w_stmt.where(
             or_(
                 WorkForInventory.created_by_user_id == current_user.id,
@@ -382,7 +414,7 @@ def api_calendar_day(
     work_payout = sum_work_master_payroll_by_work_id(
         db,
         work_ids=work_ids,
-        user_id=current_user.id if is_master else None,
+        user_id=current_user.id if is_self_scoped else None,
     )
     work_studio = (
         sum_work_studio_payroll_by_work_id(db, work_ids=work_ids)
@@ -398,32 +430,33 @@ def api_calendar_day(
     )
 
     draft_items: list[dict[str, Any]] = []
-    for dr in drafts_for_calendar_day(db, user=current_user, day=day):
-        preview = preview_dict_from_json(dr.preview_json)
-        draft_items.append(
-            {
-                "id": int(dr.id),
-                "client": dr.client.name if dr.client else "—",
-                "label": draft_summary_label(preview),
-                "url": f"/master/visit/draft/{int(dr.id)}",
-                "payout_sum": 0.0,
-                "studio_sum": 0.0,
-            }
-        )
-
     work_draft_items: list[dict[str, Any]] = []
-    for dr in work_drafts_for_calendar_day(db, user=current_user, day=day):
-        preview = work_preview_dict_from_json(dr.preview_json)
-        work_draft_items.append(
-            {
-                "id": int(dr.id),
-                "client": dr.client.name if dr.client else "—",
-                "label": work_draft_summary_label(preview),
-                "url": f"/sales/work/draft/{int(dr.id)}",
-                "payout_sum": 0.0,
-                "studio_sum": 0.0,
-            }
-        )
+    if not is_helper:
+        for dr in drafts_for_calendar_day(db, user=current_user, day=day):
+            preview = preview_dict_from_json(dr.preview_json)
+            draft_items.append(
+                {
+                    "id": int(dr.id),
+                    "client": dr.client.name if dr.client else "—",
+                    "label": draft_summary_label(preview),
+                    "url": f"/master/visit/draft/{int(dr.id)}",
+                    "payout_sum": 0.0,
+                    "studio_sum": 0.0,
+                }
+            )
+
+        for dr in work_drafts_for_calendar_day(db, user=current_user, day=day):
+            preview = work_preview_dict_from_json(dr.preview_json)
+            work_draft_items.append(
+                {
+                    "id": int(dr.id),
+                    "client": dr.client.name if dr.client else "—",
+                    "label": work_draft_summary_label(preview),
+                    "url": f"/sales/work/draft/{int(dr.id)}",
+                    "payout_sum": 0.0,
+                    "studio_sum": 0.0,
+                }
+            )
 
     work_items: list[dict[str, Any]] = []
     for w in works:
@@ -450,7 +483,7 @@ def api_calendar_day(
         )
         .order_by(HourlyWorkEntry.performed_date.asc(), HourlyWorkEntry.id.asc())
     )
-    if is_master:
+    if is_self_scoped:
         hw_stmt = hw_stmt.where(HourlyWorkEntry.master_user_id == current_user.id)
     hourly_entries = list(db.scalars(hw_stmt).all())
     hw_ids = [int(e.id) for e in hourly_entries if e.id is not None]
@@ -459,7 +492,7 @@ def api_calendar_day(
         side=PayrollFundSide.MASTER,
         source_kind=PayrollFundSourceKind.HOURLY_WORK,
         source_ids=hw_ids,
-        user_id=current_user.id if is_master else None,
+        user_id=current_user.id if is_self_scoped else None,
     )
     hw_studio = (
         _sum_ledger(

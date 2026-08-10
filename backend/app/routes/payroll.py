@@ -280,7 +280,7 @@ def admin_payroll_fund_page(
     visit_id_by_service_id = visit_ids_for_visit_service_source_ids(db, vs_source_ids)
     payout_users = list(
         db.scalars(
-            select_users_with_any_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER).order_by(User.display_name.asc())
+            select_users_with_any_role(UserRole.MASTER, UserRole.HELPER, UserRole.ADMIN, UserRole.ADMIN_SUPER).order_by(User.display_name.asc())
         ).all()
     )
     all_user_rows: list[dict[str, Any]] = []
@@ -411,7 +411,7 @@ async def admin_payroll_fund_payout(
         return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
     if db.get(User, user_id) is None:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
-    if not user_has_any_role(db, user_id, UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
+    if not user_has_any_role(db, user_id, UserRole.MASTER, UserRole.HELPER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
         return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
     pay_raw = (str(form.get("payment_kind") or "")).strip().upper()
     try:

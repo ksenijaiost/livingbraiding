@@ -267,6 +267,16 @@
       <div class="card" style="background:#fff;">
         <h3 style="margin-top:0;">Разделы</h3>
         <div class="row" style="gap:12px;">
+          {% if sections_ctx.is_helper %}
+            <div class="card" style="background:#f8fafc;">
+              <h4 style="margin:0 0 10px;">Работа</h4>
+              <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                <a href="/master/mywork"><button type="button" class="secondary">Моя работа</button></a>
+                <a href="/hourly-work"><button type="button" class="secondary">Почасовая работа</button></a>
+                <a href="/work-plans"><button type="button" class="secondary">План работ</button></a>
+              </div>
+            </div>
+          {% else %}
           <div class="card" style="background:#f8fafc;">
             <h4 style="margin:0 0 10px;">Записи</h4>
             <div style="display:flex; flex-wrap:wrap; gap:8px;">
@@ -343,6 +353,7 @@
                 <a href="/admin/super/purge"><button type="button" class="secondary" style="color:#b91c1c;border-color:#fecaca;">Удаление данных</button></a>
               </div>
             </div>
+          {% endif %}
           {% endif %}
         </div>
       </div>

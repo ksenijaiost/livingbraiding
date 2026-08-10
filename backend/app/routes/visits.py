@@ -175,7 +175,7 @@ def admin_visit_detail(
     request: Request,
     client_err: str | None = None,
     msg: str | None = None,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER, UserRole.HELPER)),
     db: Session = Depends(get_db),
 ):
     visit = db.scalar(
@@ -192,6 +192,16 @@ def admin_visit_detail(
     )
     if not visit:
         raise HTTPException(status_code=404, detail="Визит не найден")
+
+    if current_user.role == UserRole.HELPER:
+        from app.hourly_help import master_hourly_help_pay_from_visit
+
+        if master_hourly_help_pay_from_visit(visit, current_user.id) <= 0:
+            # Помощь могла быть с нулевой суммой — всё равно проверяем JSON.
+            from app.hourly_help import hourly_help_rows_from_visit
+
+            if not any(int(r.master_id) == int(current_user.id) for r in hourly_help_rows_from_visit(visit)):
+                raise HTTPException(status_code=403, detail="Недостаточно прав для просмотра этого визита")
 
     audit_rows = list(
         db.scalars(

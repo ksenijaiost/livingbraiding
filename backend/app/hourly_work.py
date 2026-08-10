@@ -18,7 +18,7 @@ from app.payroll_fund import (
     storno_source_accruals,
 )
 from app.time_utils import utcnow_naive
-from app.user_roles import select_users_with_role, user_has_role
+from app.user_roles import select_users_with_any_role, user_has_any_role
 from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
 from app.work_plan import complete_work_plan_from_hourly_work, linked_hourly_work_for_plan, validate_work_plan_for_hourly_entry
 
@@ -26,7 +26,7 @@ from app.work_plan import complete_work_plan_from_hourly_work, linked_hourly_wor
 def list_masters_for_hourly_work_form(db: Session) -> list[User]:
     return list(
         db.scalars(
-            select_users_with_role(UserRole.MASTER)
+            select_users_with_any_role(UserRole.MASTER, UserRole.HELPER)
             .where(User.is_active.is_(True))
             .order_by(User.display_name.asc(), User.username.asc())
         ).all()
@@ -133,9 +133,9 @@ def parse_hourly_work_form(
 def validate_hourly_work_master(db: Session, master_id: int) -> str | None:
     u = db.get(User, int(master_id))
     if not u or not u.is_active:
-        return "Мастер не найден или отключён."
-    if not user_has_role(db, int(master_id), UserRole.MASTER):
-        return "ЗП может получить только мастер."
+        return "Сотрудник не найден или отключён."
+    if not user_has_any_role(db, int(master_id), UserRole.MASTER, UserRole.HELPER):
+        return "ЗП может получить только мастер или помощник."
     return None
 
 

@@ -1,5 +1,5 @@
 {% set hh_fp = form_prefill if form_prefill is defined else fp %}
-{% set hh_masters_src = masters_for_visit if masters_for_visit is defined else (masters if masters is defined else []) %}
+{% set hh_masters_src = masters_for_hourly_help if masters_for_hourly_help is defined else (masters_for_visit if masters_for_visit is defined else (masters if masters is defined else [])) %}
 {% set hh_prefill_rows = [] %}
 {% for u in hh_masters_src %}
   {% set _h = hh_fp.get('hourly_help_hours_' ~ u.id, '') %}

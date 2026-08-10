@@ -108,8 +108,10 @@ def home(
     def _utc_naive_to_local_date(dt_utc_naive: datetime) -> date:
         return dt_utc_naive.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz).date()
 
-    if current_user.role in (UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
-        show_studio = UserRole.ADMIN_SUPER in current_user.roles
+    if current_user.role in (UserRole.MASTER, UserRole.HELPER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
+        is_helper = current_user.role == UserRole.HELPER
+        is_self_scoped = current_user.role in (UserRole.MASTER, UserRole.HELPER)
+        show_studio = (not is_helper) and (UserRole.ADMIN_SUPER in current_user.roles)
 
         payroll_home = {
             "personal_balance": _money0(employee_fund_balance(db, current_user.id)),
@@ -126,6 +128,8 @@ def home(
         payroll_sum_by_day: dict[date, float] = defaultdict(float)
         studio_payroll_sum_by_day: dict[date, float] = defaultdict(float)
 
+        from app.hourly_help import visit_hourly_help_master_clause
+
         v_stmt = (
             select(Visit.id, Visit.performed_date)
             .where(
@@ -134,7 +138,9 @@ def home(
                 Visit.performed_date < month_end_utc,
             )
         )
-        if current_user.role == UserRole.MASTER:
+        if is_helper:
+            v_stmt = v_stmt.where(visit_hourly_help_master_clause(current_user.id))
+        elif current_user.role == UserRole.MASTER:
             v_stmt = v_stmt.where(visit_ids_visible_to_master_clause(current_user.id))
         visit_rows = list(db.execute(v_stmt).all())
         visit_ids = [int(vid) for vid, _ in visit_rows if vid is not None]
@@ -160,7 +166,13 @@ def home(
                 ),
             )
         )
-        if current_user.role == UserRole.MASTER:
+        if is_helper:
+            w_stmt = w_stmt.where(
+                WorkForInventory.id.in_(
+                    select(WorkForInventoryStaff.work_id).where(WorkForInventoryStaff.user_id == current_user.id)
+                )
+            )
+        elif current_user.role == UserRole.MASTER:
             w_stmt = w_stmt.where(
                 or_(
                     WorkForInventory.created_by_user_id == current_user.id,
@@ -174,28 +186,29 @@ def home(
             if isinstance(dt0, datetime):
                 works_by_day[_utc_naive_to_local_date(dt0)] += 1
 
-        b_stmt = (
-            select(Booking.planned_date)
-            .where(
-                Booking.status.in_(
-                    (BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)
-                ),
-                Booking.planned_date >= month_start_utc,
-                Booking.planned_date < month_end_utc,
-            )
-        )
-        if current_user.role == UserRole.MASTER:
-            b_stmt = b_stmt.where(
-                or_(
-                    Booking.id.in_(select(BookingMaster.booking_id).where(BookingMaster.master_id == current_user.id)),
-                    Booking.id.in_(select(BookingStaff.booking_id).where(BookingStaff.user_id == current_user.id)),
+        if not is_helper:
+            b_stmt = (
+                select(Booking.planned_date)
+                .where(
+                    Booking.status.in_(
+                        (BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)
+                    ),
+                    Booking.planned_date >= month_start_utc,
+                    Booking.planned_date < month_end_utc,
                 )
             )
-        for (dt0,) in db.execute(b_stmt).all():
-            if isinstance(dt0, datetime):
-                bookings_by_day[_utc_naive_to_local_date(dt0)] += 1
+            if current_user.role == UserRole.MASTER:
+                b_stmt = b_stmt.where(
+                    or_(
+                        Booking.id.in_(select(BookingMaster.booking_id).where(BookingMaster.master_id == current_user.id)),
+                        Booking.id.in_(select(BookingStaff.booking_id).where(BookingStaff.user_id == current_user.id)),
+                    )
+                )
+            for (dt0,) in db.execute(b_stmt).all():
+                if isinstance(dt0, datetime):
+                    bookings_by_day[_utc_naive_to_local_date(dt0)] += 1
 
-        from app.db.models import WorkPlan, WorkPlanStatus
+        from app.db.models import HourlyWorkEntry, WorkPlan, WorkPlanStatus
 
         wp_stmt = (
             select(WorkPlan.planned_date)
@@ -205,35 +218,51 @@ def home(
                 WorkPlan.planned_date < month_end_utc,
             )
         )
-        if current_user.role == UserRole.MASTER:
+        if is_self_scoped:
             wp_stmt = wp_stmt.where(WorkPlan.master_id == current_user.id)
         for (dt0,) in db.execute(wp_stmt).all():
             if isinstance(dt0, datetime):
                 bookings_by_day[_utc_naive_to_local_date(dt0)] += 1
 
-        from app.visit_draft import draft_counts_by_day
-        from app.work_draft import draft_counts_by_day as work_draft_counts_by_day
+        # Почасовая работа — в счётчике «работы» дня (для мастера и помощника).
+        if is_self_scoped:
+            hw_stmt = (
+                select(HourlyWorkEntry.performed_date)
+                .where(
+                    HourlyWorkEntry.is_voided.is_(False),
+                    HourlyWorkEntry.master_user_id == current_user.id,
+                    HourlyWorkEntry.performed_date >= month_start_utc,
+                    HourlyWorkEntry.performed_date < month_end_utc,
+                )
+            )
+            for (dt0,) in db.execute(hw_stmt).all():
+                if isinstance(dt0, datetime):
+                    works_by_day[_utc_naive_to_local_date(dt0)] += 1
 
         month_end_date = next_month_local_start.date()
-        draft_day_counts = draft_counts_by_day(
-            db,
-            user=current_user,
-            day_from=month_local_start.date(),
-            day_to_excl=month_end_date,
-        )
-        for d0, cnt in draft_day_counts.items():
-            drafts_by_day[d0] = int(cnt)
-        work_draft_day_counts = work_draft_counts_by_day(
-            db,
-            user=current_user,
-            day_from=month_local_start.date(),
-            day_to_excl=month_end_date,
-        )
-        for d0, cnt in work_draft_day_counts.items():
-            drafts_by_day[d0] = int(drafts_by_day.get(d0, 0)) + int(cnt)
+        if not is_helper:
+            from app.visit_draft import draft_counts_by_day
+            from app.work_draft import draft_counts_by_day as work_draft_counts_by_day
+
+            draft_day_counts = draft_counts_by_day(
+                db,
+                user=current_user,
+                day_from=month_local_start.date(),
+                day_to_excl=month_end_date,
+            )
+            for d0, cnt in draft_day_counts.items():
+                drafts_by_day[d0] = int(cnt)
+            work_draft_day_counts = work_draft_counts_by_day(
+                db,
+                user=current_user,
+                day_from=month_local_start.date(),
+                day_to_excl=month_end_date,
+            )
+            for d0, cnt in work_draft_day_counts.items():
+                drafts_by_day[d0] = int(drafts_by_day.get(d0, 0)) + int(cnt)
 
         if visit_ids:
-            if current_user.role == UserRole.MASTER:
+            if is_self_scoped:
                 visit_pay_by_id = sum_visit_ledger_by_visit_id(
                     db,
                     side=PayrollFundSide.MASTER,
@@ -260,7 +289,7 @@ def home(
                         )
 
         if work_ids:
-            if current_user.role == UserRole.MASTER:
+            if is_self_scoped:
                 work_master_by_id = sum_work_master_payroll_by_work_id(
                     db,
                     work_ids=work_ids,
@@ -284,47 +313,48 @@ def home(
 
         sale_master_by_day: dict[date, float] = defaultdict(float)
         sale_studio_by_day: dict[date, float] = defaultdict(float)
-        s_rows = list(
-            db.execute(
-                select(
-                    ProductSale.id,
-                    ProductSale.performed_date,
-                ).where(
-                    ProductSale.performed_date >= month_start_utc,
-                    ProductSale.performed_date < month_end_utc,
-                    ProductSale.is_voided.is_(False),
-                )
-            ).all()
-        )
-        sale_ids = [int(sid) for sid, _ in s_rows if sid is not None]
-        if sale_ids:
-            if current_user.role == UserRole.MASTER:
-                sale_master_ledger = sum_ledger_amounts_by_source(
-                    db,
-                    side=PayrollFundSide.MASTER,
-                    source_kind=PayrollFundSourceKind.PRODUCT_SALE,
-                    source_ids=sale_ids,
-                    user_id=current_user.id,
-                )
-                for sid, dt0 in s_rows:
-                    if isinstance(dt0, datetime):
-                        sale_master_by_day[_utc_naive_to_local_date(dt0)] += float(
-                            sale_master_ledger.get(int(sid), 0.0)
-                        )
+        if not is_helper:
+            s_rows = list(
+                db.execute(
+                    select(
+                        ProductSale.id,
+                        ProductSale.performed_date,
+                    ).where(
+                        ProductSale.performed_date >= month_start_utc,
+                        ProductSale.performed_date < month_end_utc,
+                        ProductSale.is_voided.is_(False),
+                    )
+                ).all()
+            )
+            sale_ids = [int(sid) for sid, _ in s_rows if sid is not None]
+            if sale_ids:
+                if current_user.role == UserRole.MASTER:
+                    sale_master_ledger = sum_ledger_amounts_by_source(
+                        db,
+                        side=PayrollFundSide.MASTER,
+                        source_kind=PayrollFundSourceKind.PRODUCT_SALE,
+                        source_ids=sale_ids,
+                        user_id=current_user.id,
+                    )
+                    for sid, dt0 in s_rows:
+                        if isinstance(dt0, datetime):
+                            sale_master_by_day[_utc_naive_to_local_date(dt0)] += float(
+                                sale_master_ledger.get(int(sid), 0.0)
+                            )
 
-            if show_studio:
-                sale_studio_ledger = sum_ledger_amounts_by_source(
-                    db,
-                    side=PayrollFundSide.STUDIO,
-                    source_kind=PayrollFundSourceKind.PRODUCT_SALE,
-                    source_ids=sale_ids,
-                    user_id=None,
-                )
-                for sid, dt0 in s_rows:
-                    if isinstance(dt0, datetime):
-                        sale_studio_by_day[_utc_naive_to_local_date(dt0)] += float(
-                            sale_studio_ledger.get(int(sid), 0.0)
-                        )
+                if show_studio:
+                    sale_studio_ledger = sum_ledger_amounts_by_source(
+                        db,
+                        side=PayrollFundSide.STUDIO,
+                        source_kind=PayrollFundSourceKind.PRODUCT_SALE,
+                        source_ids=sale_ids,
+                        user_id=None,
+                    )
+                    for sid, dt0 in s_rows:
+                        if isinstance(dt0, datetime):
+                            sale_studio_by_day[_utc_naive_to_local_date(dt0)] += float(
+                                sale_studio_ledger.get(int(sid), 0.0)
+                            )
 
         for day_key, amt in sale_master_by_day.items():
             payroll_sum_by_day[day_key] += amt
@@ -348,7 +378,7 @@ def home(
                 ),
             )
         )
-        if current_user.role == UserRole.MASTER:
+        if is_self_scoped:
             for dt0, amt in db.execute(other_stmt).all():
                 if isinstance(dt0, datetime):
                     payroll_sum_by_day[_utc_naive_to_local_date(dt0)] += float(amt or 0.0)
@@ -410,6 +440,7 @@ def home(
 
         sections_ctx = {
             "is_master": current_user.role == UserRole.MASTER,
+            "is_helper": is_helper,
             "is_admin": current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER),
             "is_admin_super": current_user.role == UserRole.ADMIN_SUPER,
         }

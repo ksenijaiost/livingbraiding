@@ -39,11 +39,13 @@ from app.work_plan import (
 
 router = APIRouter(prefix="/work-plans", tags=["work-plans"])
 
-_VIEW = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
+_VIEW = Depends(require_role(UserRole.MASTER, UserRole.HELPER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _CREATE = _VIEW
 
 
 def _is_admin(user: AuthUser) -> bool:
+    if user.role == UserRole.HELPER:
+        return False
     return UserRole.ADMIN in user.roles or UserRole.ADMIN_SUPER in user.roles
 
 
