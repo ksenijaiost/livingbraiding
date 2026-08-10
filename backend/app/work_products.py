@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -122,6 +122,7 @@ _WORK_NEW_FP_KEYS = frozenset({
     "performed_date",
     "scope",
     "kind",
+    "order_booking_mode",
     "amount_from_client",
     "comment",
     "kanekalon_grams",
@@ -1175,6 +1176,10 @@ def work_new_get(
         v = request.query_params.get(key)
         if v is not None and str(v).strip() != "":
             fp[key] = str(v).strip()
+    if (fp.get("booking_id") or "").strip():
+        fp["order_booking_mode"] = "with_booking"
+    elif not (fp.get("order_booking_mode") or "").strip():
+        fp["order_booking_mode"] = "without_booking"
     _enrich_fp_rubber(fp)
     return _work_new_template_response(
         request,
@@ -1184,6 +1189,17 @@ def work_new_get(
         selected_client=selected_client,
         kit_master_on_ids=[],
     )
+
+
+@router.get("/bookings/suggest")
+def work_bookings_suggest(
+    q: str = "",
+    current_user: AuthUser = _MASTER,
+    db: Session = Depends(get_db),
+):
+    from app.routes.bookings import suggest_bookings_for_work_order
+
+    return JSONResponse({"bookings": suggest_bookings_for_work_order(db, q)})
 
 
 @router.get("/draft/{draft_id}", response_class=HTMLResponse)
@@ -1212,6 +1228,10 @@ def work_draft_get(
         return RedirectResponse("/master/mywork", status_code=303)
 
     fp = form_dict_from_json(draft.form_json)
+    if (fp.get("booking_id") or "").strip():
+        fp["order_booking_mode"] = "with_booking"
+    elif not (fp.get("order_booking_mode") or "").strip():
+        fp["order_booking_mode"] = "without_booking"
     _enrich_fp_rubber(fp)
     lock_banner = None
     readonly = False
@@ -1411,6 +1431,10 @@ async def work_new_post(
         amount_from_client: int | None = None
         client_payment_kind: ClientPaymentKind | None = None
         if scope == WorkScope.CUSTOM_ORDER:
+            order_mode = (_g_str(form, "order_booking_mode", "") or "").strip().lower()
+            bid_check = (_g_str(form, "booking_id", "") or "").strip()
+            if order_mode == "with_booking" and not bid_check:
+                raise ValueError("Выберите бронь или переключите на «без брони».")
             cid_raw = (_g_str(form, "client_id", "") or "").strip()
             try:
                 client_id = parse_int(cid_raw, min=1, field_name="client_id")

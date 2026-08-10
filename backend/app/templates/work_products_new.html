@@ -29,7 +29,7 @@
       action="{% if draft_id %}/sales/work/draft/{{ draft_id }}{% else %}/sales/work/new{% endif %}"
       id="work_products_form">
       {% if draft_id %}<input type="hidden" name="draft_id" value="{{ draft_id }}" />{% endif %}
-      <input type="hidden" name="booking_id" value="{{ fp.booking_id or '' }}" />
+      <input type="hidden" name="booking_id" id="booking_id" value="{{ fp.booking_id or '' }}" />
       <input type="hidden" name="work_plan_id" value="{{ fp.work_plan_id or '' }}" />
       <div class="row">
         <div>
@@ -42,6 +42,17 @@
               </label>
             {% endfor %}
           </div>
+          {% set obm = fp.order_booking_mode or ('with_booking' if fp.booking_id else 'without_booking') %}
+          <div id="order_booking_mode_block" style="margin-top: 10px;{% if scope_val != 'CUSTOM_ORDER' %} display:none;{% endif %}">
+            <label style="margin-right: 16px;">
+              <input type="radio" name="order_booking_mode" value="with_booking" {% if obm == 'with_booking' %}checked{% endif %} />
+              С бронью
+            </label>
+            <label>
+              <input type="radio" name="order_booking_mode" value="without_booking" {% if obm != 'with_booking' %}checked{% endif %} />
+              Без брони
+            </label>
+          </div>
         </div>
         <div>
           <label>Вид работы</label>
@@ -51,6 +62,31 @@
               <option value="{{ k.value }}" {% if fp.kind == k.value %}selected{% endif %}>{{ k.label }}</option>
             {% endfor %}
           </select>
+        </div>
+      </div>
+
+      <div id="work_booking_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
+        <strong style="display:block; margin-bottom: 6px;">Бронь</strong>
+        <div id="work_booking_search_row" class="row" style="align-items: flex-end;">
+          <div style="flex:1;">
+            <label>Поиск брони по номеру, клиенту или дате</label>
+            <input type="search" id="booking_search_q" autocomplete="off" placeholder="№ брони, имя/телефон клиента или дата (дд.мм.гггг) — ввод или «Найти»" value="" />
+          </div>
+          <div>
+            <button type="button" id="work_booking_find_btn" class="secondary">Найти</button>
+          </div>
+        </div>
+        <ul id="booking_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:260px;overflow:auto;"></ul>
+        <div id="work_booking_selected_panel" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
+            <div style="line-height:1.4;">
+              <div><span style="font-weight:700;color:#065f46;">Выбрана бронь</span>
+                <span id="work_booking_selected_label" style="font-weight:600;color:#047857;"></span>
+              </div>
+              <div id="work_booking_selected_details" class="muted" style="font-size:12px;margin-top:4px;"></div>
+            </div>
+            <button type="button" id="work_booking_change_btn" class="secondary" style="flex-shrink:0;">Изменить</button>
+          </div>
         </div>
       </div>
 
@@ -95,7 +131,7 @@
       <div class="row">
         <div>
           <label>Дата работы (событие)</label>
-          <input type="date" name="performed_date" required value="{{ fp.performed_date or default_date }}" />
+          <input type="date" name="performed_date" id="performed_date" required value="{{ fp.performed_date or default_date }}" />
           <p class="muted" style="font-size:12px;margin:4px 0 0;">Эта дата влияет на календарь и период ЗП.</p>
         </div>
       </div>
@@ -996,11 +1032,180 @@
     function syncClientBlock() {
       var el = document.getElementById('client_block');
       if (!el) return;
-      el.style.display = (getScopeValue() === 'CUSTOM_ORDER') ? 'block' : 'none';
+      var isOrder = getScopeValue() === 'CUSTOM_ORDER';
+      el.style.display = isOrder ? 'block' : 'none';
       var a = document.getElementById('amount_from_client_block');
-      if (a) a.style.display = (getScopeValue() === 'CUSTOM_ORDER') ? 'block' : 'none';
+      if (a) a.style.display = isOrder ? 'block' : 'none';
+      var modeBlk = document.getElementById('order_booking_mode_block');
+      if (modeBlk) modeBlk.style.display = isOrder ? 'block' : 'none';
+      if (!isOrder) {
+        var without = document.querySelector('input[name="order_booking_mode"][value="without_booking"]');
+        if (without) without.checked = true;
+        clearWorkBookingSelection(false);
+      }
+      syncOrderBookingModeUi();
       if (typeof syncWorkClientUi === 'function') syncWorkClientUi();
     }
+    function getOrderBookingMode() {
+      var el = document.querySelector('input[name="order_booking_mode"]:checked');
+      return el ? String(el.value || '') : 'without_booking';
+    }
+    function syncOrderBookingModeUi() {
+      var isOrder = getScopeValue() === 'CUSTOM_ORDER';
+      var withBooking = isOrder && getOrderBookingMode() === 'with_booking';
+      var bBlk = document.getElementById('work_booking_block');
+      if (bBlk) bBlk.style.display = withBooking ? 'block' : 'none';
+      var clientSearch = document.getElementById('work_client_search_row');
+      var clientChange = document.getElementById('work_client_change_btn');
+      if (!withBooking) {
+        if (clientSearch) clientSearch.style.display = '';
+        if (clientChange) clientChange.style.display = '';
+      } else {
+        if (clientSearch) clientSearch.style.display = 'none';
+        if (clientChange) clientChange.style.display = 'none';
+      }
+      syncWorkBookingUi();
+      if (typeof syncWorkClientUi === 'function') syncWorkClientUi();
+    }
+    function syncWorkBookingUi() {
+      var bidEl = document.getElementById('booking_id');
+      var q = document.getElementById('booking_search_q');
+      var findBtn = document.getElementById('work_booking_find_btn');
+      var row = document.getElementById('work_booking_search_row');
+      var panel = document.getElementById('work_booking_selected_panel');
+      if (!bidEl || !q || !findBtn || !row || !panel) return;
+      var has = !!(bidEl.value || '').trim();
+      q.disabled = has;
+      findBtn.disabled = has;
+      row.style.opacity = has ? '0.55' : '1';
+      panel.style.display = has ? 'block' : 'none';
+    }
+    function clearWorkBookingSelection(clearClient) {
+      var bid = document.getElementById('booking_id');
+      if (bid) bid.value = '';
+      var ul = document.getElementById('booking_suggest_list');
+      if (ul) ul.innerHTML = '';
+      var q = document.getElementById('booking_search_q');
+      if (q) q.value = '';
+      var lab = document.getElementById('work_booking_selected_label');
+      if (lab) lab.textContent = '';
+      var det = document.getElementById('work_booking_selected_details');
+      if (det) det.textContent = '';
+      if (clearClient) clearWorkClientSelection();
+      syncWorkBookingUi();
+    }
+    function applyBookingPrefill(prefill) {
+      if (!prefill || typeof prefill !== 'object') return;
+      Object.keys(prefill).forEach(function (key) {
+        if (key === 'booking_id' || key === 'client_id') return;
+        var val = prefill[key];
+        if (val == null) return;
+        var s = String(val);
+        if (key === 'performed_date') {
+          var d = document.getElementById('performed_date') || document.querySelector('input[name="performed_date"]');
+          if (d) d.value = s;
+          return;
+        }
+        if (key === 'kind') {
+          var kindSel = document.querySelector('select[name="kind"]');
+          if (kindSel) {
+            kindSel.value = s;
+            kindSel.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          return;
+        }
+        if (key === 'scope') {
+          var scopeRadio = document.querySelector('input[name="scope"][value="' + s + '"]');
+          if (scopeRadio) {
+            scopeRadio.checked = true;
+            scopeRadio.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          return;
+        }
+        if (key === 'comment') {
+          var ta = document.querySelector('textarea[name="comment"]');
+          if (ta) ta.value = s;
+          return;
+        }
+        var el = document.querySelector('[name="' + key + '"]');
+        if (!el) return;
+        if (el.type === 'checkbox') {
+          el.checked = (s === '1' || s === 'on' || s === 'true' || s === 'yes');
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else if (el.type === 'radio') {
+          var r = document.querySelector('input[name="' + key + '"][value="' + s + '"]');
+          if (r) { r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); }
+        } else {
+          el.value = s;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      });
+      if (typeof syncPriceHint === 'function') syncPriceHint();
+      if (typeof syncWorkPreview === 'function') syncWorkPreview();
+    }
+    function selectBooking(item) {
+      if (!item) return;
+      var bid = document.getElementById('booking_id');
+      if (bid) bid.value = String(item.id || '');
+      var lab = document.getElementById('work_booking_selected_label');
+      if (lab) lab.textContent = ' #' + item.id + ' — ' + (item.date_label || '') + ' — ' + (item.client_name || '');
+      var det = document.getElementById('work_booking_selected_details');
+      if (det) det.textContent = item.details_text || ((item.kind_label || '') + (item.status_label ? (' · ' + item.status_label) : ''));
+      var ul = document.getElementById('booking_suggest_list');
+      if (ul) ul.innerHTML = '';
+      var prefill = item.prefill || {};
+      if (item.client_id) selectClient(item.client_id, item.client_name || '', false);
+      applyBookingPrefill(prefill);
+      if (prefill.performed_date) {
+        var d = document.getElementById('performed_date');
+        if (d) d.value = String(prefill.performed_date);
+      } else if (item.prefill && item.prefill.performed_date) {
+        var d2 = document.getElementById('performed_date');
+        if (d2) d2.value = String(item.prefill.performed_date);
+      }
+      syncWorkBookingUi();
+      syncOrderBookingModeUi();
+    }
+    async function bookingSuggest() {
+      var qEl = document.getElementById('booking_search_q');
+      if (qEl && qEl.disabled) return;
+      var q = qEl ? qEl.value.trim() : '';
+      var res = await fetch('/sales/work/bookings/suggest?q=' + encodeURIComponent(q));
+      var data = await res.json();
+      var ul = document.getElementById('booking_suggest_list');
+      if (!ul) return;
+      ul.innerHTML = '';
+      var items = data.bookings || [];
+      if (!items.length) {
+        var empty = document.createElement('li');
+        empty.className = 'muted';
+        empty.style.margin = '0 0 8px';
+        empty.textContent = 'Ничего не найдено';
+        ul.appendChild(empty);
+        return;
+      }
+      for (var i = 0; i < items.length; i++) {
+        (function (b) {
+          var li = document.createElement('li');
+          li.style.margin = '0 0 8px';
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'secondary';
+          btn.style.width = '100%';
+          btn.style.textAlign = 'left';
+          btn.style.lineHeight = '1.35';
+          var line1 = '#' + b.id + ' — ' + (b.date_label || '—') + ' — ' + (b.client_name || '—');
+          var line2 = (b.kind_label || '') + (b.details_text && b.details_text !== '—' ? (' · ' + b.details_text) : '');
+          btn.innerHTML = '<div style="font-weight:600;">' + line1.replace(/</g, '&lt;') + '</div>' +
+            '<div class="muted" style="font-size:12px;margin-top:2px;">' + String(line2 || '').replace(/</g, '&lt;') + '</div>';
+          btn.addEventListener('click', function () { selectBooking(b); });
+          li.appendChild(btn);
+          ul.appendChild(li);
+        })(items[i]);
+      }
+    }
+    var bookingSuggestTimer = null;
     function syncWorkClientUi() {
       var cidEl = document.getElementById('client_id');
       var q = document.getElementById('client_search_q');
@@ -1011,9 +1216,10 @@
       if (!cidEl || !q || !findBtn || !row || !panel || !nameEl) return;
       var cid = (cidEl.value || '').trim();
       var has = !!cid;
-      q.disabled = has;
-      findBtn.disabled = has;
-      row.style.opacity = has ? '0.55' : '1';
+      var lockedByBooking = getScopeValue() === 'CUSTOM_ORDER' && getOrderBookingMode() === 'with_booking';
+      q.disabled = has || lockedByBooking;
+      findBtn.disabled = has || lockedByBooking;
+      row.style.opacity = (has || lockedByBooking) ? '0.55' : '1';
       panel.style.display = has ? 'block' : 'none';
       if (!has) nameEl.textContent = '';
     }
@@ -1073,6 +1279,51 @@
     var workClientChg = document.getElementById('work_client_change_btn');
     if (workClientChg) workClientChg.addEventListener('click', clearWorkClientSelection);
     syncWorkClientUi();
+    document.querySelectorAll('input[name="order_booking_mode"]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        if (getOrderBookingMode() === 'without_booking') {
+          clearWorkBookingSelection(true);
+        }
+        syncOrderBookingModeUi();
+      });
+    });
+    var bookingFind = document.getElementById('work_booking_find_btn');
+    if (bookingFind) bookingFind.addEventListener('click', bookingSuggest);
+    var bookingQ = document.getElementById('booking_search_q');
+    if (bookingQ) {
+      bookingQ.addEventListener('input', function () {
+        if (bookingSuggestTimer) clearTimeout(bookingSuggestTimer);
+        bookingSuggestTimer = setTimeout(bookingSuggest, 350);
+      });
+      bookingQ.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); bookingSuggest(); }
+      });
+    }
+    var bookingChg = document.getElementById('work_booking_change_btn');
+    if (bookingChg) {
+      bookingChg.addEventListener('click', function () {
+        clearWorkBookingSelection(true);
+        var q = document.getElementById('booking_search_q');
+        if (q) q.focus();
+        syncOrderBookingModeUi();
+      });
+    }
+    (function initBookingSelectedFromFp() {
+      var bidEl = document.getElementById('booking_id');
+      var bid = bidEl ? String(bidEl.value || '').trim() : '';
+      if (!bid) return;
+      var lab = document.getElementById('work_booking_selected_label');
+      var nameEl = document.getElementById('work_client_selected_name');
+      var dateEl = document.getElementById('performed_date');
+      if (lab) {
+        lab.textContent = ' #' + bid +
+          (dateEl && dateEl.value ? (' — ' + dateEl.value) : '') +
+          (nameEl && nameEl.textContent ? (' — ' + nameEl.textContent) : '');
+      }
+      var det = document.getElementById('work_booking_selected_details');
+      if (det) det.textContent = 'Привязка к брони #' + bid;
+    })();
+    syncOrderBookingModeUi();
     function syncKitStockBlock() {
       var el = document.getElementById('kit_stock_block');
       if (!el) return;
