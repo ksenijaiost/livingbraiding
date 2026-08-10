@@ -43,6 +43,7 @@ from app.db.models import (
     UserRole,
     Visit,
     VisitKitUsage,
+    WorkDraft,
     WorkForInventoryAuditLog,
     WorkForInventory,
     WorkForInventoryStaff,
@@ -105,6 +106,7 @@ from app.work_products_detail_view import (
 )
 from app.work_kit_edit import (
     apply_kit_work_edit,
+    details_lines_to_initial_lines,
     read_staff_profits_from_form,
     replace_work_staff_rows,
     sync_work_kit_reserves_for_scope,
@@ -217,6 +219,127 @@ def work_detail_legacy_redirect(
 
 def _ctx(request: Request, current_user: AuthUser, **kwargs):
     return {"request": request, "current_user": current_user, **kwargs}
+
+
+class _FormDictAdapter:
+    """Адаптер dict формы для lines_from_form / getlist (kit_master_on)."""
+
+    def __init__(self, data: dict[str, str]):
+        self._data = data
+
+    def keys(self):
+        return self._data.keys()
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
+
+    def getlist(self, key: str) -> list[str]:
+        raw = self._data.get(key)
+        if raw is None:
+            return []
+        if key == "kit_master_on" and "," in str(raw):
+            return [p.strip() for p in str(raw).split(",") if p.strip()]
+        return [str(raw)]
+
+
+def _initial_kit_lines_from_fp(fp: dict[str, str], *, prefix: str = "kit_line") -> list[dict[str, Any]]:
+    adapter = _FormDictAdapter(fp)
+    lines = filter_nonempty(lines_from_form(adapter, prefix=prefix))
+    return details_lines_to_initial_lines(lines_dicts_for_details(lines))
+
+
+def _work_new_template_response(
+    request: Request,
+    *,
+    current_user: AuthUser,
+    db: Session,
+    fp: dict[str, str],
+    error: str | None = None,
+    selected_client: Client | None = None,
+    kit_master_on_ids: list[int] | None = None,
+    status_code: int = 200,
+    is_draft: bool = False,
+    draft_id: int | None = None,
+    draft_readonly: bool = False,
+    lock_banner: dict[str, str] | None = None,
+    draft_saved: bool = False,
+):
+    if selected_client is None:
+        cid = (fp.get("client_id") or "").strip()
+        try:
+            cid_i = parse_int(cid, min=1, field_name="client_id") if cid else 0
+        except ValueError:
+            cid_i = 0
+        if cid_i > 0:
+            selected_client = db.get(Client, cid_i)
+    masters = _list_masters_for_work_form(db)
+    other_items = _other_items_for_work_form(db)
+    work_price_meta = {
+        "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
+        "other": {str(x["id"]): x for x in other_items},
+        "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
+        "customOrderBonus": _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0),
+        "mixRates": mix_rates_meta_json_dict(db),
+        "salonCutPct": float(get_salon_cut_pct(db, current_user.id)),
+    }
+    kit_prefill = {k: v for k, v in fp.items() if k.startswith("kit_qty_")}
+    kit_initial = _initial_kit_lines_from_fp(fp, prefix="kit_line")
+    corr_initial = _initial_kit_lines_from_fp(fp, prefix="corr_kit_line")
+    if kit_master_on_ids is None:
+        from app.work_draft import kit_master_on_ids_from_fp
+
+        kit_master_on_ids = kit_master_on_ids_from_fp(fp)
+    return templates.TemplateResponse(
+        "work_products_new.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            error=error,
+            fp=fp,
+            selected_client=selected_client,
+            masters=masters,
+            kit_master_on_ids=kit_master_on_ids,
+            kit_table_state_json=_kit_table_state_json(
+                current_user, masters, kit_prefill, db, initial_lines=kit_initial
+            ),
+            corr_kit_table_state_json=_kit_table_state_json(
+                current_user, masters, {}, db, initial_lines=corr_initial
+            ),
+            default_date=date.today().isoformat(),
+            kinds=[{"value": k.value, "label": _kind_label(k)} for k in WorkKind],
+            scopes=[
+                {"value": s.value, "label": ("В наличие" if s == WorkScope.IN_STOCK else "На заказ")}
+                for s in WorkScope
+            ],
+            kit_se_items=_kit_se_items(),
+            kit_de_items=_kit_de_items(),
+            rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
+            rubber_families=[{"value": v, "label": l} for v, l in _rubber_family_items()],
+            rubber_sizes=[{"value": v, "label": l} for v, l in _rubber_size_items()],
+            other_items=other_items,
+            work_price_meta_json=json.dumps(work_price_meta, ensure_ascii=False),
+            is_draft=is_draft,
+            draft_id=draft_id,
+            draft_readonly=draft_readonly,
+            lock_banner=lock_banner,
+            draft_saved=draft_saved,
+        ),
+        status_code=status_code,
+    )
+
+
+def _draft_lock_banner(db: Session, draft: WorkDraft) -> dict[str, str] | None:
+    from app.ru_labels import ru_user_role
+
+    if not draft.locked_by_user_id:
+        return None
+    holder = db.get(User, int(draft.locked_by_user_id))
+    if not holder:
+        return None
+    return {
+        "display_name": holder.display_name or holder.username,
+        "role": ru_user_role(holder.role),
+    }
 
 
 def _work_edit_profit_meta_json(db: Session, work: WorkForInventory) -> str:
@@ -1053,39 +1176,190 @@ def work_new_get(
         if v is not None and str(v).strip() != "":
             fp[key] = str(v).strip()
     _enrich_fp_rubber(fp)
-    other_items = _other_items_for_work_form(db)
-    masters = _list_masters_for_work_form(db)
-    work_price_meta = {
-        "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
-        "other": {str(x["id"]): x for x in other_items},
-        "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
-        "customOrderBonus": _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0),
-        "mixRates": mix_rates_meta_json_dict(db),
-        "salonCutPct": float(get_salon_cut_pct(db, current_user.id)),
-    }
-    return templates.TemplateResponse(
-        "work_products_new.html",
-        _ctx(
+    return _work_new_template_response(
+        request,
+        current_user=current_user,
+        db=db,
+        fp=fp,
+        selected_client=selected_client,
+        kit_master_on_ids=[],
+    )
+
+
+@router.get("/draft/{draft_id}", response_class=HTMLResponse)
+def work_draft_get(
+    request: Request,
+    draft_id: int,
+    draft_saved: str | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    from app.ru_labels import ru_user_role
+    from app.work_draft import (
+        acquire_draft_lock,
+        form_dict_from_json,
+        kit_master_on_ids_from_fp,
+        user_can_edit_draft,
+        user_can_view_draft,
+    )
+
+    draft = db.scalar(
+        select(WorkDraft)
+        .where(WorkDraft.id == int(draft_id), WorkDraft.finalized_work_id.is_(None))
+        .options(selectinload(WorkDraft.participants))
+    )
+    if not draft or not user_can_view_draft(current_user, draft, db):
+        return RedirectResponse("/master/mywork", status_code=303)
+
+    fp = form_dict_from_json(draft.form_json)
+    _enrich_fp_rubber(fp)
+    lock_banner = None
+    readonly = False
+    if current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER):
+        readonly = True
+        lock_banner = _draft_lock_banner(db, draft)
+    elif not user_can_edit_draft(current_user, draft, db):
+        readonly = True
+    else:
+        lock = acquire_draft_lock(db, draft, current_user.id)
+        readonly = lock.readonly
+        if lock.lock_holder:
+            lock_banner = {
+                "display_name": lock.lock_holder.display_name or lock.lock_holder.username,
+                "role": ru_user_role(lock.lock_holder.role),
+            }
+    db.commit()
+    selected_client = db.get(Client, int(draft.client_id)) if draft.client_id else None
+    return _work_new_template_response(
+        request,
+        current_user=current_user,
+        db=db,
+        fp=fp,
+        selected_client=selected_client,
+        kit_master_on_ids=kit_master_on_ids_from_fp(fp),
+        is_draft=True,
+        draft_id=int(draft.id),
+        draft_readonly=readonly,
+        lock_banner=lock_banner,
+        draft_saved=draft_saved == "1",
+    )
+
+
+@router.post("/draft")
+async def work_draft_create_post(
+    request: Request,
+    current_user: AuthUser = _MASTER,
+    db: Session = Depends(get_db),
+):
+    from app.work_draft import collect_form_dict, save_work_draft
+
+    form = await request.form()
+    form_dict = collect_form_dict(form)
+    try:
+        draft = save_work_draft(db, None, form_dict, current_user.id)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        _enrich_fp_rubber(form_dict)
+        return _work_new_template_response(
             request,
             current_user=current_user,
-            error=None,
-            fp=fp,
-            selected_client=selected_client,
-            masters=masters,
-            kit_master_on_ids=[],
-            kit_table_state_json=_kit_table_state_json(current_user, masters, {}, db),
-            default_date=date.today().isoformat(),
-            kinds=[{"value": k.value, "label": _kind_label(k)} for k in WorkKind],
-            scopes=[{"value": s.value, "label": ("В наличие" if s == WorkScope.IN_STOCK else "На заказ")} for s in WorkScope],
-            kit_se_items=_kit_se_items(),
-            kit_de_items=_kit_de_items(),
-            rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
-            rubber_families=[{"value": v, "label": l} for v, l in _rubber_family_items()],
-            rubber_sizes=[{"value": v, "label": l} for v, l in _rubber_size_items()],
-            other_items=other_items,
-            work_price_meta_json=json.dumps(work_price_meta, ensure_ascii=False),
-        ),
+            db=db,
+            fp=form_dict,
+            error=str(exc),
+            kit_master_on_ids=_read_kit_master_on_ids(form),
+            status_code=400,
+            is_draft=False,
+            draft_id=None,
+        )
+    return RedirectResponse(f"/sales/work/draft/{draft.id}?draft_saved=1", status_code=303)
+
+
+@router.post("/draft/{draft_id}")
+async def work_draft_update_post(
+    request: Request,
+    draft_id: int,
+    current_user: AuthUser = _MASTER,
+    db: Session = Depends(get_db),
+):
+    from app.ru_labels import ru_user_role
+    from app.work_draft import (
+        acquire_draft_lock,
+        collect_form_dict,
+        save_work_draft,
+        user_can_edit_draft,
     )
+
+    form = await request.form()
+    form_dict = collect_form_dict(form)
+    draft = db.get(WorkDraft, int(draft_id))
+    lock_banner = None
+    if draft and draft.locked_by_user_id:
+        holder = db.get(User, int(draft.locked_by_user_id))
+        if holder:
+            lock_banner = {
+                "display_name": holder.display_name or holder.username,
+                "role": ru_user_role(holder.role),
+            }
+    if not draft or not user_can_edit_draft(current_user, draft, db):
+        return RedirectResponse("/master/mywork", status_code=303)
+    lock = acquire_draft_lock(db, draft, current_user.id)
+    if lock.readonly:
+        db.rollback()
+        if lock.lock_holder:
+            lock_banner = {
+                "display_name": lock.lock_holder.display_name or lock.lock_holder.username,
+                "role": ru_user_role(lock.lock_holder.role),
+            }
+        _enrich_fp_rubber(form_dict)
+        return _work_new_template_response(
+            request,
+            current_user=current_user,
+            db=db,
+            fp=form_dict,
+            error="Черновик сейчас редактирует другой пользователь.",
+            kit_master_on_ids=_read_kit_master_on_ids(form),
+            status_code=400,
+            is_draft=True,
+            draft_id=int(draft_id),
+            draft_readonly=True,
+            lock_banner=lock_banner,
+        )
+    try:
+        save_work_draft(db, int(draft_id), form_dict, current_user.id)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        _enrich_fp_rubber(form_dict)
+        return _work_new_template_response(
+            request,
+            current_user=current_user,
+            db=db,
+            fp=form_dict,
+            error=str(exc),
+            kit_master_on_ids=_read_kit_master_on_ids(form),
+            status_code=400,
+            is_draft=True,
+            draft_id=int(draft_id),
+            draft_readonly=False,
+            lock_banner=lock_banner,
+        )
+    return RedirectResponse(f"/sales/work/draft/{draft_id}?draft_saved=1", status_code=303)
+
+
+@router.post("/draft/{draft_id}/unlock")
+def work_draft_unlock_post(
+    draft_id: int,
+    current_user: AuthUser = _MASTER,
+    db: Session = Depends(get_db),
+):
+    from app.work_draft import release_draft_lock
+
+    draft = db.get(WorkDraft, int(draft_id))
+    if draft:
+        release_draft_lock(db, draft, current_user.id)
+        db.commit()
+    return RedirectResponse(f"/sales/work/draft/{draft_id}", status_code=303)
 
 
 @router.post("/new")
@@ -1097,7 +1371,21 @@ async def work_new_post(
 ):
     form = await request.form()
     fp = {k: _g_str(form, k) for k in form.keys() if isinstance(k, str)}
+    draft_id_raw = (_g_str(form, "draft_id", "") or "").strip()
+    draft_id_val: int | None = None
+    if draft_id_raw.isdigit():
+        draft_id_val = int(draft_id_raw)
     try:
+        if draft_id_val is not None:
+            from app.work_draft import acquire_draft_lock, user_can_edit_draft
+
+            draft = db.get(WorkDraft, int(draft_id_val))
+            if not draft or not user_can_edit_draft(current_user, draft, db):
+                raise ValueError("Черновик недоступен для сохранения работы.")
+            lock = acquire_draft_lock(db, draft, current_user.id)
+            if lock.readonly:
+                raise ValueError("Черновик сейчас редактирует другой пользователь.")
+
         pd_raw = (_g_str(form, "performed_date", "") or "").strip()
         try:
             performed_dt = datetime.combine(parse_date_iso(pd_raw, field_name="performed_date"), datetime.min.time())
@@ -1781,6 +2069,10 @@ async def work_new_post(
         )
         db.flush()
         post_work_accruals(db, work.id, staff_saved, current_user.id)
+        if draft_id_val is not None:
+            from app.work_draft import link_finalized_work
+
+            link_finalized_work(db, int(draft_id_val), int(work.id), current_user.id)
         db.commit()
         if bid_for_auto_complete is not None:
             from app.routes.bookings import try_auto_complete_booking
@@ -1805,43 +2097,17 @@ async def work_new_post(
             context="work",
         )
         _enrich_fp_rubber(fp)
-        other_items = _other_items_for_work_form(db)
-        masters = _list_masters_for_work_form(db)
-        work_price_meta = {
-            "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
-            "other": {str(x["id"]): x for x in other_items},
-            "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
-            "customOrderBonus": _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0),
-            "mixRates": mix_rates_meta_json_dict(db),
-            "salonCutPct": float(get_salon_cut_pct(db, current_user.id)),
-        }
-        kit_master_on_ids = _read_kit_master_on_ids(form)
-        kit_prefill = _kit_qty_prefill_from_form(form)
-        return templates.TemplateResponse(
-            "work_products_new.html",
-            _ctx(
-                request,
-                current_user=current_user,
-                error=str(exc),
-                fp=fp,
-                masters=masters,
-                kit_master_on_ids=kit_master_on_ids,
-                kit_table_state_json=_kit_table_state_json(current_user, masters, kit_prefill, db),
-                default_date=date.today().isoformat(),
-                kinds=[{"value": k.value, "label": _kind_label(k)} for k in WorkKind],
-                scopes=[
-                    {"value": s.value, "label": ("В наличие" if s == WorkScope.IN_STOCK else "На заказ")}
-                    for s in WorkScope
-                ],
-                kit_se_items=_kit_se_items(),
-                kit_de_items=_kit_de_items(),
-                rubber_types=[{"value": v, "label": l} for v, l in _rubber_type_items()],
-            rubber_families=[{"value": v, "label": l} for v, l in _rubber_family_items()],
-            rubber_sizes=[{"value": v, "label": l} for v, l in _rubber_size_items()],
-                other_items=other_items,
-                work_price_meta_json=json.dumps(work_price_meta, ensure_ascii=False),
-            ),
+        return _work_new_template_response(
+            request,
+            current_user=current_user,
+            db=db,
+            fp=fp,
+            error=str(exc),
+            kit_master_on_ids=_read_kit_master_on_ids(form),
             status_code=400,
+            is_draft=draft_id_val is not None,
+            draft_id=draft_id_val,
+            draft_readonly=False,
         )
 
 

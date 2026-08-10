@@ -3881,6 +3881,11 @@ def master_mywork(
     db: Session = Depends(get_db),
 ):
     from app.visit_draft import draft_summary_label, list_open_drafts_for_master, preview_dict_from_json
+    from app.work_draft import (
+        draft_summary_label as work_draft_summary_label,
+        list_open_drafts_for_master as list_open_work_drafts_for_master,
+        preview_dict_from_json as work_preview_dict_from_json,
+    )
 
     draft_rows: list[dict[str, object]] = []
     for d in list_open_drafts_for_master(db, current_user.id):
@@ -3890,6 +3895,16 @@ def master_mywork(
                 "draft": d,
                 "services_label": draft_summary_label(preview),
                 "amount_total": preview.get("amount_from_client_total"),
+            }
+        )
+    work_draft_rows: list[dict[str, object]] = []
+    for d in list_open_work_drafts_for_master(db, current_user.id):
+        preview = work_preview_dict_from_json(d.preview_json)
+        work_draft_rows.append(
+            {
+                "draft": d,
+                "kind_label": work_draft_summary_label(preview),
+                "amount_total": preview.get("amount_from_client"),
             }
         )
     visit_ids = list(
@@ -3988,6 +4003,7 @@ def master_mywork(
             current_user=current_user,
             rows=rows,
             draft_rows=draft_rows,
+            work_draft_rows=work_draft_rows,
             display_tz=display_tz,
             archive_rows=archive_rows,
             archive_cap=archive_cap,

@@ -467,6 +467,9 @@
           if (data.drafts && data.drafts.count) {
             html += block('Черновики визита', data.drafts, 'drafts');
           }
+          if (data.work_drafts && data.work_drafts.count) {
+            html += block('Черновики работы', data.work_drafts, 'work_drafts');
+          }
           body.innerHTML = html;
           tt.textContent = data.date || isoDay || '—';
         } catch (e) {

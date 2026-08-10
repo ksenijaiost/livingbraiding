@@ -391,6 +391,11 @@ def api_calendar_day(
     )
 
     from app.visit_draft import draft_summary_label, drafts_for_calendar_day, preview_dict_from_json
+    from app.work_draft import (
+        draft_summary_label as work_draft_summary_label,
+        drafts_for_calendar_day as work_drafts_for_calendar_day,
+        preview_dict_from_json as work_preview_dict_from_json,
+    )
 
     draft_items: list[dict[str, Any]] = []
     for dr in drafts_for_calendar_day(db, user=current_user, day=day):
@@ -401,6 +406,20 @@ def api_calendar_day(
                 "client": dr.client.name if dr.client else "—",
                 "label": draft_summary_label(preview),
                 "url": f"/master/visit/draft/{int(dr.id)}",
+                "payout_sum": 0.0,
+                "studio_sum": 0.0,
+            }
+        )
+
+    work_draft_items: list[dict[str, Any]] = []
+    for dr in work_drafts_for_calendar_day(db, user=current_user, day=day):
+        preview = work_preview_dict_from_json(dr.preview_json)
+        work_draft_items.append(
+            {
+                "id": int(dr.id),
+                "client": dr.client.name if dr.client else "—",
+                "label": work_draft_summary_label(preview),
+                "url": f"/sales/work/draft/{int(dr.id)}",
                 "payout_sum": 0.0,
                 "studio_sum": 0.0,
             }
@@ -514,6 +533,12 @@ def api_calendar_day(
             "payout_sum": 0.0,
             "studio_sum": 0.0,
             "items": draft_items,
+        },
+        "work_drafts": {
+            "count": len(work_draft_items),
+            "payout_sum": 0.0,
+            "studio_sum": 0.0,
+            "items": work_draft_items,
         },
         "is_super": is_super,
     }

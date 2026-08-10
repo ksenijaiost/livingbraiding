@@ -1,18 +1,34 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="card">
-    <h2 style="margin-top: 0;">Работа с товарами</h2>
+  <div class="card" {% if draft_readonly %}style="pointer-events: none; opacity: 0.92;"{% endif %}>
+    <h2 style="margin-top: 0;">
+      {% if draft_id %}Черновик работы #{{ draft_id }}{% else %}Работа с товарами{% endif %}
+    </h2>
     <p class="muted" style="margin-top:-6px;">
       Режим, материал; для комплекта — таблица заготовок и мастера в блоке комплекта. ЗП по заготовкам — из количеств в таблице.
+      {% if draft_id %} Склад и начисления ЗП — только при «Сохранить работу».{% else %} «В черновик» сохраняет форму без склада и ЗП.{% endif %}
     </p>
 
     {% if error %}
       <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
     {% endif %}
+    {% if lock_banner %}
+      <div class="error" style="margin-bottom: 12px; background:#fef3c7; color:#92400e; border-color:#f59e0b;">
+        <strong>Только просмотр.</strong> Сейчас редактирует: {{ lock_banner.display_name }} ({{ lock_banner.role }}).
+      </div>
+    {% endif %}
+    {% if draft_saved %}
+      <div style="margin-bottom: 12px; padding:10px 12px; background:#ecfdf5; color:#065f46; border:1px solid #6ee7b7; border-radius:8px;">
+        Черновик сохранён.
+      </div>
+    {% endif %}
 
     {% set scope_val = fp.scope or 'IN_STOCK' %}
 
-    <form method="post" action="/sales/work/new" id="work_products_form">
+    <form method="post"
+      action="{% if draft_id %}/sales/work/draft/{{ draft_id }}{% else %}/sales/work/new{% endif %}"
+      id="work_products_form">
+      {% if draft_id %}<input type="hidden" name="draft_id" value="{{ draft_id }}" />{% endif %}
       <input type="hidden" name="booking_id" value="{{ fp.booking_id or '' }}" />
       <input type="hidden" name="work_plan_id" value="{{ fp.work_plan_id or '' }}" />
       <div class="row">
@@ -372,12 +388,28 @@
         <div id="work_preview_cost_line" class="muted" style="font-size: 13px; margin-top: 8px;">—</div>
       </div>
 
-      <button type="submit">Сохранить</button>
+      <p style="margin-top: 16px; pointer-events: auto;">
+        {% if draft_id %}
+          {% if not draft_readonly %}
+            <button type="submit">Сохранить черновик</button>
+            <button type="submit" formaction="/sales/work/new" formmethod="post"
+              onclick="return confirm('Сохранить работу? Склад будет обновлён, начисления ЗП созданы.');">Сохранить работу</button>
+            <button type="submit" class="secondary" form="work-draft-unlock-form">Снять блокировку</button>
+          {% endif %}
+          <a href="/master/mywork"><button type="button" class="secondary">Моя работа</button></a>
+        {% else %}
+          <button type="submit">Сохранить</button>
+          <button type="submit" class="secondary" formaction="/sales/work/draft" formmethod="post">В черновик</button>
+        {% endif %}
+      </p>
     </form>
+    {% if draft_id and not draft_readonly %}
+      <form id="work-draft-unlock-form" method="post" action="/sales/work/draft/{{ draft_id }}/unlock" style="pointer-events:auto;"></form>
+    {% endif %}
   </div>
 
   <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
-  <script type="application/json" id="corr_kit_table_state">{{ kit_table_state_json | safe }}</script>
+  <script type="application/json" id="corr_kit_table_state">{{ (corr_kit_table_state_json or kit_table_state_json) | safe }}</script>
   <script type="application/json" id="work_price_meta">{{ work_price_meta_json | safe }}</script>
   <script src="/static/correction_custom_amount.js"></script>
   <script>

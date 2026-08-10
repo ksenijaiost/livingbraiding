@@ -4,10 +4,12 @@
     <h2 style="margin-top:0;">Моя работа</h2>
 
     <h3 style="margin:18px 0 8px;font-size:1.05rem;">Черновики</h3>
-    <p class="muted" style="margin-top:0;">Незавершённые визиты, где вы участвуете как мастер.</p>
-    {% if not draft_rows %}
+    <p class="muted" style="margin-top:0;">Незавершённые визиты и работы, где вы участвуете как мастер.</p>
+    {% if not draft_rows and not work_draft_rows %}
       <p class="muted">Черновиков нет.</p>
     {% else %}
+      {% if draft_rows %}
+      <h4 style="margin:12px 0 6px;font-size:0.95rem;">Визиты</h4>
       <table>
         <thead>
           <tr>
@@ -31,6 +33,33 @@
           {% endfor %}
         </tbody>
       </table>
+      {% endif %}
+      {% if work_draft_rows %}
+      <h4 style="margin:16px 0 6px;font-size:0.95rem;">Работа с товарами</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Клиент</th>
+            <th>Вид</th>
+            <th>С клиента</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in work_draft_rows %}
+            {% set d = row.draft %}
+            <tr>
+              <td>{{ format_naive_utc_datetime(d.performed_date, display_tz) }}</td>
+              <td>{% if d.client %}<a href="/clients/{{ d.client.id }}">{{ d.client.name }}</a>{% else %}—{% endif %}</td>
+              <td>{{ row.kind_label }}</td>
+              <td>{% if row.amount_total is not none %}{{ "%.0f"|format(row.amount_total) }} ₽{% else %}—{% endif %}</td>
+              <td><a href="/sales/work/draft/{{ d.id }}"><button type="button" class="secondary">Открыть</button></a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
     {% endif %}
 
     <hr style="border:0;border-top:1px solid #e5e7eb;margin:28px 0 16px;" />

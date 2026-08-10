@@ -1179,6 +1179,11 @@ class WorkForInventory(Base):
         back_populates="work",
         cascade="all, delete-orphan",
     )
+    draft_source: Mapped["WorkDraft | None"] = relationship(
+        back_populates="finalized_work",
+        foreign_keys="WorkDraft.finalized_work_id",
+        uselist=False,
+    )
 
 
 class WorkForInventoryStaff(Base):
@@ -1485,6 +1490,71 @@ class VisitDraftParticipant(Base):
     master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
     visit_draft: Mapped["VisitDraft"] = relationship(back_populates="participants")
+    master: Mapped["User"] = relationship()
+
+
+class WorkDraft(Base):
+    """Черновик «работы с товарами» — форма без склада и начислений ЗП."""
+
+    __tablename__ = "work_drafts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    performed_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
+    booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True)
+    work_plan_id: Mapped[int | None] = mapped_column(ForeignKey("work_plans.id"), nullable=True)
+
+    kind: Mapped[WorkKind | None] = mapped_column(
+        Enum(WorkKind, native_enum=False, length=32),
+        nullable=True,
+    )
+    scope: Mapped[WorkScope | None] = mapped_column(
+        Enum(WorkScope, native_enum=False, length=24),
+        nullable=True,
+    )
+
+    form_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preview_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    locked_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finalized_work_id: Mapped[int | None] = mapped_column(
+        ForeignKey("work_for_inventory.id"),
+        nullable=True,
+    )
+
+    client: Mapped[Client | None] = relationship()
+    booking: Mapped["Booking | None"] = relationship()
+    work_plan: Mapped["WorkPlan | None"] = relationship()
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    locked_by_user: Mapped["User | None"] = relationship(foreign_keys=[locked_by_user_id])
+    finalized_work: Mapped["WorkForInventory | None"] = relationship(
+        back_populates="draft_source",
+        foreign_keys=[finalized_work_id],
+    )
+    participants: Mapped[list["WorkDraftParticipant"]] = relationship(
+        back_populates="work_draft",
+        cascade="all, delete-orphan",
+    )
+
+
+class WorkDraftParticipant(Base):
+    __tablename__ = "work_draft_participants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    work_draft_id: Mapped[int] = mapped_column(
+        ForeignKey("work_drafts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    master_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    work_draft: Mapped["WorkDraft"] = relationship(back_populates="participants")
     master: Mapped["User"] = relationship()
 
 
