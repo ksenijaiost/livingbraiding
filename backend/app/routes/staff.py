@@ -37,6 +37,7 @@ _ROLE_FORM_KEYS = (
     (UserRole.ADMIN_SUPER, "role_admin_super"),
     (UserRole.ADMIN, "role_admin"),
     (UserRole.MASTER, "role_master"),
+    (UserRole.HELPER, "role_helper"),
     (UserRole.TECHSPEC, "role_techspec"),
 )
 

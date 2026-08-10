@@ -3690,6 +3690,13 @@ _MASTER_ARCHIVE_KIND_OPTIONS: list[tuple[str, str]] = [
     ("consultation", "Консультация"),
 ]
 
+_HELPER_ARCHIVE_KIND_OPTIONS: list[tuple[str, str]] = [
+    ("", "Все виды"),
+    ("visit", "Визит (помощь)"),
+    ("work", "Работа (помощь)"),
+    ("hourly", "Почасовая"),
+]
+
 
 def _master_archive_kind_label(kind: str) -> str:
     return {
@@ -3776,7 +3783,9 @@ def master_activity_archive(
     date_to: date,
     kind: str | None = None,
     max_rows: int = 100,
+    helper_only: bool = False,
 ) -> tuple[list[dict[str, Any]], bool]:
+    from app.hourly_help import visit_hourly_help_master_clause
     from app.payroll_fund import visit_ids_visible_to_master_clause
 
     mid = int(master_id)
@@ -3787,6 +3796,11 @@ def master_activity_archive(
 
     want_all = not kind_filter
     if want_all or kind_filter == "visit":
+        visit_clause = (
+            visit_hourly_help_master_clause(mid)
+            if helper_only
+            else visit_ids_visible_to_master_clause(mid)
+        )
         visits = list(
             db.scalars(
                 select(Visit)
@@ -3794,7 +3808,7 @@ def master_activity_archive(
                     Visit.performed_date >= start,
                     Visit.performed_date < end_excl,
                     Visit.is_cancelled.is_(False),
-                    visit_ids_visible_to_master_clause(mid),
+                    visit_clause,
                 )
                 .options(
                     selectinload(Visit.client),
@@ -3810,17 +3824,24 @@ def master_activity_archive(
             items.append({"kind": "visit", "sort_at": v.performed_date, "visit": v, "label": svc_l, "client": v.client})
 
     if want_all or kind_filter == "work":
+        work_scope = (
+            WorkForInventory.id.in_(
+                select(WorkForInventoryStaff.work_id).where(WorkForInventoryStaff.user_id == mid)
+            )
+            if helper_only
+            else or_(
+                WorkForInventory.created_by_user_id == mid,
+                WorkForInventory.id.in_(
+                    select(WorkForInventoryStaff.work_id).where(WorkForInventoryStaff.user_id == mid)
+                ),
+            )
+        )
         works = list(
             db.scalars(
                 select(WorkForInventory)
                 .where(
                     WorkForInventory.is_voided.is_(False),
-                    or_(
-                        WorkForInventory.created_by_user_id == mid,
-                        WorkForInventory.id.in_(
-                            select(WorkForInventoryStaff.work_id).where(WorkForInventoryStaff.user_id == mid)
-                        ),
-                    ),
+                    work_scope,
                     or_(
                         and_(
                             WorkForInventory.performed_date.is_not(None),
@@ -3853,7 +3874,7 @@ def master_activity_archive(
                 }
             )
 
-    if want_all or kind_filter == "sale":
+    if (want_all or kind_filter == "sale") and not helper_only:
         staff_on_booking = exists(
             select(1).where(BookingStaff.booking_id == ProductSale.booking_id, BookingStaff.user_id == mid)
         )
@@ -3908,7 +3929,7 @@ def master_activity_archive(
                 }
             )
 
-    if want_all or kind_filter == "consultation":
+    if (want_all or kind_filter == "consultation") and not helper_only:
         consultations = list(
             db.scalars(
                 select(Consultation)
@@ -3979,7 +4000,7 @@ def admin_bookings_list_legacy_redirect(
 
 
 @legacy_master_bookings_page_router.get("")
-def master_bookings_legacy_redirect(request: Request, current_user: AuthUser = Depends(require_role(UserRole.MASTER))):
+def master_bookings_legacy_redirect(request: Request, current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.HELPER))):
     q = request.url.query
     target = "/master/mywork" + (f"?{q}" if q else "")
     return RedirectResponse(url=target, status_code=308)
@@ -3991,9 +4012,10 @@ def master_mywork(
     kind: str | None = Query(None),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.HELPER)),
     db: Session = Depends(get_db),
 ):
+    is_helper = current_user.role == UserRole.HELPER
     from app.visit_draft import draft_summary_label, list_open_drafts_for_master, preview_dict_from_json
     from app.work_draft import (
         draft_summary_label as work_draft_summary_label,
@@ -4002,45 +4024,49 @@ def master_mywork(
     )
 
     draft_rows: list[dict[str, object]] = []
-    for d in list_open_drafts_for_master(db, current_user.id):
-        preview = preview_dict_from_json(d.preview_json)
-        draft_rows.append(
-            {
-                "draft": d,
-                "services_label": draft_summary_label(preview),
-                "amount_total": preview.get("amount_from_client_total"),
-            }
-        )
     work_draft_rows: list[dict[str, object]] = []
-    for d in list_open_work_drafts_for_master(db, current_user.id):
-        preview = work_preview_dict_from_json(d.preview_json)
-        work_draft_rows.append(
-            {
-                "draft": d,
-                "kind_label": work_draft_summary_label(preview),
-                "amount_total": preview.get("amount_from_client"),
-            }
+    if not is_helper:
+        for d in list_open_drafts_for_master(db, current_user.id):
+            preview = preview_dict_from_json(d.preview_json)
+            draft_rows.append(
+                {
+                    "draft": d,
+                    "services_label": draft_summary_label(preview),
+                    "amount_total": preview.get("amount_from_client_total"),
+                }
+            )
+        for d in list_open_work_drafts_for_master(db, current_user.id):
+            preview = work_preview_dict_from_json(d.preview_json)
+            work_draft_rows.append(
+                {
+                    "draft": d,
+                    "kind_label": work_draft_summary_label(preview),
+                    "amount_total": preview.get("amount_from_client"),
+                }
+            )
+    visit_ids: list[int] = []
+    sale_ids: list[int] = []
+    if not is_helper:
+        visit_ids = list(
+            db.scalars(
+                select(Booking.id)
+                .join(BookingMaster, BookingMaster.booking_id == Booking.id)
+                .where(
+                    Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)),
+                    BookingMaster.master_id == current_user.id,
+                )
+            ).all()
         )
-    visit_ids = list(
-        db.scalars(
-            select(Booking.id)
-            .join(BookingMaster, BookingMaster.booking_id == Booking.id)
-            .where(
-                Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)),
-                BookingMaster.master_id == current_user.id,
-            )
-        ).all()
-    )
-    sale_ids = list(
-        db.scalars(
-            select(Booking.id)
-            .join(BookingStaff, BookingStaff.booking_id == Booking.id)
-            .where(
-                Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)),
-                BookingStaff.user_id == current_user.id,
-            )
-        ).all()
-    )
+        sale_ids = list(
+            db.scalars(
+                select(Booking.id)
+                .join(BookingStaff, BookingStaff.booking_id == Booking.id)
+                .where(
+                    Booking.status.in_((BookingStatus.PENDING_CONFIRMATION, BookingStatus.ACTIVE)),
+                    BookingStaff.user_id == current_user.id,
+                )
+            ).all()
+        )
     ids = sorted(set([int(x) for x in (visit_ids + sale_ids) if x is not None]))
     display_tz = get_display_timezone(db)
 
@@ -4087,8 +4113,9 @@ def master_mywork(
 
     today = utcnow_naive().date()
     default_from = today - timedelta(days=29)
+    archive_kind_options = _HELPER_ARCHIVE_KIND_OPTIONS if is_helper else _MASTER_ARCHIVE_KIND_OPTIONS
     archive_kind = (kind or "").strip().lower()
-    if archive_kind and archive_kind not in {k for k, _ in _MASTER_ARCHIVE_KIND_OPTIONS if k}:
+    if archive_kind and archive_kind not in {k for k, _ in archive_kind_options if k}:
         archive_kind = ""
     try:
         archive_date_from = date.fromisoformat((date_from or "").strip()) if (date_from or "").strip() else default_from
@@ -4109,6 +4136,7 @@ def master_mywork(
         date_to=archive_date_to,
         kind=archive_kind or None,
         max_rows=archive_cap,
+        helper_only=is_helper,
     )
     return templates.TemplateResponse(
         "master_mywork.html",
@@ -4118,12 +4146,13 @@ def master_mywork(
             rows=rows,
             draft_rows=draft_rows,
             work_draft_rows=work_draft_rows,
+            is_helper=is_helper,
             display_tz=display_tz,
             archive_rows=archive_rows,
             archive_cap=archive_cap,
             archive_truncated=archive_truncated,
             archive_kind=archive_kind,
-            archive_kind_options=_MASTER_ARCHIVE_KIND_OPTIONS,
+            archive_kind_options=archive_kind_options,
             archive_date_from=archive_date_from.isoformat(),
             archive_date_to=archive_date_to.isoformat(),
         ),

@@ -3,6 +3,7 @@
   <div class="card">
     <h2 style="margin-top:0;">Моя работа</h2>
 
+    {% if not is_helper %}
     <h3 style="margin:18px 0 8px;font-size:1.05rem;">Черновики</h3>
     <p class="muted" style="margin-top:0;">Незавершённые визиты и работы, где вы участвуете как мастер.</p>
     {% if not draft_rows and not work_draft_rows %}
@@ -66,7 +67,6 @@
 
     <h3 style="margin:18px 0 8px;font-size:1.05rem;">Активные записи</h3>
     <p class="muted" style="margin-top:0;">Будущие брони (визит или продажа/заказ), где вы указаны мастером или ответственным по продаже.</p>
-
     {% if not rows %}
       <p class="muted">Активных записей нет.</p>
     {% else %}
@@ -96,12 +96,19 @@
         </tbody>
       </table>
     {% endif %}
+    {% else %}
+    <p class="muted" style="margin-top:0;">Почасовая работа и визиты/работы, где вы указаны в почасовой помощи — в архиве ниже.</p>
+    {% endif %}
 
     <hr style="border:0;border-top:1px solid #e5e7eb;margin:28px 0 16px;" />
 
     <h3 style="margin:0 0 8px;font-size:1.05rem;">Архив</h3>
     <p class="muted" style="margin-top:0;">
-      Визиты, работы с товарами, продажи, почасовая и консультации, где вы участвовали.
+      {% if is_helper %}
+        Почасовая работа и визиты/работы, где вы указаны в почасовой помощи.
+      {% else %}
+        Визиты, работы с товарами, продажи, почасовая и консультации, где вы участвовали.
+      {% endif %}
       Колонка «Ваша ЗП» — начисление именно вам по этой записи.
       {% if archive_truncated %}
         Показано не более {{ archive_cap }} последних событий — сузьте фильтр по датам или виду.
@@ -165,7 +172,11 @@
               <td>{{ row.label }}</td>
               <td>
                 {% if row.client %}
-                  <a href="/clients/{{ row.client.id }}">{{ row.client.name }}</a>
+                  {% if is_helper %}
+                    {{ row.client.name }}
+                  {% else %}
+                    <a href="/clients/{{ row.client.id }}">{{ row.client.name }}</a>
+                  {% endif %}
                 {% else %}
                   <span class="muted">—</span>
                 {% endif %}

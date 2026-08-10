@@ -27,10 +27,12 @@ from app.webui import templates
 
 router = APIRouter(prefix="/hourly-work", tags=["hourly-work"])
 
-_ACCESS = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
+_ACCESS = Depends(require_role(UserRole.MASTER, UserRole.HELPER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 
 
 def _is_admin_user(user: AuthUser) -> bool:
+    if user.role == UserRole.HELPER:
+        return False
     return UserRole.ADMIN in user.roles or UserRole.ADMIN_SUPER in user.roles
 
 
@@ -60,7 +62,10 @@ def _list_entries(
     )
     if not show_voided:
         stmt = stmt.where(HourlyWorkEntry.is_voided.is_(False))
-    if UserRole.MASTER in current_user.roles and not _is_admin_user(current_user):
+    # В кабинете помощника — только свои; у мастера без админ-роли — тоже только свои.
+    if current_user.role == UserRole.HELPER or (
+        current_user.role == UserRole.MASTER and not _is_admin_user(current_user)
+    ):
         stmt = stmt.where(HourlyWorkEntry.master_user_id == int(current_user.id))
     return list(db.scalars(stmt).all())
 

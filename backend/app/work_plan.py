@@ -12,7 +12,7 @@ from app.db.models import HourlyWorkEntry, WorkForInventory, WorkKind, WorkPlan,
 from app.display_time import get_display_timezone
 from app.master_schedule import TimeRangeMinutes, _interval_overlaps, is_master_available_for_interval
 from app.time_utils import utcnow_naive
-from app.user_roles import select_users_with_role
+from app.user_roles import select_users_with_any_role
 
 WORK_KIND_LABELS: dict[WorkKind, str] = {
     WorkKind.KIT: "Комплект/Заготовки (поштучно)",
@@ -27,7 +27,7 @@ WORK_KIND_LABELS: dict[WorkKind, str] = {
 def list_masters_for_work_plan_form(db: Session) -> list[User]:
     return list(
         db.scalars(
-            select_users_with_role(UserRole.MASTER)
+            select_users_with_any_role(UserRole.MASTER, UserRole.HELPER)
             .where(User.is_active.is_(True))
             .order_by(User.display_name.asc(), User.username.asc())
         ).all()

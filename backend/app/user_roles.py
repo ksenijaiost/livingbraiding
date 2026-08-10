@@ -12,7 +12,16 @@ _ROLE_PRIORITY = (
     UserRole.ADMIN_SUPER,
     UserRole.ADMIN,
     UserRole.MASTER,
+    UserRole.HELPER,
 )
+
+_ROLE_SORT_ORDER = {
+    UserRole.TECHSPEC: -1,
+    UserRole.ADMIN_SUPER: 0,
+    UserRole.ADMIN: 1,
+    UserRole.MASTER: 2,
+    UserRole.HELPER: 3,
+}
 
 
 def max_user_role(roles: list[UserRole]) -> UserRole:
@@ -28,6 +37,8 @@ def default_active_role(roles: list[UserRole]) -> UserRole:
         return UserRole.ADMIN
     if UserRole.MASTER in roles:
         return UserRole.MASTER
+    if UserRole.HELPER in roles:
+        return UserRole.HELPER
     return UserRole.TECHSPEC
 
 
@@ -39,8 +50,7 @@ def get_roles_for_user(db: Session, user_id: int) -> list[UserRole]:
     )
     if not rows:
         return []
-    order = {UserRole.TECHSPEC: -1, UserRole.ADMIN_SUPER: 0, UserRole.ADMIN: 1, UserRole.MASTER: 2}
-    return sorted(set(rows), key=lambda r: order[r])
+    return sorted(set(rows), key=lambda r: _ROLE_SORT_ORDER.get(r, 99))
 
 
 def resolve_active_role(roles: list[UserRole], cookie_value: str | None) -> UserRole:

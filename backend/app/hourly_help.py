@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import User, UserRole, Visit, VisitMastersScope
 from app.payroll_fund import money_q2
-from app.user_roles import user_has_role
+from app.user_roles import user_has_any_role, user_has_role
 
 _HOURS_RE = re.compile(r"^hourly_help_hours_(\d+)$")
 _MINUTES_RE = re.compile(r"^hourly_help_minutes_(\d+)$")
@@ -149,9 +149,9 @@ def format_hourly_help_duration(hours: int, minutes: int) -> str:
 def _validate_master(db: Session, master_id: int) -> None:
     u = db.get(User, master_id)
     if not u or not u.is_active:
-        raise ValueError("Мастер помощи не найден или отключён.")
-    if not user_has_role(db, master_id, UserRole.MASTER):
-        raise ValueError("Помощь может получить только активный мастер.")
+        raise ValueError("Сотрудник помощи не найден или отключён.")
+    if not user_has_any_role(db, master_id, UserRole.MASTER, UserRole.HELPER):
+        raise ValueError("Помощь может получить только активный мастер или помощник.")
 
 
 def validate_hourly_help_rows(

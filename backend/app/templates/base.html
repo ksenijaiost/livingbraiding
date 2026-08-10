@@ -206,94 +206,106 @@
 
           <!-- Desktop: sections (A) -->
           <div class="nav-desktop" aria-label="Навигация">
-            <a href="/">Главная</a>
-            <a href="/clients">Клиенты</a>
-
-            <details class="nav-dd">
-              <summary>Записи</summary>
-              <div class="dd">
-                <a href="/visits">Визиты</a>
-                <a href="/consultations">Консультации</a>
-                <a href="/bookings">Брони</a>
-                {% if current_user.role.value in ("ADMIN", "ADMIN_SUPER") %}
-                  <a href="/bookings/new">Новая бронь</a>
-                {% endif %}
-                <a href="/service-catalog">Прайс — услуги</a>
-              </div>
-            </details>
-
-            <details class="nav-dd">
-              <summary>Работа</summary>
-              <div class="dd">
-                {% if current_user.role.value == "MASTER" %}
-                  <a href="/master/mywork">Моя работа</a>
-                  <a href="/master/visit/new">Новый визит</a>
-                  <a href="/consultations/new">Новая консультация</a>
-                  <a href="/sales/work/new">Новая работа</a>
-                {% endif %}
-                <a href="/work-plans">План работ</a>
-                {% if current_user.role.value in ("MASTER", "ADMIN", "ADMIN_SUPER") %}
-                  <a href="/hourly-work">Почасовая работа</a>
-                {% endif %}
-              </div>
-            </details>
-
-            <details class="nav-dd">
-              <summary>Товары</summary>
-              <div class="dd">
-                <a href="/sales/products">Продажа товаров</a>
-                <a href="/sales/work">Работа с товарами</a>
-                <a href="/products-calc">Калькулятор</a>
-                <a href="/products-catalog">Прайс — товары</a>
-              </div>
-            </details>
-
-            <details class="nav-dd">
-              <summary>Склад</summary>
-              <div class="dd">
-                <a href="/kits">Комплекты</a>
-              </div>
-            </details>
-
-            {% if current_user.role.value == "MASTER" %}
+            {% if current_user.role.value == "HELPER" %}
+              <a href="/">Главная</a>
               <details class="nav-dd">
-                <summary>График</summary>
+                <summary>Работа</summary>
+                <div class="dd">
+                  <a href="/master/mywork">Моя работа</a>
+                  <a href="/hourly-work">Почасовая работа</a>
+                  <a href="/work-plans">План работ</a>
+                </div>
+              </details>
+            {% else %}
+              <a href="/">Главная</a>
+              <a href="/clients">Клиенты</a>
+
+              <details class="nav-dd">
+                <summary>Записи</summary>
+                <div class="dd">
+                  <a href="/visits">Визиты</a>
+                  <a href="/consultations">Консультации</a>
+                  <a href="/bookings">Брони</a>
+                  {% if current_user.role.value in ("ADMIN", "ADMIN_SUPER") %}
+                    <a href="/bookings/new">Новая бронь</a>
+                  {% endif %}
+                  <a href="/service-catalog">Прайс — услуги</a>
+                </div>
+              </details>
+
+              <details class="nav-dd">
+                <summary>Работа</summary>
+                <div class="dd">
+                  {% if current_user.role.value == "MASTER" %}
+                    <a href="/master/mywork">Моя работа</a>
+                    <a href="/master/visit/new">Новый визит</a>
+                    <a href="/consultations/new">Новая консультация</a>
+                    <a href="/sales/work/new">Новая работа</a>
+                  {% endif %}
+                  <a href="/work-plans">План работ</a>
+                  {% if current_user.role.value in ("MASTER", "ADMIN", "ADMIN_SUPER") %}
+                    <a href="/hourly-work">Почасовая работа</a>
+                  {% endif %}
+                </div>
+              </details>
+
+              <details class="nav-dd">
+                <summary>Товары</summary>
+                <div class="dd">
+                  <a href="/sales/products">Продажа товаров</a>
+                  <a href="/sales/work">Работа с товарами</a>
+                  <a href="/products-calc">Калькулятор</a>
+                  <a href="/products-catalog">Прайс — товары</a>
+                </div>
+              </details>
+
+              <details class="nav-dd">
+                <summary>Склад</summary>
+                <div class="dd">
+                  <a href="/kits">Комплекты</a>
+                </div>
+              </details>
+
+              {% if current_user.role.value == "MASTER" %}
+                <details class="nav-dd">
+                  <summary>График</summary>
+                  <div class="dd">
+                    <a href="/masters-schedule">График всех мастеров</a>
+                    <a href="/master/schedule">Редактировать график</a>
+                    <a href="/master/schedule?block=1">Занять время</a>
+                  </div>
+                </details>
+              {% endif %}
+
+              <details class="nav-dd">
+                <summary>Студия</summary>
                 <div class="dd">
                   <a href="/masters-schedule">График всех мастеров</a>
-                  <a href="/master/schedule">Редактировать график</a>
-                  <a href="/master/schedule?block=1">Занять время</a>
+                  {% if current_user.role.value == "MASTER" %}
+                    <a href="/master/schedule">Управление графиком</a>
+                  {% endif %}
+                  {% if current_user.role.value == "ADMIN_SUPER" %}
+                    <a href="/admin/master-schedule">Управление графиком мастеров</a>
+                    <a href="/admin/settings/staff">Сотрудники</a>
+                  {% endif %}
                 </div>
               </details>
-            {% endif %}
 
-            <details class="nav-dd">
-              <summary>Студия</summary>
-              <div class="dd">
-                <a href="/masters-schedule">График всех мастеров</a>
-                {% if current_user.role.value == "MASTER" %}
-                  <a href="/master/schedule">Управление графиком</a>
-                {% endif %}
-                {% if current_user.role.value == "ADMIN_SUPER" %}
-                  <a href="/admin/master-schedule">Управление графиком мастеров</a>
-                  <a href="/admin/settings/staff">Сотрудники</a>
-                {% endif %}
-              </div>
-            </details>
-
-            {% if current_user.role.value == "ADMIN_SUPER" %}
-              <details class="nav-dd">
-                <summary>Управление</summary>
-                <div class="dd">
-                  <a href="/admin/expenses">Расходы</a>
-                  <a href="/admin/payroll-fund">Фонды</a>
-                  <a href="/admin/payroll-periods">Периоды</a>
-                  <a href="/admin/reports">Отчёты</a>
-                  <a href="/admin/statistics">Статистика</a>
-                  <a href="/admin/catalog">Управление прайсом</a>
-                  <a href="/admin/settings">Настройки</a>
-                  <a href="/admin/super/purge" style="color:#b91c1c;">Удаление данных</a>
-                </div>
-              </details>
+              {% if current_user.role.value == "ADMIN_SUPER" %}
+                <details class="nav-dd">
+                  <summary>Управление</summary>
+                  <div class="dd">
+                    <a href="/admin/expenses">Расходы</a>
+                    <a href="/admin/payroll-fund">Фонды</a>
+                    <a href="/admin/payroll-periods">Периоды</a>
+                    <a href="/admin/reports">Отчёты</a>
+                    <a href="/admin/statistics">Статистика</a>
+                    <a href="/admin/catalog">Управление прайсом</a>
+                    <a href="/admin/settings">Настройки</a>
+                    <a href="/admin/super/purge" style="color:#b91c1c;">Удаление данных</a>
+                  </div>
+                </details>
+              {% endif %}
             {% endif %}
 
             <a href="/logout">Выйти</a>
@@ -302,7 +314,9 @@
           <!-- Mobile: "Главная" + ☰ (B) -->
           <div class="nav-mobile" aria-label="Навигация (мобильная)">
             <a href="/">Главная</a>
-            <a href="/clients">Клиенты</a>
+            {% if current_user.role.value != "HELPER" %}
+              <a href="/clients">Клиенты</a>
+            {% endif %}
             <button type="button" class="hamburger" aria-label="Открыть меню" aria-controls="lbMobileDrawer" aria-expanded="false" onclick="window.lbToggleMobileNav(true)">☰</button>
           </div>
         {% else %}
@@ -322,79 +336,88 @@
         </div>
 
         <a class="md-link" href="/" onclick="window.lbToggleMobileNav(false)"><strong>Главная</strong></a>
-        <a class="md-link" href="/clients" onclick="window.lbToggleMobileNav(false)"><strong>Клиенты</strong></a>
-
-        <details>
-          <summary><strong>Записи</strong></summary>
-          <a class="md-link" href="/visits" onclick="window.lbToggleMobileNav(false)">Визиты</a>
-          <a class="md-link" href="/consultations" onclick="window.lbToggleMobileNav(false)">Консультации</a>
-          <a class="md-link" href="/bookings" onclick="window.lbToggleMobileNav(false)">Брони</a>
-          {% if current_user.role.value in ("ADMIN", "ADMIN_SUPER") %}
-            <a class="md-link" href="/bookings/new" onclick="window.lbToggleMobileNav(false)">Новая бронь</a>
-          {% endif %}
-          <a class="md-link" href="/service-catalog" onclick="window.lbToggleMobileNav(false)">Прайс — услуги</a>
-        </details>
-
-        <details>
-          <summary><strong>Работа</strong></summary>
-          {% if current_user.role.value == "MASTER" %}
+        {% if current_user.role.value == "HELPER" %}
+          <details>
+            <summary><strong>Работа</strong></summary>
             <a class="md-link" href="/master/mywork" onclick="window.lbToggleMobileNav(false)">Моя работа</a>
-            <a class="md-link" href="/master/visit/new" onclick="window.lbToggleMobileNav(false)">Новый визит</a>
-            <a class="md-link" href="/consultations/new" onclick="window.lbToggleMobileNav(false)">Новая консультация</a>
-            <a class="md-link" href="/sales/work/new" onclick="window.lbToggleMobileNav(false)">Новая работа</a>
-          {% endif %}
-          <a class="md-link" href="/work-plans" onclick="window.lbToggleMobileNav(false)">План работ</a>
-          {% if current_user.role.value in ("MASTER", "ADMIN", "ADMIN_SUPER") %}
             <a class="md-link" href="/hourly-work" onclick="window.lbToggleMobileNav(false)">Почасовая работа</a>
-          {% endif %}
-        </details>
-
-        <details>
-          <summary><strong>Товары</strong></summary>
-          <a class="md-link" href="/sales/products" onclick="window.lbToggleMobileNav(false)">Продажа товаров</a>
-          <a class="md-link" href="/sales/work" onclick="window.lbToggleMobileNav(false)">Работа с товарами</a>
-          <a class="md-link" href="/products-calc" onclick="window.lbToggleMobileNav(false)">Калькулятор</a>
-          <a class="md-link" href="/products-catalog" onclick="window.lbToggleMobileNav(false)">Прайс — товары</a>
-        </details>
-
-        <details>
-          <summary><strong>Склад</strong></summary>
-          <a class="md-link" href="/kits" onclick="window.lbToggleMobileNav(false)">Комплекты</a>
-        </details>
-
-        {% if current_user.role.value == "MASTER" %}
-          <details>
-            <summary><strong>График</strong></summary>
-            <a class="md-link" href="/masters-schedule" onclick="window.lbToggleMobileNav(false)">График всех мастеров</a>
-            <a class="md-link" href="/master/schedule" onclick="window.lbToggleMobileNav(false)">Редактировать график</a>
-            <a class="md-link" href="/master/schedule?block=1" onclick="window.lbToggleMobileNav(false)">Занять время</a>
+            <a class="md-link" href="/work-plans" onclick="window.lbToggleMobileNav(false)">План работ</a>
           </details>
-        {% endif %}
+        {% else %}
+          <a class="md-link" href="/clients" onclick="window.lbToggleMobileNav(false)"><strong>Клиенты</strong></a>
 
-        <details>
-          <summary><strong>Студия</strong></summary>
-          <a class="md-link" href="/masters-schedule" onclick="window.lbToggleMobileNav(false)">График всех мастеров</a>
+          <details>
+            <summary><strong>Записи</strong></summary>
+            <a class="md-link" href="/visits" onclick="window.lbToggleMobileNav(false)">Визиты</a>
+            <a class="md-link" href="/consultations" onclick="window.lbToggleMobileNav(false)">Консультации</a>
+            <a class="md-link" href="/bookings" onclick="window.lbToggleMobileNav(false)">Брони</a>
+            {% if current_user.role.value in ("ADMIN", "ADMIN_SUPER") %}
+              <a class="md-link" href="/bookings/new" onclick="window.lbToggleMobileNav(false)">Новая бронь</a>
+            {% endif %}
+            <a class="md-link" href="/service-catalog" onclick="window.lbToggleMobileNav(false)">Прайс — услуги</a>
+          </details>
+
+          <details>
+            <summary><strong>Работа</strong></summary>
+            {% if current_user.role.value == "MASTER" %}
+              <a class="md-link" href="/master/mywork" onclick="window.lbToggleMobileNav(false)">Моя работа</a>
+              <a class="md-link" href="/master/visit/new" onclick="window.lbToggleMobileNav(false)">Новый визит</a>
+              <a class="md-link" href="/consultations/new" onclick="window.lbToggleMobileNav(false)">Новая консультация</a>
+              <a class="md-link" href="/sales/work/new" onclick="window.lbToggleMobileNav(false)">Новая работа</a>
+            {% endif %}
+            <a class="md-link" href="/work-plans" onclick="window.lbToggleMobileNav(false)">План работ</a>
+            {% if current_user.role.value in ("MASTER", "ADMIN", "ADMIN_SUPER") %}
+              <a class="md-link" href="/hourly-work" onclick="window.lbToggleMobileNav(false)">Почасовая работа</a>
+            {% endif %}
+          </details>
+
+          <details>
+            <summary><strong>Товары</strong></summary>
+            <a class="md-link" href="/sales/products" onclick="window.lbToggleMobileNav(false)">Продажа товаров</a>
+            <a class="md-link" href="/sales/work" onclick="window.lbToggleMobileNav(false)">Работа с товарами</a>
+            <a class="md-link" href="/products-calc" onclick="window.lbToggleMobileNav(false)">Калькулятор</a>
+            <a class="md-link" href="/products-catalog" onclick="window.lbToggleMobileNav(false)">Прайс — товары</a>
+          </details>
+
+          <details>
+            <summary><strong>Склад</strong></summary>
+            <a class="md-link" href="/kits" onclick="window.lbToggleMobileNav(false)">Комплекты</a>
+          </details>
+
           {% if current_user.role.value == "MASTER" %}
-            <a class="md-link" href="/master/schedule" onclick="window.lbToggleMobileNav(false)">Управление графиком</a>
+            <details>
+              <summary><strong>График</strong></summary>
+              <a class="md-link" href="/masters-schedule" onclick="window.lbToggleMobileNav(false)">График всех мастеров</a>
+              <a class="md-link" href="/master/schedule" onclick="window.lbToggleMobileNav(false)">Редактировать график</a>
+              <a class="md-link" href="/master/schedule?block=1" onclick="window.lbToggleMobileNav(false)">Занять время</a>
+            </details>
           {% endif %}
-          {% if current_user.role.value == "ADMIN_SUPER" %}
-            <a class="md-link" href="/admin/master-schedule" onclick="window.lbToggleMobileNav(false)">Управление графиком мастеров</a>
-            <a class="md-link" href="/admin/settings/staff" onclick="window.lbToggleMobileNav(false)">Сотрудники</a>
-          {% endif %}
-        </details>
 
-        {% if current_user.role.value == "ADMIN_SUPER" %}
           <details>
-            <summary><strong>Управление</strong></summary>
-            <a class="md-link" href="/admin/expenses" onclick="window.lbToggleMobileNav(false)">Расходы</a>
-            <a class="md-link" href="/admin/payroll-fund" onclick="window.lbToggleMobileNav(false)">Фонды</a>
-            <a class="md-link" href="/admin/payroll-periods" onclick="window.lbToggleMobileNav(false)">Периоды</a>
-            <a class="md-link" href="/admin/reports" onclick="window.lbToggleMobileNav(false)">Отчёты</a>
-            <a class="md-link" href="/admin/statistics" onclick="window.lbToggleMobileNav(false)">Статистика</a>
-            <a class="md-link" href="/admin/catalog" onclick="window.lbToggleMobileNav(false)">Управление прайсом</a>
-            <a class="md-link" href="/admin/settings" onclick="window.lbToggleMobileNav(false)">Настройки</a>
-            <a class="md-link" href="/admin/super/purge" style="color:#b91c1c;" onclick="window.lbToggleMobileNav(false)">Удаление данных</a>
+            <summary><strong>Студия</strong></summary>
+            <a class="md-link" href="/masters-schedule" onclick="window.lbToggleMobileNav(false)">График всех мастеров</a>
+            {% if current_user.role.value == "MASTER" %}
+              <a class="md-link" href="/master/schedule" onclick="window.lbToggleMobileNav(false)">Управление графиком</a>
+            {% endif %}
+            {% if current_user.role.value == "ADMIN_SUPER" %}
+              <a class="md-link" href="/admin/master-schedule" onclick="window.lbToggleMobileNav(false)">Управление графиком мастеров</a>
+              <a class="md-link" href="/admin/settings/staff" onclick="window.lbToggleMobileNav(false)">Сотрудники</a>
+            {% endif %}
           </details>
+
+          {% if current_user.role.value == "ADMIN_SUPER" %}
+            <details>
+              <summary><strong>Управление</strong></summary>
+              <a class="md-link" href="/admin/expenses" onclick="window.lbToggleMobileNav(false)">Расходы</a>
+              <a class="md-link" href="/admin/payroll-fund" onclick="window.lbToggleMobileNav(false)">Фонды</a>
+              <a class="md-link" href="/admin/payroll-periods" onclick="window.lbToggleMobileNav(false)">Периоды</a>
+              <a class="md-link" href="/admin/reports" onclick="window.lbToggleMobileNav(false)">Отчёты</a>
+              <a class="md-link" href="/admin/statistics" onclick="window.lbToggleMobileNav(false)">Статистика</a>
+              <a class="md-link" href="/admin/catalog" onclick="window.lbToggleMobileNav(false)">Управление прайсом</a>
+              <a class="md-link" href="/admin/settings" onclick="window.lbToggleMobileNav(false)">Настройки</a>
+              <a class="md-link" href="/admin/super/purge" style="color:#b91c1c;" onclick="window.lbToggleMobileNav(false)">Удаление данных</a>
+            </details>
+          {% endif %}
         {% endif %}
 
         <a class="md-link" href="/logout">Выйти</a>

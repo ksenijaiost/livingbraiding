@@ -98,6 +98,7 @@ from app.hourly_help import (
     parse_hourly_help_from_form,
     validate_hourly_help_rows,
 )
+from app.hourly_work import list_masters_for_hourly_work_form
 from app.work_products_detail_view import (
     build_composition_table_view,
     catalog_product_name,
@@ -170,6 +171,7 @@ _logger = logging.getLogger("livingbraiding.app")
 #   /admin/sales/work/...  -> 308 -> /sales/work/...
 legacy_admin_router = APIRouter(prefix="/admin/sales/work", tags=["work-products-legacy"])
 _VIEW = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
+_DETAIL = Depends(require_role(UserRole.MASTER, UserRole.HELPER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _MASTER = Depends(require_role(UserRole.MASTER))
 _SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
 _EDIT = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
@@ -213,7 +215,7 @@ def work_edit_form_legacy_redirect(
 def work_detail_legacy_redirect(
     work_id: int,
     request: Request,
-    current_user: AuthUser = _VIEW,
+    current_user: AuthUser = _DETAIL,
 ):
     return _redirect_admin_sales_work_to_canon(request, suffix=f"/{int(work_id)}")
 
@@ -299,6 +301,7 @@ def _work_new_template_response(
             fp=fp,
             selected_client=selected_client,
             masters=masters,
+            masters_for_hourly_help=list_masters_for_hourly_work_form(db),
             kit_master_on_ids=kit_master_on_ids,
             kit_table_state_json=_kit_table_state_json(
                 current_user, masters, kit_prefill, db, initial_lines=kit_initial
@@ -2197,7 +2200,7 @@ def work_list(
 def work_detail(
     request: Request,
     work_id: int,
-    current_user: AuthUser = _VIEW,
+    current_user: AuthUser = _DETAIL,
     db: Session = Depends(get_db),
 ):
     w = db.get(WorkForInventory, work_id)
@@ -2222,10 +2225,12 @@ def work_detail(
         )
         .where(WorkForInventory.id == work_id)
     )
-    if current_user.role == UserRole.MASTER:
+    if current_user.role in (UserRole.MASTER, UserRole.HELPER):
         allowed = (w.created_by_user_id == current_user.id) or any(
             s.user_id == current_user.id for s in (w.staff_rows or [])
         )
+        if current_user.role == UserRole.HELPER:
+            allowed = any(s.user_id == current_user.id for s in (w.staff_rows or []))
         if not allowed:
             return templates.TemplateResponse(
                 "work_products_detail.html",

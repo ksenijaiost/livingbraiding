@@ -68,6 +68,7 @@ from app.ru_labels import ru_master_level, ru_user_role
 from app.routes.bookings import try_auto_complete_booking
 from app.thermo_visit import collect_thermo_prefill_from_form
 from app.form_validation_log import log_user_validation_error
+from app.hourly_work import list_masters_for_hourly_work_form
 from app.user_roles import select_users_with_role
 from app.webui import templates, ctx as _ctx
 from app.work_products import _zakaz_subcategory_services_map
@@ -341,6 +342,7 @@ def _master_visit_step1_template_response(
             current_user=current_user,
             service_catalog=list_master_visit_services_catalog(db),
             masters_for_visit=_masters_for_visit_form(db),
+            masters_for_hourly_help=list_masters_for_hourly_work_form(db),
             visit_master_on_ids=visit_master_on_ids,
             visit_master_pct_str=visit_master_pct_str,
             stock_kit_selected_label=_kit_stock_label_from_form(db, form_prefill, "stock_kit_id"),
