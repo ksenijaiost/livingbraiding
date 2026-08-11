@@ -100,6 +100,8 @@ from app.routes.public_pages import router as public_pages_router  # noqa: E402
 app.include_router(public_pages_router)
 from app.routes.media import router as media_router  # noqa: E402
 app.include_router(media_router)
+from app.routes.techspec_data import router as techspec_data_router  # noqa: E402
+app.include_router(techspec_data_router)
 from app.routes.techspec_media import router as techspec_media_router  # noqa: E402
 app.include_router(techspec_media_router)
 from app.routes.super_admin_purge import router as super_admin_purge_router  # noqa: E402

@@ -10,7 +10,7 @@
 
     {% if techspec_home %}
       <div class="card" style="margin-bottom: 16px; background: #f8fafc;">
-        <h3 style="margin-top: 0;">Техническая сводка</h3>
+        <h3 style="margin-top: 0;">Медиа-бэкап</h3>
         <div style="display: flex; flex-direction: column; gap: 12px; font-size: 14px;">
           <div>
             <div class="muted" style="font-size: 12px;">Медиа-бэкап (<code>/techspec/media/backup.zip</code>)</div>
@@ -19,9 +19,15 @@
               {{ "файл" if techspec_home.media.file_count == 1 else ("файла" if techspec_home.media.file_count in [2,3,4] else "файлов") }},
               <strong>{{ techspec_home.media.total_size_human }}</strong>
             </div>
-            <div style="margin-top: 8px;">
+            <div style="margin-top: 8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
               <a href="/techspec/media/backup.zip"><button type="button" class="secondary">Скачать backup.zip</button></a>
+              <form id="techspec-media-restore-form" method="post" action="/techspec/media/restore" enctype="multipart/form-data" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0;">
+                <input type="file" name="archive" accept=".zip,application/zip" style="max-width: 18rem; padding: 8px;" />
+                <button type="submit" class="secondary">Сохранить</button>
+              </form>
+              <a href="/techspec/data"><button type="button" class="secondary">Технические данные</button></a>
             </div>
+            <div id="techspec-media-restore-status" class="muted" style="margin-top: 8px; font-size: 12px;"></div>
           </div>
           <div>
             <div class="muted" style="font-size: 12px;">Каталог загрузок</div>
@@ -31,30 +37,6 @@
                 Прочих файлов в каталоге (не в архиве): {{ techspec_home.media.skipped_other_files }}
               </div>
             {% endif %}
-          </div>
-          <div>
-            <div class="muted" style="font-size: 12px;">База данных</div>
-            <div style="margin-top: 4px;"><code>{{ techspec_home.database }}</code></div>
-          </div>
-          <div>
-            <div class="muted" style="font-size: 12px;">Записи в системе</div>
-            <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13px;">
-              <span>польз.: <strong>{{ techspec_home.counts.users_active }}</strong></span>
-              <span>клиентов: <strong>{{ techspec_home.counts.clients }}</strong></span>
-              <span>визитов: <strong>{{ techspec_home.counts.visits }}</strong></span>
-              <span>броней: <strong>{{ techspec_home.counts.bookings }}</strong></span>
-              <span>консульт.: <strong>{{ techspec_home.counts.consultations }}</strong></span>
-              <span>комплектов: <strong>{{ techspec_home.counts.kits }}</strong> <span class="muted">(акт. {{ techspec_home.counts.kits_active }})</span></span>
-              <span>работ: <strong>{{ techspec_home.counts.works }}</strong></span>
-              <span>продаж: <strong>{{ techspec_home.counts.product_sales }}</strong></span>
-              <span>поз. прайса товаров: <strong>{{ techspec_home.counts.catalog_products }}</strong> <span class="muted">(акт. {{ techspec_home.counts.catalog_products_active }})</span></span>
-              <span>услуг: <strong>{{ techspec_home.counts.services }}</strong> <span class="muted">(акт. {{ techspec_home.counts.services_active }})</span></span>
-            </div>
-          </div>
-          <div class="muted" style="font-size: 12px;">
-            Окружение: <strong>{{ techspec_home.app_env }}</strong> ·
-            Python <strong>{{ techspec_home.python_version }}</strong> ·
-            часовой пояс отображения: <strong>{{ techspec_home.display_tz }}</strong>
           </div>
         </div>
       </div>
@@ -363,6 +345,30 @@
   <script src="/static/calendar_occupancy_grid.js?v=20260805"></script>
   <script>
     (function () {
+      var restoreForm = document.getElementById('techspec-media-restore-form');
+      var restoreStatus = document.getElementById('techspec-media-restore-status');
+      if (restoreForm && restoreStatus) {
+        restoreForm.addEventListener('submit', async function (e) {
+          e.preventDefault();
+          restoreStatus.className = 'muted';
+          restoreStatus.textContent = 'Загрузка архива...';
+          try {
+            var res = await fetch('/techspec/media/restore', {
+              method: 'POST',
+              body: new FormData(restoreForm)
+            });
+            var data = await res.json();
+            if (!res.ok) throw new Error(data && data.detail ? data.detail : ('HTTP ' + res.status));
+            restoreStatus.className = 'ok';
+            restoreStatus.textContent = 'Сохранено: ' + (data.restored || 0) + ', пропущено: ' + (data.skipped || 0) + '.';
+            restoreForm.reset();
+          } catch (err) {
+            restoreStatus.className = 'error';
+            restoreStatus.textContent = err && err.message ? err.message : 'Не удалось восстановить архив.';
+          }
+        });
+      }
+
       function money2(x) {
         try {
           var v = Number(x || 0);

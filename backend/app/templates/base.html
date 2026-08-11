@@ -206,7 +206,10 @@
 
           <!-- Desktop: sections (A) -->
           <div class="nav-desktop" aria-label="Навигация">
-            {% if current_user.role.value == "HELPER" %}
+            {% if current_user.role.value == "TECHSPEC" %}
+              <a href="/">Главная</a>
+              <a href="/techspec/data">Технические данные</a>
+            {% elif current_user.role.value == "HELPER" %}
               <a href="/">Главная</a>
               <details class="nav-dd">
                 <summary>Работа</summary>
@@ -314,7 +317,7 @@
           <!-- Mobile: "Главная" + ☰ (B) -->
           <div class="nav-mobile" aria-label="Навигация (мобильная)">
             <a href="/">Главная</a>
-            {% if current_user.role.value != "HELPER" %}
+            {% if current_user.role.value not in ("HELPER", "TECHSPEC") %}
               <a href="/clients">Клиенты</a>
             {% endif %}
             <button type="button" class="hamburger" aria-label="Открыть меню" aria-controls="lbMobileDrawer" aria-expanded="false" onclick="window.lbToggleMobileNav(true)">☰</button>
@@ -336,7 +339,9 @@
         </div>
 
         <a class="md-link" href="/" onclick="window.lbToggleMobileNav(false)"><strong>Главная</strong></a>
-        {% if current_user.role.value == "HELPER" %}
+        {% if current_user.role.value == "TECHSPEC" %}
+          <a class="md-link" href="/techspec/data" onclick="window.lbToggleMobileNav(false)"><strong>Технические данные</strong></a>
+        {% elif current_user.role.value == "HELPER" %}
           <details>
             <summary><strong>Работа</strong></summary>
             <a class="md-link" href="/master/mywork" onclick="window.lbToggleMobileNav(false)">Моя работа</a>
