@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top:0;">Технические данные</h2>
+
+    <div class="card" style="margin-bottom:16px; background:#f8fafc;">
+      <h3 style="margin-top:0;">Сводка</h3>
+      <div style="display:flex; flex-direction:column; gap:12px; font-size:14px;">
+        <div>
+          <div class="muted" style="font-size:12px;">База данных</div>
+          <div style="margin-top:4px;"><code>{{ techspec_home.database }}</code></div>
+        </div>
+        <div>
+          <div class="muted" style="font-size:12px;">Записи в системе</div>
+          <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:8px 14px; font-size:13px;">
+            <span>польз.: <strong>{{ techspec_home.counts.users_active }}</strong></span>
+            <span>ролей: <strong>{{ techspec_home.counts.roles_assigned }}</strong></span>
+            <span>клиентов: <strong>{{ techspec_home.counts.clients }}</strong></span>
+            <span>визитов: <strong>{{ techspec_home.counts.visits }}</strong></span>
+            <span>броней: <strong>{{ techspec_home.counts.bookings }}</strong></span>
+            <span>консульт.: <strong>{{ techspec_home.counts.consultations }}</strong></span>
+            <span>почасовой: <strong>{{ techspec_home.counts.hourly_work_entries }}</strong></span>
+            <span>планов: <strong>{{ techspec_home.counts.work_plans }}</strong></span>
+            <span>черн. визита: <strong>{{ techspec_home.counts.visit_drafts }}</strong></span>
+            <span>черн. работы: <strong>{{ techspec_home.counts.work_drafts }}</strong></span>
+            <span>комплектов: <strong>{{ techspec_home.counts.kits }}</strong> <span class="muted">(акт. {{ techspec_home.counts.kits_active }})</span></span>
+            <span>работ: <strong>{{ techspec_home.counts.works }}</strong></span>
+            <span>продаж: <strong>{{ techspec_home.counts.product_sales }}</strong></span>
+            <span>товаров прайса: <strong>{{ techspec_home.counts.catalog_products }}</strong> <span class="muted">(акт. {{ techspec_home.counts.catalog_products_active }})</span></span>
+            <span>услуг: <strong>{{ techspec_home.counts.services }}</strong> <span class="muted">(акт. {{ techspec_home.counts.services_active }})</span></span>
+          </div>
+        </div>
+        <div class="muted" style="font-size:12px;">
+          Окружение: <strong>{{ techspec_home.app_env }}</strong> ·
+          Python <strong>{{ techspec_home.python_version }}</strong> ·
+          часовой пояс отображения: <strong>{{ techspec_home.display_tz }}</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin-top:0;">БД</h3>
+      <p class="muted" style="margin-top:0;">Список ORM-таблиц приложения, их назначение и текущее число записей.</p>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:4rem;">№</th>
+              <th>Таблица</th>
+              <th>Для чего</th>
+              <th style="width:8rem;">Записей</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in db_tables %}
+              <tr>
+                <td>{{ row.idx }}</td>
+                <td>
+                  <code>{{ row.name }}</code>
+                  {% if row.model_name %}
+                    <div class="muted" style="font-size:12px;">{{ row.model_name }}</div>
+                  {% endif %}
+                </td>
+                <td>{{ row.description }}</td>
+                <td><strong>{{ row.count }}</strong></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">SQL</h3>
+      <p class="muted" style="margin-top:0;">Только read-only запросы: <code>SELECT</code>, <code>WITH</code>, <code>EXPLAIN</code>. Показаны первые 200 строк.</p>
+      <form method="post" action="/techspec/data/sql">
+        <label for="sql_query">Запрос</label>
+        <textarea id="sql_query" name="sql_query" rows="8" style="font-family: ui-monospace, SFMono-Regular, Consolas, monospace;">{{ sql_query or "SELECT * FROM users LIMIT 20" }}</textarea>
+        <div style="margin-top:10px;">
+          <button type="submit">Выполнить</button>
+        </div>
+      </form>
+
+      {% if sql_error %}
+        <div class="error" style="margin-top:12px;">{{ sql_error }}</div>
+      {% endif %}
+
+      {% if sql_result %}
+        <div style="margin-top:14px;">
+          <div class="muted" style="font-size:12px;">Выполнен запрос</div>
+          <div style="margin-top:4px;"><code>{{ sql_result.sql }}</code></div>
+          <div class="muted" style="margin-top:8px; font-size:12px;">
+            Строк: <strong>{{ sql_result.row_count }}</strong>{% if sql_result.truncated %} (показаны первые 200){% endif %}
+          </div>
+
+          {% if sql_result.columns %}
+            <div style="overflow-x:auto; margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    {% for col in sql_result.columns %}
+                      <th><code>{{ col }}</code></th>
+                    {% endfor %}
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in sql_result.rows %}
+                    <tr>
+                      {% for col in sql_result.columns %}
+                        <td style="vertical-align:top; white-space:pre-wrap;">{{ row[col] }}</td>
+                      {% endfor %}
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="muted" style="margin-top:10px;">Запрос выполнен без табличного результата.</div>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

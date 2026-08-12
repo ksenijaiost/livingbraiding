@@ -398,7 +398,7 @@
                     <tr>
                       <td class="muted">{{ a.changed_at|dt_local }}</td>
                       <td class="muted">{% if a.changed_by_user %}{{ a.changed_by_user.display_name }}{% else %}—{% endif %}</td>
-                      <td><code>{{ a.field_name }}</code></td>
+                      <td>{{ audit_field_label(a.field_name) }}</td>
                       <td class="muted">{{ a.old_value if a.old_value is not none else "—" }}</td>
                       <td class="muted">{{ a.new_value if a.new_value is not none else "—" }}</td>
                     </tr>
@@ -412,7 +412,7 @@
                     <tr class="lb-audit-work" style="display:none;">
                       <td class="muted">{{ a.changed_at|dt_local }}</td>
                       <td class="muted">{% if a.changed_by_user %}{{ a.changed_by_user.display_name }}{% else %}—{% endif %}</td>
-                      <td><code>{{ a.field_name }}</code></td>
+                      <td>{{ audit_field_label(a.field_name) }}</td>
                       <td class="muted">{{ a.old_value if a.old_value is not none else "—" }}</td>
                       <td class="muted">{{ a.new_value if a.new_value is not none else "—" }}</td>
                     </tr>
@@ -422,7 +422,7 @@
                     <tr>
                       <td class="muted">{{ a.changed_at|dt_local }}</td>
                       <td class="muted">{% if a.changed_by_user %}{{ a.changed_by_user.display_name }}{% else %}—{% endif %}</td>
-                      <td><code>{{ a.field_name }}</code></td>
+                      <td>{{ audit_field_label(a.field_name) }}</td>
                       <td class="muted">{{ a.old_value if a.old_value is not none else "—" }}</td>
                       <td class="muted">{{ a.new_value if a.new_value is not none else "—" }}</td>
                     </tr>

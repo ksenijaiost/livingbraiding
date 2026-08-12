@@ -14,6 +14,7 @@ from typing import Literal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.audit_field_labels import audit_field_label
 from app.calendar_display import get_calendar_display_hours
 from app.db.models import MasterScheduleAuditLog, MasterScheduleDay, MasterScheduleStatus
 
@@ -231,7 +232,7 @@ def _write_audit_rows_for_master_schedule(
                 work_date=work_date,
                 changed_at=now,
                 changed_by_user_id=changed_by_user_id,
-                field_name=field_name,
+                field_name=audit_field_label(field_name),
                 old_value=old_s,
                 new_value=new_s,
             )

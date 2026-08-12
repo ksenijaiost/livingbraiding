@@ -12,6 +12,7 @@ from typing import Any, Iterable, Type
 
 from sqlalchemy.orm import Session
 
+from app.audit_field_labels import apply_audit_field_labels
 from app.display_time import DEFAULT_DISPLAY_TIMEZONE, format_naive_utc_datetime, get_display_timezone
 from app.time_utils import utcnow_naive
 
@@ -50,7 +51,7 @@ def write_audit_rows(
     *,
     log_model: Type[Any],
     entity_field: str,
-    entity_id: int,
+    entity_id: int | str,
     changed_by_user_id: int | None,
     changes: list[FieldChange],
     changed_at: datetime | None = None,
@@ -59,7 +60,9 @@ def write_audit_rows(
         return
     when = changed_at or utcnow_naive()
     tz = get_display_timezone(db)
-    for ch in changes:
+    log_table = getattr(log_model, "__tablename__", None)
+    labeled = apply_audit_field_labels(changes, log_table=log_table, entity_id=entity_id)
+    for ch in labeled:
         db.add(
             log_model(
                 **{

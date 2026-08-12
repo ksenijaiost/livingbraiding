@@ -194,7 +194,7 @@
                     <tr>
                       <td class="muted">{{ a.changed_at|dt_local }}</td>
                       <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
-                      <td><code>{{ a.field_name }}</code></td>
+                      <td>{{ audit_field_label(a.field_name) }}</td>
                       <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
                       <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
                     </tr>
@@ -208,7 +208,7 @@
                     <tr class="lb-audit-sale" style="display:none;">
                       <td class="muted">{{ a.changed_at|dt_local }}</td>
                       <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
-                      <td><code>{{ a.field_name }}</code></td>
+                      <td>{{ audit_field_label(a.field_name) }}</td>
                       <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
                       <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
                     </tr>
@@ -218,7 +218,7 @@
                     <tr>
                       <td class="muted">{{ a.changed_at|dt_local }}</td>
                       <td>{{ a.changed_by_user.display_name if a.changed_by_user and a.changed_by_user.display_name else (a.changed_by_user.username if a.changed_by_user else "—") }}</td>
-                      <td><code>{{ a.field_name }}</code></td>
+                      <td>{{ audit_field_label(a.field_name) }}</td>
                       <td style="white-space:pre-wrap;">{{ a.old_value or "—" }}</td>
                       <td style="white-space:pre-wrap;">{{ a.new_value or "—" }}</td>
                     </tr>

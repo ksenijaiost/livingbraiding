@@ -54,6 +54,7 @@ from app.visit_edit_policy import (
 from app.visit_form_prefill import visit_to_form_prefill
 from app.visit_stock import visit_cancel_revert_stock, visit_service_revert_stock
 from app.audit import diff_fields, write_audit_rows
+from app.audit_field_labels import audit_field_label
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
 )
@@ -634,7 +635,7 @@ async def admin_visit_change_client(
         VisitAuditLog(
             visit_id=visit.id,
             changed_by_user_id=current_user.id,
-            field_name="client_id",
+            field_name=audit_field_label("client_id"),
             old_value=str(old_id),
             new_value=str(new_cid),
         )

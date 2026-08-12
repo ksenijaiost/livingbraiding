@@ -437,7 +437,7 @@
           html += '<tr>';
           html += '<td class="muted">' + escapeHtml(a.changed_at) + '</td>';
           html += '<td class="muted">' + escapeHtml(a.changed_by || '—') + '</td>';
-          html += '<td><code>' + escapeHtml(a.field_name) + '</code></td>';
+          html += '<td>' + escapeHtml(a.field_name) + '</td>';
           html += '<td class="muted" style="white-space:pre-wrap;">' + escapeHtml(a.old_value || '—') + '</td>';
           html += '<td class="muted" style="white-space:pre-wrap;">' + escapeHtml(a.new_value || '—') + '</td>';
           html += '</tr>';
@@ -448,7 +448,7 @@
           html += '<tr class="' + cls + '" style="display:none;">';
           html += '<td class="muted">' + escapeHtml(b.changed_at) + '</td>';
           html += '<td class="muted">' + escapeHtml(b.changed_by || '—') + '</td>';
-          html += '<td><code>' + escapeHtml(b.field_name) + '</code></td>';
+          html += '<td>' + escapeHtml(b.field_name) + '</td>';
           html += '<td class="muted" style="white-space:pre-wrap;">' + escapeHtml(b.old_value || '—') + '</td>';
           html += '<td class="muted" style="white-space:pre-wrap;">' + escapeHtml(b.new_value || '—') + '</td>';
           html += '</tr>';
@@ -459,7 +459,7 @@
           html += '<tr>';
           html += '<td class="muted">' + escapeHtml(c.changed_at) + '</td>';
           html += '<td class="muted">' + escapeHtml(c.changed_by || '—') + '</td>';
-          html += '<td><code>' + escapeHtml(c.field_name) + '</code></td>';
+          html += '<td>' + escapeHtml(c.field_name) + '</td>';
           html += '<td class="muted" style="white-space:pre-wrap;">' + escapeHtml(c.old_value || '—') + '</td>';
           html += '<td class="muted" style="white-space:pre-wrap;">' + escapeHtml(c.new_value || '—') + '</td>';
           html += '</tr>';
