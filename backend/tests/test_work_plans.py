@@ -281,3 +281,46 @@ def test_cancelled_plan_not_in_occupancy(memory_db, monkeypatch) -> None:
     monkeypatch.setattr("app.calendar_occupancy.list_calendar_masters", lambda _db: [{"id": master.id, "name": master.display_name}])
     occ = build_occupancy_for_day(db, day=date(2026, 7, 10), hour_from=9, hour_to=18)
     assert not [s for s in occ["segments"] if s.get("work_plan_id")]
+
+
+def test_parse_work_product_master_ids_multi() -> None:
+    from starlette.datastructures import FormData
+
+    from app.routes.work_plans import _parse_work_product_master_ids
+
+    form = FormData([("master_ids", "3"), ("master_ids", "5"), ("master_ids", "3")])
+    assert _parse_work_product_master_ids(form, is_admin=True, current_user_id=1) == [3, 5]
+
+
+def test_parse_work_product_master_ids_self_default() -> None:
+    from starlette.datastructures import FormData
+
+    from app.routes.work_plans import _parse_work_product_master_ids
+
+    form = FormData([])
+    assert _parse_work_product_master_ids(form, is_admin=False, current_user_id=42) == [42]
+
+
+def test_parse_work_product_master_ids_requires_selection() -> None:
+    from starlette.datastructures import FormData
+
+    from app.routes.work_plans import _parse_work_product_master_ids
+
+    with pytest.raises(ValueError, match="хотя бы одного"):
+        _parse_work_product_master_ids(FormData([]), is_admin=True, current_user_id=1)
+
+
+def test_parse_hourly_master_id_single() -> None:
+    from starlette.datastructures import FormData
+
+    from app.routes.work_plans import _parse_hourly_master_id
+
+    assert _parse_hourly_master_id(FormData([]), is_admin=False, current_user_id=7) == 7
+    assert (
+        _parse_hourly_master_id(
+            FormData([("pick_other_master", "1"), ("master_id", "9")]),
+            is_admin=False,
+            current_user_id=7,
+        )
+        == 9
+    )

@@ -6,6 +6,12 @@
       <a href="/work-plans/new"><button type="button">Запланировать</button></a>
     </div>
 
+    {% if msg == 'created_multi' %}
+      <div class="ok" style="margin:12px 0;">Создано планов: {{ created_count or 'несколько' }}.</div>
+    {% elif msg == 'created' %}
+      <div class="ok" style="margin:12px 0;">План сохранён.</div>
+    {% endif %}
+
     {% set _show = 'all' if show_mode == 'all' else 'active' %}
     {% set _mine = '1' if mine_only else '0' %}
     {% set _sort = 'desc' if sort_date_mode == 'desc' else 'asc' %}

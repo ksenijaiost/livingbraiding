@@ -56,43 +56,6 @@
         </div>
       </div>
 
-      <div class="card" style="margin-top:14px; background:#f8fafc;">
-        <div style="font-weight:600; margin-bottom:8px;">Мастер *</div>
-        {% if is_admin %}
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            {% for m in masters %}
-              <label style="display:flex; align-items:center; gap:8px;">
-                <input type="radio" name="master_id" value="{{ m.id }}" class="wp-master-radio"
-                  {% if fp.get('master_id')|string == m.id|string %}checked{% endif %} />
-                <span>{{ m.display_name or m.username }}</span>
-              </label>
-            {% endfor %}
-          </div>
-        {% else %}
-          <input type="hidden" name="master_id" id="wp_master_id" value="{{ fp.get('master_id', current_user.id) }}" />
-          <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
-            <input type="checkbox" name="pick_other_master" value="1" id="pick_other_master"
-              {% if fp.get('pick_other_master') == '1' %}checked{% endif %} />
-            <span>Выбрать другого мастера</span>
-          </label>
-          <div id="wp_self_master_note" style="margin-bottom:8px;">
-            <span class="muted">Вы: </span><strong>{{ current_user.display_name or current_user.username }}</strong>
-            <span id="wp_self_avail" class="muted" style="margin-left:8px;"></span>
-          </div>
-          <div id="wp_masters_list" style="display:none; flex-direction:column; gap:8px;">
-            {% for m in masters %}
-              <label style="display:flex; align-items:center; gap:8px;">
-                <input type="radio" name="master_id_pick" value="{{ m.id }}" class="wp-master-radio"
-                  data-master-id="{{ m.id }}"
-                  {% if fp.get('master_id')|string == m.id|string %}checked{% endif %}
-                  disabled />
-                <span>{{ m.display_name or m.username }}</span>
-              </label>
-            {% endfor %}
-          </div>
-        {% endif %}
-      </div>
-
       <div class="card" style="margin-top:14px;">
         <div style="font-weight:600; margin-bottom:8px;">На что план *</div>
         <label style="display:block; margin-bottom:6px;">
@@ -113,6 +76,85 @@
             {% if fp.get('plan_type') == 'HOURLY' %}checked{% endif %}
             onchange="wpSyncPlanType()" /> Почасовая работа
         </label>
+      </div>
+
+      <div class="card" style="margin-top:14px; background:#f8fafc;">
+        <div style="font-weight:600; margin-bottom:4px;" id="wp_masters_title">Мастер *</div>
+        <div class="muted" id="wp_masters_hint" style="font-size:12px; margin-bottom:8px;"></div>
+
+        {# --- Работа с товаром: несколько мастеров --- #}
+        <div id="wp_masters_multi">
+          {% if is_admin %}
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              {% for m in masters %}
+                <label style="display:flex; align-items:center; gap:8px;">
+                  <input type="checkbox" name="master_ids" value="{{ m.id }}" class="wp-master-check"
+                    {% if m.id|string in selected_master_ids %}checked{% endif %} />
+                  <span>{{ m.display_name or m.username }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          {% else %}
+            <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+              <input type="checkbox" name="pick_other_master_multi" value="1" id="pick_other_master_multi"
+                {% if fp.get('pick_other_master_multi') == '1' %}checked{% endif %} />
+              <span>Добавить других мастеров</span>
+            </label>
+            <div id="wp_self_master_note_multi" style="margin-bottom:8px;">
+              <input type="hidden" name="master_ids" id="wp_self_master_id" value="{{ current_user.id }}" />
+              <span class="muted">Вы: </span><strong>{{ current_user.display_name or current_user.username }}</strong>
+              <span id="wp_self_avail_multi" class="muted" style="margin-left:8px;"></span>
+            </div>
+            <div id="wp_masters_list_multi" style="display:none; flex-direction:column; gap:8px;">
+              {% for m in masters %}
+                <label style="display:flex; align-items:center; gap:8px;">
+                  <input type="checkbox" name="master_ids_pick" value="{{ m.id }}" class="wp-master-check"
+                    data-master-id="{{ m.id }}"
+                    {% if m.id|string in selected_master_ids %}checked{% endif %}
+                    disabled />
+                  <span>{{ m.display_name or m.username }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+
+        {# --- Почасовая: один мастер --- #}
+        <div id="wp_masters_single" style="display:none;">
+          {% if is_admin %}
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              {% for m in masters %}
+                <label style="display:flex; align-items:center; gap:8px;">
+                  <input type="radio" name="master_id" value="{{ m.id }}" class="wp-master-radio"
+                    {% if fp.get('master_id')|string == m.id|string %}checked{% endif %} />
+                  <span>{{ m.display_name or m.username }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          {% else %}
+            <input type="hidden" name="master_id" id="wp_master_id" value="{{ fp.get('master_id', current_user.id) }}" />
+            <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+              <input type="checkbox" name="pick_other_master" value="1" id="pick_other_master"
+                {% if fp.get('pick_other_master') == '1' %}checked{% endif %} />
+              <span>Выбрать другого мастера</span>
+            </label>
+            <div id="wp_self_master_note" style="margin-bottom:8px;">
+              <span class="muted">Вы: </span><strong>{{ current_user.display_name or current_user.username }}</strong>
+              <span id="wp_self_avail" class="muted" style="margin-left:8px;"></span>
+            </div>
+            <div id="wp_masters_list" style="display:none; flex-direction:column; gap:8px;">
+              {% for m in masters %}
+                <label style="display:flex; align-items:center; gap:8px;">
+                  <input type="radio" name="master_id_pick" value="{{ m.id }}" class="wp-master-radio"
+                    data-master-id="{{ m.id }}"
+                    {% if fp.get('master_id')|string == m.id|string %}checked{% endif %}
+                    disabled />
+                  <span>{{ m.display_name or m.username }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
       </div>
 
       <div style="margin-top:14px;">
@@ -139,6 +181,7 @@
   <script src="/static/calendar_occupancy_grid.js?v=20260805"></script>
   <script>
     (function () {
+      var CURRENT_USER_ID = '{{ current_user.id }}';
       function esc(s) {
         return String(s || '').replace(/\x26/g, '\x26amp;').replace(/\x3c/g, '\x26lt;').replace(/\x3e/g, '\x3egt;').replace(/\x22/g, '\x26quot;');
       }
@@ -152,6 +195,10 @@
         var t = document.getElementById('planned_time');
         return { day: d ? d.value : '', time: t ? (t.value || '').slice(0, 5) : '', dur: durationMinutes() };
       }
+      function isHourly() {
+        var hourly = document.querySelector('input[name="plan_type"][value="HOURLY"]');
+        return !!(hourly && hourly.checked);
+      }
       async function refreshMasters() {
         var p = schedParams();
         if (!p.day || !p.time) return;
@@ -160,30 +207,31 @@
           if (!res.ok) return;
           var data = await res.json();
           var ids = (data.available_master_ids || []).map(String);
-          document.querySelectorAll('.wp-master-radio').forEach(function (cb) {
+          document.querySelectorAll('.wp-master-radio, .wp-master-check').forEach(function (cb) {
             var id = String(cb.value || cb.getAttribute('data-master-id') || '');
             var ok = ids.indexOf(id) >= 0;
+            // Не трогаем скрытые/неактивные списки выбора
+            if (cb.name === 'master_id_pick' || cb.name === 'master_ids_pick') return;
+            if (cb.type === 'hidden') return;
             cb.disabled = !ok;
             var lbl = cb.closest('label');
             if (lbl) lbl.style.opacity = ok ? '1' : '0.45';
           });
         } catch (e) { console.error(e); }
       }
-      async function refreshSelfAvail() {
-        var el = document.getElementById('wp_self_avail');
-        var pick = document.getElementById('pick_other_master');
-        if (!el || (pick && pick.checked)) return;
+      async function refreshSelfAvail(elId, masterId) {
+        var el = document.getElementById(elId);
+        if (!el) return;
         var p = schedParams();
-        var mid = document.getElementById('wp_master_id');
-        if (!p.day || !p.time || !mid) return;
+        if (!p.day || !p.time || !masterId) return;
         try {
-          var res = await fetch('/api/work-plan/master-availability?d=' + encodeURIComponent(p.day) + '&t=' + encodeURIComponent(p.time) + '&master_id=' + encodeURIComponent(mid.value) + '&duration_minutes=' + encodeURIComponent(String(p.dur)));
+          var res = await fetch('/api/work-plan/master-availability?d=' + encodeURIComponent(p.day) + '&t=' + encodeURIComponent(p.time) + '&master_id=' + encodeURIComponent(masterId) + '&duration_minutes=' + encodeURIComponent(String(p.dur)));
           var data = await res.json();
           el.textContent = data.available ? 'время доступно' : 'время не доступно';
           el.style.color = data.available ? '#047857' : '#b91c1c';
         } catch (e) { el.textContent = ''; }
       }
-      function wpSyncMasterUi() {
+      function wpSyncMasterUiSingle() {
         var pick = document.getElementById('pick_other_master');
         var list = document.getElementById('wp_masters_list');
         var note = document.getElementById('wp_self_master_note');
@@ -197,27 +245,92 @@
           if (hidden) hidden.name = 'master_id_unused';
         } else {
           list.querySelectorAll('input[name="master_id"]').forEach(function (r) { r.disabled = true; r.name = 'master_id_pick'; });
-          if (hidden) { hidden.name = 'master_id'; hidden.value = '{{ current_user.id }}'; }
+          if (hidden) { hidden.name = 'master_id'; hidden.value = CURRENT_USER_ID; }
         }
-        refreshMasters();
-        refreshSelfAvail();
+      }
+      function wpSyncMasterUiMulti() {
+        var pick = document.getElementById('pick_other_master_multi');
+        var list = document.getElementById('wp_masters_list_multi');
+        var note = document.getElementById('wp_self_master_note_multi');
+        var selfHidden = document.getElementById('wp_self_master_id');
+        if (!pick || !list) return;
+        var on = pick.checked;
+        list.style.display = on ? 'flex' : 'none';
+        if (note) note.style.display = on ? 'none' : 'block';
+        if (on) {
+          list.querySelectorAll('input[name="master_ids_pick"]').forEach(function (r) {
+            r.disabled = false;
+            r.name = 'master_ids';
+          });
+          if (selfHidden) selfHidden.name = 'master_ids_self_unused';
+          // По умолчанию отметить себя в списке
+          list.querySelectorAll('input[name="master_ids"]').forEach(function (r) {
+            if (String(r.value) === CURRENT_USER_ID && !r.checked) r.checked = true;
+          });
+        } else {
+          list.querySelectorAll('input[name="master_ids"]').forEach(function (r) {
+            r.disabled = true;
+            r.name = 'master_ids_pick';
+          });
+          if (selfHidden) { selfHidden.name = 'master_ids'; selfHidden.value = CURRENT_USER_ID; }
+        }
       }
       window.wpSyncPlanType = function () {
-        var hourly = document.querySelector('input[name="plan_type"][value="HOURLY"]');
         var wrap = document.getElementById('wp_work_kind_wrap');
         var kind = document.getElementById('work_kind');
-        var isHourly = hourly && hourly.checked;
-        if (wrap) wrap.style.display = isHourly ? 'none' : 'block';
-        if (kind) kind.disabled = !!isHourly;
+        var multi = document.getElementById('wp_masters_multi');
+        var single = document.getElementById('wp_masters_single');
+        var title = document.getElementById('wp_masters_title');
+        var hint = document.getElementById('wp_masters_hint');
+        var hourly = isHourly();
+        if (wrap) wrap.style.display = hourly ? 'none' : 'block';
+        if (kind) kind.disabled = !!hourly;
+        if (multi) {
+          multi.style.display = hourly ? 'none' : 'block';
+          multi.querySelectorAll('input').forEach(function (el) { el.disabled = !!hourly; });
+        }
+        if (single) {
+          single.style.display = hourly ? 'block' : 'none';
+          single.querySelectorAll('input').forEach(function (el) { el.disabled = !hourly; });
+        }
+        if (title) title.textContent = hourly ? 'Мастер *' : 'Мастера *';
+        if (hint) {
+          hint.textContent = hourly
+            ? 'Для почасовой работы — один мастер.'
+            : 'Можно выбрать несколько: для каждого создаётся отдельный план.';
+        }
+        if (hourly) {
+          wpSyncMasterUiSingle();
+          refreshSelfAvail('wp_self_avail', CURRENT_USER_ID);
+        } else {
+          wpSyncMasterUiMulti();
+          refreshSelfAvail('wp_self_avail_multi', CURRENT_USER_ID);
+        }
+        refreshMasters();
       };
       var pick = document.getElementById('pick_other_master');
-      if (pick) pick.addEventListener('change', wpSyncMasterUi);
+      if (pick) pick.addEventListener('change', function () {
+        wpSyncMasterUiSingle();
+        refreshMasters();
+        refreshSelfAvail('wp_self_avail', CURRENT_USER_ID);
+      });
+      var pickMulti = document.getElementById('pick_other_master_multi');
+      if (pickMulti) pickMulti.addEventListener('change', function () {
+        wpSyncMasterUiMulti();
+        refreshMasters();
+        refreshSelfAvail('wp_self_avail_multi', CURRENT_USER_ID);
+      });
       ['planned_date', 'planned_time', 'duration_h', 'duration_m'].forEach(function (id) {
         var el = document.getElementById(id);
-        if (el) el.addEventListener('change', function () { refreshMasters(); refreshSelfAvail(); });
-        if (el) el.addEventListener('input', function () { refreshMasters(); refreshSelfAvail(); });
+        if (el) el.addEventListener('change', function () {
+          refreshMasters();
+          refreshSelfAvail(isHourly() ? 'wp_self_avail' : 'wp_self_avail_multi', CURRENT_USER_ID);
+        });
+        if (el) el.addEventListener('input', function () {
+          refreshMasters();
+          refreshSelfAvail(isHourly() ? 'wp_self_avail' : 'wp_self_avail_multi', CURRENT_USER_ID);
+        });
       });
-      wpSyncMasterUi();
       window.wpSyncPlanType();
 
       // Month calendar (reuse booking schedule API)
@@ -278,7 +391,8 @@
             td.innerHTML = '<div style="font-weight:700;">' + dayNum + '</div><div class="muted" style="font-size:12px;margin-top:6px;">Брони: <strong>' + esc(it.bookings || 0) + '</strong></div>';
             td.addEventListener('click', function (isoDay) { return function () {
               if (plannedDate) plannedDate.value = isoDay;
-              refreshMasters(); refreshSelfAvail();
+              refreshMasters();
+              refreshSelfAvail(isHourly() ? 'wp_self_avail' : 'wp_self_avail_multi', CURRENT_USER_ID);
               window.lbWpOccOpen(isoDay);
             }; }(iso));
           }
