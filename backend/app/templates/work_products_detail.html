@@ -38,6 +38,14 @@
         <div class="row">
           <div><strong>ID</strong><div class="muted">{{ row.id }}</div></div>
           <div><strong>Создано</strong><div class="muted">{{ row.created_at|dt_local('%Y-%m-%d %H:%M') if row.created_at else '—' }}</div></div>
+          <div>
+            <strong>Создал</strong>
+            <div class="muted">
+              {% if row.created_by_user %}
+                {{ row.created_by_user.display_name or row.created_by_user.username }}
+              {% else %}—{% endif %}
+            </div>
+          </div>
           {% if row.performed_date %}
             <div><strong>Дата работы</strong><div class="muted">{{ row.performed_date.strftime('%Y-%m-%d') }}</div></div>
           {% endif %}

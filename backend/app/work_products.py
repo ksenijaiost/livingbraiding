@@ -2221,6 +2221,7 @@ def work_detail(
         select(WorkForInventory)
         .options(
             selectinload(WorkForInventory.client),
+            selectinload(WorkForInventory.created_by_user),
             selectinload(WorkForInventory.staff_rows).selectinload(WorkForInventoryStaff.user),
         )
         .where(WorkForInventory.id == work_id)
