@@ -6,8 +6,9 @@
       <div>
         <h2 style="margin: 0 0 8px;">Визит #{{ visit.id }}. Дата: {{ visit.performed_date.strftime("%d.%m.%Y") }}</h2>
         <p class="muted" style="margin:0;">
-          Создан: {{ visit.created_at|dt_local }}
-          {% if visit_creator_label %}· {{ visit_creator_label }}{% endif %}
+          Создал:
+          {% if visit.created_by_user %}{{ visit.created_by_user.display_name or visit.created_by_user.username }}{% else %}—{% endif %}
+          · {{ visit.created_at|dt_local }}
         </p>
       </div>
       {% if not visit_edit_blocked and not visit.is_cancelled %}

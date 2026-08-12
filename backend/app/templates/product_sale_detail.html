@@ -53,7 +53,7 @@
           </p>
         {% endif %}
         <p style="margin:6px 0;"><strong>В фонд студии</strong>: {{ "%.2f"|format(sale.studio_margin_amount|float) }} ₽{% if sale.sale_percent %} <span class="muted">(остаток после % и себестоимости)</span>{% endif %}</p>
-        <p style="margin:6px 0;"><strong>Кто внёс</strong>: {{ sale.created_by_user.display_name if sale.created_by_user else '—' }}</p>
+        <p style="margin:6px 0;"><strong>Создал</strong>: {{ sale.created_by_user.display_name if sale.created_by_user else '—' }}</p>
         {% if sale.booking_id %}
           <p style="margin:6px 0;"><strong>Бронь</strong>: <a href="/bookings/{{ sale.booking_id }}">#{{ sale.booking_id }}</a></p>
         {% endif %}

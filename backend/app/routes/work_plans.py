@@ -64,6 +64,8 @@ def work_plans_list(
     mine: str | None = Query(None),
     sort_date: str | None = Query(None),
     q: str | None = Query(None),
+    msg: str | None = Query(None),
+    n: int | None = Query(None),
     current_user: AuthUser = _VIEW,
     db: Session = Depends(get_db),
 ):
@@ -104,11 +106,78 @@ def work_plans_list(
             list_search_q=list_search_q,
             search_id=search_id,
             display_tz=display_tz,
+            msg=msg,
+            created_count=n,
             work_plan_status_label=work_plan_status_label,
             work_plan_status_emoji=work_plan_status_emoji,
             work_plan_type_display=work_plan_type_display,
         ),
     )
+
+
+def _form_ctx(
+    request: Request,
+    *,
+    current_user: AuthUser,
+    error: str | None,
+    fp: dict,
+    selected_master_ids: list[str],
+    is_admin: bool,
+    db: Session,
+    tz: str,
+    status_code: int = 200,
+):
+    return templates.TemplateResponse(
+        "work_plan_form.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            error=error,
+            fp=fp,
+            selected_master_ids=selected_master_ids,
+            masters=_masters_for_form(db),
+            kinds=_kind_options(),
+            is_admin=is_admin,
+            display_tz=tz,
+        ),
+        status_code=status_code,
+    )
+
+
+def _parse_work_product_master_ids(
+    form,
+    *,
+    is_admin: bool,
+    current_user_id: int,
+) -> list[int]:
+    """Несколько мастеров для плана «работа с товаром»."""
+    raw_ids = [str(x) for x in form.getlist("master_ids") if str(x).strip()]
+    if not is_admin and not parse_bool(str(form.get("pick_other_master_multi") or "")):
+        # Только себя (скрытое поле или дефолт)
+        if not raw_ids:
+            raw_ids = [str(current_user_id)]
+    ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_ids:
+        mid = parse_int(raw, min=1, field_name="master_ids")
+        if mid in seen:
+            continue
+        seen.add(mid)
+        ids.append(mid)
+    if not ids:
+        raise ValueError("Выберите хотя бы одного мастера.")
+    return ids
+
+
+def _parse_hourly_master_id(
+    form,
+    *,
+    is_admin: bool,
+    current_user_id: int,
+) -> int:
+    if is_admin or parse_bool(str(form.get("pick_other_master") or "")):
+        return parse_int(str(form.get("master_id") or "0"), min=1, field_name="master_id")
+    return current_user_id
 
 
 @router.get("/new", response_class=HTMLResponse)
@@ -128,20 +197,18 @@ def work_plan_new_get(
         "work_kind": WorkKind.KIT.value,
         "master_id": str(current_user.id),
         "pick_other_master": "0",
+        "pick_other_master_multi": "0",
         "comment": "",
     }
-    return templates.TemplateResponse(
-        "work_plan_form.html",
-        _ctx(
-            request,
-            current_user=current_user,
-            error=None,
-            fp=fp,
-            masters=_masters_for_form(db),
-            kinds=_kind_options(),
-            is_admin=is_admin,
-            display_tz=tz,
-        ),
+    return _form_ctx(
+        request,
+        current_user=current_user,
+        error=None,
+        fp=fp,
+        selected_master_ids=[str(current_user.id)],
+        is_admin=is_admin,
+        db=db,
+        tz=tz,
     )
 
 
@@ -153,6 +220,9 @@ async def work_plan_new_post(
 ):
     form = await request.form()
     fp = {k: str(v) for k, v in form.items() if isinstance(k, str)}
+    selected_master_ids = [str(x) for x in form.getlist("master_ids") if str(x).strip()]
+    if not selected_master_ids and fp.get("master_id"):
+        selected_master_ids = [str(fp.get("master_id"))]
     is_admin = _is_admin(current_user)
     tz = get_display_timezone(db)
     try:
@@ -166,52 +236,58 @@ async def work_plan_new_post(
         if plan_type_raw == WorkPlanType.HOURLY.value:
             plan_type = WorkPlanType.HOURLY
             work_kind = None
+            master_ids = [_parse_hourly_master_id(form, is_admin=is_admin, current_user_id=current_user.id)]
         else:
             plan_type = WorkPlanType.WORK_PRODUCT
             kind_raw = (fp.get("work_kind") or "").strip().upper()
             if not kind_raw:
                 raise ValueError("Выберите вид работы.")
             work_kind = WorkKind(kind_raw)
-        if is_admin or parse_bool(fp.get("pick_other_master", "")):
-            mid = parse_int(fp.get("master_id", "0"), min=1, field_name="master_id")
-        else:
-            mid = current_user.id
-        master = db.get(User, mid)
-        if master is None or not master.is_active:
-            raise ValueError("Мастер не найден.")
-        err = validate_work_plan_interval(
-            db, master_id=mid, start_utc=planned_utc, duration_minutes=duration
-        )
-        if err:
-            raise ValueError(err)
+            master_ids = _parse_work_product_master_ids(
+                form, is_admin=is_admin, current_user_id=current_user.id
+            )
         comment = (fp.get("comment") or "").strip() or None
-        plan = WorkPlan(
-            created_by_user_id=current_user.id,
-            planned_date=planned_utc,
-            duration_minutes=duration,
-            master_id=mid,
-            plan_type=plan_type,
-            work_kind=work_kind,
-            comment=comment,
-            status=WorkPlanStatus.PLANNED,
-        )
-        db.add(plan)
+        created: list[WorkPlan] = []
+        for mid in master_ids:
+            master = db.get(User, mid)
+            if master is None or not master.is_active:
+                raise ValueError("Мастер не найден.")
+            err = validate_work_plan_interval(
+                db, master_id=mid, start_utc=planned_utc, duration_minutes=duration
+            )
+            if err:
+                name = (master.display_name or master.username or str(mid)).strip()
+                raise ValueError(f"{name}: {err}")
+            plan = WorkPlan(
+                created_by_user_id=current_user.id,
+                planned_date=planned_utc,
+                duration_minutes=duration,
+                master_id=mid,
+                plan_type=plan_type,
+                work_kind=work_kind,
+                comment=comment,
+                status=WorkPlanStatus.PLANNED,
+            )
+            db.add(plan)
+            created.append(plan)
         db.commit()
-        return RedirectResponse(url=f"/work-plans/{plan.id}?msg=created", status_code=303)
+        if len(created) == 1:
+            return RedirectResponse(url=f"/work-plans/{created[0].id}?msg=created", status_code=303)
+        return RedirectResponse(
+            url=f"/work-plans?msg=created_multi&n={len(created)}",
+            status_code=303,
+        )
     except ValueError as exc:
         db.rollback()
-        return templates.TemplateResponse(
-            "work_plan_form.html",
-            _ctx(
-                request,
-                current_user=current_user,
-                error=str(exc),
-                fp=fp,
-                masters=_masters_for_form(db),
-                kinds=_kind_options(),
-                is_admin=is_admin,
-                display_tz=tz,
-            ),
+        return _form_ctx(
+            request,
+            current_user=current_user,
+            error=str(exc),
+            fp=fp,
+            selected_master_ids=selected_master_ids or [str(current_user.id)],
+            is_admin=is_admin,
+            db=db,
+            tz=tz,
             status_code=400,
         )
 

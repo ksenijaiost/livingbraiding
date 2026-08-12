@@ -548,11 +548,13 @@ class Kit(Base):
     author_cost_total: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     is_in_stock: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    created_by_user: Mapped["User | None"] = relationship(foreign_keys=[created_by_user_id])
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
 
     # Автор(ы) комплекта: сотрудники студии и/или отметка «Извне» (заполняется при внесении карточки).

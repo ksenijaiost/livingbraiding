@@ -451,7 +451,7 @@ async def admin_kit_new_post(
         validate_kit_admin_form(d, for_create=True)
         if db.scalar(select(Kit.id).where(Kit.sku == d.sku)):
             raise ValueError("Комплект с таким артикулом уже есть")
-        kit = Kit()
+        kit = Kit(created_by_user_id=current_user.id)
         apply_kit_admin_form(kit, d)
         if d.composition_lines:
             kit.composition_json = lines_to_json(d.composition_lines)
@@ -576,6 +576,7 @@ def admin_kit_detail(
             selectinload(Kit.reserves).selectinload(KitReserve.reserved_by_user),
             selectinload(Kit.reserves).selectinload(KitReserve.booking),
             selectinload(Kit.author_staff_links).selectinload(KitAuthorStaff.user),
+            selectinload(Kit.created_by_user),
         )
         .where(Kit.id == kit_id)
     )

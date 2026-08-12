@@ -392,6 +392,7 @@ def import_single_kit_row(
                 kit.composition_json = comp_json
             elif comp:
                 kit.composition_json = json.dumps(comp, ensure_ascii=False, sort_keys=True)
+        kit.created_by_user_id = changed_by_user_id
         kit.updated_by_user_id = changed_by_user_id
         db.add(kit)
         db.flush()
