@@ -435,7 +435,7 @@ def test_update_visit_writes_audit_rows(memory_db):
     update_visit_with_services(db, visit.id, master_a.id, MultiServiceVisitInput(header=header, lines=[line]))
     rows = db.scalars(select(VisitAuditLog).where(VisitAuditLog.visit_id == visit.id)).all()
     assert rows
-    assert any(r.field_name == "amount_from_client" for r in rows)
+    assert any(r.field_name == "Сумма от клиента" for r in rows)
 
 
 def test_visit_ledger_net_reflects_amount_edit_for_calendar(memory_db):

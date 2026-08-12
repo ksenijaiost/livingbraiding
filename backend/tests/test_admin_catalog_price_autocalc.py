@@ -151,5 +151,5 @@ def test_apply_autocalc_rounding_and_null_skip(memory_db):
     assert isinstance(svc.updated_at, datetime)
     logs = list(db.query(ServiceAuditLog).filter(ServiceAuditLog.service_id == svc.id).all())
     assert logs
-    assert any(l.field_name == "price_junior_from" for l in logs)
+    assert any(l.field_name == "Цена — младший (от)" for l in logs)
 

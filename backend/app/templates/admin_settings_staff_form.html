@@ -186,7 +186,7 @@
                 <tr>
                   <td class="muted">{{ a.changed_at|dt_local }}</td>
                   <td>{{ a.changed_by_user.display_name if a.changed_by_user else "—" }}</td>
-                  <td><code>{{ a.field_name }}</code></td>
+                  <td>{{ audit_field_label(a.field_name) }}</td>
                   <td class="lb-prewrap-12rem">{{ a.old_value or "—" }}</td>
                   <td class="lb-prewrap-12rem">{{ a.new_value or "—" }}</td>
                 </tr>

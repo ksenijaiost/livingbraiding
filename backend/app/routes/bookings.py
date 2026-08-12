@@ -17,9 +17,8 @@ from sqlalchemy import and_, case, delete, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.audit import FieldChange, diff_fields, write_audit_rows
+from app.audit_field_labels import audit_field_label
 from app.booking_audit_labels import (
-    apply_booking_audit_field_labels,
-    booking_audit_field_label,
     diff_planned_service_masters_audit,
     planned_service_masters_audit_field_label,
 )
@@ -427,7 +426,7 @@ def _write_booking_audit(
         entity_field="booking_id",
         entity_id=booking_id,
         changed_by_user_id=changed_by_user_id,
-        changes=apply_booking_audit_field_labels(changes),
+        changes=changes,
     )
 
 
@@ -531,7 +530,7 @@ def _booking_details_audit_changes(db: Session, before_raw: str | None, after_ra
         if k in ("sale_kit_order_master_ids", "visit_order_master_ids", "sale_rubber_order_master_id"):
             out.append(
                 FieldChange(
-                    field_name=booking_audit_field_label(str(k)),
+                    field_name=audit_field_label(str(k)),
                     old_value=_pretty_user_ids_csv(db, str(a) if a is not None else None),
                     new_value=_pretty_user_ids_csv(db, str(b) if b is not None else None),
                 )
@@ -539,7 +538,7 @@ def _booking_details_audit_changes(db: Session, before_raw: str | None, after_ra
             continue
         out.append(
             FieldChange(
-                field_name=booking_audit_field_label(str(k)),
+                field_name=audit_field_label(str(k)),
                 old_value=None if a is None else str(a),
                 new_value=None if b is None else str(b),
             )

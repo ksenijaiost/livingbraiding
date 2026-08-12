@@ -15,6 +15,7 @@ from starlette.datastructures import UploadFile
 
 from app.auth import AuthUser, require_role
 from app.audit import diff_fields, write_audit_rows
+from app.audit_field_labels import audit_field_label
 from app.db.models import (
     StudioExpense,
     StudioExpenseCategory,
@@ -204,7 +205,7 @@ def studio_expense_audit(
                 {
                     "changed_at": format_naive_utc_datetime(r.changed_at, tz) if r.changed_at else "",
                     "changed_by": (r.changed_by_user.display_name if r.changed_by_user else None),
-                    "field_name": r.field_name,
+                    "field_name": audit_field_label(r.field_name),
                     "old_value": r.old_value,
                     "new_value": r.new_value,
                 }

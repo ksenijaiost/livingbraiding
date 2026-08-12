@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
 
 from app.consultation_booking import booking_kind_label, booking_status_display
-from app.booking_audit_labels import booking_audit_field_label
+from app.audit_field_labels import audit_field_label, audit_field_is_json
 from app.client_payment import client_payment_kind_label
 from app.consultation_types import format_types_display
 from app.display_time import (
@@ -73,7 +73,9 @@ templates.env.globals["format_service_catalog_path"] = format_service_catalog_pa
 templates.env.globals["format_types_display"] = format_types_display
 templates.env.globals["timezone_label"] = timezone_label
 templates.env.globals["booking_status_display"] = booking_status_display
-templates.env.globals["booking_audit_field_label"] = booking_audit_field_label
+templates.env.globals["audit_field_label"] = audit_field_label
+templates.env.globals["audit_field_is_json"] = audit_field_is_json
+templates.env.globals["booking_audit_field_label"] = audit_field_label
 templates.env.globals["booking_kind_label"] = booking_kind_label
 templates.env.globals["client_payment_kind_label"] = client_payment_kind_label
 templates.env.globals["UserRole"] = UserRole

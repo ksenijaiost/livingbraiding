@@ -9,11 +9,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.audit import FieldChange
-from app.booking_audit_labels import (
-    apply_booking_audit_field_labels,
-    booking_audit_field_label,
+from app.audit_field_labels import (
+    audit_field_label,
     diff_planned_service_masters_audit,
     planned_service_masters_audit_field_label,
+    resolve_audit_field_name,
+    setting_key_audit_label,
 )
 from app.db import models as _orm_models  # noqa: F401
 from app.db.base import Base
@@ -35,7 +36,7 @@ from app.routes.bookings import (
     _booking_masters_audit_changes,
     _collect_planned_service_masters_audit_lines,
 )
-from app.setting_keys import DISPLAY_TIMEZONE
+from app.setting_keys import DISPLAY_TIMEZONE, SALON_CUT_PCT
 
 
 @pytest.fixture()
@@ -64,23 +65,25 @@ def _visit_setup(db):
     return svc, admin, client
 
 
-def test_booking_audit_field_label_maps_legacy_names() -> None:
-    assert booking_audit_field_label("visit_masters") == "Мастера (на весь визит)"
-    assert booking_audit_field_label("planned_services") == "Услуги в брони"
-    assert booking_audit_field_label("deposit_amount") == "Депозит"
+def test_audit_field_label_maps_legacy_names() -> None:
+    assert audit_field_label("visit_masters") == "Мастера (на весь визит)"
+    assert audit_field_label("planned_services") == "Услуги в брони"
+    assert audit_field_label("deposit_amount") == "Депозит"
+    assert audit_field_label("pieces_available") == "Прядей доступно"
 
 
-def test_booking_audit_field_label_keeps_service_specific() -> None:
+def test_setting_key_audit_label() -> None:
+    assert setting_key_audit_label(SALON_CUT_PCT) == "Доля салона"
+    assert resolve_audit_field_name(
+        "value",
+        log_table="setting_audit_logs",
+        entity_id=SALON_CUT_PCT,
+    ) == "Доля салона"
+
+
+def test_audit_field_label_keeps_service_specific() -> None:
     label = "Мастера · Снятие (15:00)"
-    assert booking_audit_field_label(label) == label
-
-
-def test_apply_booking_audit_field_labels() -> None:
-    out = apply_booking_audit_field_labels(
-        [FieldChange("planned_services", "a", "b")]
-    )
-    assert len(out) == 1
-    assert out[0].field_name == "Услуги в брони"
+    assert audit_field_label(label) == label
 
 
 def test_diff_planned_service_masters_audit_only_changed_line() -> None:

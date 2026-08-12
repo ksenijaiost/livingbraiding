@@ -464,16 +464,16 @@
             <tr>
               <td>{{ format_naive_utc_datetime(r.changed_at, display_tz, "%Y-%m-%d %H:%M") if r.changed_at else "—" }}</td>
               <td>{% if r.changed_by_user %}{{ r.changed_by_user.display_name }}{% else %}Система{% endif %}</td>
-              <td>{{ booking_audit_field_label(r.field_name) }}</td>
+              <td>{{ audit_field_label(r.field_name) }}</td>
               <td class="muted lb-max-420" style="vertical-align:top;">
-                {% if r.field_name == "details_json" or booking_audit_field_label(r.field_name) == "Параметры (JSON)" %}
+                {% if audit_field_is_json(r.field_name) %}
                   <pre class="lb-pre-json">{{ r.old_value | pretty_json }}</pre>
                 {% else %}
                   {{ r.old_value or "—" }}
                 {% endif %}
               </td>
               <td class="lb-max-420" style="vertical-align:top;">
-                {% if r.field_name == "details_json" or booking_audit_field_label(r.field_name) == "Параметры (JSON)" %}
+                {% if audit_field_is_json(r.field_name) %}
                   <pre class="lb-pre-json">{{ r.new_value | pretty_json }}</pre>
                 {% else %}
                   {{ r.new_value or "—" }}
