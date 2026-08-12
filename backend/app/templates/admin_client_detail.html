@@ -52,7 +52,7 @@
         <h2 style="margin: 0 0 8px;">{{ client.name }}</h2>
         <p class="muted" style="margin:0;">id {{ client.id }}{% if not client.is_confirmed %} · <strong>черновик</strong>{% endif %}</p>
         {% if client.created_by_label %}
-          <p class="muted" style="margin:8px 0 0;">Занесён в базу: {{ client.created_by_label }}</p>
+          <p class="muted" style="margin:8px 0 0;">Создал: {{ client.created_by_label }}</p>
         {% endif %}
       </div>
       {% if show_admin_actions %}

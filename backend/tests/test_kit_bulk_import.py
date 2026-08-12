@@ -116,6 +116,7 @@ def test_import_success_minimal(memory_db: Session) -> None:
     k = db.get(Kit, kid)
     assert k is not None
     assert int(k.pieces_available) == 5
+    assert k.created_by_user_id == 1
     assert k.composition_json is None
 
 

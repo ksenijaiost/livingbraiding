@@ -54,7 +54,7 @@
       <tr><td class="muted">Тип</td><td>{{ work_plan_type_display(plan) }}</td></tr>
       <tr><td class="muted">Комментарий</td><td>{{ plan.comment or '—' }}</td></tr>
       <tr><td class="muted">Статус</td><td><strong>{{ work_plan_status_label(plan.status) }}</strong></td></tr>
-      <tr><td class="muted">Создание</td><td>{{ plan.created_at|dt_local }} · {{ plan.created_by_user.display_name or plan.created_by_user.username }}</td></tr>
+      <tr><td class="muted">Создал</td><td>{{ plan.created_at|dt_local }} · {{ plan.created_by_user.display_name or plan.created_by_user.username }}</td></tr>
       {% if linked_work %}
         <tr><td class="muted">Работа</td><td><a href="/sales/work/{{ linked_work.id }}">№{{ linked_work.id }}</a></td></tr>
       {% endif %}

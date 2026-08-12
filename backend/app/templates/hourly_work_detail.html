@@ -23,10 +23,15 @@
     <table style="margin:12px 0; width:100%;">
       <tr>
         <td class="muted" style="width:11rem; vertical-align:top;">Создано</td>
+        <td>{{ entry.created_at|dt_local if entry.created_at else '—' }}</td>
+      </tr>
+      <tr>
+        <td class="muted" style="width:11rem; vertical-align:top;">Создал</td>
         <td>
-          {{ entry.created_at|dt_local if entry.created_at else '—' }}
           {% if entry.created_by_user %}
-            · {{ entry.created_by_user.display_name or entry.created_by_user.username }}
+            {{ entry.created_by_user.display_name or entry.created_by_user.username }}
+          {% else %}
+            —
           {% endif %}
         </td>
       </tr>

@@ -95,6 +95,18 @@
         {% endif %}
       </dd>
 
+      <dt class="muted">Создано</dt>
+      <dd style="margin:0;">{{ kit.created_at|dt_local if kit.created_at else '—' }}</dd>
+
+      <dt class="muted">Создал</dt>
+      <dd style="margin:0;">
+        {% if kit.created_by_user %}
+          {{ kit.created_by_user.display_name or kit.created_by_user.username }}
+        {% else %}
+          —
+        {% endif %}
+      </dd>
+
       <dt class="muted">Авторство</dt>
       <dd style="margin:0;">
         {% if kit.author_external %}<span>Извне</span>{% endif %}

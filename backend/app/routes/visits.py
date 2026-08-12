@@ -188,6 +188,7 @@ def admin_visit_detail(
             .selectinload(VisitServiceMaster.master),
             selectinload(Visit.kit_usages).selectinload(VisitKitUsage.kit),
             selectinload(Visit.masters).selectinload(VisitMaster.master),
+            selectinload(Visit.created_by_user),
         )
         .where(Visit.id == visit_id)
     )
@@ -227,12 +228,6 @@ def admin_visit_detail(
         else:
             mix_bonus_master_label = f"ID {visit.mix_bonus_master_id}"
 
-    visit_creator_label: str | None = None
-    if visit.created_by_user_id:
-        cu = db.get(User, visit.created_by_user_id)
-        if cu and (cu.display_name or "").strip():
-            visit_creator_label = cu.display_name.strip()
-
     duration_h = visit.duration_minutes // 60
     duration_m = visit.duration_minutes % 60
 
@@ -264,7 +259,6 @@ def admin_visit_detail(
             mix_complexity_ru=ru_mix_complexity(getattr(visit, "mix_complexity", None)),
             materials_used_ru="Да" if (visit.kanekalon_grams > 0 or visit.kudri_grams > 0) else "Нет",
             kit_usages_note=kit_usages_empty_explanation(),
-            visit_creator_label=visit_creator_label,
             duration_h=duration_h,
             duration_m=duration_m,
             client_err=client_err,

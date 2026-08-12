@@ -33,7 +33,7 @@
       {% if consultation.comment %}
         <p class="lb-my-6"><strong>Комментарий</strong>:<br />{{ consultation.comment }}</p>
       {% endif %}
-      <p class="lb-my-6"><strong>Мастер-консультант</strong>:
+      <p class="lb-my-6"><strong>Создал</strong>:
         {% if consultation.created_by_user %}{{ consultation.created_by_user.display_name }}{% else %}—{% endif %}
         · {{ format_naive_utc_datetime(consultation.created_at, display_tz) }}
       </p>

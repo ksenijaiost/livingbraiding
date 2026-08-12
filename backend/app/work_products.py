@@ -1990,6 +1990,7 @@ async def work_new_post(
                 cost_snapshot_text=cost_snapshot_text,
                 author_cost_total=None,
                 created_at=utcnow_naive(),
+                created_by_user_id=current_user.id,
                 is_in_stock=True,
                 is_archived=False,
             )
@@ -2067,6 +2068,7 @@ async def work_new_post(
                 cost_snapshot_text=cost_snap,
                 author_cost_total=None,
                 created_at=utcnow_naive(),
+                created_by_user_id=current_user.id,
                 is_in_stock=True,
                 is_archived=False,
             )
