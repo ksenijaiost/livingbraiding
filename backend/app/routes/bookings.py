@@ -17,6 +17,12 @@ from sqlalchemy import and_, case, delete, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.audit import FieldChange, diff_fields, write_audit_rows
+from app.booking_audit_labels import (
+    apply_booking_audit_field_labels,
+    booking_audit_field_label,
+    diff_planned_service_masters_audit,
+    planned_service_masters_audit_field_label,
+)
 
 _logger = logging.getLogger("livingbraiding.bookings")
 from app.auth import AuthUser, require_role
@@ -335,6 +341,96 @@ def _planned_services_audit_label(db: Session, booking_id: int) -> str:
     return "; ".join(parts)
 
 
+def _collect_planned_service_masters_audit_lines(db: Session, booking_id: int) -> list[tuple[str, str, str]]:
+    """Снимок мастеров по услугам: (key, field_label, masters_csv)."""
+    rows = list(
+        db.scalars(
+            select(BookingPlannedService)
+            .where(BookingPlannedService.booking_id == booking_id)
+            .options(
+                selectinload(BookingPlannedService.service),
+                selectinload(BookingPlannedService.masters).selectinload(BookingPlannedServiceMaster.master),
+            )
+            .order_by(BookingPlannedService.sort_order.asc(), BookingPlannedService.id.asc())
+        ).all()
+    )
+    if not rows:
+        return []
+    tz = get_display_timezone(db)
+    booking = db.get(Booking, booking_id)
+    out: list[tuple[str, str, str]] = []
+    for ps in rows:
+        svc = ps.service
+        name = (svc.name if svc else f"#{ps.service_id}")
+        if ps.planned_start_time:
+            local_start = planned_start_local_datetime(
+                ps.planned_start_time,
+                booking_planned_date=booking.planned_date if booking else None,
+                tz_name=tz,
+            )
+            t_s = local_start.strftime("%H:%M") if local_start else "?"
+        else:
+            t_s = "?"
+        key = f"{int(ps.sort_order)}|{int(ps.service_id)}|{t_s}"
+        mids = sorted({int(x.master_id) for x in (ps.masters or []) if x.master_id})
+        masters = _audit_user_names(db, mids)
+        label = planned_service_masters_audit_field_label(name, t_s)
+        out.append((key, label, masters))
+    return out
+
+
+def _booking_masters_audit_changes(
+    *,
+    kind_raw: str,
+    masters_mode: str,
+    before_visit_masters: str,
+    after_visit_masters: str,
+    before_sale_staff: str,
+    after_sale_staff: str,
+    before_service_lines: list[tuple[str, str, str]],
+    after_service_lines: list[tuple[str, str, str]],
+) -> list[FieldChange]:
+    if kind_raw == BookingKind.VISIT.value:
+        mode = str(masters_mode or "all").strip().lower()
+        if mode == "per_service":
+            return diff_planned_service_masters_audit(before_service_lines, after_service_lines)
+        if before_visit_masters != after_visit_masters:
+            return [
+                FieldChange(
+                    field_name="Мастера (на весь визит)",
+                    old_value=before_visit_masters,
+                    new_value=after_visit_masters,
+                )
+            ]
+        return []
+    if before_sale_staff != after_sale_staff:
+        return [
+            FieldChange(
+                field_name="sale_order_masters",
+                old_value=before_sale_staff,
+                new_value=after_sale_staff,
+            )
+        ]
+    return []
+
+
+def _write_booking_audit(
+    db: Session,
+    *,
+    booking_id: int,
+    changed_by_user_id: int | None,
+    changes: list[FieldChange],
+) -> None:
+    write_audit_rows(
+        db,
+        log_model=BookingAuditLog,
+        entity_field="booking_id",
+        entity_id=booking_id,
+        changed_by_user_id=changed_by_user_id,
+        changes=apply_booking_audit_field_labels(changes),
+    )
+
+
 def _audit_sale_order_masters_label(db: Session, booking_id: int) -> str:
     staff = list(
         db.scalars(
@@ -432,18 +528,22 @@ def _booking_details_audit_changes(db: Session, before_raw: str | None, after_ra
             continue
         if a is None and b is not None and str(b) in _DETAILS_KIT_DEFAULT_BACKFILL.get(k, set()):
             continue
-        if k in ("sale_kit_order_master_ids", "visit_order_master_ids"):
+        if k in ("sale_kit_order_master_ids", "visit_order_master_ids", "sale_rubber_order_master_id"):
             out.append(
                 FieldChange(
-                    field_name=str(k),
+                    field_name=booking_audit_field_label(str(k)),
                     old_value=_pretty_user_ids_csv(db, str(a) if a is not None else None),
                     new_value=_pretty_user_ids_csv(db, str(b) if b is not None else None),
                 )
             )
             continue
-        if k in ("sale_kit_order_master_ids", "visit_order_master_ids", "sale_rubber_order_master_id"):
-            continue
-        out.append(FieldChange(field_name=str(k), old_value=None if a is None else str(a), new_value=None if b is None else str(b)))
+        out.append(
+            FieldChange(
+                field_name=booking_audit_field_label(str(k)),
+                old_value=None if a is None else str(a),
+                new_value=None if b is None else str(b),
+            )
+        )
     return out
 
 
@@ -1263,11 +1363,9 @@ def try_auto_complete_booking(db: Session, booking_id: int) -> None:
     b.status = BookingStatus.DONE
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = None
-    write_audit_rows(
+    _write_booking_audit(
         db,
-        log_model=BookingAuditLog,
-        entity_field="booking_id",
-        entity_id=b.id,
+        booking_id=b.id,
         changed_by_user_id=None,
         changes=[
             FieldChange("status", _booking_status_label(old_status.value), _booking_status_label(BookingStatus.DONE.value))
@@ -3215,6 +3313,8 @@ async def admin_booking_edit_post(
     before_visit_masters = _audit_user_names(db, before_visit_master_ids)
     before_sale_staff = _audit_sale_order_masters_label(db, b.id)
     before_planned_services = _planned_services_audit_label(db, b.id)
+    before_service_masters_lines = _collect_planned_service_masters_audit_lines(db, b.id)
+    masters_mode = str(fp.get("booking_masters_mode") or "all").strip().lower()
     before_details_json = b.details_json
     before = SimpleNamespace(
         client_id=b.client_id,
@@ -3351,6 +3451,7 @@ async def admin_booking_edit_post(
     after_visit_masters = _audit_user_names(db, on_ids if kind_raw == BookingKind.VISIT.value else [])
     after_sale_staff = _audit_sale_order_masters_label(db, b.id)
     after_planned_services = _planned_services_audit_label(db, b.id)
+    after_service_masters_lines = _collect_planned_service_masters_audit_lines(db, b.id)
     after_audit = SimpleNamespace(
         client_id=b.client_id,
         planned_date=b.planned_date.replace(second=0, microsecond=0) if b.planned_date else None,
@@ -3367,11 +3468,9 @@ async def admin_booking_edit_post(
         details_json=_canonical_booking_details_json(b.details_json),
         cancelled_reason=b.cancelled_reason,
     )
-    write_audit_rows(
+    _write_booking_audit(
         db,
-        log_model=BookingAuditLog,
-        entity_field="booking_id",
-        entity_id=b.id,
+        booking_id=b.id,
         changed_by_user_id=current_user.id,
         changes=diff_fields(
             before,
@@ -3393,31 +3492,30 @@ async def admin_booking_edit_post(
             ),
         ),
     )
-    write_audit_rows(
+    _write_booking_audit(
         db,
-        log_model=BookingAuditLog,
-        entity_field="booking_id",
-        entity_id=b.id,
+        booking_id=b.id,
         changed_by_user_id=current_user.id,
         changes=_booking_details_audit_changes(db, before_details_json, after_details_json),
     )
-    write_audit_rows(
+    _write_booking_audit(
         db,
-        log_model=BookingAuditLog,
-        entity_field="booking_id",
-        entity_id=b.id,
+        booking_id=b.id,
         changed_by_user_id=current_user.id,
-        changes=diff_fields(
-            SimpleNamespace(visit_masters=before_visit_masters, sale_order_masters=before_sale_staff),
-            SimpleNamespace(visit_masters=after_visit_masters, sale_order_masters=after_sale_staff),
-            ("visit_masters", "sale_order_masters"),
+        changes=_booking_masters_audit_changes(
+            kind_raw=kind_raw,
+            masters_mode=masters_mode,
+            before_visit_masters=before_visit_masters,
+            after_visit_masters=after_visit_masters,
+            before_sale_staff=before_sale_staff,
+            after_sale_staff=after_sale_staff,
+            before_service_lines=before_service_masters_lines,
+            after_service_lines=after_service_masters_lines,
         ),
     )
-    write_audit_rows(
+    _write_booking_audit(
         db,
-        log_model=BookingAuditLog,
-        entity_field="booking_id",
-        entity_id=b.id,
+        booking_id=b.id,
         changed_by_user_id=current_user.id,
         changes=diff_fields(
             SimpleNamespace(planned_services=before_planned_services),
@@ -3579,11 +3677,9 @@ def admin_booking_cancel(
         b.consultation_id = None
     release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
     db.commit()
-    write_audit_rows(
+    _write_booking_audit(
         db,
-        log_model=BookingAuditLog,
-        entity_field="booking_id",
-        entity_id=b.id,
+        booking_id=b.id,
         changed_by_user_id=current_user.id,
         changes=diff_fields(before, b, ("status", "cancelled_at", "cancelled_by_user_id", "cancelled_reason")),
     )
@@ -3608,11 +3704,9 @@ def admin_booking_mark_done(
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
     release_booking_kit_reserves(db, booking_id=b.id, changed_by_user_id=current_user.id)
-    write_audit_rows(
+    _write_booking_audit(
         db,
-        log_model=BookingAuditLog,
-        entity_field="booking_id",
-        entity_id=b.id,
+        booking_id=b.id,
         changed_by_user_id=current_user.id,
         changes=[FieldChange("status", _booking_status_label(old_status.value), _booking_status_label(BookingStatus.DONE.value))],
     )
@@ -3636,11 +3730,9 @@ def admin_booking_confirm(
     b.status = BookingStatus.ACTIVE
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
-    write_audit_rows(
+    _write_booking_audit(
         db,
-        log_model=BookingAuditLog,
-        entity_field="booking_id",
-        entity_id=b.id,
+        booking_id=b.id,
         changed_by_user_id=current_user.id,
         changes=[
             FieldChange(
