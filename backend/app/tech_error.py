@@ -7,11 +7,13 @@ from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.requests import ClientDisconnect
 from starlette.responses import Response
 
 logger = logging.getLogger("livingbraiding.app")
 
 TECH_ERROR_QUERY = "tech_err"
+CLIENT_DISCONNECT_STATUS = 499
 
 TECH_ERROR_USER_MESSAGE = (
     "Произошла техническая ошибка. Напишите техническому специалисту и опишите все ваши действия. "
@@ -24,6 +26,24 @@ TECH_ERROR_JSON = {
     "error": "technical",
     "message": TECH_ERROR_USER_MESSAGE,
 }
+
+
+def is_client_disconnect(exc: BaseException | None) -> bool:
+    """Клиент закрыл соединение (вкладка, таймаут, обрыв сети) — не баг сервера."""
+    if exc is None:
+        return False
+    if isinstance(exc, ClientDisconnect):
+        return True
+    if isinstance(exc, BaseExceptionGroup):
+        return bool(exc.exceptions) and all(is_client_disconnect(e) for e in exc.exceptions)
+    if is_client_disconnect(exc.__cause__) or is_client_disconnect(exc.__context__):
+        return True
+    return False
+
+
+def client_disconnect_response() -> Response:
+    """Nginx-style 499: клиент оборвал запрос, ответ уже никому не нужен."""
+    return Response(status_code=CLIENT_DISCONNECT_STATUS)
 
 
 def wants_json_error(request: Request) -> bool:
@@ -49,7 +69,19 @@ def request_shows_tech_error_banner(request: Request) -> bool:
     return (request.query_params.get(TECH_ERROR_QUERY) or "").strip() in ("1", "true", "yes")
 
 
+async def client_disconnect_handler(request: Request, exc: Exception) -> Response:
+    logger.info(
+        "Client disconnected %s %s",
+        request.method,
+        request.url.path,
+    )
+    return client_disconnect_response()
+
+
 async def unhandled_exception_handler(request: Request, exc: Exception) -> Response:
+    if is_client_disconnect(exc):
+        return await client_disconnect_handler(request, exc)
+
     # HTTPException и RequestValidationError обрабатываются своими хендлерами (более узкий тип).
     logger.exception(
         "Unhandled error %s %s",
@@ -76,4 +108,28 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> Respo
 
 
 def register_tech_error_handlers(app: FastAPI) -> None:
+    app.add_exception_handler(ClientDisconnect, client_disconnect_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)
+
+
+class SwallowClientDisconnectMiddleware:
+    """Обрыв клиента на send/parse не должен всплывать в uvicorn как 500."""
+
+    def __init__(self, app):  # noqa: ANN001
+        self.app = app
+
+    async def __call__(self, scope, receive, send):  # noqa: ANN001
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        try:
+            await self.app(scope, receive, send)
+        except BaseException as exc:
+            if is_client_disconnect(exc):
+                logger.info(
+                    "Client disconnected %s %s",
+                    scope.get("method", "?"),
+                    scope.get("path", "?"),
+                )
+                return
+            raise

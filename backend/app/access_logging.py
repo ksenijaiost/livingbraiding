@@ -16,6 +16,7 @@ from starlette.responses import Response
 from app.auth import optional_session_user_id
 from app.db.models import User
 from app.db.session import SessionLocal
+from app.tech_error import CLIENT_DISCONNECT_STATUS, client_disconnect_response, is_client_disconnect
 
 ACCESS_LOGGER_NAME = "livingbraiding.access"
 APP_LOGGER_NAME = "livingbraiding.app"
@@ -53,11 +54,13 @@ def configure_request_access_logging() -> None:
 def access_log_level_for_status(status: int, *, has_validation_error: bool) -> int:
     """
     INFO — успех и редиректы;
-    WARNING — пользовательская валидация (как logger.warning в form_validation_log);
+    WARNING — пользовательская валидация (как logger.warning в form_validation_log) и обрыв клиента;
     ERROR — прочие 4xx/5xx.
     """
     if 200 <= status < 400:
         return logging.INFO
+    if status == CLIENT_DISCONNECT_STATUS:
+        return logging.WARNING
     if has_validation_error and 400 <= status < 500:
         return logging.WARNING
     return logging.ERROR
@@ -88,6 +91,11 @@ class AccessLogWithUserMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
             return response
+        except Exception as exc:
+            if is_client_disconnect(exc):
+                response = client_disconnect_response()
+                return response
+            raise
         finally:
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             status = int(response.status_code) if response is not None else 500

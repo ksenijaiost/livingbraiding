@@ -122,3 +122,4 @@ def test_access_log_level_for_status() -> None:
     assert access_log_level_for_status(400, has_validation_error=True) == logging.WARNING
     assert access_log_level_for_status(404, has_validation_error=False) == logging.ERROR
     assert access_log_level_for_status(500, has_validation_error=False) == logging.ERROR
+    assert access_log_level_for_status(499, has_validation_error=False) == logging.WARNING
