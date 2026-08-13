@@ -43,12 +43,13 @@ def memory_db():
 def test_rubber_family_size_split_and_resolve() -> None:
     assert _rubber_family_size_from_type("TAIL_CRAB_MINI") == ("TAIL_CRAB", "MINI")
     assert _rubber_family_size_from_type("TAIL_ELASTIC") == ("TAIL_ELASTIC", "")
+    assert _rubber_family_size_from_type("TAIL_ELASTIC_MINI") == ("TAIL_ELASTIC", "MINI")
 
     form = _FakeForm({"rubber_family": "TAIL_NET", "rubber_size": "STANDARD"})
     assert _resolve_rubber_type_from_form(form) == "TAIL_NET_STANDARD"
 
-    with pytest.raises(ValueError, match="размер"):
-        _resolve_rubber_type_from_form(_FakeForm({"rubber_family": "TAIL_BUN"}))
+    assert _resolve_rubber_type_from_form(_FakeForm({"rubber_family": "TAIL_BUN"})) == "TAIL_BUN_STANDARD"
+    assert _resolve_rubber_type_from_form(_FakeForm({"rubber_family": "TAIL_ELASTIC"})) == "TAIL_ELASTIC_STANDARD"
 
 
 def _seed_master(db) -> User:
@@ -203,8 +204,8 @@ def test_post_work_other_self_mixed(memory_db) -> None:
         select(WorkForInventoryStaff).where(WorkForInventoryStaff.work_id == work.id)
     )
     assert staff is not None
-    # 100 (работа из прайса) + 100*2.5 (смешка) = 350
-    assert float(staff.master_profit_amount or 0) == pytest.approx(350.0)
+    # 1.19: бонус за смешку в ЗП мастеров в работах не начисляется.
+    assert float(staff.master_profit_amount or 0) == pytest.approx(100.0)
 
 
 def test_post_work_rubber_family_size(memory_db) -> None:
@@ -240,3 +241,42 @@ def test_post_work_rubber_family_size(memory_db) -> None:
     assert work.kind == WorkKind.RUBBER
     details = json.loads(work.details_json or "{}")
     assert details["rubber"]["type"] == "TAIL_CRAB_MINI"
+
+
+def test_post_work_rubber_elastic_size_from_messy_catalog(memory_db) -> None:
+    from app.db.models import CatalogProduct
+
+    master = _seed_master(memory_db)
+    memory_db.add(
+        CatalogProduct(
+            category_name="Заказ",
+            subcategory_name="Хвосты/резинки",
+            name="Хвост на резинке (1 крепление) mini",
+            price=150.0,
+            meta_json=json.dumps(
+                {"master_pay": 25.0, "studio_pay": 0.0, "fixed_expense": 40.0, "is_per_unit": True}
+            ),
+            is_active=True,
+        )
+    )
+    memory_db.commit()
+
+    resp = _post_work_form(
+        memory_db,
+        master,
+        {
+            "performed_date": "2025-05-21",
+            "scope": "IN_STOCK",
+            "kind": "RUBBER",
+            "rubber_family": "TAIL_ELASTIC",
+            "rubber_size": "MINI",
+            "rubber_attach_qty": "27",
+            "kanekalon_grams": "10",
+        },
+    )
+    assert resp.status_code == 303
+    work = memory_db.scalar(select(WorkForInventory).order_by(WorkForInventory.id.desc()))
+    assert work is not None
+    details = json.loads(work.details_json or "{}")
+    assert details["rubber"]["type"] == "TAIL_ELASTIC_MINI"
+    assert details["rubber"]["qty"] == 27

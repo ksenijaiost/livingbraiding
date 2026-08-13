@@ -8,21 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import CatalogProduct, WorkForInventory, WorkKind, WorkScope
+from app.rubber_catalog import rubber_service_name
 from app.zakaz_blanks import kit_composition_catalog_items, zakaz_blank_def_by_key
-
-_RUBBER_TYPE_LABELS: dict[str, str] = {
-    "TAIL_ELASTIC": "Хвост на резинке (1 крепление)",
-    "TAIL_CRAB_MINI": "Хвост на крабе — mini",
-    "TAIL_CRAB_STANDARD": "Хвост на крабе — standard",
-    "TAIL_CRAB_MAX": "Хвост на крабе — max",
-    "TAIL_NET_MINI": "Хвост на сетке — mini",
-    "TAIL_NET_STANDARD": "Хвост на сетке — standard",
-    "TAIL_NET_MAX": "Хвост на сетке — max",
-    "TAIL_BUN_MINI": "Хвост на бублике — mini",
-    "TAIL_BUN_STANDARD": "Хвост на бублике — standard",
-    "TAIL_BUN_MAX": "Хвост на бублике — max",
-    "BRAIDS_ELASTIC": "Косы на резинке",
-}
 
 
 def blank_key_label(db: Session | None, key: str) -> str:
@@ -46,7 +33,10 @@ def blank_condition_label(condition: str | None) -> str:
 
 def rubber_type_label(rubber_type: str | None) -> str:
     rt = (rubber_type or "").strip()
-    return _RUBBER_TYPE_LABELS.get(rt, rt or "—")
+    if not rt:
+        return "—"
+    label = rubber_service_name(rt)
+    return label or rt
 
 
 def build_composition_table_view(

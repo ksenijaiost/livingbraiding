@@ -70,6 +70,29 @@
       margin: 0;
       flex-shrink: 0;
     }
+    .products-catalog-wrap th.pcat-size,
+    .products-catalog-wrap td.pcat-size {
+      width: 5.5rem;
+      max-width: 5.5rem;
+      text-align: center;
+    }
+    .products-catalog-wrap .pcat-size label {
+      margin: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 400;
+      font-size: 0.85rem;
+    }
+    .products-catalog-wrap .pcat-size-indent {
+      padding-left: 1.35rem;
+      color: #475569;
+    }
+    .products-catalog-wrap .pcat-price-locked {
+      background: #e2e8f0;
+      color: #94a3b8;
+      pointer-events: none;
+    }
     .products-catalog-wrap .pcat-active label {
       margin: 0;
       display: inline-flex;
@@ -202,11 +225,13 @@
           {% set zakaz_no_labels = g.subcategory_name in ["Коррекция комплекта", "Хвосты/резинки", "Другое"] %}
           {% set show_labels_col = selected_category == "Заказ" and not zakaz_no_labels %}
           {% set show_expense_col = selected_category == "Заказ" and zakaz_no_labels %}
+          {% set show_size_col = g.show_size_col if g.show_size_col is defined else (g.subcategory_name == "Хвосты/резинки") %}
           <div style="overflow-x:auto;">
             <table>
               <thead>
                 <tr>
                   <th class="pcat-name"><span class="lb-th-full">Наименование</span><span class="lb-th-short" title="Наименование">Назв.</span></th>
+                  {% if show_size_col %}<th class="pcat-size"><span class="lb-th-full">Размер</span><span class="lb-th-short" title="Размер">Разм.</span></th>{% endif %}
                   {% if show_labels_col %}<th class="pcat-labels"><span class="lb-th-full">Метки</span><span class="lb-th-short" title="Метки">М.</span></th>{% endif %}
                   <th class="pcat-num"><span class="lb-th-full">Цена</span><span class="lb-th-short" title="Цена">₽</span></th>
                   {% if show_work %}<th class="pcat-num"><span class="lb-th-full">Работа</span><span class="lb-th-short" title="Работа">Раб.</span></th>{% endif %}
@@ -219,9 +244,18 @@
               </thead>
               <tbody>
                 {% for r in g.rows %}
+                  {% set row_kind = r.row_kind if r.row_kind is defined else 'plain' %}
+                  {% set price_locked = r.price_locked if r.price_locked is defined else false %}
                   <tr>
                     <td class="pcat-name">
-                      {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
+                      {% if row_kind == 'group_parent' and current_user.role.value == "ADMIN_SUPER" and r.id %}
+                        <input form="rubber-group-{{ r.id }}" name="name" type="text" value="{{ r.base_name }}" maxlength="200" required style="width:100%;max-width:100%;box-sizing:border-box;" />
+                      {% elif row_kind == 'size_child' or row_kind == 'size_placeholder' %}
+                        <div class="pcat-size-indent">{{ r.size_label }}{% if row_kind == 'size_placeholder' %} <span class="muted">— нет в прайсе</span>{% endif %}</div>
+                        {% if row_kind == 'size_child' and current_user.role.value == "ADMIN_SUPER" and r.id %}
+                          <input form="row-edit-{{ r.id }}" type="hidden" name="name" value="{{ r.name }}" />
+                        {% endif %}
+                      {% elif current_user.role.value == "ADMIN_SUPER" and r.id %}
                         <input form="row-edit-{{ r.id }}" name="name" type="text" value="{{ r.name }}" maxlength="200" required style="width:100%;max-width:100%;box-sizing:border-box;" />
                         {% if g.subcategory_name == "Заготовки поштучно" %}
                           <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
@@ -234,6 +268,19 @@
                         <strong>{{ r.name }}</strong>
                       {% endif %}
                     </td>
+                    {% if show_size_col %}
+                      <td class="pcat-size">
+                        {% if (row_kind == 'group_parent' or row_kind == 'plain') and current_user.role.value == "ADMIN_SUPER" and r.id %}
+                          <form method="post" action="/products-catalog/{{ r.id }}/rubber-sizes" class="pcat-size-toggle-form" data-enable="{{ '0' if r.size_checked else '1' }}" data-checked="{{ '1' if r.size_checked else '0' }}">
+                            <input type="hidden" name="category" value="{{ selected_category }}" />
+                            <input type="hidden" name="enable" value="{{ '1' if r.size_checked else '0' }}" />
+                            <label>
+                              <input type="checkbox" {% if r.size_checked %}checked{% endif %} />
+                            </label>
+                          </form>
+                        {% endif %}
+                      </td>
+                    {% endif %}
                     {% if show_labels_col %}
                       <td class="pcat-labels">
                         {% set is_kit = r.is_used_in_kit_form %}
@@ -251,7 +298,31 @@
                         {% endif %}
                       </td>
                     {% endif %}
-                    {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
+                    {% if current_user.role.value == "ADMIN_SUPER" and r.id and row_kind == 'group_parent' %}
+                      <td class="pcat-num"><input class="pcat-price-locked" type="text" value="" disabled tabindex="-1" /></td>
+                      {% if show_work %}<td class="pcat-num"><input class="pcat-price-locked" type="text" value="" disabled tabindex="-1" /></td>{% endif %}
+                      {% if show_expense_col %}<td class="pcat-num"><input class="pcat-price-locked" type="text" value="" disabled tabindex="-1" /></td>{% endif %}
+                      <td class="pcat-active"><span class="muted">—</span></td>
+                      <td class="pcat-actions">
+                        <form id="rubber-group-{{ r.id }}" method="post" action="/products-catalog/{{ r.id }}/rubber-group-rename">
+                          <input type="hidden" name="category" value="{{ selected_category }}" />
+                          <button type="submit" class="secondary" style="padding:4px 10px;">Сохранить</button>
+                        </form>
+                      </td>
+                    {% elif current_user.role.value == "ADMIN_SUPER" and row_kind == 'size_placeholder' %}
+                      <td class="pcat-num"><input class="pcat-price-locked" type="text" value="" disabled tabindex="-1" /></td>
+                      {% if show_work %}<td class="pcat-num"><input class="pcat-price-locked" type="text" value="" disabled tabindex="-1" /></td>{% endif %}
+                      {% if show_expense_col %}<td class="pcat-num"><input class="pcat-price-locked" type="text" value="" disabled tabindex="-1" /></td>{% endif %}
+                      <td class="pcat-active"><span class="muted">—</span></td>
+                      <td class="pcat-actions">
+                        <form method="post" action="/products-catalog/{{ r.id }}/rubber-size">
+                          <input type="hidden" name="category" value="{{ selected_category }}" />
+                          <input type="hidden" name="base_name" value="{{ r.base_name }}" />
+                          <input type="hidden" name="size" value="{{ r.size_key }}" />
+                          <button type="submit" class="secondary" style="padding:4px 10px;">Добавить</button>
+                        </form>
+                      </td>
+                    {% elif current_user.role.value == "ADMIN_SUPER" and r.id %}
                       <td class="pcat-num">
                         <input form="row-edit-{{ r.id }}" name="price" type="text" inputmode="decimal" value="{{ '' if r.price is none else r.price }}" />
                       </td>
@@ -272,20 +343,31 @@
                         </label>
                       </td>
                       <td class="pcat-actions">
-                        <form id="row-edit-{{ r.id }}" method="post" action="/products-catalog/{{ r.id }}/edit">
-                          <input type="hidden" name="category" value="{{ selected_category }}" />
-                          {% if not show_work %}
-                            <input type="hidden" name="master_pay" value="" />
+                        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+                          <form id="row-edit-{{ r.id }}" method="post" action="/products-catalog/{{ r.id }}/edit" style="margin:0;">
+                            <input type="hidden" name="category" value="{{ selected_category }}" />
+                            {% if not show_work %}
+                              <input type="hidden" name="master_pay" value="" />
+                            {% endif %}
+                            {% if not show_expense_col %}
+                              <input type="hidden" name="fixed_expense" value="{{ '' if r.fixed_expense is none else r.fixed_expense }}" />
+                            {% endif %}
+                            {% if selected_category == "Заказ" and not show_labels_col %}
+                              <input type="hidden" name="is_used_in_kit_form" value="{% if r.is_used_in_kit_form %}on{% endif %}" />
+                              <input type="hidden" name="ignore_in_calc" value="{% if r.ignore_in_calc %}on{% endif %}" />
+                            {% endif %}
+                            <button type="submit" class="secondary" style="padding:4px 10px;">Сохранить</button>
+                          </form>
+                          {% if show_size_col %}
+                          <form method="post" action="/products-catalog/{{ r.id }}/delete" style="margin:0;"
+                            class="pcat-delete-row-form"
+                            data-pcat-delete-row-id="{{ r.id }}"
+                            data-pcat-delete-name="{{ r.name }}"
+                          >
+                            <button type="submit" class="secondary" style="padding:4px 10px;color:#b91c1c;border-color:#fecaca;">Удалить</button>
+                          </form>
                           {% endif %}
-                          {% if not show_expense_col %}
-                            <input type="hidden" name="fixed_expense" value="{{ '' if r.fixed_expense is none else r.fixed_expense }}" />
-                          {% endif %}
-                          {% if selected_category == "Заказ" and not show_labels_col %}
-                            <input type="hidden" name="is_used_in_kit_form" value="{% if r.is_used_in_kit_form %}on{% endif %}" />
-                            <input type="hidden" name="ignore_in_calc" value="{% if r.ignore_in_calc %}on{% endif %}" />
-                          {% endif %}
-                          <button type="submit" class="secondary" style="padding:4px 10px;">Сохранить</button>
-                        </form>
+                        </div>
                       </td>
                     {% else %}
                       <td class="pcat-num">{% if r.price is not none %}{{ r.price }}{% else %}<span class="muted">—</span>{% endif %}</td>
@@ -324,6 +406,7 @@
                         <strong>{{ r.name }}</strong>
                       {% endif %}
                     </td>
+                    {% if show_size_col %}<td class="pcat-size"></td>{% endif %}
                     {% if show_labels_col %}
                       <td class="pcat-labels">
                         {% set is_kit = r.is_used_in_kit_form %}
@@ -421,6 +504,7 @@
                         </div>
                       {% endif %}
                     </td>
+                    {% if show_size_col %}<td class="pcat-size"></td>{% endif %}
                     {% if show_labels_col %}
                       <td class="pcat-labels">
                         <div class="pcat-label-stack">
@@ -473,6 +557,23 @@
 
   <script>
     (function () {
+      document.querySelectorAll('form.pcat-size-toggle-form').forEach(function (form) {
+        var box = form.querySelector('input[type="checkbox"]');
+        var hidden = form.querySelector('input[name="enable"]');
+        if (!box || !hidden) return;
+        box.addEventListener('change', function () {
+          var enable = box.checked;
+          var msg = enable
+            ? 'Разбить позицию на mini / standard / max? Цены текущей строки останутся у standard.'
+            : 'Свернуть размеры в одну позицию? Цены возьмём со standard, остальные строки снимутся с актуальных.';
+          if (!window.confirm(msg)) {
+            box.checked = !enable;
+            return;
+          }
+          hidden.value = enable ? '1' : '0';
+          form.submit();
+        });
+      });
       function kitLine(k) {
         var tag = k.is_catalog_active ? 'активный' : (k.is_archived ? 'архив' : 'неактивный');
         return (k.sku || '—') + ' — ' + (k.title || '—') + ' (' + tag + ')';
