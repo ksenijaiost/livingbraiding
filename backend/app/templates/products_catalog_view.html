@@ -144,7 +144,7 @@
   <div class="card products-catalog-wrap">
     <h2 style="margin-top: 0;">Прайс · Товары</h2>
     <p class="muted" style="margin-top:-6px;">
-      Категории каталога без формы визита (например «Продажа материала», «Заказ») — вкладки ниже. Внутри категории позиции разделены по подкатегориям.
+      «Заказ» и «Продажа материала» — без формы визита. «Работа по фикс цене» — позиции для визита (перья и т.п.): цена, работа и расход за штуку.
     </p>
 
     {% if msg == "saved" %}
@@ -220,11 +220,13 @@
     {% if grouped_rows %}
       {% for g in grouped_rows %}
         <div class="card" style="margin-top:12px;">
-          <h3 style="margin-top:0;">{{ g.subcategory_name }}</h3>
+          {% if selected_category != "Работа по фикс цене" %}
+            <h3 style="margin-top:0;">{{ g.subcategory_name }}</h3>
+          {% endif %}
           {% set show_work = selected_category != "Продажа материала" %}
           {% set zakaz_no_labels = g.subcategory_name in ["Коррекция комплекта", "Хвосты/резинки", "Другое"] %}
           {% set show_labels_col = selected_category == "Заказ" and not zakaz_no_labels %}
-          {% set show_expense_col = selected_category == "Заказ" and zakaz_no_labels %}
+          {% set show_expense_col = (selected_category == "Заказ" and zakaz_no_labels) or selected_category == "Работа по фикс цене" %}
           {% set show_size_col = g.show_size_col if g.show_size_col is defined else (g.subcategory_name == "Хвосты/резинки") %}
           <div style="overflow-x:auto;">
             <table>

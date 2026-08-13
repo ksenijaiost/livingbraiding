@@ -30,6 +30,13 @@ from app.db.session import get_db
 from app.forms_parse import parse_bool, parse_optional_float
 from app.price_ordering import price_sort_key, service_sort_price
 from app.ru_labels import format_price_integer_rub
+from app.fixed_price_visit import (
+    FIXED_PRICE_VISIT_CATEGORY,
+    deactivate_fixed_price_mirror_service,
+    ensure_fixed_price_visit_nodes,
+    is_fixed_price_category_name,
+    sync_fixed_price_catalog_product,
+)
 from app.rubber_catalog import (
     RUBBER_SUBCATEGORY,
     build_rubber_catalog_display,
@@ -374,6 +381,8 @@ def products_catalog_view(
     # Исторически сюда попадали категории "товаров" из services.
     # Сейчас опираемся на имена отдельных потоков.
     _SERVICE_PRODUCT_CATS = ("Заказ", "Продажа материала")
+    if ensure_fixed_price_visit_nodes(db):
+        db.commit()
     service_cats = list(
         db.scalars(
             select(ServiceCategory.name)
@@ -388,7 +397,7 @@ def products_catalog_view(
             .order_by(CatalogProduct.category_name.asc())
         ).all()
     )
-    cats = sorted(set(service_cats + product_cats))
+    cats = sorted(set(service_cats + product_cats + [FIXED_PRICE_VISIT_CATEGORY]))
     selected = (category or "").strip() or (cats[0] if cats else None)
     grouped_rows: list[SimpleNamespace] = []
     is_catalog_products_category = False
@@ -403,7 +412,7 @@ def products_catalog_view(
                 .order_by(CatalogProduct.subcategory_name.asc(), CatalogProduct.sort_order.asc(), CatalogProduct.name.asc())
             ).all()
         )
-        if product_rows:
+        if product_rows or is_fixed_price_category_name(selected):
             is_catalog_products_category = True
             groups_active: dict[str, list[SimpleNamespace]] = defaultdict(list)
             groups_inactive: dict[str, list[SimpleNamespace]] = defaultdict(list)
@@ -440,6 +449,8 @@ def products_catalog_view(
             if selected == "Заказ" and "Другое" not in sub_names:
                 sub_names.append("Другое")
                 sub_names = sorted(sub_names)
+            if is_fixed_price_category_name(selected) and not sub_names:
+                sub_names = [FIXED_PRICE_VISIT_CATEGORY]
             grouped_rows = []
             for sub_name in sub_names:
                 if sub_name == RUBBER_SUBCATEGORY:
@@ -585,6 +596,7 @@ async def products_catalog_row_edit(
             return _redirect("err", "blank_fields")
     row.is_active = parse_bool(form.get("is_active"))
     row.meta_json = json.dumps(meta, ensure_ascii=False)
+    sync_fixed_price_catalog_product(db, row)
     db.commit()
     return _redirect("msg", "saved")
 
@@ -721,17 +733,18 @@ async def products_catalog_row_new(
     }
     if category == _BLANK_CATALOG_CATEGORY and subcategory_name == _BLANK_CATALOG_SUBCATEGORY:
         meta["kit_key"] = kit_key_new[:80]
-    db.add(
-        CatalogProduct(
-            category_name=category,
-            subcategory_name=subcategory_name,
-            name=name,
-            price=price,
-            meta_json=json.dumps(meta, ensure_ascii=False),
-            sort_order=int(max_sort or 0) + 1,
-            is_active=parse_bool(form.get("is_active")),
-        )
+    row = CatalogProduct(
+        category_name=category,
+        subcategory_name=subcategory_name,
+        name=name,
+        price=price,
+        meta_json=json.dumps(meta, ensure_ascii=False),
+        sort_order=int(max_sort or 0) + 1,
+        is_active=parse_bool(form.get("is_active")),
     )
+    db.add(row)
+    db.flush()
+    sync_fixed_price_catalog_product(db, row)
     db.commit()
     return _redirect("msg", "saved")
 
@@ -767,6 +780,7 @@ def products_catalog_row_delete(
 
     if row.is_active:
         return _redirect("err", "delete_active")
+    deactivate_fixed_price_mirror_service(db, row)
     db.delete(row)
     db.commit()
     return _redirect("msg", "deleted")

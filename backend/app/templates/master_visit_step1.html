@@ -246,6 +246,11 @@
           style="width: 100%; max-width: 100%; box-sizing: border-box; min-height: 2.5rem;">
         </select>
       </div>
+      <div id="fixed_price_qty_wrap" style="display:none; margin-top:8px;">
+        <label for="fixed_price_qty">Количество, шт</label>
+        <input id="fixed_price_qty" type="number" name="fixed_price_qty" min="1" step="1" inputmode="numeric"
+          value="{{ fp.get('fixed_price_qty', '1') }}" style="max-width: 8rem;" />
+      </div>
       <div id="line0_service_feature_flags" class="muted" style="margin-top:8px; font-size:12px; display:none;"></div>
 
       <div class="row" style="margin-top:8px;">
@@ -1221,8 +1226,11 @@
     const _cis = document.querySelector('input[name="client_is_self"]');
     if (_cis) _cis.addEventListener('change', syncAmountRequired);
     document.addEventListener('lbCorrCustomAmountChanged', function () { syncAmountRequired(); syncVisitPreview(); });
-    const _amt = document.getElementById('amount_from_client');
-    if (_amt) { _amt.addEventListener('input', syncVisitPreview); _amt.addEventListener('change', syncVisitPreview); }
+    const _qty = document.getElementById('fixed_price_qty');
+    if (_qty) {
+      _qty.addEventListener('input', function () { applyFixedPriceAmountAutofill(0); updateRecommendedPriceHint(); syncVisitPreview(); });
+      _qty.addEventListener('change', function () { applyFixedPriceAmountAutofill(0); updateRecommendedPriceHint(); syncVisitPreview(); });
+    }
     const _disc = document.getElementById('client_discount_percent');
     if (_disc) {
       _disc.addEventListener('input', function () { updateRecommendedPriceHint(); });
@@ -1771,11 +1779,66 @@
     }
 
     function lineAmountFromClient(idx) {
-      if (idx === 0) return Math.max(0, numVal('#amount_from_client'));
-      const row = visitLineRow(idx);
-      if (!row) return 0;
-      const el = row.querySelector('input[name="line_' + idx + '_amount_from_client"]');
-      return Math.max(0, parseFloat(String(el && el.value || '0')) || 0);
+      let typed = 0;
+      if (idx === 0) typed = Math.max(0, numVal('#amount_from_client'));
+      else {
+        const row = visitLineRow(idx);
+        if (!row) return 0;
+        const el = row.querySelector('input[name="line_' + idx + '_amount_from_client"]');
+        typed = Math.max(0, parseFloat(String(el && el.value || '0')) || 0);
+      }
+      const svc = lineFixedPriceService(idx);
+      if (svc && typed <= 0 && !visitClientIsSelf()) {
+        const p = parseFloat(svc.client_price);
+        if (!isNaN(p)) return Math.max(0, p * lineFixedPriceQty(idx));
+      }
+      return typed;
+    }
+
+    function visitClientIsSelf() {
+      const cb = document.querySelector('input[name="client_is_self"]');
+      return !!(cb && cb.checked);
+    }
+
+    function lineFixedPriceQty(idx) {
+      let el = null;
+      if (idx === 0) el = document.getElementById('fixed_price_qty');
+      else {
+        const row = visitLineRow(idx);
+        el = row ? row.querySelector('input[name="line_' + idx + '_fixed_price_qty"]') : null;
+      }
+      let n = parseInt(String((el && el.value) || '1'), 10);
+      if (isNaN(n) || n < 1) n = 1;
+      return n;
+    }
+
+    function lineFixedPriceService(idx) {
+      let sid = 0;
+      if (idx === 0) {
+        const selected = getSelectedService();
+        if (selected && selected.is_fixed_price_work) return selected;
+        sid = parseInt((document.getElementById('service_id') || {}).value || '0', 10) || 0;
+      } else {
+        sid = parseInt((document.getElementById('line_' + idx + '_service_id') || {}).value || '0', 10) || 0;
+      }
+      const svc = sid ? getServiceById(sid) : null;
+      if (svc && svc.is_fixed_price_work) return svc;
+      return null;
+    }
+
+    function lineFixedExpenseCost(idx) {
+      const svc = lineFixedPriceService(idx);
+      if (!svc) return 0;
+      const fe = parseFloat(svc.fixed_expense);
+      if (isNaN(fe)) return 0;
+      return fe * lineFixedPriceQty(idx);
+    }
+
+    function lineFixedMastersPool(idx) {
+      const svc = lineFixedPriceService(idx);
+      if (!svc) return null;
+      const mp = parseFloat(svc.master_pay);
+      return (isNaN(mp) ? 0 : mp) * lineFixedPriceQty(idx);
     }
 
     function lineMaterialCost(idx) {
@@ -2014,6 +2077,7 @@
       const sync = function () { syncVisitPreview(); };
       box.querySelectorAll(
         'input[name="line_' + idx + '_amount_from_client"],' +
+        'input[name="line_' + idx + '_fixed_price_qty"],' +
         'input[name="line_' + idx + '_kanekalon_grams"],' +
         'input[name="line_' + idx + '_kudri_grams"],' +
         'input[name="line_' + idx + '_amortization_level"],' +
@@ -2048,6 +2112,7 @@
       let corrExtraTotal = 0;
       let costTotal = addons;
       let mixBonusTotal = 0;
+      let fpExpenseTotal = 0;
       let stockKitParts = '';
       let extraKitParts = '';
       let warn = '';
@@ -2057,10 +2122,12 @@
         const mat = lineMaterialCost(idx);
         const amort = lineAmortCost(idx);
         const corrX = lineCorrectionExtraCost(idx);
+        const fpExp = lineFixedExpenseCost(idx);
         matTotal += mat;
         amortTotal += amort;
         corrExtraTotal += corrX;
-        costTotal += mat + amort + corrX;
+        fpExpenseTotal += fpExp;
+        costTotal += mat + amort + corrX + fpExp;
         const mix = lineMixCostAndBonus(idx);
         costTotal += mix.mixCost;
         mixBonusTotal += mix.mixBonus;
@@ -2089,18 +2156,25 @@
         totalsByMaster[mid].bonus += bonus;
       }
 
+      function linePreviewMastersPool(idx) {
+        const fpPool = lineFixedMastersPool(idx);
+        if (fpPool != null) return fpPool;
+        let lineAmount = effectiveAmountFromClient(idx);
+        let lineCost = lineMaterialCost(idx) + lineAmortCost(idx) + lineCorrectionExtraCost(idx) + lineFixedExpenseCost(idx);
+        const mix = lineMixCostAndBonus(idx);
+        lineCost += mix.mixCost;
+        const meta = visitLineServiceMeta(idx);
+        const kit = lineKitCostParts(idx, meta);
+        lineCost += kit.kitCost;
+        lineAmount += kit.kitClient || 0;
+        const profitBefore = lineAmount - lineCost;
+        return profitBefore - profitBefore * salonRate;
+      }
+
       if (scope === 'PER_SERVICE') {
         visitLineIndicesForPreview().forEach(function (idx) {
-          let lineAmount = effectiveAmountFromClient(idx);
-          let lineCost = lineMaterialCost(idx) + lineAmortCost(idx) + lineCorrectionExtraCost(idx);
           const mix = lineMixCostAndBonus(idx);
-          lineCost += mix.mixCost;
-          const meta = visitLineServiceMeta(idx);
-          const kit = lineKitCostParts(idx, meta);
-          lineCost += kit.kitCost;
-          lineAmount += kit.kitClient || 0;
-          const profitBefore = lineAmount - lineCost;
-          const mastersPool = profitBefore - profitBefore * salonRate;
+          const mastersPool = linePreviewMastersPool(idx);
           const alloc = readLineAllocationsForPreview(idx);
           if (!alloc) return;
           for (const r of alloc) {
@@ -2110,14 +2184,15 @@
           }
         });
       } else {
-        const profitBefore = amountTotal - costTotal;
-        const mastersPool = profitBefore - profitBefore * salonRate;
         const alloc = readAllocationsForPreview();
-        if (alloc) {
-          for (const r of alloc) {
-            addMasterPay(r.mid, mastersPool * (r.pct / 100.0), 0);
+        visitLineIndicesForPreview().forEach(function (idx) {
+          const mastersPool = linePreviewMastersPool(idx);
+          if (alloc) {
+            for (const r of alloc) {
+              addMasterPay(r.mid, mastersPool * (r.pct / 100.0), 0);
+            }
           }
-        }
+        });
         visitLineIndicesForPreview().forEach(function (idx) {
           const mix = lineMixCostAndBonus(idx);
           if (mix.mixBonus > 0 && mix.bonusMasterId) {
@@ -2172,6 +2247,7 @@
           'Доп. продажи: ' + money2(addons) + ' ₽',
           'Амортизация: ' + money2(amortTotal) + ' ₽',
         ];
+        if (fpExpenseTotal > 0) parts.push('Фикс. расход: ' + money2(fpExpenseTotal) + ' ₽');
         if (corrExtraTotal > 0) parts.push('Коррекция (доп.): ' + money2(corrExtraTotal) + ' ₽');
         if (warn) parts.push(warn);
         costPartsEl.innerHTML = parts.map(function (p) { return '<div>' + p + '</div>'; }).join('');
@@ -2348,6 +2424,10 @@
         host.textContent = '';
         return;
       }
+      if (svc.is_fixed_price_work) {
+        host.textContent = fixedPriceHintText(svc, pct, lineFixedPriceQty(0));
+        return;
+      }
       const lo = svc[keys[0]];
       const hi = svc[keys[1]];
       if (lo == null && hi == null) {
@@ -2372,8 +2452,48 @@
       host.textContent = 'Рекомендуемая цена по прайсу (' + lvlRu + '): ' + priceStr + tail;
     }
 
+    function fixedPriceHintText(svc, pct, qty) {
+      const price = parseFloat(svc && svc.client_price);
+      if (svc == null || isNaN(price)) return '';
+      const q = (!qty || qty < 1) ? 1 : qty;
+      const mul = (100 - (pct || 0)) / 100.0;
+      const total = Math.round(price * q * mul);
+      let t = 'Цена по прайсу: ' + String(Math.round(price)) + ' ₽ × ' + String(q) + ' шт = ' + String(total) + ' ₽';
+      if (pct > 0) t += ' с учётом скидки';
+      return t;
+    }
+
+    function applyFixedPriceAmountAutofill(idx) {
+      const svc = lineFixedPriceService(idx);
+      if (!svc) return;
+      const price = parseFloat(svc.client_price);
+      if (isNaN(price)) return;
+      const auto = Math.round(price * lineFixedPriceQty(idx));
+      let el = null;
+      if (idx === 0) el = document.getElementById('amount_from_client');
+      else {
+        const row = visitLineRow(idx);
+        el = row ? row.querySelector('input[name="line_' + idx + '_amount_from_client"]') : null;
+      }
+      if (!el) return;
+      const last = el.getAttribute('data-auto-amount');
+      if (!String(el.value || '').trim() || String(el.value) === last) {
+        el.value = String(auto);
+        el.setAttribute('data-auto-amount', String(auto));
+      }
+    }
+
+    function syncFixedPriceQtyUi() {
+      const wrap = document.getElementById('fixed_price_qty_wrap');
+      const svc = getSelectedService();
+      const on = !!(svc && svc.is_fixed_price_work);
+      if (wrap) wrap.style.display = on ? 'block' : 'none';
+      if (on) applyFixedPriceAmountAutofill(0);
+    }
+
     function updateServiceDerivedUI() {
       updateKitSectionVisibility();
+      syncFixedPriceQtyUi();
       updateRecommendedPriceHint();
       renderLine0ServiceFlags();
       rebuildVisitQuestionnaire();
@@ -2514,6 +2634,8 @@
             requires_kit_block: !!s.requires_kit_block,
             requires_tail_block: !!s.requires_tail_block,
             requires_thermo: !!s.requires_thermo,
+            is_fixed_price_work: !!s.is_fixed_price_work,
+            hide_subcategory: !!c.hide_subcategory,
             questionnaire_count: Array.isArray(s.questionnaire_fields) ? s.questionnaire_fields.length : 0,
             questionnaire_fields: Array.isArray(s.questionnaire_fields) ? s.questionnaire_fields : [],
           };
@@ -2876,6 +2998,10 @@
         host.textContent = '';
         return;
       }
+      if (svc.is_fixed_price_work) {
+        host.textContent = fixedPriceHintText(svc, pct, lineFixedPriceQty(idx));
+        return;
+      }
       const lo = svc[keys[0]];
       const hi = svc[keys[1]];
       if (lo == null && hi == null) {
@@ -2932,6 +3058,7 @@
         bindExtraLineQuestionnaireReveals(idx);
       }
       updateExtraLinePriceHint(idx);
+      syncExtraLineFixedPriceQty(idx);
     }
 
     function bindExtraLineMixEditors(idx, row) {
@@ -3061,7 +3188,7 @@
         subSel.innerHTML = '<option value="">—</option>';
         subSel.disabled = true;
         serviceSel.innerHTML = '<option value="">— выберите услугу —</option>';
-        if (subWrap) subWrap.style.opacity = '0.85';
+        if (subWrap) { subWrap.style.opacity = '0.85'; subWrap.style.display = ''; }
         updateServiceDerivedUI();
         return;
       }
@@ -3075,13 +3202,15 @@
 
       if (subs.length > 0) subSel.value = subs[0].id;
 
-      // UX: if subcategory is single, no need to "choose" it.
-      if (subs.length <= 1) {
+      if (cat && cat.hide_subcategory) {
         subSel.disabled = true;
-        if (subWrap) subWrap.style.opacity = '0.85';
+        if (subWrap) { subWrap.style.display = 'none'; subWrap.style.opacity = '0.85'; }
+      } else if (subs.length <= 1) {
+        subSel.disabled = true;
+        if (subWrap) { subWrap.style.display = ''; subWrap.style.opacity = '0.85'; }
       } else {
         subSel.disabled = false;
-        if (subWrap) subWrap.style.opacity = '1';
+        if (subWrap) { subWrap.style.display = ''; subWrap.style.opacity = '1'; }
       }
       fillServices();
     }
@@ -3130,6 +3259,7 @@
     function fillLineSubcategories(idx) {
       const catSel = document.getElementById('line_' + idx + '_service_category_id');
       const subSel = document.getElementById('line_' + idx + '_service_subcategory_id');
+      const subWrap = document.getElementById('line_' + idx + '_service_subcategory_wrap');
       if (!catSel || !subSel || !serviceCatalog.length) return;
       const catId = parseInt(catSel.value || '0');
       const cat = serviceCatalog.find(function (c) { return Number(c.id) === catId; }) || serviceCatalog[0];
@@ -3142,6 +3272,7 @@
         opt.textContent = sc.name;
         subSel.appendChild(opt);
       }
+      if (subWrap) subWrap.style.display = (cat && cat.hide_subcategory) ? 'none' : '';
       fillLineServices(idx);
     }
 
@@ -3169,7 +3300,19 @@
       if (!keep && services.length === 1) {
         svcSel.value = String(services[0].id);
       }
+      syncExtraLineFixedPriceQty(idx);
       renderExtraLineServiceFlags(idx);
+    }
+
+    function syncExtraLineFixedPriceQty(idx) {
+      const row = document.querySelector('[data-extra-line-idx="' + String(idx) + '"]');
+      if (!row) return;
+      const wrap = row.querySelector('[data-fixed-price-qty-wrap]');
+      const sid = parseInt((document.getElementById('line_' + idx + '_service_id') || {}).value || '0', 10) || 0;
+      const svc = sid ? getServiceById(sid) : null;
+      const on = !!(svc && svc.is_fixed_price_work);
+      if (wrap) wrap.style.display = on ? 'block' : 'none';
+      if (on) applyFixedPriceAmountAutofill(idx);
     }
 
     (function initServiceCatalog() {
@@ -3250,11 +3393,15 @@
           '<div><label>Категория</label><select id="line_' + idx + '_service_category_id" style="width:100%; box-sizing:border-box;">' +
             serviceCatalog.map(function (c) { return '<option value="' + c.id + '">' + escAttr(c.name) + '</option>'; }).join('') +
           '</select></div>' +
-          '<div><label>Подкатегория</label><select id="line_' + idx + '_service_subcategory_id" style="width:100%; box-sizing:border-box;"></select></div>' +
+          '<div id="line_' + idx + '_service_subcategory_wrap"><label>Подкатегория</label><select id="line_' + idx + '_service_subcategory_id" style="width:100%; box-sizing:border-box;"></select></div>' +
         '</div>' +
         '<div class="row" style="margin-top:8px;">' +
           '<div><label>Услуга *</label><select name="line_' + idx + '_service_id" id="line_' + idx + '_service_id" style="width:100%; box-sizing:border-box;"></select></div>' +
           '<div></div>' +
+        '</div>' +
+        '<div data-fixed-price-qty-wrap style="display:none; margin-top:8px;">' +
+          '<label>Количество, шт</label>' +
+          '<input type="number" name="line_' + idx + '_fixed_price_qty" min="1" step="1" value="' + escAttr(prefill.fixed_price_qty || '1') + '" style="max-width:8rem;" />' +
         '</div>' +
         (prefill.visit_service_id ? '<input type="hidden" name="line_' + idx + '_visit_service_id" value="' + escAttr(prefill.visit_service_id) + '" />' : '') +
         '<div data-extra-line-service-flags="1" class="muted" style="margin-top:8px; font-size:12px; display:none;"></div>' +
@@ -3322,7 +3469,7 @@
       if (initialServiceId) svcSel.value = String(initialServiceId);
       catSel.addEventListener('change', function () { fillLineSubcategories(idx); });
       subSel.addEventListener('change', function () { fillLineServices(idx); });
-      svcSel.addEventListener('change', function () { renderExtraLineServiceFlags(idx); });
+      svcSel.addEventListener('change', function () { syncExtraLineFixedPriceQty(idx); renderExtraLineServiceFlags(idx); });
       box.querySelector('[data-remove-line="' + idx + '"]').addEventListener('click', function () {
         box.remove();
         syncExtraLinesVisibility();
@@ -3345,6 +3492,19 @@
         inp.addEventListener('input', syncVisitPreview);
         inp.addEventListener('change', syncVisitPreview);
       });
+      const qtyIn = box.querySelector('input[name="line_' + idx + '_fixed_price_qty"]');
+      if (qtyIn) {
+        qtyIn.addEventListener('input', function () {
+          applyFixedPriceAmountAutofill(idx);
+          updateExtraLinePriceHint(idx);
+          syncVisitPreview();
+        });
+        qtyIn.addEventListener('change', function () {
+          applyFixedPriceAmountAutofill(idx);
+          updateExtraLinePriceHint(idx);
+          syncVisitPreview();
+        });
+      }
       const discIn = box.querySelector('input[name="line_' + idx + '_client_discount_percent"]');
       if (discIn) discIn.addEventListener('input', function () { updateExtraLinePriceHint(idx); });
       renderExtraLineServiceFlags(idx);
@@ -3411,6 +3571,7 @@
             service_id: fpAll['line_' + idx + '_service_id'] || '',
             visit_service_id: fpAll['line_' + idx + '_visit_service_id'] || '',
             amount_from_client: fpAll['line_' + idx + '_amount_from_client'] || '',
+            fixed_price_qty: fpAll['line_' + idx + '_fixed_price_qty'] || '1',
             client_payment_kind: fpAll['line_' + idx + '_client_payment_kind'] || 'CASH',
             started_time: fpAll['line_' + idx + '_started_time'] || '',
             client_discount_percent: fpAll['line_' + idx + '_client_discount_percent'] || '0',

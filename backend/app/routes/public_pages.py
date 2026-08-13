@@ -472,7 +472,7 @@ def service_catalog_view(
     if subcategory_id is not None and subcategory_id <= 0:
         subcategory_id = None
 
-    _EXCLUDED_CATS = ("Заказ", "Продажа материала")
+    _EXCLUDED_CATS = ("Заказ", "Продажа материала", "Работа по фикс цене")
     categories = list(
         db.scalars(
             select(ServiceCategory)

@@ -15,6 +15,13 @@ from starlette.datastructures import UploadFile
 from app.client_payment import parse_client_payment_kind
 from app.work_products_compute import compute_correction_catalog_pays, compute_correction_extra_costs
 from app.client_validation import client_has_any_contact, strip_or_none
+from app.fixed_price_visit import (
+    catalog_product_for_visit_service,
+    is_fixed_price_service_id,
+    is_fixed_price_visit_service,
+    normalize_fixed_price_qty,
+    unit_economics,
+)
 from app.db.models import (
     AmortizationLevel,
     Client,
@@ -161,6 +168,7 @@ class VisitServiceLineInput:
     sort_order: int = 0
     visit_service_id: int | None = None
     client_payment_kind: ClientPaymentKind = ClientPaymentKind.CASH
+    fixed_price_qty: int | None = None
 
 
 def effective_amount_from_client(line: VisitServiceLineInput) -> float:
@@ -458,6 +466,17 @@ def compute_visit_service_line(
     correction_master_id: int | None = None
     correction_master_amount = 0.0
 
+    fp_row = catalog_product_for_visit_service(db, service) if is_fixed_price_visit_service(service) else None
+    fp_qty = 1
+    fp_work = 0.0
+    if fp_row is not None:
+        fp_qty = normalize_fixed_price_qty(line.fixed_price_qty)
+        unit_price, fp_work, unit_expense = unit_economics(fp_row)
+        if header.client_type != VisitClientType.SELF and base_amount_from_client <= 0:
+            base_amount_from_client = unit_price * fp_qty
+        amount_from_client = base_amount_from_client + float(kit_client_total or 0.0)
+        cost_total += unit_expense * fp_qty
+
     if line.own_correction:
         correction_master_id = _resolve_correction_master_id(
             db,
@@ -512,6 +531,10 @@ def compute_visit_service_line(
             salon_profit = base_profit * salon_pct + catalog_sp
             masters_pool = base_profit - base_profit * salon_pct
             profit_before = base_profit
+    elif fp_row is not None:
+        profit_before = amount_from_client - cost_total
+        masters_pool = fp_work * fp_qty
+        salon_profit = amount_from_client - cost_total - masters_pool
     else:
         profit_before = amount_from_client - cost_total
         salon_profit = profit_before * salon_pct
@@ -546,6 +569,23 @@ def compute_visit_service_line(
         kit_paid_separately=bool(line.kit_paid_separately),
         kit_usages=usages,
     )
+
+
+def _attach_fixed_price_qty(payload: Any, line: VisitServiceLineInput, service: Service) -> None:
+    if is_fixed_price_visit_service(service):
+        payload.fixed_price_qty = normalize_fixed_price_qty(line.fixed_price_qty)
+
+
+def _line_needs_client_amount(db: Session, header: VisitHeaderInput, line: VisitServiceLineInput) -> bool:
+    if header.client_type == VisitClientType.SELF:
+        return False
+    if effective_amount_from_client(line) > 0:
+        return False
+    if _line_may_defer_client_amount_to_kit(line):
+        return False
+    if line.fixed_price_qty is not None:
+        return False
+    return not is_fixed_price_service_id(db, line.service_id)
 
 
 def recalc_visit_totals(visit: Visit) -> None:
@@ -714,11 +754,7 @@ def save_visit_with_services(
         db.flush()
 
     for idx, line in enumerate(inp.lines):
-        if (
-            inp.header.client_type != VisitClientType.SELF
-            and effective_amount_from_client(line) <= 0
-            and not _line_may_defer_client_amount_to_kit(line)
-        ):
+        if _line_needs_client_amount(db, inp.header, line):
             raise ValueError("Укажите сумму с клиента за услугу и/или за комплект.")
         computed = compute_visit_service_line(
             db,
@@ -736,6 +772,7 @@ def save_visit_with_services(
             .where(Service.id == line.service_id, Service.is_active.is_(True))
         )
         assert service and service.subcategory and service.subcategory.category
+        _attach_fixed_price_qty(payload, line, service)
 
         vs = VisitService(
             visit_id=visit.id,
@@ -1066,6 +1103,15 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
     if own_corr_use_custom and line_amount <= 0:
         line_pk = own_corr_pk
 
+    qty_raw = g("fixed_price_qty", "").strip()
+    fixed_price_qty: int | None = None
+    if qty_raw:
+        try:
+            qn = int(float(str(qty_raw).replace(",", ".")))
+        except ValueError:
+            qn = 0
+        fixed_price_qty = qn if qn >= 1 else 1
+
     return VisitServiceLineInput(
         service_id=int(parse_float(g("service_id", "0") or "0", field_name="service_id")),
         amount_from_client=line_amount,
@@ -1125,6 +1171,7 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
         comment=g("comment", "") or None,
         sort_order=idx,
         visit_service_id=visit_service_id,
+        fixed_price_qty=fixed_price_qty,
     )
 
 
@@ -1413,11 +1460,7 @@ def _insert_visit_service_from_line(
     editor_user_id: int,
     performed_dt: datetime,
 ) -> VisitService:
-    if (
-        inp.header.client_type != VisitClientType.SELF
-        and effective_amount_from_client(line) <= 0
-        and not _line_may_defer_client_amount_to_kit(line)
-    ):
+    if _line_needs_client_amount(db, inp.header, line):
         raise ValueError("Укажите сумму с клиента за услугу и/или за комплект.")
     computed = compute_visit_service_line(
         db,
@@ -1435,6 +1478,7 @@ def _insert_visit_service_from_line(
         .where(Service.id == line.service_id, Service.is_active.is_(True))
     )
     assert service and service.subcategory and service.subcategory.category
+    _attach_fixed_price_qty(payload, line, service)
 
     vs = VisitService(
         visit_id=visit.id,
@@ -1604,6 +1648,7 @@ def update_visit_with_services(
             )
             if not service or not service.subcategory or not service.subcategory.category:
                 raise ValueError("Услуга не найдена")
+            _attach_fixed_price_qty(payload, line, service)
             vs.service_id = service.id
             vs.category_name = service.subcategory.category.name
             vs.subcategory_name = service.subcategory.name

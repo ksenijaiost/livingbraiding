@@ -125,6 +125,10 @@ from app.kit_blank_stock_core import (
 )
 from app.payroll_fund import post_visit_accruals
 from app.user_roles import user_has_role
+from app.fixed_price_visit import (
+    economics_by_mirror_service_id,
+    is_fixed_price_category_name,
+)
 from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
 
 
@@ -1322,6 +1326,7 @@ def list_master_visit_services_catalog(db: Session) -> list[dict[str, Any]]:
         return None if v is None else float(v)
 
     services = list_master_visit_services(db)
+    econ_by_sid = economics_by_mirror_service_id(db)
     cats: dict[int, dict[str, Any]] = {}
     for s in services:
         sub = getattr(s, "subcategory", None)
@@ -1331,31 +1336,45 @@ def list_master_visit_services_catalog(db: Session) -> list[dict[str, Any]]:
 
         c_id = int(cat.id)
         sc_id = int(sub.id)
+        is_fp = is_fixed_price_category_name(cat.name)
 
         if c_id not in cats:
-            cats[c_id] = {"id": c_id, "name": cat.name, "subcategories": {}}
+            cats[c_id] = {
+                "id": c_id,
+                "name": cat.name,
+                "hide_subcategory": is_fp,
+                "is_fixed_price_work": is_fp,
+                "subcategories": {},
+            }
 
         subs = cats[c_id]["subcategories"]
         if sc_id not in subs:
             subs[sc_id] = {"id": sc_id, "name": sub.name, "services": []}
 
-        subs[sc_id]["services"].append(
-            {
-                "id": int(s.id),
-                "name": s.name,
-                "estimated_duration_minutes": int(s.estimated_duration_minutes or 0),
-                "requires_kit_block": service_requires_kit_block(s),
-                "requires_tail_block": service_requires_tail_block(s),
-                "requires_thermo": service_requires_thermo_flow(s),
-                "price_junior_from": _opt_f(s.price_junior_from),
-                "price_junior_to": _opt_f(s.price_junior_to),
-                "price_middle_from": _opt_f(s.price_middle_from),
-                "price_middle_to": _opt_f(s.price_middle_to),
-                "price_senior_from": _opt_f(s.price_senior_from),
-                "price_senior_to": _opt_f(s.price_senior_to),
-                "questionnaire_fields": merged_questionnaire_client_json(db, int(s.id)),
-            }
-        )
+        econ = econ_by_sid.get(int(s.id), {})
+        svc_row = {
+            "id": int(s.id),
+            "name": s.name,
+            "estimated_duration_minutes": int(s.estimated_duration_minutes or 0),
+            "requires_kit_block": False if is_fp else service_requires_kit_block(s),
+            "requires_tail_block": False if is_fp else service_requires_tail_block(s),
+            "requires_thermo": False if is_fp else service_requires_thermo_flow(s),
+            "is_fixed_price_work": is_fp,
+            "client_price": econ.get("client_price"),
+            "master_pay": econ.get("master_pay"),
+            "fixed_expense": econ.get("fixed_expense"),
+            "price_junior_from": _opt_f(s.price_junior_from),
+            "price_junior_to": _opt_f(s.price_junior_to),
+            "price_middle_from": _opt_f(s.price_middle_from),
+            "price_middle_to": _opt_f(s.price_middle_to),
+            "price_senior_from": _opt_f(s.price_senior_from),
+            "price_senior_to": _opt_f(s.price_senior_to),
+            "questionnaire_fields": [] if is_fp else merged_questionnaire_client_json(db, int(s.id)),
+        }
+        if not is_fp:
+            if svc_row["client_price"] is None:
+                svc_row["client_price"] = _opt_f(s.price_middle_from)
+        subs[sc_id]["services"].append(svc_row)
 
     # Convert dict -> list, keep stable ordering.
     out: list[dict[str, Any]] = []
@@ -1364,7 +1383,15 @@ def list_master_visit_services_catalog(db: Session) -> list[dict[str, Any]]:
         for _, sc in sorted(c["subcategories"].items(), key=lambda x: x[1]["name"]):
             sc["services"] = sorted(sc["services"], key=lambda x: x["name"])
             subs_out.append(sc)
-        out.append({"id": c["id"], "name": c["name"], "subcategories": subs_out})
+        out.append(
+            {
+                "id": c["id"],
+                "name": c["name"],
+                "hide_subcategory": bool(c.get("hide_subcategory")),
+                "is_fixed_price_work": bool(c.get("is_fixed_price_work")),
+                "subcategories": subs_out,
+            }
+        )
     return out
 
 

@@ -255,6 +255,8 @@ class VisitServiceDetailsPayload(BaseModel):
     answer_labels: dict[str, str] = Field(default_factory=dict)
     answer_display: dict[str, str] = Field(default_factory=dict)
     thermo: ThermoVisitDetails | None = None
+    # Количество шт для категории «Работа по фикс цене»; для обычных услуг — None.
+    fixed_price_qty: int | None = None
 
 
 def parse_visit_service_details(data: object) -> VisitServiceDetailsPayload:
