@@ -195,3 +195,37 @@ def test_parse_explicit_masters_with_multi_flag() -> None:
     )
     multi = parse_multi_service_visit_form(form, single_master_default_id=None)
     assert multi.header.visit_master_allocations == [(3, 100)]
+
+
+def test_own_kit_kind_coerced_to_stock_when_stock_lines_filled() -> None:
+    """Как в логе Анастасии: kit_kind=OWN без происхождения, но комплект из наличия выбран."""
+    from app.kit_inlay_visit import coerce_kit_kind
+    from app.visit_multi_service import StockKitLineInput, _parse_line_from_form
+
+    assert (
+        coerce_kit_kind(
+            "OWN",
+            stock_kit_id=111,
+            stock_kit_lines=[StockKitLineInput(kit_id=111, use_entire=False, blanks_used=91)],
+            own_origin="",
+        )
+        == "STOCK"
+    )
+    assert coerce_kit_kind("OWN", own_origin="STUDIO", stock_kit_id=111) == "OWN"
+
+    form = FormData(
+        [
+            ("service_id", "2"),
+            ("amount_from_client", "5000"),
+            ("kit_kind", "OWN"),
+            ("own_origin", ""),
+            ("stock_kit_id", "111"),
+            (
+                "stock_kit_lines_json",
+                '[{"kit_id":111,"use_entire":false,"blanks_used":91,"breakdown":{"DE_BRAID_LONG":91},"amount_from_client":12900}]',
+            ),
+        ]
+    )
+    line = _parse_line_from_form(form, 0)
+    assert line.kit_kind == "STOCK"
+    assert line.stock_kit_lines and line.stock_kit_lines[0].kit_id == 111

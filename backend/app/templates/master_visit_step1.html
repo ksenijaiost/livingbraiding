@@ -10,7 +10,7 @@
         Сохранение доступно только техспецу. Потребуется двойное подтверждение; проводки ЗП будут пересобраны заново.
       </div>
     {% endif %}
-    {% if lock_banner %}
+    {% if draft_readonly and lock_banner %}
       <div style="margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid #fca5a5; background: #fef2f2; color: #b91c1c; pointer-events: auto;">
         <strong>Только просмотр.</strong> Сейчас редактирует: {{ lock_banner.display_name }} ({{ lock_banner.role }}).
       </div>
@@ -1124,6 +1124,11 @@
         onPick: function (k) {
           const skLegacy = document.getElementById('stock_kit_id');
           if (skLegacy) skLegacy.value = String(k.id || '');
+          const stockRadio = document.querySelector('input[name="kit_kind"][value="STOCK"]');
+          if (stockRadio && !stockRadio.checked) {
+            stockRadio.checked = true;
+            if (typeof kitKind === 'function') kitKind();
+          }
         },
       }));
     }
@@ -3019,8 +3024,14 @@
         const extraWrap = row.querySelector('[data-line-own-extra="' + idx + '"]');
         function syncKind() {
           const v = (row.querySelector('input[name="line_' + idx + '_kit_kind"]:checked') || {}).value || 'STOCK';
-          if (stockBlk) stockBlk.style.display = v === 'STOCK' ? 'block' : 'none';
-          if (ownBlk) ownBlk.style.display = v === 'OWN' ? 'block' : 'none';
+          if (stockBlk) {
+            stockBlk.style.display = v === 'STOCK' ? 'block' : 'none';
+            stockBlk.querySelectorAll('input, select, textarea').forEach(function (ctrl) { ctrl.disabled = v !== 'STOCK'; });
+          }
+          if (ownBlk) {
+            ownBlk.style.display = v === 'OWN' ? 'block' : 'none';
+            ownBlk.querySelectorAll('input, select, textarea').forEach(function (ctrl) { ctrl.disabled = v !== 'OWN'; });
+          }
         }
         function syncOwnSubsections() {
           if (corrWrap) corrWrap.style.display = (corrOn && corrOn.checked) ? 'block' : 'none';
@@ -3460,10 +3471,21 @@
         syncOwnCorrWashCircle();
       }
     }
+    function setKitBlockControlsDisabled(el, disabled) {
+      if (!el) return;
+      el.querySelectorAll('input, select, textarea').forEach(function (ctrl) {
+        ctrl.disabled = !!disabled;
+      });
+    }
     function kitKind() {
-      const v = document.querySelector('input[name="kit_kind"]:checked').value;
-      document.getElementById('blk-stock').style.display = v === 'STOCK' ? 'block' : 'none';
-      document.getElementById('blk-own').style.display = v === 'OWN' ? 'block' : 'none';
+      const checked = document.querySelector('input[name="kit_kind"]:checked');
+      const v = checked ? checked.value : 'STOCK';
+      const blkStock = document.getElementById('blk-stock');
+      const blkOwn = document.getElementById('blk-own');
+      if (blkStock) blkStock.style.display = v === 'STOCK' ? 'block' : 'none';
+      if (blkOwn) blkOwn.style.display = v === 'OWN' ? 'block' : 'none';
+      setKitBlockControlsDisabled(blkStock, v !== 'STOCK');
+      setKitBlockControlsDisabled(blkOwn, v !== 'OWN');
       ownCorrectionPanelSync();
       if (v === 'STOCK') void prefetchVisitStockKitsIfReady('main');
       syncVisitStockEntireUi();

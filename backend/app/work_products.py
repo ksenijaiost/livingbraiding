@@ -21,7 +21,7 @@ from app.list_search import parse_list_id_search
 from app.payroll_fund import post_work_accruals, replace_work_accruals, storno_source_accruals
 from starlette.datastructures import UploadFile
 
-from app.auth import AuthUser, require_role
+from app.auth import AuthUser, require_assigned_roles, require_role
 from app.client_payment import parse_client_payment_kind
 from app.client_validation import format_created_by_label
 from app.form_validation_log import log_user_validation_error
@@ -332,10 +332,12 @@ def _work_new_template_response(
     )
 
 
-def _draft_lock_banner(db: Session, draft: WorkDraft) -> dict[str, str] | None:
+def _draft_lock_banner(db: Session, draft: WorkDraft, *, exclude_user_id: int | None = None) -> dict[str, str] | None:
     from app.ru_labels import ru_user_role
 
     if not draft.locked_by_user_id:
+        return None
+    if exclude_user_id is not None and int(draft.locked_by_user_id) == int(exclude_user_id):
         return None
     holder = db.get(User, int(draft.locked_by_user_id))
     if not holder:
@@ -1238,12 +1240,7 @@ def work_draft_get(
     _enrich_fp_rubber(fp)
     lock_banner = None
     readonly = False
-    if current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER):
-        readonly = True
-        lock_banner = _draft_lock_banner(db, draft)
-    elif not user_can_edit_draft(current_user, draft, db):
-        readonly = True
-    else:
+    if user_can_edit_draft(current_user, draft, db):
         lock = acquire_draft_lock(db, draft, current_user.id)
         readonly = lock.readonly
         if lock.lock_holder:
@@ -1251,6 +1248,9 @@ def work_draft_get(
                 "display_name": lock.lock_holder.display_name or lock.lock_holder.username,
                 "role": ru_user_role(lock.lock_holder.role),
             }
+    else:
+        readonly = True
+        lock_banner = _draft_lock_banner(db, draft, exclude_user_id=current_user.id)
     db.commit()
     selected_client = db.get(Client, int(draft.client_id)) if draft.client_id else None
     return _work_new_template_response(
@@ -1302,7 +1302,7 @@ async def work_draft_create_post(
 async def work_draft_update_post(
     request: Request,
     draft_id: int,
-    current_user: AuthUser = _MASTER,
+    current_user: AuthUser = Depends(require_assigned_roles(UserRole.MASTER, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     from app.ru_labels import ru_user_role
@@ -1316,17 +1316,10 @@ async def work_draft_update_post(
     form = await request.form()
     form_dict = collect_form_dict(form)
     draft = db.get(WorkDraft, int(draft_id))
-    lock_banner = None
-    if draft and draft.locked_by_user_id:
-        holder = db.get(User, int(draft.locked_by_user_id))
-        if holder:
-            lock_banner = {
-                "display_name": holder.display_name or holder.username,
-                "role": ru_user_role(holder.role),
-            }
     if not draft or not user_can_edit_draft(current_user, draft, db):
         return RedirectResponse("/master/mywork", status_code=303)
     lock = acquire_draft_lock(db, draft, current_user.id)
+    lock_banner = None
     if lock.readonly:
         db.rollback()
         if lock.lock_holder:
@@ -1365,7 +1358,7 @@ async def work_draft_update_post(
             is_draft=True,
             draft_id=int(draft_id),
             draft_readonly=False,
-            lock_banner=lock_banner,
+            lock_banner=None,
         )
     return RedirectResponse(f"/sales/work/draft/{draft_id}?draft_saved=1", status_code=303)
 

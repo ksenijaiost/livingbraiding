@@ -838,7 +838,12 @@ def parse_kit_inlay_form(
         mix_complexity=comp,
         amortization_level=amort,
         service_id=g_int("service_id", 0),
-        kit_kind=g("kit_kind", "STOCK").upper(),
+        kit_kind=coerce_kit_kind(
+            g("kit_kind", "STOCK"),
+            stock_kit_lines=stock_kit_lines,
+            stock_kit_id=stock_id if stock_id else None,
+            own_origin=g("own_origin") or None,
+        ),
         stock_kit_id=stock_id if stock_id else None,
         stock_use_entire=stock_kit_lines[0].use_entire if stock_kit_lines else False,
         stock_blanks_used=stock_kit_lines[0].blanks_used if stock_kit_lines else 0,
@@ -972,8 +977,33 @@ def _answers_labels_display_from_specs(
     return answer_labels, answer_display
 
 
+def coerce_kit_kind(
+    kit_kind: str,
+    *,
+    stock_kit_lines: list | None = None,
+    stock_kit_id: int | None = None,
+    own_origin: str | None = None,
+) -> str:
+    """Если в форме выбран комплект из наличия, а kit_kind ошибочно OWN без происхождения — это STOCK.
+
+    Скрытый блок «Свой» всё равно уходит в POST (own_origin пустой, leftover-поля коррекции),
+    а мастер при этом заполняет «Из наличия».
+    """
+    kind = (kit_kind or "STOCK").strip().upper() or "STOCK"
+    origin = (own_origin or "").strip().upper()
+    has_stock = bool(stock_kit_id) or any(getattr(x, "kit_id", None) for x in (stock_kit_lines or []))
+    if kind == "OWN" and has_stock and origin not in ("STUDIO", "FOREIGN"):
+        return "STOCK"
+    return kind
+
+
 def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock:
-    kind = inp.kit_kind.upper()
+    kind = coerce_kit_kind(
+        inp.kit_kind,
+        stock_kit_lines=inp.stock_kit_lines,
+        stock_kit_id=inp.stock_kit_id,
+        own_origin=inp.own_origin,
+    )
     if kind == "STOCK":
         lines = inp.stock_kit_lines
         if not lines:

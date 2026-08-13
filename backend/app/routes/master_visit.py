@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import AuthUser, require_role
+from app.auth import AuthUser, require_assigned_roles, require_role
 from app.client_validation import format_created_by_label
 from app.db.models import (
     Booking,
@@ -54,6 +54,7 @@ from app.visit_multi_service import (
 from app.visit_draft import (
     acquire_draft_lock,
     collect_form_dict,
+    draft_lock_banner_for_holder,
     finalize_visit_draft,
     form_dict_from_json,
     parse_draft_form,
@@ -445,24 +446,18 @@ def _load_draft_form_context(
     acquire_lock: bool,
 ) -> tuple[dict[str, str], list[int], dict[int, str], Client | None, bool, dict[str, str] | None]:
     lock_banner: dict[str, str] | None = None
-    readonly = current_user.role != UserRole.MASTER
-    if acquire_lock and current_user.role == UserRole.MASTER:
+    can_edit = user_can_edit_draft(current_user, draft, db)
+    readonly = not can_edit
+    if acquire_lock and can_edit:
         lock = acquire_draft_lock(db, draft, current_user.id)
         readonly = lock.readonly
-        if lock.lock_holder:
-            lock_banner = {
-                "display_name": lock.lock_holder.display_name or lock.lock_holder.username,
-                "role": ru_user_role(lock.lock_holder.role),
-            }
-    elif current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER):
+        lock_banner = draft_lock_banner_for_holder(lock.lock_holder)
+    elif not can_edit:
         readonly = True
         if draft.locked_by_user_id:
             holder = db.get(User, int(draft.locked_by_user_id))
-            if holder:
-                lock_banner = {
-                    "display_name": holder.display_name or holder.username,
-                    "role": ru_user_role(holder.role),
-                }
+            if holder and int(holder.id) != int(current_user.id):
+                lock_banner = draft_lock_banner_for_holder(holder)
     fp = form_dict_from_json(draft.form_json)
     if not fp.get("performed_date") and draft.performed_date:
         tz = get_display_timezone(db)
@@ -721,10 +716,6 @@ def master_visit_draft_get(
     fp, vm_on_ids, vm_pct_str, client, readonly, lock_banner = _load_draft_form_context(
         db, draft, current_user=current_user, acquire_lock=True
     )
-    if current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER):
-        readonly = True
-    elif not user_can_edit_draft(current_user, draft, db):
-        readonly = True
     db.commit()
     return _master_visit_step1_template_response(
         request,
@@ -782,30 +773,16 @@ async def master_visit_draft_create_post(
 async def master_visit_draft_update_post(
     request: Request,
     draft_id: int,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    current_user: AuthUser = Depends(require_assigned_roles(UserRole.MASTER, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     form = await request.form()
     draft = db.get(VisitDraft, int(draft_id))
-    readonly = False
-    lock_banner = None
-    if draft and draft.locked_by_user_id:
-        holder = db.get(User, int(draft.locked_by_user_id))
-        if holder:
-            lock_banner = {
-                "display_name": holder.display_name or holder.username,
-                "role": ru_user_role(holder.role),
-            }
     if not draft or not user_can_edit_draft(current_user, draft, db):
         return RedirectResponse("/master/mywork", status_code=303)
     lock = acquire_draft_lock(db, draft, current_user.id)
-    readonly = lock.readonly
-    if lock.lock_holder:
-        lock_banner = {
-            "display_name": lock.lock_holder.display_name or lock.lock_holder.username,
-            "role": ru_user_role(lock.lock_holder.role),
-        }
-    if readonly:
+    lock_banner = draft_lock_banner_for_holder(lock.lock_holder)
+    if lock.readonly:
         db.rollback()
         return _draft_form_response_from_error(
             request,
@@ -840,7 +817,7 @@ async def master_visit_draft_update_post(
             form=form,
             draft_id=int(draft_id),
             draft_readonly=False,
-            lock_banner=lock_banner,
+            lock_banner=None,
             error=str(exc),
         )
     return RedirectResponse(f"/master/visit/draft/{draft_id}?draft_saved=1", status_code=303)
@@ -850,22 +827,16 @@ async def master_visit_draft_update_post(
 async def master_visit_draft_finalize_post(
     request: Request,
     draft_id: int,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    current_user: AuthUser = Depends(require_assigned_roles(UserRole.MASTER, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     form = await request.form()
     draft = db.get(VisitDraft, int(draft_id))
-    lock_banner = None
     if not draft or not user_can_edit_draft(current_user, draft, db):
         return RedirectResponse("/master/mywork", status_code=303)
     lock = acquire_draft_lock(db, draft, current_user.id)
     if lock.readonly:
         db.rollback()
-        if lock.lock_holder:
-            lock_banner = {
-                "display_name": lock.lock_holder.display_name or lock.lock_holder.username,
-                "role": ru_user_role(lock.lock_holder.role),
-            }
         return _draft_form_response_from_error(
             request,
             current_user=current_user,
@@ -873,7 +844,7 @@ async def master_visit_draft_finalize_post(
             form=form,
             draft_id=int(draft_id),
             draft_readonly=True,
-            lock_banner=lock_banner,
+            lock_banner=draft_lock_banner_for_holder(lock.lock_holder),
             error="Черновик сейчас редактирует другой пользователь.",
         )
     try:
@@ -897,7 +868,7 @@ async def master_visit_draft_finalize_post(
             form=form,
             draft_id=int(draft_id),
             draft_readonly=False,
-            lock_banner=lock_banner,
+            lock_banner=None,
             error=str(exc),
         )
     url = f"/visits/{visit_id}?msg=created"
@@ -910,7 +881,7 @@ async def master_visit_draft_finalize_post(
 @router.post("/master/visit/draft/{draft_id}/unlock")
 def master_visit_draft_unlock_post(
     draft_id: int,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER)),
+    current_user: AuthUser = Depends(require_assigned_roles(UserRole.MASTER, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     draft = db.get(VisitDraft, int(draft_id))

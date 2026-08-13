@@ -12,7 +12,7 @@
     {% if error %}
       <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
     {% endif %}
-    {% if lock_banner %}
+    {% if draft_readonly and lock_banner %}
       <div class="error" style="margin-bottom: 12px; background:#fef3c7; color:#92400e; border-color:#f59e0b;">
         <strong>Только просмотр.</strong> Сейчас редактирует: {{ lock_banner.display_name }} ({{ lock_banner.role }}).
       </div>

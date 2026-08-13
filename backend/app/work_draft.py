@@ -189,7 +189,7 @@ def user_is_draft_participant(db: Session, user_id: int, draft_id: int) -> bool:
 def user_can_view_draft(user: AuthUser, draft: WorkDraft, db: Session) -> bool:
     if draft.finalized_work_id is not None:
         return False
-    if user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER):
+    if user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER) or UserRole.ADMIN_SUPER in user.roles:
         return True
     if user.role == UserRole.MASTER:
         return user_is_draft_participant(db, user.id, int(draft.id))
@@ -199,6 +199,8 @@ def user_can_view_draft(user: AuthUser, draft: WorkDraft, db: Session) -> bool:
 def user_can_edit_draft(user: AuthUser, draft: WorkDraft, db: Session) -> bool:
     if draft.finalized_work_id is not None:
         return False
+    if UserRole.ADMIN_SUPER in user.roles or user.role == UserRole.ADMIN_SUPER:
+        return True
     if user.role != UserRole.MASTER:
         return False
     return user_is_draft_participant(db, user.id, int(draft.id))
