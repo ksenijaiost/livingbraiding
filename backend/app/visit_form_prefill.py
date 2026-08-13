@@ -294,6 +294,10 @@ def _apply_service_line_to_fp(
         _set(fp, f"{p}own_corr_client_payment_kind", vs.client_payment_kind.value)
     _apply_questionnaire_to_fp(fp, prefix if idx > 0 else "", payload)
     _apply_thermo_to_fp(fp, prefix, payload)
+    if payload.fixed_price_qty:
+        _set(fp, f"{p}fixed_price_qty", int(payload.fixed_price_qty))
+        if idx == 0:
+            _set(fp, "fixed_price_qty", int(payload.fixed_price_qty))
 
     if visit.masters_scope == VisitMastersScope.PER_SERVICE:
         masters = list(

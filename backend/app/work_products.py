@@ -21,7 +21,7 @@ from app.list_search import parse_list_id_search
 from app.payroll_fund import post_work_accruals, replace_work_accruals, storno_source_accruals
 from starlette.datastructures import UploadFile
 
-from app.auth import AuthUser, require_role
+from app.auth import AuthUser, require_assigned_roles, require_role
 from app.client_payment import parse_client_payment_kind
 from app.client_validation import format_created_by_label
 from app.form_validation_log import log_user_validation_error
@@ -163,6 +163,22 @@ from app.kit_crud import kit_key_excluded_from_client_price
 from app.mix_rates import mix_rates_meta_json_dict
 from app.ui_visit_display import ru_mix_complexity as ru_mix_complexity_label
 from app.zakaz_blanks import kit_composition_catalog_items, kit_form_blank_defs
+from app.rubber_catalog import (
+    RUBBER_SIZED_FAMILIES,
+    family_needs_size,
+    find_rubber_catalog_product,
+    rubber_family_items,
+    rubber_family_size_from_type,
+    rubber_price_meta_by_type,
+    rubber_pricing_tuple,
+    rubber_service_name,
+    rubber_size_items,
+    rubber_type_code,
+    rubber_type_items,
+    rubber_uses_attach_qty,
+    rubber_uses_braids_qty,
+    valid_rubber_types,
+)
 from app.webui import templates
 
 router = APIRouter(prefix="/sales/work", tags=["work-products"])
@@ -277,13 +293,21 @@ def _work_new_template_response(
             selected_client = db.get(Client, cid_i)
     masters = _list_masters_for_work_form(db)
     other_items = _other_items_for_work_form(db)
+    rubber_by_type = rubber_price_meta_by_type(db)
+    sized_families = set(RUBBER_SIZED_FAMILIES)
+    for rt in rubber_by_type:
+        fam, sz = rubber_family_size_from_type(rt)
+        if fam and sz:
+            sized_families.add(fam)
     work_price_meta = {
         "rubber": _zakaz_subcategory_services_map(db, "Хвосты/резинки"),
+        "rubberByType": rubber_by_type,
         "other": {str(x["id"]): x for x in other_items},
         "correction": _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
         "customOrderBonus": _wr_float(db, CUSTOM_ORDER_BONUS_MULTIPLIER, 1.0),
         "mixRates": mix_rates_meta_json_dict(db),
         "salonCutPct": float(get_salon_cut_pct(db, current_user.id)),
+        "rubberSizedFamilies": sorted(sized_families),
     }
     kit_prefill = {k: v for k, v in fp.items() if k.startswith("kit_qty_")}
     kit_initial = _initial_kit_lines_from_fp(fp, prefix="kit_line")
@@ -332,10 +356,12 @@ def _work_new_template_response(
     )
 
 
-def _draft_lock_banner(db: Session, draft: WorkDraft) -> dict[str, str] | None:
+def _draft_lock_banner(db: Session, draft: WorkDraft, *, exclude_user_id: int | None = None) -> dict[str, str] | None:
     from app.ru_labels import ru_user_role
 
     if not draft.locked_by_user_id:
+        return None
+    if exclude_user_id is not None and int(draft.locked_by_user_id) == int(exclude_user_id):
         return None
     holder = db.get(User, int(draft.locked_by_user_id))
     if not holder:
@@ -637,55 +663,29 @@ def _wr_float(db: Session, key: str, default: float) -> float:
 
 
 def _rubber_type_items() -> list[tuple[str, str]]:
-    return [
-        ("TAIL_ELASTIC", "Хвост на резинке"),
-        ("TAIL_CRAB_MINI", "Хвост на крабе — mini"),
-        ("TAIL_CRAB_STANDARD", "Хвост на крабе — standard"),
-        ("TAIL_CRAB_MAX", "Хвост на крабе — max"),
-        ("TAIL_NET_MINI", "Хвост на сетке — mini"),
-        ("TAIL_NET_STANDARD", "Хвост на сетке — standard"),
-        ("TAIL_NET_MAX", "Хвост на сетке — max"),
-        ("TAIL_BUN_MINI", "Хвост на бублике — mini"),
-        ("TAIL_BUN_STANDARD", "Хвост на бублике — standard"),
-        ("TAIL_BUN_MAX", "Хвост на бублике — max"),
-        ("BRAIDS_ELASTIC", "Косы на резинке"),
-    ]
+    return rubber_type_items()
 
 
 def _rubber_family_items() -> list[tuple[str, str]]:
-    return [
-        ("TAIL_ELASTIC", "Хвост на резинке"),
-        ("TAIL_CRAB", "Хвост на крабе"),
-        ("TAIL_NET", "Хвост на сетке"),
-        ("TAIL_BUN", "Хвост на бублике"),
-        ("BRAIDS_ELASTIC", "Косы на резинке"),
-    ]
+    return rubber_family_items()
 
 
 def _rubber_size_items() -> list[tuple[str, str]]:
-    return [
-        ("MINI", "mini"),
-        ("STANDARD", "standard"),
-        ("MAX", "max"),
-    ]
+    return rubber_size_items()
 
 
-_RUBBER_SIZED_FAMILIES = frozenset({"TAIL_CRAB", "TAIL_NET", "TAIL_BUN"})
-_VALID_RUBBER_TYPES = frozenset(k for k, _ in _rubber_type_items())
+_RUBBER_SIZED_FAMILIES = RUBBER_SIZED_FAMILIES
+_VALID_RUBBER_TYPES = valid_rubber_types()
 
 
 def _rubber_family_size_from_type(rubber_type: str) -> tuple[str, str]:
-    rt = (rubber_type or "").strip()
-    if rt in ("TAIL_ELASTIC", "BRAIDS_ELASTIC"):
-        return rt, ""
-    for prefix in ("TAIL_CRAB", "TAIL_NET", "TAIL_BUN"):
-        if rt.startswith(prefix + "_"):
-            return prefix, rt[len(prefix) + 1 :]
-    return "", ""
+    return rubber_family_size_from_type(rubber_type)
 
 
 def _enrich_fp_rubber(fp: dict[str, Any]) -> None:
     if (fp.get("rubber_family") or "").strip():
+        if family_needs_size(str(fp.get("rubber_family") or "")) and not (fp.get("rubber_size") or "").strip():
+            fp["rubber_size"] = "STANDARD"
         return
     rt = (fp.get("rubber_type") or "").strip()
     if not rt:
@@ -695,16 +695,18 @@ def _enrich_fp_rubber(fp: dict[str, Any]) -> None:
         fp["rubber_family"] = fam
     if size:
         fp["rubber_size"] = size
+    elif fam and family_needs_size(fam):
+        fp["rubber_size"] = "STANDARD"
 
 
 def _resolve_rubber_type_from_form(form: Any) -> str:
     family = (_g_str(form, "rubber_family", "") or "").strip()
     if family:
-        if family in _RUBBER_SIZED_FAMILIES:
+        if family_needs_size(family):
             size = (_g_str(form, "rubber_size", "") or "").strip().upper()
             if size not in {k for k, _ in _rubber_size_items()}:
-                raise ValueError("Для выбранного типа укажите размер: mini, standard или max.")
-            return f"{family}_{size}"
+                size = "STANDARD"
+            return rubber_type_code(family, size)
         if family in ("TAIL_ELASTIC", "BRAIDS_ELASTIC"):
             return family
         raise ValueError("Для «Хвосты/резинки» выберите тип.")
@@ -715,19 +717,7 @@ def _resolve_rubber_type_from_form(form: Any) -> str:
 
 
 def _rubber_service_name(rubber_type: str) -> str:
-    return {
-        "TAIL_ELASTIC": "Хвост на резинке (1 крепление)",
-        "TAIL_CRAB_MINI": "Хвост на крабе — mini",
-        "TAIL_CRAB_STANDARD": "Хвост на крабе — standard",
-        "TAIL_CRAB_MAX": "Хвост на крабе — max",
-        "TAIL_NET_MINI": "Хвост на сетке — mini",
-        "TAIL_NET_STANDARD": "Хвост на сетке — standard",
-        "TAIL_NET_MAX": "Хвост на сетке — max",
-        "TAIL_BUN_MINI": "Хвост на бублике — mini",
-        "TAIL_BUN_STANDARD": "Хвост на бублике — standard",
-        "TAIL_BUN_MAX": "Хвост на бублике — max",
-        "BRAIDS_ELASTIC": "Косы на резинке (1 коса)",
-    }[rubber_type]
+    return rubber_service_name(rubber_type)
 
 
 def _rubber_pricing_from_catalog(db: Session, rubber_type: str) -> tuple[float, float, float, bool, str | None]:
@@ -735,29 +725,11 @@ def _rubber_pricing_from_catalog(db: Session, rubber_type: str) -> tuple[float, 
     Возвращает: (master_pay, studio_pay, fixed_expense, is_per_unit, unit_label).
     Берём из прайса товаров (catalog_products): категория «Заказ» → подкатегория «Хвосты/резинки».
     """
-    svc_name = _rubber_service_name(rubber_type)
-    row = db.scalar(
-        select(CatalogProduct).where(
-            CatalogProduct.category_name == "Заказ",
-            CatalogProduct.subcategory_name == "Хвосты/резинки",
-            CatalogProduct.name == svc_name,
-            CatalogProduct.is_active.is_(True),
-        )
-    )
+    row = find_rubber_catalog_product(db, rubber_type)
+    fam, _sz = _rubber_family_size_from_type(rubber_type)
     if not row:
-        raise ValueError(f"Не найден прайс для «{svc_name}».")
-    try:
-        meta = json.loads(row.meta_json or "{}")
-    except Exception:
-        meta = {}
-    if not isinstance(meta, dict):
-        meta = {}
-    mp = float(meta.get("master_pay") or 0.0)
-    sp = float(meta.get("studio_pay") or 0.0)
-    fx = float(meta.get("fixed_expense") or 0.0)
-    is_per_unit = bool(meta.get("is_per_unit") or False)
-    unit_label = meta.get("unit_label") or None
-    return mp, sp, fx, is_per_unit, (str(unit_label) if unit_label else None)
+        raise ValueError(f"Не найден прайс для «{_rubber_service_name(rubber_type)}».")
+    return rubber_pricing_tuple(row, fam)
 
 
 def _other_pricing_from_catalog(db: Session, catalog_product_id: int) -> tuple[float, float, float, bool, str | None]:
@@ -1238,12 +1210,7 @@ def work_draft_get(
     _enrich_fp_rubber(fp)
     lock_banner = None
     readonly = False
-    if current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER):
-        readonly = True
-        lock_banner = _draft_lock_banner(db, draft)
-    elif not user_can_edit_draft(current_user, draft, db):
-        readonly = True
-    else:
+    if user_can_edit_draft(current_user, draft, db):
         lock = acquire_draft_lock(db, draft, current_user.id)
         readonly = lock.readonly
         if lock.lock_holder:
@@ -1251,6 +1218,9 @@ def work_draft_get(
                 "display_name": lock.lock_holder.display_name or lock.lock_holder.username,
                 "role": ru_user_role(lock.lock_holder.role),
             }
+    else:
+        readonly = True
+        lock_banner = _draft_lock_banner(db, draft, exclude_user_id=current_user.id)
     db.commit()
     selected_client = db.get(Client, int(draft.client_id)) if draft.client_id else None
     return _work_new_template_response(
@@ -1302,7 +1272,7 @@ async def work_draft_create_post(
 async def work_draft_update_post(
     request: Request,
     draft_id: int,
-    current_user: AuthUser = _MASTER,
+    current_user: AuthUser = Depends(require_assigned_roles(UserRole.MASTER, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     from app.ru_labels import ru_user_role
@@ -1316,17 +1286,10 @@ async def work_draft_update_post(
     form = await request.form()
     form_dict = collect_form_dict(form)
     draft = db.get(WorkDraft, int(draft_id))
-    lock_banner = None
-    if draft and draft.locked_by_user_id:
-        holder = db.get(User, int(draft.locked_by_user_id))
-        if holder:
-            lock_banner = {
-                "display_name": holder.display_name or holder.username,
-                "role": ru_user_role(holder.role),
-            }
     if not draft or not user_can_edit_draft(current_user, draft, db):
         return RedirectResponse("/master/mywork", status_code=303)
     lock = acquire_draft_lock(db, draft, current_user.id)
+    lock_banner = None
     if lock.readonly:
         db.rollback()
         if lock.lock_holder:
@@ -1365,7 +1328,7 @@ async def work_draft_update_post(
             is_draft=True,
             draft_id=int(draft_id),
             draft_readonly=False,
-            lock_banner=lock_banner,
+            lock_banner=None,
         )
     return RedirectResponse(f"/sales/work/draft/{draft_id}?draft_saved=1", status_code=303)
 
@@ -1603,11 +1566,11 @@ async def work_new_post(
             if rubber_type not in _VALID_RUBBER_TYPES:
                 raise ValueError("Для «Хвосты/резинки» выберите тип.")
 
-            if rubber_type == "TAIL_ELASTIC":
+            if rubber_uses_attach_qty(rubber_type):
                 rubber_qty = int(_g_float(form, "rubber_attach_qty", 0))
                 if rubber_qty <= 0:
                     raise ValueError("Укажите количество креплений для хвоста на резинке (целое число).")
-            elif rubber_type == "BRAIDS_ELASTIC":
+            elif rubber_uses_braids_qty(rubber_type):
                 rubber_qty = int(_g_float(form, "rubber_braids_qty", 0))
                 if rubber_qty <= 0:
                     raise ValueError("Укажите количество кос для кос на резинке (целое число).")

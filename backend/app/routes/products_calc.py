@@ -23,8 +23,8 @@ from app.db.models import (
 from app.db.session import get_db
 from app.kit_inlay_visit import list_master_visit_services_catalog
 from app.work_products import _kit_client_stock_price_total, _rubber_type_items, _zakaz_subcategory_services_map
-from app.work_products import _rubber_service_name
 from app.work_products import _kit_se_items, _kit_de_items
+from app.rubber_catalog import rubber_price_meta_by_type, rubber_uses_attach_qty, rubber_uses_braids_qty, valid_rubber_types
 from app.work_products_compute import (
     CORR_SVC_HOURLY,
     CORR_SVC_TRIM,
@@ -399,14 +399,13 @@ async def api_products_calc(
                 client_max = None
 
         else:
-            rubber_type = str(payload.get("rubber_type") or "TAIL_ELASTIC").strip().upper()
-            rubber_allowed = {k for k, _ in _rubber_type_items()}
-            if rubber_type not in rubber_allowed:
-                rubber_type = "TAIL_ELASTIC"
+            rubber_type = str(payload.get("rubber_type") or "TAIL_ELASTIC_STANDARD").strip().upper()
+            if rubber_type not in valid_rubber_types():
+                rubber_type = "TAIL_ELASTIC_STANDARD"
             qty = 1
-            if rubber_type == "TAIL_ELASTIC":
+            if rubber_uses_attach_qty(rubber_type):
                 qty = max(1, _i("rubber_attach_qty", 1))
-            elif rubber_type == "BRAIDS_ELASTIC":
+            elif rubber_uses_braids_qty(rubber_type):
                 qty = max(1, _i("rubber_braids_qty", 1))
             fin = compute_work_financials(
                 db,
@@ -432,9 +431,8 @@ async def api_products_calc(
                 corr_circle=False,
                 corr_steam=False,
             )
-            rub_map = _zakaz_subcategory_services_map(db, "Хвосты/резинки")
-            svc_name = _rubber_service_name(rubber_type)
-            row = rub_map.get(svc_name) or {}
+            by_type = rubber_price_meta_by_type(db)
+            row = by_type.get(rubber_type) or {}
             cp = row.get("client_price")
             if cp is not None:
                 client_total = float(cp) * float(qty)
@@ -450,8 +448,8 @@ async def api_products_calc(
                 "product_kind": ProductSaleKind.RUBBER.value,
                 "sale_rubber_mode": "ORDER",
                 "sale_rubber_type": rubber_type,
-                "sale_rubber_attach_qty": str(qty) if rubber_type == "TAIL_ELASTIC" else "",
-                "sale_rubber_braids_qty": str(qty) if rubber_type == "BRAIDS_ELASTIC" else "",
+                "sale_rubber_attach_qty": str(qty) if rubber_uses_attach_qty(rubber_type) else "",
+                "sale_rubber_braids_qty": str(qty) if rubber_uses_braids_qty(rubber_type) else "",
             }
             svc_id = str(payload.get("visit_service_id") or "").strip()
             prefill_visit = {"kind": BookingKind.VISIT.value, "service_id": svc_id}

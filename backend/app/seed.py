@@ -163,6 +163,10 @@ def ensure_prod_seed_data(db: Session) -> None:
     # Expense catalog (idempotent)
     ensure_studio_expense_catalog(db)
 
+    from app.fixed_price_visit import ensure_fixed_price_visit_nodes
+
+    ensure_fixed_price_visit_nodes(db)
+
     db.commit()
 
 

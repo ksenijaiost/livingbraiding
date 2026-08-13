@@ -20,7 +20,7 @@ CONSULTATION_TYPE_CHOICES: list[tuple[str, str]] = [
 _CONSULTATION_TYPE_LABELS = dict(CONSULTATION_TYPE_CHOICES)
 
 _EXTENSION_CATEGORY_NAMES = frozenset({"Наращивание"})
-_OTHER_CATEGORY_NAMES = frozenset({"Снятие", "Уход", "Обучение"})
+_OTHER_CATEGORY_NAMES = frozenset({"Снятие", "Уход", "Обучение", "Работа по фикс цене"})
 
 
 def consultation_kind_for_category_name(name: str) -> ConsultationKind:
@@ -87,7 +87,13 @@ def list_consultation_services_catalog(db) -> list[dict]:
         int(c.id): c.consultation_kind
         for c in db.scalars(select(ServiceCategory)).all()
     }
-    full = list_master_visit_services_catalog(db)
+    from app.fixed_price_visit import FIXED_PRICE_VISIT_CATEGORY
+
+    full = [
+        c
+        for c in list_master_visit_services_catalog(db)
+        if (c.get("name") or "").strip() != FIXED_PRICE_VISIT_CATEGORY
+    ]
     for c in full:
         kind = kinds.get(int(c.get("id") or 0), ConsultationKind.BRAIDING)
         c["consultation_kind"] = kind.value if isinstance(kind, ConsultationKind) else str(kind)

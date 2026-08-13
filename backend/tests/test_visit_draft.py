@@ -206,6 +206,74 @@ def test_lock_readonly_for_other_master(memory_db):
     assert lock.lock_holder.id == m1.id
 
 
+def test_lock_same_master_can_reacquire(memory_db):
+    m1, _, _, sid = _seed_users_and_service(memory_db)
+    client = memory_db.scalar(select(Client).limit(1))
+    inp = _visit_inp(int(client.id), sid, [(m1.id, 100)])
+    draft = save_visit_draft(
+        memory_db,
+        None,
+        inp,
+        m1.id,
+        {"performed_date": "2026-05-15"},
+        created_by_label="test",
+    )
+    memory_db.commit()
+    draft.locked_by_user_id = m1.id
+    draft.locked_at = utcnow_naive()
+    memory_db.commit()
+    lock = acquire_draft_lock(memory_db, draft, m1.id)
+    assert lock.readonly is False
+    assert lock.lock_holder is None
+
+
+def test_admin_super_can_edit_any_draft(memory_db):
+    from app.visit_draft import user_can_edit_draft
+
+    m1, _, _, sid = _seed_users_and_service(memory_db)
+    admin = memory_db.scalar(select(User).where(User.username == "adm"))
+    assert admin is not None
+    memory_db.add(UserRoleAssignment(user_id=admin.id, role=UserRole.ADMIN_SUPER))
+    memory_db.commit()
+    client = memory_db.scalar(select(Client).limit(1))
+    inp = _visit_inp(int(client.id), sid, [(m1.id, 100)])
+    draft = save_visit_draft(
+        memory_db,
+        None,
+        inp,
+        m1.id,
+        {"performed_date": "2026-05-15"},
+        created_by_label="test",
+    )
+    memory_db.commit()
+    super_user = AuthUser(
+        id=admin.id,
+        username=admin.username,
+        display_name=admin.display_name,
+        role=UserRole.ADMIN_SUPER,
+        roles=(UserRole.ADMIN_SUPER,),
+    )
+    assert user_can_edit_draft(super_user, draft, memory_db) is True
+    lock = acquire_draft_lock(memory_db, draft, admin.id)
+    assert lock.readonly is False
+
+
+def test_draft_lock_banner_only_for_other_holder():
+    from app.visit_draft import draft_lock_banner_for_holder
+
+    assert draft_lock_banner_for_holder(None) is None
+    u = User(
+        username="x",
+        password_hash="x",
+        display_name="Анна",
+        role=UserRole.MASTER,
+        is_active=True,
+    )
+    u.id = 7
+    banner = draft_lock_banner_for_holder(u)
+    assert banner is not None
+    assert banner["display_name"] == "Анна"
+
 def test_finalize_creates_visit_without_preview_stock(memory_db):
     m1, _, _, sid = _seed_users_and_service(memory_db)
     client = memory_db.scalar(select(Client).limit(1))

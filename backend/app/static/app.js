@@ -210,8 +210,8 @@ function initProductsCalc() {
     var a = document.getElementById('rubber_attach_qty_block');
     var b = document.getElementById('rubber_braids_qty_block');
     if (!a || !b) return;
-    a.style.display = (t === 'TAIL_ELASTIC') ? 'block' : 'none';
-    b.style.display = (t === 'BRAIDS_ELASTIC') ? 'block' : 'none';
+    a.style.display = (t === 'TAIL_ELASTIC' || String(t || '').indexOf('TAIL_ELASTIC_') === 0) ? 'block' : 'none';
+    b.style.display = (t === 'BRAIDS_ELASTIC' || String(t || '').indexOf('BRAIDS_ELASTIC_') === 0) ? 'block' : 'none';
   }
 
   function kitTotals() {
@@ -767,8 +767,8 @@ function initAdminBookingForm() {
     var t = getSaleRubberType();
     var a = byId("sale_rubber_attach_qty_block");
     var b = byId("sale_rubber_braids_qty_block");
-    if (a) a.style.display = (show && t === "TAIL_ELASTIC") ? "block" : "none";
-    if (b) b.style.display = (show && t === "BRAIDS_ELASTIC") ? "block" : "none";
+    if (a) a.style.display = (show && (t === "TAIL_ELASTIC" || String(t || "").indexOf("TAIL_ELASTIC_") === 0)) ? "block" : "none";
+    if (b) b.style.display = (show && (t === "BRAIDS_ELASTIC" || String(t || "").indexOf("BRAIDS_ELASTIC_") === 0)) ? "block" : "none";
   }
 
   function syncSaleRubberMode() {

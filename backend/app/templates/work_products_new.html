@@ -12,7 +12,7 @@
     {% if error %}
       <div class="error" style="margin-bottom: 12px;">{{ error }}</div>
     {% endif %}
-    {% if lock_banner %}
+    {% if draft_readonly and lock_banner %}
       <div class="error" style="margin-bottom: 12px; background:#fef3c7; color:#92400e; border-color:#f59e0b;">
         <strong>Только просмотр.</strong> Сейчас редактирует: {{ lock_banner.display_name }} ({{ lock_banner.role }}).
       </div>
@@ -192,7 +192,7 @@
           <div style="margin-top: 6px;">
             {% for s in rubber_sizes %}
               <label style="display:block; margin-bottom: 6px;">
-                <input type="radio" name="rubber_size" value="{{ s.value }}" {% if fp.rubber_size == s.value %}checked{% endif %} />
+                <input type="radio" name="rubber_size" value="{{ s.value }}" {% if fp.rubber_size == s.value or (not fp.rubber_size and s.value == 'STANDARD') %}checked{% endif %} />
                 {{ s.label }}
               </label>
             {% endfor %}
@@ -487,13 +487,27 @@
       if (!kind || !ob) return;
       ob.style.display = (kind.value === 'OTHER') ? 'block' : 'none';
     }
+    function rubberSizedFamilies() {
+      var meta = readWorkPriceMeta();
+      var list = (meta && meta.rubberSizedFamilies) ? meta.rubberSizedFamilies : ['TAIL_ELASTIC', 'TAIL_CRAB', 'TAIL_NET', 'TAIL_BUN'];
+      return list;
+    }
+    function familyNeedsSize(fam) {
+      return rubberSizedFamilies().indexOf(fam) >= 0;
+    }
+    function rubberUsesAttachQty(t) {
+      return t === 'TAIL_ELASTIC' || String(t || '').indexOf('TAIL_ELASTIC_') === 0;
+    }
+    function rubberUsesBraidsQty(t) {
+      return t === 'BRAIDS_ELASTIC' || String(t || '').indexOf('BRAIDS_ELASTIC_') === 0;
+    }
     function resolveRubberType() {
       var famEl = document.querySelector('input[name="rubber_family"]:checked');
       var fam = famEl ? famEl.value : '';
-      if (fam === 'TAIL_CRAB' || fam === 'TAIL_NET' || fam === 'TAIL_BUN') {
+      if (familyNeedsSize(fam)) {
         var szEl = document.querySelector('input[name="rubber_size"]:checked');
-        var sz = szEl ? szEl.value : '';
-        if (!sz) return '';
+        var sz = szEl ? szEl.value : 'STANDARD';
+        if (!sz) sz = 'STANDARD';
         return fam + '_' + sz;
       }
       return fam;
@@ -504,10 +518,35 @@
       var sizeBlock = document.getElementById('rubber_size_block');
       var a = document.getElementById('rubber_attach_qty_block');
       var b = document.getElementById('rubber_braids_qty_block');
-      var needsSize = fam === 'TAIL_CRAB' || fam === 'TAIL_NET' || fam === 'TAIL_BUN';
+      var needsSize = familyNeedsSize(fam);
       if (sizeBlock) sizeBlock.style.display = needsSize ? 'block' : 'none';
       if (a) a.style.display = (fam === 'TAIL_ELASTIC') ? 'block' : 'none';
       if (b) b.style.display = (fam === 'BRAIDS_ELASTIC') ? 'block' : 'none';
+    }
+    function rubberPriceRow(typeVal) {
+      var meta = readWorkPriceMeta();
+      var byType = (meta && meta.rubberByType) ? meta.rubberByType : {};
+      if (byType[typeVal]) return byType[typeVal];
+      var fam = String(typeVal || '').replace(/_(MINI|STANDARD|MAX)$/, '');
+      if (fam && byType[fam]) return byType[fam];
+      var map = (meta && meta.rubber) ? meta.rubber : {};
+      var nameByType = {
+        TAIL_ELASTIC: 'Хвост на резинке (1 крепление)',
+        TAIL_ELASTIC_MINI: 'Хвост на резинке (1 крепление) — mini',
+        TAIL_ELASTIC_STANDARD: 'Хвост на резинке (1 крепление) — standard',
+        TAIL_ELASTIC_MAX: 'Хвост на резинке (1 крепление) — max',
+        TAIL_CRAB_MINI: 'Хвост на крабе — mini',
+        TAIL_CRAB_STANDARD: 'Хвост на крабе — standard',
+        TAIL_CRAB_MAX: 'Хвост на крабе — max',
+        TAIL_NET_MINI: 'Хвост на сетке — mini',
+        TAIL_NET_STANDARD: 'Хвост на сетке — standard',
+        TAIL_NET_MAX: 'Хвост на сетке — max',
+        TAIL_BUN_MINI: 'Хвост на бублике — mini',
+        TAIL_BUN_STANDARD: 'Хвост на бублике — standard',
+        TAIL_BUN_MAX: 'Хвост на бублике — max',
+        BRAIDS_ELASTIC: 'Косы на резинке (1 коса)'
+      };
+      return map[nameByType[typeVal] || ''] || null;
     }
     function syncCorrectionBlock() {
       var kind = document.querySelector('select[name="kind"]');
@@ -804,25 +843,11 @@
 
       if (k === 'RUBBER') {
         var typeVal = resolveRubberType();
-        var map = (meta && meta.rubber) ? meta.rubber : {};
-        var nameByType = {
-          TAIL_ELASTIC: 'Хвост на резинке (1 крепление)',
-          TAIL_CRAB_MINI: 'Хвост на крабе — mini',
-          TAIL_CRAB_STANDARD: 'Хвост на крабе — standard',
-          TAIL_CRAB_MAX: 'Хвост на крабе — max',
-          TAIL_NET_MINI: 'Хвост на сетке — mini',
-          TAIL_NET_STANDARD: 'Хвост на сетке — standard',
-          TAIL_NET_MAX: 'Хвост на сетке — max',
-          TAIL_BUN_MINI: 'Хвост на бублике — mini',
-          TAIL_BUN_STANDARD: 'Хвост на бублике — standard',
-          TAIL_BUN_MAX: 'Хвост на бублике — max',
-          BRAIDS_ELASTIC: 'Косы на резинке (1 коса)'
-        };
-        var row = map[nameByType[typeVal] || ''] || null;
+        var row = rubberPriceRow(typeVal);
         var units = 1;
         if (row && row.is_per_unit) {
-          if (typeVal === 'TAIL_ELASTIC') units = parseInt((document.querySelector('input[name="rubber_attach_qty"]') || {}).value || '1', 10) || 1;
-          else if (typeVal === 'BRAIDS_ELASTIC') units = parseInt((document.querySelector('input[name="rubber_braids_qty"]') || {}).value || '1', 10) || 1;
+          if (rubberUsesAttachQty(typeVal)) units = parseInt((document.querySelector('input[name="rubber_attach_qty"]') || {}).value || '1', 10) || 1;
+          else if (rubberUsesBraidsQty(typeVal)) units = parseInt((document.querySelector('input[name="rubber_braids_qty"]') || {}).value || '1', 10) || 1;
           else units = 1;
         }
         if (!units || units < 1) units = 1;
@@ -963,23 +988,9 @@
       var line = '';
       if (kind.value === 'RUBBER') {
         var typeVal = resolveRubberType();
-        var map = (meta && meta.rubber) ? meta.rubber : {};
-        var nameByType = {
-          TAIL_ELASTIC: 'Хвост на резинке (1 крепление)',
-          TAIL_CRAB_MINI: 'Хвост на крабе — mini',
-          TAIL_CRAB_STANDARD: 'Хвост на крабе — standard',
-          TAIL_CRAB_MAX: 'Хвост на крабе — max',
-          TAIL_NET_MINI: 'Хвост на сетке — mini',
-          TAIL_NET_STANDARD: 'Хвост на сетке — standard',
-          TAIL_NET_MAX: 'Хвост на сетке — max',
-          TAIL_BUN_MINI: 'Хвост на бублике — mini',
-          TAIL_BUN_STANDARD: 'Хвост на бублике — standard',
-          TAIL_BUN_MAX: 'Хвост на бублике — max',
-          BRAIDS_ELASTIC: 'Косы на резинке (1 коса)'
-        };
-        var row = map[nameByType[typeVal] || ''] || null;
+        var row = rubberPriceRow(typeVal);
         if (row) {
-          var units = row.is_per_unit ? (typeVal === 'TAIL_ELASTIC' ? parseInt((document.querySelector('input[name="rubber_attach_qty"]')||{}).value||'1',10) : (typeVal === 'BRAIDS_ELASTIC' ? parseInt((document.querySelector('input[name="rubber_braids_qty"]')||{}).value||'1',10) : 1)) : 1;
+          var units = row.is_per_unit ? (rubberUsesAttachQty(typeVal) ? parseInt((document.querySelector('input[name="rubber_attach_qty"]')||{}).value||'1',10) : (rubberUsesBraidsQty(typeVal) ? parseInt((document.querySelector('input[name="rubber_braids_qty"]')||{}).value||'1',10) : 1)) : 1;
           if (!units || units < 1) units = 1;
           var lo = row.client_from != null ? Math.round(row.client_from * units * bonus) : null;
           var hi = row.client_to != null ? Math.round(row.client_to * units * bonus) : null;

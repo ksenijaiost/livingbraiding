@@ -30,6 +30,23 @@ from app.db.session import get_db
 from app.forms_parse import parse_bool, parse_optional_float
 from app.price_ordering import price_sort_key, service_sort_price
 from app.ru_labels import format_price_integer_rub
+from app.fixed_price_visit import (
+    FIXED_PRICE_VISIT_CATEGORY,
+    deactivate_fixed_price_mirror_service,
+    ensure_fixed_price_visit_nodes,
+    is_fixed_price_category_name,
+    sync_fixed_price_catalog_product,
+)
+from app.rubber_catalog import (
+    RUBBER_SUBCATEGORY,
+    build_rubber_catalog_display,
+    disable_rubber_sizes,
+    enable_rubber_sizes,
+    ensure_rubber_size_row,
+    normalize_rubber_catalog_names,
+    rename_rubber_group,
+    rubber_types_for_catalog_name,
+)
 from app.webui import templates, ctx as _ctx
 
 
@@ -97,10 +114,7 @@ def catalog_blank_kit_key_usage(db: Session, kit_key: str, *, limit: int = 12) -
 
 
 def _rubber_types_for_catalog_name(name: str) -> list[str]:
-    from app.work_products import _rubber_service_name, _rubber_type_items
-
-    nn = str(name or "").strip()
-    return [rt for rt, _ in _rubber_type_items() if _rubber_service_name(rt) == nn]
+    return rubber_types_for_catalog_name(name)
 
 
 def _work_usage_by_details_needle(
@@ -367,6 +381,8 @@ def products_catalog_view(
     # Исторически сюда попадали категории "товаров" из services.
     # Сейчас опираемся на имена отдельных потоков.
     _SERVICE_PRODUCT_CATS = ("Заказ", "Продажа материала")
+    if ensure_fixed_price_visit_nodes(db):
+        db.commit()
     service_cats = list(
         db.scalars(
             select(ServiceCategory.name)
@@ -381,11 +397,14 @@ def products_catalog_view(
             .order_by(CatalogProduct.category_name.asc())
         ).all()
     )
-    cats = sorted(set(service_cats + product_cats))
+    cats = sorted(set(service_cats + product_cats + [FIXED_PRICE_VISIT_CATEGORY]))
     selected = (category or "").strip() or (cats[0] if cats else None)
     grouped_rows: list[SimpleNamespace] = []
     is_catalog_products_category = False
     if selected:
+        if selected == "Заказ":
+            if normalize_rubber_catalog_names(db):
+                db.commit()
         product_rows = list(
             db.scalars(
                 select(CatalogProduct)
@@ -393,7 +412,7 @@ def products_catalog_view(
                 .order_by(CatalogProduct.subcategory_name.asc(), CatalogProduct.sort_order.asc(), CatalogProduct.name.asc())
             ).all()
         )
-        if product_rows:
+        if product_rows or is_fixed_price_category_name(selected):
             is_catalog_products_category = True
             groups_active: dict[str, list[SimpleNamespace]] = defaultdict(list)
             groups_inactive: dict[str, list[SimpleNamespace]] = defaultdict(list)
@@ -430,14 +449,29 @@ def products_catalog_view(
             if selected == "Заказ" and "Другое" not in sub_names:
                 sub_names.append("Другое")
                 sub_names = sorted(sub_names)
-            grouped_rows = [
-                SimpleNamespace(
-                    subcategory_name=sub_name,
-                    rows=groups_active.get(sub_name, []),
-                    inactive_rows=groups_inactive.get(sub_name, []),
+            if is_fixed_price_category_name(selected) and not sub_names:
+                sub_names = [FIXED_PRICE_VISIT_CATEGORY]
+            grouped_rows = []
+            for sub_name in sub_names:
+                if sub_name == RUBBER_SUBCATEGORY:
+                    combined = list(groups_active.get(sub_name, [])) + list(groups_inactive.get(sub_name, []))
+                    grouped_rows.append(
+                        SimpleNamespace(
+                            subcategory_name=sub_name,
+                            rows=build_rubber_catalog_display(combined),
+                            inactive_rows=[],
+                            show_size_col=True,
+                        )
+                    )
+                    continue
+                grouped_rows.append(
+                    SimpleNamespace(
+                        subcategory_name=sub_name,
+                        rows=groups_active.get(sub_name, []),
+                        inactive_rows=groups_inactive.get(sub_name, []),
+                        show_size_col=False,
+                    )
                 )
-                for sub_name in sub_names
-            ]
         else:
             services = list(
                 db.scalars(
@@ -481,7 +515,12 @@ def products_catalog_view(
                     key=lambda r: price_sort_key(getattr(r, "sort_price", None), name=r.name),
                 )
             grouped_rows = [
-                SimpleNamespace(subcategory_name=sub_name, rows=groups2[sub_name], inactive_rows=[])
+                SimpleNamespace(
+                    subcategory_name=sub_name,
+                    rows=groups2[sub_name],
+                    inactive_rows=[],
+                    show_size_col=False,
+                )
                 for sub_name in sorted(groups2.keys())
             ]
     return templates.TemplateResponse(
@@ -557,6 +596,81 @@ async def products_catalog_row_edit(
             return _redirect("err", "blank_fields")
     row.is_active = parse_bool(form.get("is_active"))
     row.meta_json = json.dumps(meta, ensure_ascii=False)
+    sync_fixed_price_catalog_product(db, row)
+    db.commit()
+    return _redirect("msg", "saved")
+
+
+@router.post("/products-catalog/{row_id}/rubber-group-rename")
+async def products_catalog_rubber_group_rename(
+    row_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    row = db.get(CatalogProduct, row_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Позиция прайса не найдена")
+    form = await request.form()
+    category = (str(form.get("category") or "").strip() or row.category_name)
+
+    def _redirect(message_key: str, value: str) -> RedirectResponse:
+        return RedirectResponse(url=f"/products-catalog?{urlencode({'category': category, message_key: value})}", status_code=303)
+
+    new_base = str(form.get("name") or "").strip()
+    if not new_base:
+        return _redirect("err", "empty")
+    rename_rubber_group(db, row, new_base)
+    db.commit()
+    return _redirect("msg", "saved")
+
+
+@router.post("/products-catalog/{row_id}/rubber-sizes")
+async def products_catalog_rubber_sizes_toggle(
+    row_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    row = db.get(CatalogProduct, row_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Позиция прайса не найдена")
+    form = await request.form()
+    category = (str(form.get("category") or "").strip() or row.category_name)
+
+    def _redirect(message_key: str, value: str) -> RedirectResponse:
+        return RedirectResponse(url=f"/products-catalog?{urlencode({'category': category, message_key: value})}", status_code=303)
+
+    enable = parse_bool(form.get("enable"))
+    if enable:
+        enable_rubber_sizes(db, row)
+    else:
+        disable_rubber_sizes(db, row)
+    db.commit()
+    return _redirect("msg", "saved")
+
+
+@router.post("/products-catalog/{row_id}/rubber-size")
+async def products_catalog_rubber_size_add(
+    row_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    row = db.get(CatalogProduct, row_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Позиция прайса не найдена")
+    form = await request.form()
+    category = (str(form.get("category") or "").strip() or row.category_name)
+
+    def _redirect(message_key: str, value: str) -> RedirectResponse:
+        return RedirectResponse(url=f"/products-catalog?{urlencode({'category': category, message_key: value})}", status_code=303)
+
+    base_name = str(form.get("base_name") or "").strip()
+    size = str(form.get("size") or "").strip().upper()
+    if not base_name or not size:
+        return _redirect("err", "empty")
+    ensure_rubber_size_row(db, base_name=base_name, size=size, template=row)
     db.commit()
     return _redirect("msg", "saved")
 
@@ -619,17 +733,18 @@ async def products_catalog_row_new(
     }
     if category == _BLANK_CATALOG_CATEGORY and subcategory_name == _BLANK_CATALOG_SUBCATEGORY:
         meta["kit_key"] = kit_key_new[:80]
-    db.add(
-        CatalogProduct(
-            category_name=category,
-            subcategory_name=subcategory_name,
-            name=name,
-            price=price,
-            meta_json=json.dumps(meta, ensure_ascii=False),
-            sort_order=int(max_sort or 0) + 1,
-            is_active=parse_bool(form.get("is_active")),
-        )
+    row = CatalogProduct(
+        category_name=category,
+        subcategory_name=subcategory_name,
+        name=name,
+        price=price,
+        meta_json=json.dumps(meta, ensure_ascii=False),
+        sort_order=int(max_sort or 0) + 1,
+        is_active=parse_bool(form.get("is_active")),
     )
+    db.add(row)
+    db.flush()
+    sync_fixed_price_catalog_product(db, row)
     db.commit()
     return _redirect("msg", "saved")
 
@@ -665,6 +780,7 @@ def products_catalog_row_delete(
 
     if row.is_active:
         return _redirect("err", "delete_active")
+    deactivate_fixed_price_mirror_service(db, row)
     db.delete(row)
     db.commit()
     return _redirect("msg", "deleted")

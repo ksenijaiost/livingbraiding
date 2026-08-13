@@ -5,7 +5,9 @@ from starlette.requests import Request
 from starlette.testclient import TestClient
 
 from app.tech_error import (
+    CLIENT_DISCONNECT_STATUS,
     TECH_ERROR_USER_MESSAGE,
+    is_client_disconnect,
     recovery_get_url,
     register_tech_error_handlers,
     wants_json_error,
@@ -72,3 +74,31 @@ def test_api_unhandled_returns_json() -> None:
     assert data["error"] == "technical"
     assert "техническ" in data["message"].lower()
     assert TECH_ERROR_USER_MESSAGE in data["message"] or "видео" in data["message"]
+
+
+def test_is_client_disconnect_plain_and_group() -> None:
+    from starlette.requests import ClientDisconnect
+
+    assert is_client_disconnect(ClientDisconnect()) is True
+    assert is_client_disconnect(RuntimeError("x")) is False
+    grouped = ExceptionGroup("unhandled errors in a TaskGroup", [ClientDisconnect()])
+    assert is_client_disconnect(grouped) is True
+    nested = ExceptionGroup("outer", [grouped])
+    assert is_client_disconnect(nested) is True
+    mixed = ExceptionGroup("mixed", [ClientDisconnect(), RuntimeError("x")])
+    assert is_client_disconnect(mixed) is False
+
+
+def test_post_client_disconnect_is_not_500() -> None:
+    from starlette.requests import ClientDisconnect
+
+    app = FastAPI()
+    register_tech_error_handlers(app)
+
+    @app.post("/bookings/new")
+    async def boom() -> None:
+        raise ClientDisconnect()
+
+    client = TestClient(app, raise_server_exceptions=False)
+    res = client.post("/bookings/new", follow_redirects=False)
+    assert res.status_code == CLIENT_DISCONNECT_STATUS

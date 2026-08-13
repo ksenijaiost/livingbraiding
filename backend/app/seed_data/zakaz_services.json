@@ -79,12 +79,34 @@
               "economics": { "master_pay": 2000, "studio_pay": 0, "fixed_expense": 500, "is_per_unit": false }
             },
             {
-              "name": "Хвост на резинке (1 крепление)",
-              "price": { "from": 30, "to": 40 },
+              "name": "Хвост на резинке (1 крепление) — mini",
+              "price": { "from": 150 },
               "economics": {
-                "master_pay": 10,
-                "studio_pay": 10,
-                "fixed_expense": 5,
+                "master_pay": 25,
+                "studio_pay": 0,
+                "fixed_expense": 40,
+                "is_per_unit": true,
+                "unit_label": "крепление"
+              }
+            },
+            {
+              "name": "Хвост на резинке (1 крепление) — standard",
+              "price": { "from": 250 },
+              "economics": {
+                "master_pay": 30,
+                "studio_pay": 0,
+                "fixed_expense": 50,
+                "is_per_unit": true,
+                "unit_label": "крепление"
+              }
+            },
+            {
+              "name": "Хвост на резинке (1 крепление) — max",
+              "price": { "from": 350 },
+              "economics": {
+                "master_pay": 35,
+                "studio_pay": 0,
+                "fixed_expense": 60,
                 "is_per_unit": true,
                 "unit_label": "крепление"
               }

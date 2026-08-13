@@ -43,7 +43,7 @@ templates.env.globals["ru_user_role"] = ru_user_role
 router = APIRouter(prefix="/admin/catalog", tags=["admin-catalog"])
 
 _SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
-_PRODUCT_CATALOG_ONLY_CATEGORIES = {"Заказ", "Продажа материала"}
+_PRODUCT_CATALOG_ONLY_CATEGORIES = {"Заказ", "Продажа материала", "Работа по фикс цене"}
 _PRICE_LEVEL_FIELDS: dict[str, tuple[str, str]] = {
     "JUNIOR": ("price_junior_from", "price_junior_to"),
     "MIDDLE": ("price_middle_from", "price_middle_to"),

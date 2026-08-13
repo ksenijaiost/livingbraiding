@@ -171,7 +171,7 @@ def user_is_draft_participant(db: Session, user_id: int, draft_id: int) -> bool:
 def user_can_view_draft(user: AuthUser, draft: VisitDraft, db: Session) -> bool:
     if draft.finalized_visit_id is not None:
         return False
-    if user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER):
+    if user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER) or UserRole.ADMIN_SUPER in user.roles:
         return True
     if user.role == UserRole.MASTER:
         return user_is_draft_participant(db, user.id, int(draft.id))
@@ -181,9 +181,24 @@ def user_can_view_draft(user: AuthUser, draft: VisitDraft, db: Session) -> bool:
 def user_can_edit_draft(user: AuthUser, draft: VisitDraft, db: Session) -> bool:
     if draft.finalized_visit_id is not None:
         return False
+    # Суперадмин может править любой открытый черновик (в т.ч. перехватить замок).
+    if UserRole.ADMIN_SUPER in user.roles or user.role == UserRole.ADMIN_SUPER:
+        return True
     if user.role != UserRole.MASTER:
         return False
     return user_is_draft_participant(db, user.id, int(draft.id))
+
+
+def draft_lock_banner_for_holder(holder: User | None) -> dict[str, str] | None:
+    """Баннер «сейчас редактирует» — только для чужого держателя замка."""
+    if holder is None:
+        return None
+    from app.ru_labels import ru_user_role
+
+    return {
+        "display_name": holder.display_name or holder.username,
+        "role": ru_user_role(holder.role),
+    }
 
 
 def _lock_is_active(draft: VisitDraft, now: datetime | None = None) -> bool:
