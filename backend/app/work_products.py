@@ -119,6 +119,7 @@ from app.time_utils import utcnow_naive
 _WORK_NEW_FP_KEYS = frozenset({
     "booking_id",
     "work_plan_id",
+    "work_plan_missing_masters_ack",
     "client_id",
     "performed_date",
     "scope",
@@ -316,6 +317,20 @@ def _work_new_template_response(
         from app.work_draft import kit_master_on_ids_from_fp
 
         kit_master_on_ids = kit_master_on_ids_from_fp(fp)
+    planned_work_masters: list[dict[str, Any]] = []
+    wp_raw = (fp.get("work_plan_id") or "").strip()
+    try:
+        wp_ctx_id = parse_int(wp_raw, min=1, field_name="work_plan_id") if wp_raw else 0
+    except ValueError:
+        wp_ctx_id = 0
+    if wp_ctx_id > 0:
+        from app.work_plan import planned_masters_for_work_plan
+
+        planned_work_masters = planned_masters_for_work_plan(db, wp_ctx_id)
+        if not kit_master_on_ids and planned_work_masters:
+            kit_master_on_ids = [int(m["id"]) for m in planned_work_masters]
+            if len(kit_master_on_ids) > 1 and not fp.get("kit_use_multi_masters"):
+                fp["kit_use_multi_masters"] = "on"
     return templates.TemplateResponse(
         "work_products_new.html",
         _ctx(
@@ -327,6 +342,7 @@ def _work_new_template_response(
             masters=masters,
             masters_for_hourly_help=list_masters_for_hourly_work_form(db),
             kit_master_on_ids=kit_master_on_ids,
+            planned_work_masters_json=json.dumps(planned_work_masters, ensure_ascii=False),
             kit_table_state_json=_kit_table_state_json(
                 current_user, masters, kit_prefill, db, initial_lines=kit_initial
             ),
@@ -1813,6 +1829,23 @@ async def work_new_post(
         profit_total = master_total + studio_total
         studio_share = fin.studio_share_snapshot
 
+        wp_raw = (_g_str(form, "work_plan_id", "") or "").strip()
+        wp_id_for_complete: int | None = None
+        try:
+            wp_i = parse_int(wp_raw, min=1, field_name="work_plan_id") if wp_raw else 0
+        except ValueError:
+            wp_i = 0
+        if wp_i > 0:
+            from app.work_plan import require_work_plan_missing_masters_ack
+
+            require_work_plan_missing_masters_ack(
+                db,
+                wp_i,
+                participant_ids,
+                form.get("work_plan_missing_masters_ack"),
+            )
+            wp_id_for_complete = wp_i
+
         work = WorkForInventory(
             created_by_user_id=current_user.id,
             performed_date=performed_dt,
@@ -1846,15 +1879,8 @@ async def work_new_post(
         if bid_i > 0:
             work.booking_id = bid_i
             bid_for_auto_complete = bid_i
-        wp_raw = (_g_str(form, "work_plan_id", "") or "").strip()
-        wp_id_for_complete: int | None = None
-        try:
-            wp_i = parse_int(wp_raw, min=1, field_name="work_plan_id") if wp_raw else 0
-        except ValueError:
-            wp_i = 0
-        if wp_i > 0:
-            work.work_plan_id = wp_i
-            wp_id_for_complete = wp_i
+        if wp_id_for_complete is not None:
+            work.work_plan_id = wp_id_for_complete
         db.add(work)
         db.flush()
 

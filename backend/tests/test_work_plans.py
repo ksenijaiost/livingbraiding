@@ -23,7 +23,10 @@ from app.work_plan import (
     complete_work_plan_from_hourly_work,
     complete_work_plan_from_work,
     linked_hourly_work_for_plan,
+    linked_work_for_plan,
     master_has_work_plan_conflict,
+    missing_planned_masters_confirm_text,
+    require_work_plan_missing_masters_ack,
     work_plan_hourly_new_query_params,
     work_plan_is_open,
     work_plan_status_emoji,
@@ -239,6 +242,142 @@ def test_complete_work_plan_from_work(memory_db) -> None:
     assert plan.status == WorkPlanStatus.COMPLETED
     assert work.work_plan_id == plan.id
     assert not work_plan_is_open(plan)
+
+
+def _sibling_kit_plans(db, creator: User, masters: list[User], *, created_at: datetime, planned_dates: list[datetime] | None = None) -> list[WorkPlan]:
+    plans: list[WorkPlan] = []
+    for i, master in enumerate(masters):
+        planned = (planned_dates[i] if planned_dates else datetime(2026, 7, 10, 14, 0))
+        plan = WorkPlan(
+            created_by_user_id=creator.id,
+            created_at=created_at,
+            planned_date=planned,
+            duration_minutes=60,
+            master_id=master.id,
+            plan_type=WorkPlanType.WORK_PRODUCT,
+            work_kind=WorkKind.KIT,
+            status=WorkPlanStatus.PLANNED,
+        )
+        db.add(plan)
+        plans.append(plan)
+    db.flush()
+    return plans
+
+
+def test_complete_work_plan_closes_all_sibling_masters(memory_db) -> None:
+    db = memory_db
+    author = _add_master(db, "author", "Автор")
+    m1 = _add_master(db, "m1", "Анна")
+    m2 = _add_master(db, "m2", "Борис")
+    batch_at = datetime(2026, 7, 9, 12, 0, 0)
+    p1, p2 = _sibling_kit_plans(db, author, [m1, m2], created_at=batch_at)
+    work = WorkForInventory(
+        created_by_user_id=author.id,
+        performed_date=datetime(2026, 7, 10, 14, 0),
+        kind=WorkKind.KIT,
+        scope=WorkScope.IN_STOCK,
+    )
+    db.add(work)
+    db.flush()
+    complete_work_plan_from_work(db, p1.id, work.id)
+    db.commit()
+    db.refresh(p1)
+    db.refresh(p2)
+    db.refresh(work)
+    assert p1.status == WorkPlanStatus.COMPLETED
+    assert p2.status == WorkPlanStatus.COMPLETED
+    assert work.work_plan_id == p1.id
+    assert linked_work_for_plan(db, p2.id) is work
+
+
+def test_complete_work_plan_closes_siblings_with_different_planned_date(memory_db) -> None:
+    db = memory_db
+    author = _add_master(db, "author", "Автор")
+    m1 = _add_master(db, "m1", "Анна")
+    m2 = _add_master(db, "m2", "Борис")
+    batch_at = datetime(2026, 7, 9, 12, 0, 0)
+    p1, p2 = _sibling_kit_plans(
+        db,
+        author,
+        [m1, m2],
+        created_at=batch_at,
+        planned_dates=[datetime(2026, 7, 10, 14, 0), datetime(2026, 7, 11, 9, 0)],
+    )
+    work = WorkForInventory(
+        created_by_user_id=author.id,
+        performed_date=datetime(2026, 7, 10, 14, 0),
+        kind=WorkKind.KIT,
+        scope=WorkScope.IN_STOCK,
+    )
+    db.add(work)
+    db.flush()
+    complete_work_plan_from_work(db, p1.id, work.id)
+    db.commit()
+    db.refresh(p1)
+    db.refresh(p2)
+    assert p1.status == WorkPlanStatus.COMPLETED
+    assert p2.status == WorkPlanStatus.COMPLETED
+
+
+def test_complete_work_plan_does_not_close_unrelated_same_day_plan(memory_db) -> None:
+    db = memory_db
+    author = _add_master(db, "author", "Автор")
+    m1 = _add_master(db, "m1", "Анна")
+    m2 = _add_master(db, "m2", "Борис")
+    batch_at = datetime(2026, 7, 9, 12, 0, 0)
+    p1, p2 = _sibling_kit_plans(db, author, [m1, m2], created_at=batch_at)
+    other = WorkPlan(
+        created_by_user_id=author.id,
+        created_at=datetime(2026, 7, 9, 15, 0, 0),
+        planned_date=datetime(2026, 7, 10, 16, 0),
+        duration_minutes=60,
+        master_id=m2.id,
+        plan_type=WorkPlanType.WORK_PRODUCT,
+        work_kind=WorkKind.KIT,
+        status=WorkPlanStatus.PLANNED,
+    )
+    db.add(other)
+    work = WorkForInventory(
+        created_by_user_id=author.id,
+        performed_date=datetime(2026, 7, 10, 14, 0),
+        kind=WorkKind.KIT,
+        scope=WorkScope.IN_STOCK,
+    )
+    db.add(work)
+    db.flush()
+    complete_work_plan_from_work(db, p1.id, work.id)
+    db.commit()
+    db.refresh(p1)
+    db.refresh(p2)
+    db.refresh(other)
+    assert p1.status == WorkPlanStatus.COMPLETED
+    assert p2.status == WorkPlanStatus.COMPLETED
+    assert other.status == WorkPlanStatus.PLANNED
+
+
+def test_missing_planned_masters_confirm_text() -> None:
+    assert missing_planned_masters_confirm_text([]) == ""
+    assert missing_planned_masters_confirm_text(["Анна"]) == (
+        "Вы сохраняете работу, но на неё был запланирован мастер Анна. "
+        "Точно сохранить без него?"
+    )
+    assert missing_planned_masters_confirm_text(["Анна", "Борис"]) == (
+        "Вы сохраняете работу, но на неё были запланированы мастера Анна, Борис. "
+        "Точно сохранить без них?"
+    )
+
+
+def test_require_work_plan_missing_masters_ack(memory_db) -> None:
+    db = memory_db
+    author = _add_master(db, "author", "Автор")
+    m1 = _add_master(db, "m1", "Анна")
+    m2 = _add_master(db, "m2", "Борис")
+    p1, _p2 = _sibling_kit_plans(db, author, [m1, m2], created_at=datetime(2026, 7, 9, 12, 0, 0))
+    db.commit()
+    with pytest.raises(ValueError, match="Анна"):
+        require_work_plan_missing_masters_ack(db, p1.id, {m2.id}, None)
+    require_work_plan_missing_masters_ack(db, p1.id, {m1.id, m2.id}, None)
+    require_work_plan_missing_masters_ack(db, p1.id, {m2.id}, "1")
 
 
 def test_work_plan_work_new_query_params(memory_db, monkeypatch) -> None:
