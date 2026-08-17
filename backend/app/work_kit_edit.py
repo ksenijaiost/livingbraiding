@@ -24,8 +24,11 @@ from app.db.models import (
 from app.forms_parse import parse_float
 from app.kit_blank_stock_core import (
     composition_keys_intersection_catalog,
+    consume_blank_stock_for_reserve,
+    kit_inventory_is_keyed,
     load_catalog_kit_maps,
     replace_blank_stock_for_kit,
+    reserve_kit_stock_for_client,
 )
 from app.kit_composition_lines import (
     client_price_for_lines,
@@ -189,9 +192,15 @@ def _sync_kit_reserve_pieces(db: Session, kit: Kit, work: WorkForInventory, new_
             )
             or 0
         )
-        kit.pieces_available = max(0, int(new_pieces) - total_reserved)
+        if kit_inventory_is_keyed(db, int(kit.id)):
+            consume_blank_stock_for_reserve(
+                db, kit, kit_key=None, qty=int(total_reserved), sync_after=True
+            )
+        else:
+            kit.pieces_available = max(0, int(new_pieces) - total_reserved)
     elif not reserves:
-        kit.pieces_available = int(new_pieces)
+        if not kit_inventory_is_keyed(db, int(kit.id)):
+            kit.pieces_available = int(new_pieces)
 
 
 def sync_work_kit_reserves_for_scope(
@@ -210,7 +219,6 @@ def sync_work_kit_reserves_for_scope(
         return
 
     from app.kit_blank_stock_core import release_client_kit_reserves_into_free_pool
-    from app.time_utils import utcnow_naive
 
     old_cid = int(prev_client_id or 0)
     new_cid = int(work.client_id or 0)
@@ -241,17 +249,13 @@ def sync_work_kit_reserves_for_scope(
     pieces_reserved = int(kit.pieces_total or 0)
     if pieces_reserved <= 0:
         return
-    db.add(
-        KitReserve(
-            kit_id=int(kit.id),
-            pieces_reserved=pieces_reserved,
-            reserved_at=utcnow_naive(),
-            reserved_by_user_id=int(actor_user_id),
-            reserved_for_client_id=new_cid,
-            reserved_for_user_id=None,
-        )
+    reserve_kit_stock_for_client(
+        db,
+        kit,
+        client_id=new_cid,
+        reserved_by_user_id=int(actor_user_id),
+        qty=pieces_reserved,
     )
-    kit.pieces_available = max(0, int(kit.pieces_available or 0) - pieces_reserved)
 
 
 def apply_kit_work_edit(

@@ -13,9 +13,11 @@ from app.db import models as _orm_models  # noqa: F401
 from app.db.base import Base
 from app.db.models import (
     CatalogProduct,
+    Client,
     Kit,
     KitAuthorStaff,
     KitBlankStock,
+    KitReserve,
     MasterLevel,
     PayrollPeriod,
     User,
@@ -270,6 +272,53 @@ def test_apply_kit_work_edit_updates_composition_and_stock(memory_db) -> None:
         memory_db.scalars(select(KitAuthorStaff).where(KitAuthorStaff.kit_id == kit.id)).all()
     )
     assert {a.user_id for a in authors} == {m1.id, m2.id}
+
+
+def test_apply_kit_work_edit_custom_order_reserve_consumes_blank_stock(memory_db) -> None:
+    m1, m2 = _seed_two_masters_and_catalog(memory_db)
+    work, kit = _seed_kit_work(memory_db, m1, m2)
+    client = Client(name="Оксана")
+    memory_db.add(client)
+    memory_db.flush()
+    work.client_id = client.id
+    memory_db.add(
+        KitReserve(
+            kit_id=kit.id,
+            pieces_reserved=27,
+            reserved_by_user_id=m1.id,
+            reserved_for_client_id=client.id,
+        )
+    )
+    memory_db.commit()
+
+    form = _FakeForm(
+        {
+            "kit_type_se": "",
+            "kit_type_de": "on",
+            "kit_use_multi_masters": "on",
+            "kit_master_on": [str(m1.id), str(m2.id)],
+            "kit_line_0_key": "DE_THERMO_CURL",
+            f"kit_line_0_qty_{m1.id}": "12",
+            f"kit_line_0_qty_{m2.id}": "15",
+            f"staff_profit_{m1.id}": "300",
+            f"staff_profit_{m2.id}": "400",
+        }
+    )
+    apply_kit_work_edit(
+        memory_db,
+        work,
+        form,
+        extra_costs_amount=0.0,
+        cost_total_amount=1280.0,
+        alloc_equal_shares_for_masters=_alloc_equal_shares_for_masters,
+        kit_stock_price_snapshot_text=_kit_stock_price_snapshot_text,
+        kit_cost_snapshot_text=_kit_cost_snapshot_text,
+    )
+    memory_db.commit()
+    memory_db.refresh(kit)
+    assert kit.pieces_total == 27
+    assert int(kit.pieces_available) == 0
+    assert blank_stock_qty_map(memory_db, int(kit.id)).get("DE_THERMO_CURL") == 0
 
 
 def test_replace_work_staff_rows(memory_db) -> None:

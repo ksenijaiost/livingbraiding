@@ -12,12 +12,13 @@ import json
 import math
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
 from app.db.models import CatalogProduct, Kit, KitBlankStock, KitBlanksCondition, KitReserve
 from app.kit_crud import kit_key_excluded_from_client_price
+from app.time_utils import utcnow_naive
 
 
 def parse_composition_totals(kit: Kit) -> dict[str, int]:
@@ -296,6 +297,23 @@ def return_reserve_row_to_stock(db: Session, kit: Kit, r: KitReserve) -> None:
         kit.pieces_available = int(kit.pieces_available or 0) + qty
 
 
+def _consume_qty_distributed_from_stock_map(stock_map: dict[str, int], qty: int) -> dict[str, int]:
+    """Сколько снять с каждого ключа, не больше текущего свободного остатка."""
+    take = min(max(0, int(qty)), int(sum(max(0, int(v)) for v in stock_map.values())))
+    if take <= 0:
+        return {}
+    weights = {k: max(0, int(v)) for k, v in stock_map.items() if int(v) > 0}
+    if not weights:
+        return {}
+    dist = distribute_scalar_to_keys(weights, take)
+    out: dict[str, int] = {}
+    for k, n in dist.items():
+        clamped = min(max(0, int(n)), int(stock_map.get(k, 0)))
+        if clamped > 0:
+            out[k] = clamped
+    return out
+
+
 def consume_blank_stock_for_reserve(
     db: Session,
     kit: Kit,
@@ -310,9 +328,13 @@ def consume_blank_stock_for_reserve(
         return
     if kit_inventory_is_keyed(db, int(kit.id)):
         kk = (kit_key or "").strip()
-        if not kk:
-            raise ValueError("Для комплекта с остатками по видам укажите ключ заготовки для резерва.")
-        decrement_blank_stock_keys(db, int(kit.id), {kk: q})
+        if kk:
+            decrement_blank_stock_keys(db, int(kit.id), {kk: q})
+        else:
+            sm = blank_stock_qty_map(db, int(kit.id))
+            dist = _consume_qty_distributed_from_stock_map(sm, q)
+            if dist:
+                decrement_blank_stock_keys(db, int(kit.id), dist)
         if sync_after:
             sync_kit_pieces_available_from_blank_lines(db, kit)
     else:
@@ -320,6 +342,108 @@ def consume_blank_stock_for_reserve(
         if q > avail:
             raise ValueError("Недостаточно свободного остатка для резерва.")
         kit.pieces_available = avail - q
+
+
+def reserve_kit_stock_for_client(
+    db: Session,
+    kit: Kit,
+    *,
+    client_id: int,
+    reserved_by_user_id: int,
+    qty: int,
+    kit_key: str | None = None,
+) -> None:
+    """Снять свободный остаток в резерв клиента (как ручной резерв в админке)."""
+    q = int(qty)
+    if q <= 0:
+        return
+    consume_blank_stock_for_reserve(db, kit, kit_key=kit_key, qty=q, sync_after=True)
+    db.add(
+        KitReserve(
+            kit_id=int(kit.id),
+            pieces_reserved=q,
+            reserved_at=utcnow_naive(),
+            reserved_by_user_id=int(reserved_by_user_id),
+            reserved_for_client_id=int(client_id),
+            reserved_for_user_id=None,
+            kit_key=((kit_key or "").strip()[:80] or None),
+        )
+    )
+
+
+def repair_kit_blank_stock_reserve_desync(db: Session, kit: Kit) -> bool:
+    """Починить рассинхрон свободного остатка и kit_blank_stock после резерва «на заказ».
+
+    Старый путь резервировал комплект, уменьшая только pieces_available, и не снимал
+    строки склада. Снятие резерва тогда удваивало остаток.
+    """
+    if kit.id is None or not kit_inventory_is_keyed(db, int(kit.id)):
+        return False
+    changed = False
+    unkeyed = list(
+        db.scalars(
+            select(KitReserve).where(
+                KitReserve.kit_id == int(kit.id),
+                or_(KitReserve.kit_key.is_(None), KitReserve.kit_key == ""),
+            )
+        ).all()
+    )
+    unkeyed_qty = sum(int(r.pieces_reserved or 0) for r in unkeyed)
+    stock_map = blank_stock_qty_map(db, int(kit.id))
+    stock_sum = int(sum(stock_map.values()))
+    if unkeyed_qty > 0 and stock_sum > 0:
+        dist = _consume_qty_distributed_from_stock_map(stock_map, unkeyed_qty)
+        if dist:
+            decrement_blank_stock_keys(db, int(kit.id), dist)
+            changed = True
+            stock_map = blank_stock_qty_map(db, int(kit.id))
+            stock_sum = int(sum(stock_map.values()))
+    reserved_total = int(
+        db.scalar(
+            select(func.coalesce(func.sum(KitReserve.pieces_reserved), 0)).where(
+                KitReserve.kit_id == int(kit.id)
+            )
+        )
+        or 0
+    )
+    comp = parse_composition_totals(kit)
+    comp_sum = int(sum(int(v) for v in comp.values())) if comp else 0
+    total = int(kit.pieces_total or 0)
+    expected_free = comp_sum or total
+    if (
+        reserved_total <= 0
+        and expected_free > 0
+        and stock_sum == 2 * expected_free
+        and (comp_sum <= 0 or comp_sum == total or total <= 0)
+    ):
+        _, meta, _ = load_catalog_kit_maps(db)
+        allowed = set(composition_keys_intersection_catalog(comp, meta)) if comp else set()
+        if not allowed and comp:
+            allowed = set(comp.keys())
+        if not allowed:
+            allowed = set(stock_map.keys())
+        qty = {k: int(v) for k, v in (comp or stock_map).items() if int(v) > 0}
+        if allowed and qty:
+            replace_blank_stock_for_kit(db, kit, quantities=qty, allowed_keys=allowed)
+            return True
+    before = int(kit.pieces_available or 0)
+    sync_kit_pieces_available_from_blank_lines(db, kit)
+    if int(kit.pieces_available or 0) != before:
+        changed = True
+    return changed
+
+
+def repair_all_kits_blank_stock_reserve_desync(db: Session) -> int:
+    """Починить все комплекты с kit_blank_stock. Возвращает число изменённых."""
+    kit_ids = list(db.scalars(select(KitBlankStock.kit_id).distinct()).all())
+    n = 0
+    for kid in kit_ids:
+        kit = db.get(Kit, int(kid))
+        if kit is None:
+            continue
+        if repair_kit_blank_stock_reserve_desync(db, kit):
+            n += 1
+    return n
 
 
 def keyed_client_price_selected(

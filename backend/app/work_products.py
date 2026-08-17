@@ -32,7 +32,6 @@ from app.db.models import (
     KitAuthorStaff,
     KitBlanksCondition,
     CatalogProduct,
-    KitReserve,
     PayrollFundSourceKind,
     ProductSale,
     MaterialPriceCurrent,
@@ -2001,20 +2000,14 @@ async def work_new_post(
                     so += 1
 
             if scope == WorkScope.CUSTOM_ORDER and client_id:
-                pieces_reserved = int(kit.pieces_total)
-                db.add(
-                    KitReserve(
-                        kit_id=kit.id,
-                        pieces_reserved=pieces_reserved,
-                        reserved_at=utcnow_naive(),
-                        reserved_by_user_id=int(current_user.id),
-                        reserved_for_client_id=int(client_id),
-                        reserved_for_user_id=None,
-                    )
-                )
-                # Как при ручном резерве в админке: свободный остаток уменьшается на объём резерва.
-                kit.pieces_available = max(
-                    0, int(kit.pieces_available or 0) - pieces_reserved
+                from app.kit_blank_stock_core import reserve_kit_stock_for_client
+
+                reserve_kit_stock_for_client(
+                    db,
+                    kit,
+                    client_id=int(client_id),
+                    reserved_by_user_id=int(current_user.id),
+                    qty=int(kit.pieces_total),
                 )
 
         if kind == WorkKind.KIT_CORRECTION and corr_add_kit:
