@@ -31,6 +31,7 @@
       {% if draft_id %}<input type="hidden" name="draft_id" value="{{ draft_id }}" />{% endif %}
       <input type="hidden" name="booking_id" id="booking_id" value="{{ fp.booking_id or '' }}" />
       <input type="hidden" name="work_plan_id" value="{{ fp.work_plan_id or '' }}" />
+      <input type="hidden" name="work_plan_missing_masters_ack" id="work_plan_missing_masters_ack" value="{{ fp.get('work_plan_missing_masters_ack', '') }}" />
       <div class="row">
         <div>
           <label>Режим</label>
@@ -445,6 +446,7 @@
   </div>
 
   <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
+  <script type="application/json" id="planned_work_masters">{{ (planned_work_masters_json or '[]') | safe }}</script>
   <script type="application/json" id="corr_kit_table_state">{{ (corr_kit_table_state_json or kit_table_state_json) | safe }}</script>
   <script type="application/json" id="work_price_meta">{{ work_price_meta_json | safe }}</script>
   <script src="/static/correction_custom_amount.js"></script>
@@ -1550,6 +1552,58 @@
       syncMixUI();
       syncPriceHint();
       syncWorkPreview();
+    })();
+
+    (function () {
+      var form = document.getElementById('work_products_form');
+      if (!form) return;
+      form.addEventListener('submit', function (e) {
+        var submitter = e.submitter;
+        var action = form.getAttribute('action') || '';
+        if (submitter && submitter.getAttribute('formaction')) {
+          action = submitter.getAttribute('formaction') || action;
+        }
+        if (action.indexOf('/draft') >= 0 && action.indexOf('/sales/work/new') < 0) return;
+        var ack = document.getElementById('work_plan_missing_masters_ack');
+        if (ack && (ack.value === '1' || ack.value === 'on' || ack.value === 'true')) return;
+        var planned = [];
+        try {
+          var el = document.getElementById('planned_work_masters');
+          if (el && el.textContent) planned = JSON.parse(el.textContent) || [];
+        } catch (err) {
+          planned = [];
+        }
+        if (!planned.length) return;
+        var selected = {};
+        var kind = (document.querySelector('select[name="kind"]') || {}).value || '';
+        if (kind === 'KIT') {
+          var multi = document.getElementById('kit_use_multi_masters');
+          if (multi && multi.checked) {
+            document.querySelectorAll('input[name="kit_master_on"]:checked').forEach(function (cb) {
+              var n = parseInt(cb.value, 10);
+              if (n) selected[n] = true;
+            });
+          } else {
+            selected[kitTableCurrentUserId()] = true;
+          }
+        } else {
+          selected[kitTableCurrentUserId()] = true;
+        }
+        var missing = [];
+        planned.forEach(function (m) {
+          if (!m || !m.id) return;
+          if (!selected[m.id]) missing.push(m.name || ('#' + m.id));
+        });
+        if (!missing.length) return;
+        var msg = missing.length === 1
+          ? ('Вы сохраняете работу, но на неё был запланирован мастер ' + missing[0] + '. Точно сохранить без него?')
+          : ('Вы сохраняете работу, но на неё были запланированы мастера ' + missing.join(', ') + '. Точно сохранить без них?');
+        if (!window.confirm(msg)) {
+          e.preventDefault();
+          return;
+        }
+        if (ack) ack.value = '1';
+      });
     })();
 
     // Prevent accidental submit on Enter in inputs.

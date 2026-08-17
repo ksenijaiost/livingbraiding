@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import models as _orm_models  # noqa: F401 — register models on Base
 from app.db.base import Base
-from app.db.models import CatalogProduct, Kit, KitBlankStock, KitBlanksCondition
+from app.db.models import CatalogProduct, Client, Kit, KitBlankStock, KitBlanksCondition, KitReserve, User, UserRole
 from app.kit_blank_stock_core import (
     blank_stock_qty_map,
     build_usage_breakdown_keyed,
@@ -18,7 +18,10 @@ from app.kit_blank_stock_core import (
     ensure_blank_stock_from_composition,
     infer_kit_blanks_condition_from_totals,
     keyed_cost_selected,
+    release_client_kit_reserves_into_free_pool,
+    repair_kit_blank_stock_reserve_desync,
     require_composition_stock_rows_or_scalar_ok,
+    reserve_kit_stock_for_client,
     sync_kit_pieces_available_from_blank_lines,
 )
 
@@ -159,3 +162,121 @@ def test_require_composition_stock_auto_heals_missing_blank_rows(memory_db: Sess
     db.commit()
     require_composition_stock_rows_or_scalar_ok(db, kit)
     assert blank_stock_qty_map(db, kit.id) == {"DE": 2}
+
+
+def _user_and_client(db: Session) -> tuple[User, Client]:
+    u = User(
+        username="master1",
+        password_hash="x",
+        display_name="Мастер",
+        role=UserRole.MASTER,
+        is_active=True,
+    )
+    c = Client(name="Оксана")
+    db.add_all([u, c])
+    db.flush()
+    return u, c
+
+
+def _order_kit(db: Session, *, pieces: int = 91, available: int = 91, stock_qty: int | None = None) -> Kit:
+    kit = Kit(
+        sku="ORDER-26",
+        title="Заказ — комплект",
+        pieces_total=pieces,
+        pieces_available=available,
+        stock_price_total=15470.0,
+        discount_percent=0,
+        cost_total=4575.0,
+        composition_json=json.dumps(
+            [{"key": "DE_BRAID_LONG", "condition": "NEW", "by_staff": {"2": 4, "6": 87}}],
+            ensure_ascii=False,
+        ),
+        created_at=datetime(2026, 8, 14, 16, 1, 58),
+        is_in_stock=True,
+    )
+    db.add(kit)
+    db.flush()
+    db.add(KitBlankStock(kit_id=kit.id, kit_key="DE_BRAID_LONG", qty=stock_qty if stock_qty is not None else pieces))
+    db.flush()
+    return kit
+
+
+def test_reserve_from_work_consumes_blank_stock_and_release_does_not_double(memory_db: Session) -> None:
+    db = memory_db
+    user, client = _user_and_client(db)
+    kit = _order_kit(db)
+    db.commit()
+    db.refresh(kit)
+
+    reserve_kit_stock_for_client(
+        db,
+        kit,
+        client_id=int(client.id),
+        reserved_by_user_id=int(user.id),
+        qty=int(kit.pieces_total),
+    )
+    db.commit()
+    db.refresh(kit)
+    assert blank_stock_qty_map(db, kit.id) == {"DE_BRAID_LONG": 0}
+    assert int(kit.pieces_available) == 0
+
+    release_client_kit_reserves_into_free_pool(db, kit=kit, client_id=int(client.id))
+    db.commit()
+    db.refresh(kit)
+    assert blank_stock_qty_map(db, kit.id) == {"DE_BRAID_LONG": 91}
+    assert int(kit.pieces_available) == 91
+
+
+def test_repair_pieces_available_desync_keeps_blank_stock(memory_db: Session) -> None:
+    db = memory_db
+    kit = _order_kit(db, available=182, stock_qty=91)
+    db.commit()
+    db.refresh(kit)
+
+    assert repair_kit_blank_stock_reserve_desync(db, kit) is True
+    db.commit()
+    db.refresh(kit)
+    assert blank_stock_qty_map(db, kit.id) == {"DE_BRAID_LONG": 91}
+    assert int(kit.pieces_available) == 91
+
+
+def test_repair_unkeyed_reserve_consumes_blank_stock(memory_db: Session) -> None:
+    db = memory_db
+    user, client = _user_and_client(db)
+    kit = _order_kit(db, available=0, stock_qty=91)
+    db.add(
+        KitReserve(
+            kit_id=kit.id,
+            pieces_reserved=91,
+            reserved_by_user_id=user.id,
+            reserved_for_client_id=client.id,
+            kit_key=None,
+        )
+    )
+    db.commit()
+    db.refresh(kit)
+
+    assert repair_kit_blank_stock_reserve_desync(db, kit) is True
+    db.commit()
+    db.refresh(kit)
+    assert blank_stock_qty_map(db, kit.id) == {"DE_BRAID_LONG": 0}
+    assert int(kit.pieces_available) == 0
+
+    release_client_kit_reserves_into_free_pool(db, kit=kit, client_id=int(client.id))
+    db.commit()
+    db.refresh(kit)
+    assert blank_stock_qty_map(db, kit.id) == {"DE_BRAID_LONG": 91}
+    assert int(kit.pieces_available) == 91
+
+
+def test_repair_doubled_blank_stock_resets_to_composition(memory_db: Session) -> None:
+    db = memory_db
+    kit = _order_kit(db, available=182, stock_qty=182)
+    db.commit()
+    db.refresh(kit)
+
+    assert repair_kit_blank_stock_reserve_desync(db, kit) is True
+    db.commit()
+    db.refresh(kit)
+    assert blank_stock_qty_map(db, kit.id) == {"DE_BRAID_LONG": 91}
+    assert int(kit.pieces_available) == 91

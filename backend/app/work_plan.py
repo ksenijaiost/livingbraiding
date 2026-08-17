@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import HourlyWorkEntry, WorkForInventory, WorkKind, WorkPlan, WorkPlanStatus, WorkPlanType, User, UserRole
 from app.display_time import get_display_timezone
 from app.master_schedule import TimeRangeMinutes, _interval_overlaps, is_master_available_for_interval
 from app.time_utils import utcnow_naive
+from app.forms_parse import parse_bool
 from app.user_roles import select_users_with_any_role
+
+# Несколько мастеров в одном POST дают отдельные строки WorkPlan с одним created_at.
+_SIBLING_CREATED_AT_WINDOW = timedelta(seconds=10)
 
 WORK_KIND_LABELS: dict[WorkKind, str] = {
     WorkKind.KIT: "Комплект/Заготовки (поштучно)",
@@ -305,16 +310,129 @@ def validate_work_plan_interval(
     return None
 
 
+def _plan_master_name(plan: WorkPlan) -> str:
+    master = getattr(plan, "master", None)
+    if master is None:
+        return str(plan.master_id)
+    return str(master.display_name or master.username or plan.master_id).strip()
+
+
+def sibling_work_plans(
+    db: Session,
+    plan: WorkPlan,
+    *,
+    include_self: bool = True,
+    statuses: tuple[WorkPlanStatus, ...] | None = None,
+) -> list[WorkPlan]:
+    """Другие строки того же «мульти-мастер» плана (отдельная карточка на мастера)."""
+    if plan.created_at is None:
+        return [plan] if include_self else []
+    lo = plan.created_at - _SIBLING_CREATED_AT_WINDOW
+    hi = plan.created_at + _SIBLING_CREATED_AT_WINDOW
+    stmt = (
+        select(WorkPlan)
+        .options(selectinload(WorkPlan.master))
+        .where(
+            WorkPlan.created_by_user_id == plan.created_by_user_id,
+            WorkPlan.plan_type == plan.plan_type,
+            WorkPlan.created_at >= lo,
+            WorkPlan.created_at <= hi,
+        )
+        .order_by(WorkPlan.id.asc())
+    )
+    if plan.work_kind is None:
+        stmt = stmt.where(WorkPlan.work_kind.is_(None))
+    else:
+        stmt = stmt.where(WorkPlan.work_kind == plan.work_kind)
+    comment = (plan.comment or "").strip()
+    if comment:
+        stmt = stmt.where(WorkPlan.comment == plan.comment)
+    else:
+        stmt = stmt.where(or_(WorkPlan.comment.is_(None), WorkPlan.comment == ""))
+    if statuses:
+        stmt = stmt.where(WorkPlan.status.in_(statuses))
+    if not include_self:
+        stmt = stmt.where(WorkPlan.id != plan.id)
+    rows = list(db.scalars(stmt).all())
+    if include_self and not any(int(p.id) == int(plan.id) for p in rows):
+        rows = [plan] + rows
+    return rows
+
+
+def planned_masters_for_work_plan(db: Session, plan_id: int) -> list[dict[str, Any]]:
+    """Мастера открытых планов той же пачки (для формы работы и подтверждения)."""
+    plan = db.get(WorkPlan, int(plan_id))
+    if plan is None:
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for p in sibling_work_plans(db, plan, include_self=True, statuses=(WorkPlanStatus.PLANNED,)):
+        mid = int(p.master_id)
+        if mid in seen:
+            continue
+        seen.add(mid)
+        out.append({"id": mid, "name": _plan_master_name(p)})
+    return out
+
+
+def missing_planned_masters_confirm_text(names: list[str]) -> str:
+    clean = [n.strip() for n in names if str(n).strip()]
+    if not clean:
+        return ""
+    if len(clean) == 1:
+        return (
+            f"Вы сохраняете работу, но на неё был запланирован мастер {clean[0]}. "
+            "Точно сохранить без него?"
+        )
+    joined = ", ".join(clean)
+    return (
+        f"Вы сохраняете работу, но на неё были запланированы мастера {joined}. "
+        "Точно сохранить без них?"
+    )
+
+
+def missing_planned_master_names(
+    db: Session,
+    plan_id: int,
+    work_master_ids: set[int],
+) -> list[str]:
+    present = {int(x) for x in work_master_ids if int(x) > 0}
+    names: list[str] = []
+    for row in planned_masters_for_work_plan(db, plan_id):
+        if int(row["id"]) not in present:
+            names.append(str(row["name"]))
+    return names
+
+
+def require_work_plan_missing_masters_ack(
+    db: Session,
+    plan_id: int,
+    work_master_ids: set[int],
+    form_ack: object,
+) -> None:
+    names = missing_planned_master_names(db, plan_id, work_master_ids)
+    if not names:
+        return
+    if parse_bool(form_ack):
+        return
+    raise ValueError(missing_planned_masters_confirm_text(names))
+
+
 def complete_work_plan_from_work(db: Session, plan_id: int, work_id: int) -> None:
     plan = db.get(WorkPlan, plan_id)
-    if plan is None or not work_plan_is_open(plan):
+    if plan is None:
         return
     work = db.get(WorkForInventory, work_id)
     if work is not None and work.work_plan_id is None:
         work.work_plan_id = plan.id
-    plan.status = WorkPlanStatus.COMPLETED
-    plan.completed_at = utcnow_naive()
-    plan.updated_at = utcnow_naive()
+    now = utcnow_naive()
+    to_close = sibling_work_plans(db, plan, include_self=True, statuses=(WorkPlanStatus.PLANNED,))
+    for p in to_close:
+        if not work_plan_is_open(p):
+            continue
+        p.status = WorkPlanStatus.COMPLETED
+        p.completed_at = now
+        p.updated_at = now
 
 
 def complete_work_plan_from_hourly_work(db: Session, plan_id: int, entry_id: int) -> None:
@@ -379,9 +497,26 @@ def work_plan_hourly_new_query_params(db: Session, plan: WorkPlan) -> dict[str, 
 
 
 def linked_work_for_plan(db: Session, plan_id: int) -> WorkForInventory | None:
-    return db.scalar(
+    direct = db.scalar(
         select(WorkForInventory)
         .where(WorkForInventory.work_plan_id == plan_id, WorkForInventory.is_voided.is_(False))
+        .order_by(WorkForInventory.id.desc())
+        .limit(1)
+    )
+    if direct is not None:
+        return direct
+    plan = db.get(WorkPlan, int(plan_id))
+    if plan is None:
+        return None
+    sibling_ids = [int(p.id) for p in sibling_work_plans(db, plan, include_self=True)]
+    if not sibling_ids:
+        return None
+    return db.scalar(
+        select(WorkForInventory)
+        .where(
+            WorkForInventory.work_plan_id.in_(sibling_ids),
+            WorkForInventory.is_voided.is_(False),
+        )
         .order_by(WorkForInventory.id.desc())
         .limit(1)
     )

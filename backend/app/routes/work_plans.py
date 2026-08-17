@@ -247,6 +247,7 @@ async def work_plan_new_post(
                 form, is_admin=is_admin, current_user_id=current_user.id
             )
         comment = (fp.get("comment") or "").strip() or None
+        batch_at = utcnow_naive()
         created: list[WorkPlan] = []
         for mid in master_ids:
             master = db.get(User, mid)
@@ -260,6 +261,7 @@ async def work_plan_new_post(
                 raise ValueError(f"{name}: {err}")
             plan = WorkPlan(
                 created_by_user_id=current_user.id,
+                created_at=batch_at,
                 planned_date=planned_utc,
                 duration_minutes=duration,
                 master_id=mid,
