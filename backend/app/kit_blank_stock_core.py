@@ -112,14 +112,17 @@ def blank_stock_qty_map(db: Session, kit_id: int) -> dict[str, int]:
 
 
 def sync_kit_pieces_available_from_blank_lines(db: Session, kit: Kit) -> None:
+    """Выставить pieces_available = сумма kit_blank_stock.
+
+    Сессия приложения с autoflush=False: без flush SUM(qty) читает старые значения
+    из БД и откатывает остаток на карточке после списания.
+    """
+    if kit.id is None:
+        return
+    db.flush()
     if not kit_inventory_is_keyed(db, int(kit.id)):
         return
-    total = int(
-        db.scalar(
-            select(func.coalesce(func.sum(KitBlankStock.qty), 0)).where(KitBlankStock.kit_id == int(kit.id))
-        )
-        or 0
-    )
+    total = sum(int(v) for v in blank_stock_qty_map(db, int(kit.id)).values())
     kit.pieces_available = total
     kit.is_in_stock = total > 0
 
@@ -442,6 +445,22 @@ def repair_all_kits_blank_stock_reserve_desync(db: Session) -> int:
         if kit is None:
             continue
         if repair_kit_blank_stock_reserve_desync(db, kit):
+            n += 1
+    return n
+
+
+def repair_all_kits_pieces_available_from_blank_stock(db: Session) -> int:
+    """Выровнять pieces_available / is_in_stock по сумме kit_blank_stock. Возвращает число изменённых."""
+    kit_ids = list(db.scalars(select(KitBlankStock.kit_id).distinct()).all())
+    n = 0
+    for kid in kit_ids:
+        kit = db.get(Kit, int(kid))
+        if kit is None:
+            continue
+        before_avail = int(kit.pieces_available or 0)
+        before_stock = bool(kit.is_in_stock)
+        sync_kit_pieces_available_from_blank_lines(db, kit)
+        if int(kit.pieces_available or 0) != before_avail or bool(kit.is_in_stock) != before_stock:
             n += 1
     return n
 
