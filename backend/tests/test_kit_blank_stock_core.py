@@ -19,6 +19,7 @@ from app.kit_blank_stock_core import (
     infer_kit_blanks_condition_from_totals,
     keyed_cost_selected,
     release_client_kit_reserves_into_free_pool,
+    repair_all_kits_pieces_available_from_blank_stock,
     repair_kit_blank_stock_reserve_desync,
     require_composition_stock_rows_or_scalar_ok,
     reserve_kit_stock_for_client,
@@ -280,3 +281,46 @@ def test_repair_doubled_blank_stock_resets_to_composition(memory_db: Session) ->
     db.refresh(kit)
     assert blank_stock_qty_map(db, kit.id) == {"DE_BRAID_LONG": 91}
     assert int(kit.pieces_available) == 91
+
+
+def test_sync_after_decrement_without_autoflush() -> None:
+    """Прод: sessionmaker(..., autoflush=False) — SUM без flush оставлял pieces_available."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, future=True)
+    with SessionLocal() as db:
+        kit = Kit(
+            sku="NO-FLUSH",
+            title="Kit",
+            pieces_total=91,
+            pieces_available=91,
+            stock_price_total=100.0,
+            is_in_stock=True,
+            created_at=datetime(2026, 8, 14, 16, 0, 0),
+        )
+        db.add(kit)
+        db.flush()
+        db.add(KitBlankStock(kit_id=kit.id, kit_key="DE_BRAID_TRACERY_FULL_HARD", qty=91))
+        db.commit()
+        db.refresh(kit)
+
+        decrement_blank_stock_keys(db, int(kit.id), {"DE_BRAID_TRACERY_FULL_HARD": 91})
+        sync_kit_pieces_available_from_blank_lines(db, kit)
+        db.commit()
+        db.refresh(kit)
+        assert blank_stock_qty_map(db, int(kit.id)) == {"DE_BRAID_TRACERY_FULL_HARD": 0}
+        assert int(kit.pieces_available) == 0
+        assert kit.is_in_stock is False
+
+
+def test_repair_all_aligns_available_to_blank_stock(memory_db: Session) -> None:
+    db = memory_db
+    kit = _order_kit(db, available=91, stock_qty=0)
+    kit.is_in_stock = True
+    db.commit()
+    n = repair_all_kits_pieces_available_from_blank_stock(db)
+    db.commit()
+    db.refresh(kit)
+    assert n >= 1
+    assert int(kit.pieces_available) == 0
+    assert kit.is_in_stock is False

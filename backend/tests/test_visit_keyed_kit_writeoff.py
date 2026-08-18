@@ -44,7 +44,7 @@ from app.visit_multi_service import (
 def memory_db():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, future=True)
     with SessionLocal() as db:
         yield db
 
@@ -173,6 +173,7 @@ def test_save_visit_writes_off_entire_keyed_kit(memory_db) -> None:
     db.commit()
     db.refresh(kit)
     assert int(kit.pieces_available or 0) == 0
+    assert kit.is_in_stock is False
     assert blank_stock_qty_map(db, int(kit.id)).get("DE_BRAID_LONG") == 0
     usages = list(db.scalars(select(VisitKitUsage).where(VisitKitUsage.visit_id == visit.id)).all())
     assert len(usages) == 1
@@ -197,6 +198,7 @@ def test_save_visit_writes_off_all_keyed_pieces_by_qty(memory_db) -> None:
     db.commit()
     db.refresh(kit)
     assert int(kit.pieces_available or 0) == 0
+    assert kit.is_in_stock is False
     assert blank_stock_qty_map(db, int(kit.id)).get("DE_BRAID_LONG") == 0
 
 
@@ -216,6 +218,7 @@ def test_edit_visit_rewrites_entire_keyed_kit(memory_db) -> None:
     db.commit()
     db.refresh(kit)
     assert int(kit.pieces_available or 0) == 0
+    assert kit.is_in_stock is False
     assert blank_stock_qty_map(db, int(kit.id)).get("DE_BRAID_LONG") == 0
 
 
