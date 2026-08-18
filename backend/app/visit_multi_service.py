@@ -371,6 +371,7 @@ def compute_visit_service_line(
 
     if need_kit:
         kinp = _line_kit_inlay_adapter(line, header)
+        _build_kit_block_from_input(kinp, db)
         kind = line.kit_kind.upper()
         exclude_main_stock_cost = kind == "STOCK" and bool(line.kit_paid_separately) and bool(line.stock_kit_lines)
         stock_fn = _apply_stock_kit_usage if apply_kit_stock else estimate_stock_kit_usage
@@ -429,7 +430,6 @@ def compute_visit_service_line(
                 kit_cost_total += effective
                 kit_client_total += effective
                 kit_studio_fund += float(sf)
-        _build_kit_block_from_input(kinp, db)
 
     addons = max(0.0, float(line.addon_sales_amount or 0.0))
     addons_detail: dict[str, Any] = {}
