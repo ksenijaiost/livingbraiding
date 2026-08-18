@@ -236,8 +236,13 @@ def _validate_stock_selection(
     blanks_used: int,
     client_id: int | None = None,
     usage_by_key: dict[str, int] | None = None,
+    ensure_available: bool = True,
 ) -> Kit:
-    """Проверка без списания (для сборки JSON)."""
+    """Проверка комплекта. Остаток на складе — только если ensure_available=True.
+
+    После реального списания в том же запросе остаток уже 0: сборка JSON
+    не должна снова требовать заготовки на складе.
+    """
     kit = db.scalar(
         select(Kit)
         .where(Kit.id == int(kit_id))
@@ -245,6 +250,8 @@ def _validate_stock_selection(
     )
     if not kit or kit.is_archived or not kit.is_active:
         raise ValueError("Комплект не найден или недоступен")
+    if not ensure_available:
+        return kit
     require_composition_stock_rows_or_scalar_ok(db, kit)
 
     if kit_inventory_is_keyed(db, int(kit_id)):
@@ -1001,7 +1008,9 @@ def coerce_kit_kind(
     return kind
 
 
-def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock:
+def _build_kit_block_from_input(
+    inp: KitInlayFormInput, db: Session, *, ensure_available: bool = True
+) -> KitBlock:
     kind = coerce_kit_kind(
         inp.kit_kind,
         stock_kit_lines=inp.stock_kit_lines,
@@ -1021,6 +1030,7 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
                 blanks_used=line.blanks_used,
                 client_id=inp.existing_client_id,
                 usage_by_key=line.usage_by_key,
+                ensure_available=ensure_available,
             )
             from_stocks.append(
                 KitFromStock(
@@ -1084,6 +1094,7 @@ def _build_kit_block_from_input(inp: KitInlayFormInput, db: Session) -> KitBlock
                     blanks_used=line.blanks_used,
                     client_id=inp.existing_client_id,
                     usage_by_key=line.usage_by_key,
+                    ensure_available=ensure_available,
                 )
                 from_stocks_extra.append(
                     KitFromStock(
@@ -1149,7 +1160,8 @@ def build_payload_from_input(inp: KitInlayFormInput, db: Session) -> VisitServic
 
     kit_block = None
     if effective_requires_kit_block(service, answers, specs):
-        kit_block = _build_kit_block_from_input(inp, db)
+        # Остаток уже проверен и списан в compute_visit_service_line.
+        kit_block = _build_kit_block_from_input(inp, db, ensure_available=False)
 
     thermo_dump = None
     if effective_requires_thermo_block(service, answers, specs) and not service_requires_thermo_flow(service):
