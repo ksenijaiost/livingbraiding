@@ -322,6 +322,14 @@ def visit_services_catalog_line(visit: Visit) -> str:
 
 
 @dataclass(frozen=True)
+class VisitMasterServiceShare:
+    """Доля ЗП мастера по одной услуге визита (номер как в «Услуги визита»)."""
+
+    service_number: int
+    amount: float
+
+
+@dataclass(frozen=True)
 class VisitMasterPayRow:
     master_id: int
     master_name: str
@@ -330,6 +338,24 @@ class VisitMasterPayRow:
     correction_bonus: float
     hourly_help: float
     total: float
+    service_shares: tuple[VisitMasterServiceShare, ...] = ()
+
+    @property
+    def breakdown_paren(self) -> str:
+        """Текст в скобках: «1. 900, 2. 1200, помощь 250»."""
+        parts: list[str] = []
+        for share in self.service_shares:
+            amt = money_q2(float(share.amount or 0))
+            if amt <= 0:
+                continue
+            parts.append(f"{int(share.service_number)}. {amt:.0f}")
+        if self.mix_bonus > 0:
+            parts.append(f"бонус {money_q2(self.mix_bonus):.0f}")
+        if self.correction_bonus > 0:
+            parts.append(f"корр. {money_q2(self.correction_bonus):.0f}")
+        if self.hourly_help > 0:
+            parts.append(f"помощь {money_q2(self.hourly_help):.0f}")
+        return ", ".join(parts)
 
 
 def _master_display_name(user: User | None, master_id: int, db: Session | None) -> str:
@@ -388,21 +414,33 @@ def visit_masters_fund_total(visit: Visit) -> float:
     return money_q2(sum(visit_masters_fund_by_master(visit).values()))
 
 
+def _active_services_sorted(visit: Visit) -> list:
+    return sorted(
+        [vs for vs in (visit.services or []) if not vs.is_cancelled],
+        key=lambda s: (int(getattr(s, "sort_order", 0) or 0), int(getattr(s, "id", 0) or 0)),
+    )
+
+
 def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list[VisitMasterPayRow]:
     """ЗП каждого мастера по визиту: доля пула, коррекция и почасовая помощь."""
     from app.hourly_help import hourly_help_rows_from_visit
 
-    active_services = [vs for vs in (visit.services or []) if not vs.is_cancelled]
+    active_services = _active_services_sorted(visit)
     pool_by_master: dict[int, float] = {}
     correction_by_master: dict[int, float] = {}
     help_by_master: dict[int, float] = {}
+    # master_id -> service_number -> pool share
+    service_pool_by_master: dict[int, dict[int, float]] = {}
     names: dict[int, str] = {}
 
-    def add_pool(mid: int, amount: float, user: User | None) -> None:
+    def add_pool(mid: int, amount: float, user: User | None, service_number: int | None = None) -> None:
         if amount <= 0:
             return
         pool_by_master[mid] = money_q2(pool_by_master.get(mid, 0.0) + amount)
         names.setdefault(mid, _master_display_name(user, mid, db))
+        if service_number is not None:
+            by_svc = service_pool_by_master.setdefault(mid, {})
+            by_svc[service_number] = money_q2(by_svc.get(service_number, 0.0) + amount)
 
     def add_correction(mid: int, amount: float, user: User | None = None) -> None:
         if amount <= 0:
@@ -417,7 +455,7 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
         names.setdefault(mid, _master_display_name(None, mid, db))
 
     if active_services:
-        for vs in active_services:
+        for svc_num, vs in enumerate(active_services, start=1):
             pool = float(vs.masters_pool or 0)
             if visit.masters_scope == VisitMastersScope.PER_SERVICE:
                 master_rows = vs.masters or []
@@ -426,7 +464,7 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
             for m in master_rows:
                 mid = int(m.master_id)
                 share = money_q2(pool * float(m.percent or 0) / 100.0)
-                add_pool(mid, share, getattr(m, "master", None))
+                add_pool(mid, share, getattr(m, "master", None), service_number=svc_num)
             if getattr(vs, "correction_master_id", None) and float(getattr(vs, "correction_master_amount", 0) or 0) > 0:
                 mid = int(vs.correction_master_id)
                 add_correction(mid, float(getattr(vs, "correction_master_amount", 0) or 0))
@@ -435,7 +473,7 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
         for m in visit.masters or []:
             mid = int(m.master_id)
             share = money_q2(pool * float(m.percent or 0) / 100.0)
-            add_pool(mid, share, getattr(m, "master", None))
+            add_pool(mid, share, getattr(m, "master", None), service_number=1)
         if getattr(visit, "correction_master_id", None) and float(getattr(visit, "correction_master_amount", 0) or 0) > 0:
             mid = int(visit.correction_master_id)
             add_correction(mid, float(getattr(visit, "correction_master_amount", 0) or 0))
@@ -450,6 +488,12 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
         mix_bonus = 0.0
         correction_bonus = correction_by_master.get(mid, 0.0)
         hourly_help = help_by_master.get(mid, 0.0)
+        svc_map = service_pool_by_master.get(mid, {})
+        service_shares = tuple(
+            VisitMasterServiceShare(service_number=num, amount=svc_map[num])
+            for num in sorted(svc_map)
+            if svc_map[num] > 0
+        )
         rows.append(
             VisitMasterPayRow(
                 master_id=mid,
@@ -459,6 +503,7 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
                 correction_bonus=correction_bonus,
                 hourly_help=hourly_help,
                 total=money_q2(pool_share + mix_bonus + correction_bonus + hourly_help),
+                service_shares=service_shares,
             )
         )
     return rows
@@ -478,18 +523,24 @@ def _format_master_percent(pct: float) -> str:
     return s
 
 
-def build_visit_masters_lines(visit: Visit, db: Session | None = None) -> list[VisitServiceMastersLine]:
-    """Строки «номер услуги — мастер (доля %)» для карточки визита."""
-    active = sorted(
-        [vs for vs in (visit.services or []) if not vs.is_cancelled],
-        key=lambda s: (int(s.sort_order or 0), int(s.id or 0)),
-    )
+def _format_master_pay_amount(amount: float) -> str:
+    return f"{money_q2(amount):.0f}"
 
-    def format_master_rows(master_rows: list) -> str:
+
+def build_visit_masters_lines(visit: Visit, db: Session | None = None) -> list[VisitServiceMastersLine]:
+    """Строки «номер услуги — мастер (доля %, ЗП)» для карточки визита."""
+    active = _active_services_sorted(visit)
+
+    def format_master_rows(master_rows: list, service_pool: float) -> str:
         parts: list[str] = []
         for m in sorted(master_rows, key=lambda x: (int(x.master_id or 0), int(getattr(x, "id", 0) or 0))):
             name = _master_display_name(getattr(m, "master", None), int(m.master_id), db)
-            parts.append(f"{name} ({_format_master_percent(float(m.percent or 0))}%)")
+            pct = _format_master_percent(float(m.percent or 0))
+            pay = money_q2(float(service_pool or 0) * float(m.percent or 0) / 100.0)
+            if pay > 0:
+                parts.append(f"{name} ({pct}%, {_format_master_pay_amount(pay)} ₽)")
+            else:
+                parts.append(f"{name} ({pct}%)")
         return ", ".join(parts)
 
     lines: list[VisitServiceMastersLine] = []
@@ -499,13 +550,13 @@ def build_visit_masters_lines(visit: Visit, db: Session | None = None) -> list[V
                 master_rows = list(vs.masters or [])
             else:
                 master_rows = list(visit.masters or [])
-            text = format_master_rows(master_rows)
+            text = format_master_rows(master_rows, float(getattr(vs, "masters_pool", 0) or 0))
             if text:
                 lines.append(VisitServiceMastersLine(service_number=idx, masters_text=text))
         return lines
 
     if visit.masters:
-        text = format_master_rows(list(visit.masters))
+        text = format_master_rows(list(visit.masters), float(getattr(visit, "masters_pool", 0) or 0))
         if text:
             lines.append(VisitServiceMastersLine(service_number=1, masters_text=text))
     return lines
