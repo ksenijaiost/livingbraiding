@@ -349,7 +349,11 @@ def _work_new_template_response(
                 current_user, masters, {}, db, initial_lines=corr_initial
             ),
             default_date=date.today().isoformat(),
-            kinds=[{"value": k.value, "label": _kind_label(k)} for k in WorkKind],
+            kinds=[
+                {"value": k.value, "label": _kind_label(k)}
+                for k in WorkKind
+                if k != WorkKind.HAIR_EXT_PREP
+            ],
             scopes=[
                 {"value": s.value, "label": ("В наличие" if s == WorkScope.IN_STOCK else "На заказ")}
                 for s in WorkScope
@@ -541,6 +545,38 @@ def _g_bool(form: Any, name: str) -> bool:
         return False
     s = v.decode() if isinstance(v, (bytes, bytearray)) else v
     return parse_bool(s)
+
+
+def _custom_client_amount_override(
+    form: Any,
+    *,
+    flag_name: str,
+    amount_name: str,
+    pay_kind_name: str,
+    fin: Any,
+    current_user_id: int,
+    db: Session,
+) -> tuple[dict[int, float], float, int, ClientPaymentKind] | None:
+    """Если нажата «Своя сумма» — прибыль = сумма − себестоимость, деление по доле салона."""
+    if not _g_bool(form, flag_name):
+        return None
+    raw_custom = (_g_str(form, amount_name, "") or "").strip()
+    if not raw_custom:
+        raise ValueError("Укажите сумму с клиента для «Своей суммы».")
+    try:
+        custom_amt = int(parse_float(raw_custom, min=0.0, field_name=amount_name))
+    except ValueError:
+        raise ValueError("Сумма с клиента должна быть числом.")
+    if custom_amt <= 0:
+        raise ValueError("Сумма с клиента должна быть больше нуля.")
+    salon_pct = float(get_salon_cut_pct(db, current_user_id))
+    profit, master_pay, studio_pay = split_profit_from_client_amount(
+        custom_amt, float(fin.cost_total_amount), salon_pct
+    )
+    if profit < -0.01:
+        raise ValueError("Сумма с клиента меньше себестоимости.")
+    pay_kind = parse_client_payment_kind(_g_str(form, pay_kind_name))
+    return {int(current_user_id): float(master_pay)}, float(studio_pay), custom_amt, pay_kind
 
 
 def _list_masters_for_work_form(db: Session) -> list[User]:
@@ -1407,6 +1443,8 @@ async def work_new_post(
             kind = WorkKind(kind_raw)
         except ValueError:
             raise ValueError("Выберите вид работы.")
+        if kind == WorkKind.HAIR_EXT_PREP:
+            raise ValueError("Вид «Подготовка к наращиванию волос» больше не используется.")
 
         client_id: int | None = None
         amount_from_client: int | None = None
@@ -1738,29 +1776,51 @@ async def work_new_post(
         )
         staff_master_profit = dict(fin.staff_master_profit)
         corr_custom_studio_total: float | None = None
-        if kind == WorkKind.KIT_CORRECTION and _g_bool(form, "corr_use_custom_amount"):
-            raw_custom = (_g_str(form, "corr_custom_amount", "") or "").strip()
-            if not raw_custom:
-                raise ValueError("Укажите сумму с клиента для «Своей суммы».")
-            try:
-                custom_amt = int(parse_float(raw_custom, min=0.0, field_name="corr_custom_amount"))
-            except ValueError:
-                raise ValueError("Сумма с клиента должна быть числом.")
-            if custom_amt <= 0:
-                raise ValueError("Сумма с клиента должна быть больше нуля.")
-            salon_pct = float(get_salon_cut_pct(db, current_user.id))
-            profit, master_pay, studio_pay = split_profit_from_client_amount(
-                custom_amt, float(fin.cost_total_amount), salon_pct
+        custom_override = None
+        if kind == WorkKind.KIT_CORRECTION:
+            custom_override = _custom_client_amount_override(
+                form,
+                flag_name="corr_use_custom_amount",
+                amount_name="corr_custom_amount",
+                pay_kind_name="corr_client_payment_kind",
+                fin=fin,
+                current_user_id=current_user.id,
+                db=db,
             )
-            if profit < -0.01:
-                raise ValueError("Сумма с клиента меньше себестоимости коррекции.")
-            staff_master_profit = {current_user.id: float(master_pay)}
-            corr_custom_studio_total = float(studio_pay)
+        elif kind == WorkKind.MIX:
+            custom_override = _custom_client_amount_override(
+                form,
+                flag_name="mix_use_custom_amount",
+                amount_name="mix_custom_amount",
+                pay_kind_name="mix_client_payment_kind",
+                fin=fin,
+                current_user_id=current_user.id,
+                db=db,
+            )
+        elif kind == WorkKind.OTHER:
+            custom_override = _custom_client_amount_override(
+                form,
+                flag_name="other_use_custom_amount",
+                amount_name="other_custom_amount",
+                pay_kind_name="other_client_payment_kind",
+                fin=fin,
+                current_user_id=current_user.id,
+                db=db,
+            )
+        if custom_override is not None:
+            staff_master_profit, corr_custom_studio_total, custom_amt, pay_kind = custom_override
             amount_from_client = custom_amt
-            client_payment_kind = parse_client_payment_kind(_g_str(form, "corr_client_payment_kind"))
-            if "correction" in details:
+            client_payment_kind = pay_kind
+            if kind == WorkKind.KIT_CORRECTION and "correction" in details:
                 details["correction"]["use_custom_amount"] = True
                 details["correction"]["custom_amount"] = float(custom_amt)
+            elif kind == WorkKind.MIX:
+                details["use_custom_amount"] = True
+                details["custom_amount"] = float(custom_amt)
+            elif kind == WorkKind.OTHER:
+                other_d = details.setdefault("other", {})
+                other_d["use_custom_amount"] = True
+                other_d["custom_amount"] = float(custom_amt)
         if kind == WorkKind.KIT and kit_bu_correction:
             bd = details["kit"].get("bu_correction_details") or {}
             corr_fin = compute_work_financials(

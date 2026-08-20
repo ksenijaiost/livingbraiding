@@ -6,7 +6,7 @@
   <div class="lb-corr-custom-amount-panel card" style="margin-top: 0; padding: 12px; background: #fff;{% if not enabled %} display: none;{% endif %}">
     <input type="hidden" name="{{ pfx }}use_custom_amount" class="lb-corr-custom-amount-flag" value="{% if enabled %}1{% endif %}" />
     <div style="font-weight: 600; margin-bottom: 8px;">Своя сумма с клиента</div>
-    <p class="muted" style="font-size: 12px; margin: 0 0 10px;">Себестоимость считается по заполненным полям коррекции; остаток делится между мастером и студией.</p>
+    <p class="muted" style="font-size: 12px; margin: 0 0 10px;">{{ custom_amount_hint|default('Себестоимость считается по заполненным полям коррекции; остаток делится между мастером и студией.') }}</p>
     <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;">
       <div style="display: flex; gap: 8px; align-items: center;">
         <label style="margin: 0; white-space: nowrap;">Сумма с клиента</label>

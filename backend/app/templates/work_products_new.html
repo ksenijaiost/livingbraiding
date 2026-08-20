@@ -172,6 +172,11 @@
             <label style="margin:0;"><input type="radio" name="mix_complexity" value="LENGTH" {% if mc == 'LENGTH' %}checked{% endif %} /> сложная длина</label>
           </div>
         </div>
+        <div id="mix_custom_amount_wrap" style="display:none;">
+          {% with prefix='mix_', fp=fp, custom_amount_hint='Себестоимость — материал; прибыль делится между мастером и студией по доле салона.' %}
+            {% include "partials/correction_custom_amount_block.html" %}
+          {% endwith %}
+        </div>
       </div>
 
       <div id="rubber_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
@@ -223,6 +228,9 @@
             {% endfor %}
           </select>
         </div>
+        {% with prefix='other_', fp=fp, custom_amount_hint='Себестоимость — материал и расход по прайсу; прибыль делится между мастером и студией по доле салона.' %}
+          {% include "partials/correction_custom_amount_block.html" %}
+        {% endwith %}
       </div>
 
       <div id="correction_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
@@ -750,6 +758,21 @@
         payEl.innerHTML = lines.map(function (l) { return '<div>' + l + '</div>'; }).join('');
       }
       function setCost(text) { costEl.textContent = text || '—'; }
+      function applyCustomAmountPreview(prefix, cost, uid) {
+        var customOn = (document.querySelector('input[name="' + prefix + '_use_custom_amount"]') || {}).value === '1';
+        if (!customOn) return false;
+        var amtC = parseInt(String((document.querySelector('input[name="' + prefix + '_custom_amount"]') || {}).value || '0'), 10) || 0;
+        var salonPct = (meta && meta.salonCutPct != null) ? parseFloat(meta.salonCutPct) : 0.5;
+        var profitC = amtC - cost;
+        var studioC = profitC * salonPct;
+        var masterC = profitC - studioC;
+        setPayLines(applyHourlyHelpToPreviewLines([
+          ('ЗП «' + nameByUserId(st, uid) + '»: ' + money2(Math.max(0, masterC)) + ' ₽'),
+          ('Студия: ' + money2(Math.max(0, studioC)) + ' ₽')
+        ], st));
+        setCost('Себестоимость: ' + money2(cost) + ' ₽ · с клиента ' + money2(amtC) + ' ₽');
+        return true;
+      }
 
       setPieces('—', false);
 
@@ -896,19 +919,7 @@
 
         var uid1 = st.currentUserId || 0;
         var costCorr = mat + fxT;
-        var customOn = (document.querySelector('input[name="corr_use_custom_amount"]') || {}).value === '1';
-        if (customOn) {
-          var amtC = parseInt(String((document.querySelector('input[name="corr_custom_amount"]') || {}).value || '0'), 10) || 0;
-          var salonPct = (meta && meta.salonCutPct != null) ? parseFloat(meta.salonCutPct) : 0.5;
-          var profitC = amtC - costCorr;
-          var studioC = profitC * salonPct;
-          var masterC = profitC - studioC;
-          setPayLines(applyHourlyHelpToPreviewLines([
-            ('ЗП «' + nameByUserId(st, uid1) + '»: ' + money2(Math.max(0, masterC)) + ' ₽'),
-            ('Студия: ' + money2(Math.max(0, studioC)) + ' ₽')
-          ], st));
-          setCost('Себестоимость: ' + money2(costCorr) + ' ₽ · с клиента ' + money2(amtC) + ' ₽');
-        } else {
+        if (!applyCustomAmountPreview('corr', costCorr, uid1)) {
           setPayLines(applyHourlyHelpToPreviewLines([('ЗП «' + nameByUserId(st, uid1) + '»: ' + money2(payT * bonus) + ' ₽')], st));
           setCost('Себестоимость (итого): ' + money2(costCorr) + ' ₽ (материал + доп. расходы)');
         }
@@ -933,8 +944,11 @@
           if (rowOther.fixed_expense != null) fxO = parseFloat(rowOther.fixed_expense) || 0;
         }
         if (getScopeValue() === 'CUSTOM_ORDER') payO = payO * bonus;
-        setPayLines(applyHourlyHelpToPreviewLines(payO > 0 ? [('ЗП «' + nameByUserId(st, uidO) + '»: ' + money2(payO) + ' ₽')] : [], st));
-        setCost('Себестоимость (итого): ' + money2(mat + fxO) + ' ₽ (материал + доп. расходы)');
+        var costOther = mat + fxO;
+        if (!applyCustomAmountPreview('other', costOther, uidO)) {
+          setPayLines(applyHourlyHelpToPreviewLines(payO > 0 ? [('ЗП «' + nameByUserId(st, uidO) + '»: ' + money2(payO) + ' ₽')] : [], st));
+          setCost('Себестоимость (итого): ' + money2(costOther) + ' ₽ (материал + доп. расходы)');
+        }
         return;
       }
 
@@ -945,23 +959,10 @@
         var rate = parseFloat(rm[mc]) || 0;
         var payM = gramsTotal > 0 ? gramsTotal * rate : 0;
         var uid2 = st.currentUserId || 0;
-        setPayLines(applyHourlyHelpToPreviewLines([('ЗП «' + nameByUserId(st, uid2) + '»: ' + money2(payM) + ' ₽')], st));
-        setCost('Себестоимость (итого): ' + money2(mat) + ' ₽ (материал + доп. расходы)');
-        return;
-      }
-
-      if (k === 'OTHER') {
-        var gramsOther = kan + kud;
-        var mixSrcOther = (document.querySelector('input[name="mix_source"]:checked') || {}).value || 'NO_MIX';
-        var payOther = 0;
-        if (gramsOther > 0 && mixSrcOther === 'SELF_MIXED') {
-          var mcOther = (document.querySelector('input[name="mix_complexity"]:checked') || {}).value || 'STANDARD';
-          var rmOther = (meta && meta.mixRates) ? meta.mixRates : {};
-          payOther = gramsOther * (parseFloat(rmOther[mcOther]) || 0);
+        if (!applyCustomAmountPreview('mix', mat, uid2)) {
+          setPayLines(applyHourlyHelpToPreviewLines([('ЗП «' + nameByUserId(st, uid2) + '»: ' + money2(payM) + ' ₽')], st));
+          setCost('Себестоимость (итого): ' + money2(mat) + ' ₽ (материал + доп. расходы)');
         }
-        var uidOther = st.currentUserId || 0;
-        setPayLines(payOther > 0 ? [('ЗП «' + nameByUserId(st, uidOther) + '»: ' + money2(payOther) + ' ₽')] : []);
-        setCost('Себестоимость (итого): ' + money2(mat) + ' ₽ (материал + доп. расходы)');
         return;
       }
 
@@ -1394,6 +1395,8 @@
         var st0 = document.querySelector('input[name="mix_complexity"][value="STANDARD"]');
         if (st0) st0.checked = true;
       }
+      var mixCustom = document.getElementById('mix_custom_amount_wrap');
+      if (mixCustom) mixCustom.style.display = isMixKind ? 'block' : 'none';
     }
     document.querySelectorAll('input[name="scope"]').forEach(function (el) {
       el.addEventListener('change', syncClientBlock);
@@ -1439,7 +1442,7 @@
     if (corrWash) corrWash.addEventListener('change', function () { syncCorrectionRules(); syncPriceHint(); syncWorkPreview(); });
     var corrCircle = document.getElementById('corr_circle');
     if (corrCircle) corrCircle.addEventListener('change', function(){ syncPriceHint(); syncWorkPreview(); });
-    document.querySelectorAll('input[name="corr_trim_qty"], input[name="corr_hourly_hours"], input[name="corr_steam"], input[name="corr_kit_description"], input[name="corr_kit_blanks_count"], input[name="corr_custom_amount"], input[name="corr_client_payment_kind"], input[name="rubber_attach_qty"], input[name="rubber_braids_qty"], select[name="rubber_variant"], input[name="mix_complexity"], input[name="mix_source"]').forEach(function(el){ el.addEventListener('change', function(){ syncPriceHint(); syncWorkPreview(); }); el.addEventListener('input', function(){ syncPriceHint(); syncWorkPreview(); }); });
+    document.querySelectorAll('input[name="corr_trim_qty"], input[name="corr_hourly_hours"], input[name="corr_steam"], input[name="corr_kit_description"], input[name="corr_kit_blanks_count"], input[name="corr_custom_amount"], input[name="corr_client_payment_kind"], input[name="mix_custom_amount"], input[name="mix_client_payment_kind"], input[name="other_custom_amount"], input[name="other_client_payment_kind"], input[name="rubber_attach_qty"], input[name="rubber_braids_qty"], select[name="rubber_variant"], input[name="mix_complexity"], input[name="mix_source"]').forEach(function(el){ el.addEventListener('change', function(){ syncPriceHint(); syncWorkPreview(); }); el.addEventListener('input', function(){ syncPriceHint(); syncWorkPreview(); }); });
     document.addEventListener('lbCorrCustomAmountChanged', function () { syncWorkPreview(); syncPriceHint(); });
     document.querySelectorAll('input[name="kanekalon_grams"], input[name="kudri_grams"]').forEach(function (el) {
       el.addEventListener('change', function () { syncMixUI(); syncWorkPreview(); if (typeof window.syncKitPreview === 'function') window.syncKitPreview(); });

@@ -248,6 +248,9 @@
           <div class="muted" style="font-size: 12px; margin-top: 6px;">
             Позиция прайса: {{ other_product_label or ("#" ~ other_detail.catalog_product_id) }}
           </div>
+          {% if other_detail.get("use_custom_amount") %}
+            <div class="muted" style="font-size: 12px; margin-top: 6px;">Своя сумма с клиента: {{ other_detail.get("custom_amount") }} ₽</div>
+          {% endif %}
         </div>
       {% endif %}
 
@@ -339,6 +342,9 @@
           {% if details.get("mix_complexity") and row.mix_source and row.mix_source.value != "NO_MIX" %}
             <div class="muted" style="font-size: 12px; margin-top: 2px;">Сложность: {{ mix_complexity_label }}</div>
           {% endif %}
+        {% endif %}
+        {% if row.kind.value == "MIX" and details.get("use_custom_amount") %}
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">Своя сумма с клиента: {{ details.get("custom_amount") }} ₽</div>
         {% endif %}
       </div>
 
