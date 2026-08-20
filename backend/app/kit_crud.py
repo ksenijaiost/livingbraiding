@@ -192,7 +192,13 @@ def parse_kit_admin_form(form: Any, *, for_create: bool) -> KitAdminFormData:
             pieces_total = inventory_piece_count(composition_lines)
         else:
             pieces_total = _g_int(form, "pieces_total", 0)
-        pieces_available = _g_int(form, "pieces_available", 0)
+        mode = (_g_str(form, "stock_remainder_mode") or "all").strip().lower()
+        if mode == "choose":
+            from app.kit_blank_stock_core import read_blank_stock_qty_from_admin_form
+
+            pieces_available = sum(int(v) for v in read_blank_stock_qty_from_admin_form(form).values())
+        else:
+            pieces_available = pieces_total
 
     return KitAdminFormData(
         sku=_g_str(form, "sku"),
@@ -561,6 +567,7 @@ def kit_edit_error_prefill(form: Any) -> dict[str, Any]:
         "blanks_condition": d.blanks_condition.value,
         "author_external": "on" if _g_bool(form, "author_external") else "",
         "kit_author_ids": parse_kit_author_user_ids_from_form(form),
+        "stock_remainder_mode": _g_str(form, "stock_remainder_mode") or "all",
     }
     try:
         for name in list(form.keys()):

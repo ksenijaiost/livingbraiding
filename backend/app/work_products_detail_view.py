@@ -165,6 +165,13 @@ def work_profit_explanation(work: WorkForInventory, details: dict[str, Any]) -> 
         ]
 
     if kind == WorkKind.OTHER:
+        other = details.get("other") or {}
+        if other.get("use_custom_amount"):
+            return [
+                "Указана своя сумма с клиента: прибыль = сумма − себестоимость, "
+                "далее деление по доле салона (как в визите).",
+                "ЗП мастера — остаток после доли студии.",
+            ]
         return [
             "Мастер и студия — по выбранной позиции прайса (master_pay и studio_pay).",
             "На заказ применяется множитель бонуса за индивидуальный заказ, если он задан в настройках.",
@@ -185,6 +192,12 @@ def work_profit_explanation(work: WorkForInventory, details: dict[str, Any]) -> 
         ]
 
     if kind == WorkKind.MIX:
+        if details.get("use_custom_amount"):
+            return [
+                "Указана своя сумма с клиента: прибыль = сумма − себестоимость материала, "
+                "далее деление по доле салона (как в визите).",
+                "ЗП мастера — остаток после доли студии.",
+            ]
         return [
             "ЗП мастера — граммы материала × ставка смешки по выбранной сложности.",
             "Студия на этапе смешки долю не получает.",

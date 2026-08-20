@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
 from app.db.models import CatalogProduct, Kit, KitBlankStock, KitBlanksCondition, KitReserve
+from app.kit_composition import KIT_INVENTORY_PIECE_EXCLUDE_KEYS
 from app.kit_crud import kit_key_excluded_from_client_price
 from app.time_utils import utcnow_naive
 
@@ -80,20 +81,109 @@ def composition_keys_intersection_catalog(
     return out
 
 
+_USED_STOCK_SUFFIX = "__USED__"
+
+
+def _stock_key_for_condition(base_key: str, condition: str) -> str:
+    k = str(base_key or "").strip()
+    if not k:
+        return ""
+    return k if str(condition or "NEW").upper() != "USED" else f"{k}{_USED_STOCK_SUFFIX}"
+
+
+def _split_stock_key_condition(stock_key: str) -> tuple[str, str]:
+    raw = str(stock_key or "").strip()
+    if not raw:
+        return "", "NEW"
+    if raw.endswith(_USED_STOCK_SUFFIX):
+        return raw[: -len(_USED_STOCK_SUFFIX)], "USED"
+    if raw.endswith("_USED"):
+        return raw[: -len("_USED")], "USED"
+    return raw, "NEW"
+
+
+def inventory_qty_by_key_from_kit(kit: Kit) -> dict[str, int]:
+    """Количество заготовок по ключу склада из состава (NEW и USED — отдельно)."""
+    from app.kit_composition_lines import filter_nonempty, lines_from_json
+
+    raw = getattr(kit, "composition_json", None)
+    lines = filter_nonempty(lines_from_json(str(raw))) if raw else []
+    if lines:
+        out: dict[str, int] = {}
+        for ln in lines:
+            if ln.total_qty() <= 0 or str(ln.key or "") in KIT_INVENTORY_PIECE_EXCLUDE_KEYS:
+                continue
+            stock_key = _stock_key_for_condition(ln.key, getattr(ln.condition, "value", ln.condition))
+            if not stock_key:
+                continue
+            out[stock_key] = out.get(stock_key, 0) + int(ln.total_qty())
+        return {k: int(v) for k, v in out.items() if int(v) > 0}
+    comp = parse_composition_totals(kit)
+    return {
+        str(k): int(v)
+        for k, v in (comp or {}).items()
+        if int(v) > 0 and str(k) not in KIT_INVENTORY_PIECE_EXCLUDE_KEYS
+    }
+
+
+def infer_stock_remainder_mode(db: Session, kit: Kit) -> str:
+    """all — остаток совпадает с составом; choose — задан отдельно по видам."""
+    inv = inventory_qty_by_key_from_kit(kit)
+    if kit.id is not None and kit_inventory_is_keyed(db, int(kit.id)):
+        sm = {k: int(v) for k, v in blank_stock_qty_map(db, int(kit.id)).items() if int(v) > 0}
+        inv_pos = {k: int(v) for k, v in inv.items() if int(v) > 0}
+        if sm == inv_pos:
+            return "all"
+        return "choose"
+    if int(kit.pieces_available or 0) == int(kit.pieces_total or 0):
+        return "all"
+    return "choose"
+
+
+def apply_kit_admin_stock_remainder(
+    db: Session,
+    kit: Kit,
+    *,
+    mode: str,
+    blank_qty: dict[str, int],
+) -> None:
+    """Записать остаток: весь состав или выбранные количества по видам."""
+    inv = inventory_qty_by_key_from_kit(kit)
+    if not inv:
+        raise ValueError("Нет ключей состава для остатков по видам (заполните таблицу состава).")
+    allowed = set(inv.keys())
+    mode_n = (mode or "all").strip().lower()
+    if mode_n != "choose":
+        replace_blank_stock_for_kit(db, kit, quantities=inv, allowed_keys=allowed)
+        return
+    posted: dict[str, int] = {k: 0 for k in allowed}
+    for k, v in (blank_qty or {}).items():
+        if k in allowed:
+            posted[k] = max(0, int(v))
+    replace_blank_stock_for_kit(db, kit, quantities=posted, allowed_keys=allowed)
+
+
 def blank_stock_edit_rows_for_kit(db: Session, kit: Kit) -> list[dict[str, Any]]:
     """Строки для таблицы «остаток по видам» в форме редактирования."""
-    comp = parse_composition_totals(kit)
-    price_map, meta_by_key, label_by_key = load_catalog_kit_maps(db)
-    keys = composition_keys_intersection_catalog(comp, meta_by_key) or sorted(comp.keys())
-    sm = blank_stock_qty_map(db, int(kit.id))
+    inv = inventory_qty_by_key_from_kit(kit)
+    price_map, _, label_by_key = load_catalog_kit_maps(db)
+    keys = sorted(inv.keys())
+    sm = blank_stock_qty_map(db, int(kit.id)) if kit.id is not None else {}
+    if kit.id is not None and inv and not kit_inventory_is_keyed(db, int(kit.id)):
+        sm = distribute_scalar_to_keys(inv, int(kit.pieces_available or 0))
     rows: list[dict[str, Any]] = []
     for k in keys:
+        base_key, cond = _split_stock_key_condition(k)
+        is_used = cond == "USED"
+        fallback_label = label_by_key.get(base_key, base_key)
         rows.append(
             {
-                "key": k,
+                "key": base_key,
+                "raw_key": k,
                 "qty": int(sm.get(k, 0)),
-                "label": label_by_key.get(k, k),
-                "price": price_map.get(k),
+                "label": fallback_label,
+                "price": price_map.get(base_key),
+                "condition_label": "б/у" if is_used else "нов",
             }
         )
     return rows
@@ -543,18 +633,15 @@ def ensure_blank_stock_from_composition(
         return False
     if kit_inventory_is_keyed(db, int(kit.id)):
         return False
-    comp = parse_composition_totals(kit)
-    if not comp:
+    inv = inventory_qty_by_key_from_kit(kit)
+    if not inv:
         return False
     if int(kit.pieces_available or 0) <= 0 and int(kit.pieces_total or 0) <= 0:
         return False
-    blank_qty = {str(k): int(v) for k, v in (quantities or comp).items() if int(v) > 0}
+    blank_qty = {str(k): int(v) for k, v in (quantities or inv).items() if int(v) > 0}
     if not blank_qty:
         return False
-    _, meta, _ = load_catalog_kit_maps(db)
-    allowed = set(composition_keys_intersection_catalog(comp, meta)) if comp else set()
-    if not allowed and comp:
-        allowed = set(comp.keys())
+    allowed = set(inv.keys())
     if not allowed:
         allowed = set(blank_qty.keys())
     replace_blank_stock_for_kit(db, kit, quantities=blank_qty, allowed_keys=allowed)
@@ -566,8 +653,8 @@ def require_composition_stock_rows_or_scalar_ok(db: Session, kit: Kit) -> None:
     Если в составе есть ключи и на складе есть заготовки, но строк kit_blank_stock нет —
     списание «из наличия» блокируем (админ должен завести остатки по видам).
     """
-    comp = parse_composition_totals(kit)
-    if not comp:
+    inv = inventory_qty_by_key_from_kit(kit)
+    if not inv:
         return
     if int(kit.pieces_available or 0) <= 0:
         return

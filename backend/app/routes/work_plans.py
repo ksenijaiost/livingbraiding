@@ -54,7 +54,11 @@ def _masters_for_form(db: Session) -> list[User]:
 
 
 def _kind_options() -> list[dict[str, str]]:
-    return [{"value": k.value, "label": work_kind_label(k)} for k in WorkKind]
+    return [
+        {"value": k.value, "label": work_kind_label(k)}
+        for k in WorkKind
+        if k != WorkKind.HAIR_EXT_PREP
+    ]
 
 
 @router.get("", response_class=HTMLResponse)
@@ -243,6 +247,8 @@ async def work_plan_new_post(
             if not kind_raw:
                 raise ValueError("Выберите вид работы.")
             work_kind = WorkKind(kind_raw)
+            if work_kind == WorkKind.HAIR_EXT_PREP:
+                raise ValueError("Вид «Подготовка к наращиванию волос» больше не используется.")
             master_ids = _parse_work_product_master_ids(
                 form, is_admin=is_admin, current_user_id=current_user.id
             )

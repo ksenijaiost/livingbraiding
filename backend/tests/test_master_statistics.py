@@ -255,3 +255,66 @@ def test_visit_statistics_splits_total_and_selected_master_pay(memory_db) -> Non
     assert row_a.masters_pay_total > row_a.master_payroll
     assert row_a.master_payroll == row_b.master_payroll
     assert row_a.masters_pay_total == pytest.approx(row_a.master_payroll + row_b.master_payroll)
+
+
+def test_build_master_statistics_daily_rows(memory_db) -> None:
+    db = memory_db
+    master_id, svc_id, client_id = _seed_master(db)
+    performed = date.today()
+    save_visit_with_services(
+        db,
+        master_id,
+        MultiServiceVisitInput(
+            header=VisitHeaderInput(
+                client_mode="existing",
+                existing_client_id=client_id,
+                draft_name="",
+                draft_phone="",
+                draft_telegram="",
+                draft_vk="",
+                draft_instagram="",
+                draft_other_contact="",
+                client_type=VisitClientType.RETURNING,
+                performed_date=performed,
+                duration_minutes=60,
+                masters_scope=VisitMastersScope.VISIT,
+                same_master_shares_all_services=False,
+                visit_master_allocations=[(master_id, 100)],
+            ),
+            lines=[
+                VisitServiceLineInput(
+                    service_id=svc_id,
+                    client_discount_percent=0,
+                    amount_from_client=4000,
+                    kanekalon_grams=0,
+                    kudri_grams=0,
+                    mix_source=MixSource.NO_MIX,
+                    mix_complexity=None,
+                    mix_bonus_master_id=None,
+                    amortization_level=None,
+                    kit_kind="STOCK",
+                )
+            ],
+        ),
+    )
+    from app.db.models import HourlyWorkEntry
+
+    db.add(
+        HourlyWorkEntry(
+            performed_date=datetime.combine(performed, datetime.min.time()),
+            duration_minutes=30,
+            amount=250.0,
+            comment="доп",
+            master_user_id=master_id,
+            created_by_user_id=master_id,
+        )
+    )
+    db.commit()
+    stats = build_master_statistics(db, master_id, performed.replace(day=1), performed)
+    assert stats is not None
+    assert len(stats.daily_rows) >= 1
+    day0 = stats.daily_rows[0]
+    assert day0.day == performed
+    assert len(day0.events) == 2
+    assert {x.event_short_label for x in day0.events} == {"визит", "почас"}
+    assert day0.total_master_payroll == pytest.approx(sum(x.master_payroll for x in day0.events))

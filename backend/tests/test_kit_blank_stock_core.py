@@ -11,12 +11,16 @@ from app.db import models as _orm_models  # noqa: F401 — register models on Ba
 from app.db.base import Base
 from app.db.models import CatalogProduct, Client, Kit, KitBlankStock, KitBlanksCondition, KitReserve, User, UserRole
 from app.kit_blank_stock_core import (
+    apply_kit_admin_stock_remainder,
+    blank_stock_edit_rows_for_kit,
     blank_stock_qty_map,
     build_usage_breakdown_keyed,
     decrement_blank_stock_keys,
     distribute_scalar_to_keys,
     ensure_blank_stock_from_composition,
     infer_kit_blanks_condition_from_totals,
+    infer_stock_remainder_mode,
+    inventory_qty_by_key_from_kit,
     keyed_cost_selected,
     release_client_kit_reserves_into_free_pool,
     repair_all_kits_pieces_available_from_blank_stock,
@@ -324,3 +328,136 @@ def test_repair_all_aligns_available_to_blank_stock(memory_db: Session) -> None:
     assert n >= 1
     assert int(kit.pieces_available) == 0
     assert kit.is_in_stock is False
+
+
+def _mixed_kit(db: Session, *, se_qty: int, de_qty: int, stock: dict[str, int] | None) -> Kit:
+    total = se_qty + de_qty
+    kit = Kit(
+        sku="INV-74",
+        title="Инвентаризация",
+        pieces_total=total,
+        pieces_available=total if stock is None else sum(stock.values()),
+        blank_type_se=True,
+        blank_type_de=True,
+        stock_price_total=1000.0,
+        cost_total=400.0,
+        composition_json=json.dumps(
+            [
+                {"key": "SE_BRAID_LONG", "qty": se_qty},
+                {"key": "DE_BRAID_LONG", "qty": de_qty},
+                {"key": "SE_TRIM_SHORT", "qty": 3},
+            ],
+            ensure_ascii=False,
+        ),
+        created_at=datetime(2026, 8, 20, 12, 0, 0),
+        is_in_stock=True,
+    )
+    db.add(kit)
+    db.flush()
+    if stock is not None:
+        for k, q in stock.items():
+            if int(q) > 0:
+                db.add(KitBlankStock(kit_id=kit.id, kit_key=k, qty=int(q)))
+        db.flush()
+    return kit
+
+
+def _mixed_condition_kit(db: Session, *, stock: dict[str, int] | None = None) -> Kit:
+    kit = Kit(
+        sku="INV-COND",
+        title="Инвентаризация с б/у",
+        pieces_total=80,
+        pieces_available=80 if stock is None else sum(stock.values()),
+        blank_type_se=True,
+        stock_price_total=1000.0,
+        cost_total=400.0,
+        composition_json=json.dumps(
+            [
+                {"key": "SE_CURL", "condition": "NEW", "qty": 28},
+                {"key": "SE_CURL", "condition": "USED", "used_price_pct": 60, "qty": 52},
+            ],
+            ensure_ascii=False,
+        ),
+        created_at=datetime(2026, 8, 20, 12, 0, 0),
+        is_in_stock=True,
+    )
+    db.add(kit)
+    db.flush()
+    if stock is not None:
+        for k, q in stock.items():
+            if int(q) > 0:
+                db.add(KitBlankStock(kit_id=kit.id, kit_key=k, qty=int(q)))
+        db.flush()
+    return kit
+
+
+def test_inventory_qty_by_key_excludes_trims(memory_db: Session) -> None:
+    kit = _mixed_kit(memory_db, se_qty=72, de_qty=2, stock=None)
+    assert inventory_qty_by_key_from_kit(kit) == {"SE_BRAID_LONG": 72, "DE_BRAID_LONG": 2}
+
+
+def test_inventory_qty_by_key_splits_new_and_used_same_kind(memory_db: Session) -> None:
+    kit = _mixed_condition_kit(memory_db, stock=None)
+    assert inventory_qty_by_key_from_kit(kit) == {"SE_CURL": 28, "SE_CURL__USED__": 52}
+
+
+def test_infer_stock_remainder_mode_all_when_stock_matches_composition(memory_db: Session) -> None:
+    db = memory_db
+    kit = _mixed_kit(db, se_qty=72, de_qty=2, stock={"SE_BRAID_LONG": 72, "DE_BRAID_LONG": 2})
+    db.commit()
+    assert infer_stock_remainder_mode(db, kit) == "all"
+
+
+def test_infer_stock_remainder_mode_choose_when_stock_differs(memory_db: Session) -> None:
+    db = memory_db
+    kit = _mixed_kit(db, se_qty=72, de_qty=2, stock={"SE_BRAID_LONG": 67, "DE_BRAID_LONG": 2})
+    db.commit()
+    assert infer_stock_remainder_mode(db, kit) == "choose"
+
+
+def test_apply_admin_remainder_all_copies_composition(memory_db: Session) -> None:
+    db = memory_db
+    kit = _mixed_kit(db, se_qty=72, de_qty=2, stock={"SE_BRAID_LONG": 67, "DE_BRAID_LONG": 2})
+    db.commit()
+    apply_kit_admin_stock_remainder(db, kit, mode="all", blank_qty={"SE_BRAID_LONG": 1})
+    db.commit()
+    db.refresh(kit)
+    assert blank_stock_qty_map(db, kit.id) == {"SE_BRAID_LONG": 72, "DE_BRAID_LONG": 2}
+    assert int(kit.pieces_available) == 74
+    assert infer_stock_remainder_mode(db, kit) == "all"
+
+
+def test_apply_admin_remainder_choose_uses_posted_qty(memory_db: Session) -> None:
+    db = memory_db
+    kit = _mixed_kit(db, se_qty=72, de_qty=2, stock={"SE_BRAID_LONG": 72, "DE_BRAID_LONG": 2})
+    db.commit()
+    apply_kit_admin_stock_remainder(
+        db, kit, mode="choose", blank_qty={"SE_BRAID_LONG": 70, "DE_BRAID_LONG": 1}
+    )
+    db.commit()
+    db.refresh(kit)
+    assert blank_stock_qty_map(db, kit.id) == {"SE_BRAID_LONG": 70, "DE_BRAID_LONG": 1}
+    assert int(kit.pieces_available) == 71
+    assert infer_stock_remainder_mode(db, kit) == "choose"
+
+
+def test_blank_stock_edit_rows_skip_trims(memory_db: Session) -> None:
+    db = memory_db
+    kit = _mixed_kit(db, se_qty=72, de_qty=2, stock={"SE_BRAID_LONG": 70, "DE_BRAID_LONG": 1})
+    db.commit()
+    rows = blank_stock_edit_rows_for_kit(db, kit)
+    assert [r["key"] for r in rows] == ["DE_BRAID_LONG", "SE_BRAID_LONG"]
+    by_key = {r["key"]: r["qty"] for r in rows}
+    assert by_key == {"DE_BRAID_LONG": 1, "SE_BRAID_LONG": 70}
+
+
+def test_blank_stock_edit_rows_split_new_and_used_same_kind(memory_db: Session) -> None:
+    db = memory_db
+    _catalog_blank(db, "SE_CURL")
+    kit = _mixed_condition_kit(db, stock={"SE_CURL": 28, "SE_CURL__USED__": 52})
+    db.commit()
+    rows = blank_stock_edit_rows_for_kit(db, kit)
+    assert [r["key"] for r in rows] == ["SE_CURL", "SE_CURL"]
+    assert [r["condition_label"] for r in rows] == ["нов", "б/у"]
+    by_raw_key = {r["raw_key"]: r["qty"] for r in rows}
+    assert by_raw_key == {"SE_CURL": 28, "SE_CURL__USED__": 52}

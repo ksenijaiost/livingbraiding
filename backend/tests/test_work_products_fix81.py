@@ -280,3 +280,98 @@ def test_post_work_rubber_elastic_size_from_messy_catalog(memory_db) -> None:
     details = json.loads(work.details_json or "{}")
     assert details["rubber"]["type"] == "TAIL_ELASTIC_MINI"
     assert details["rubber"]["qty"] == 27
+
+
+def test_post_work_mix_custom_amount(memory_db) -> None:
+    from app.db.models import ClientPaymentKind
+
+    master = _seed_master(memory_db)
+    resp = _post_work_form(
+        memory_db,
+        master,
+        {
+            "performed_date": "2025-06-01",
+            "scope": "IN_STOCK",
+            "kind": "MIX",
+            "kanekalon_grams": "10",
+            "mix_complexity": "STANDARD",
+            "mix_use_custom_amount": "1",
+            "mix_custom_amount": "5000",
+            "mix_client_payment_kind": "NON_CASH",
+        },
+    )
+    assert resp.status_code == 303
+    work = memory_db.scalar(select(WorkForInventory).order_by(WorkForInventory.id.desc()))
+    assert work is not None
+    assert work.kind == WorkKind.MIX
+    assert work.amount_from_client == 5000
+    assert work.client_payment_kind == ClientPaymentKind.NON_CASH
+    details = json.loads(work.details_json or "{}")
+    assert details.get("use_custom_amount") is True
+    assert details.get("custom_amount") == 5000
+    assert work.master_profit_amount + work.studio_profit_amount == pytest.approx(5000.0)
+
+
+def test_post_work_other_custom_amount(memory_db) -> None:
+    from app.db.models import CatalogProduct, ClientPaymentKind
+
+    master = _seed_master(memory_db)
+    memory_db.add(
+        CatalogProduct(
+            category_name="Заказ",
+            subcategory_name="Другое",
+            name="Другое — своя сумма",
+            price=100.0,
+            meta_json=json.dumps({"master_pay": 40.0, "studio_pay": 10.0, "fixed_expense": 0.0}),
+            sort_order=1,
+            is_active=True,
+        )
+    )
+    memory_db.commit()
+    other_id = int(memory_db.scalar(select(CatalogProduct.id)))
+    resp = _post_work_form(
+        memory_db,
+        master,
+        {
+            "performed_date": "2025-06-01",
+            "scope": "IN_STOCK",
+            "kind": "OTHER",
+            "other_product_id": str(other_id),
+            "other_use_custom_amount": "1",
+            "other_custom_amount": "4000",
+            "other_client_payment_kind": "CASH",
+        },
+    )
+    assert resp.status_code == 303
+    work = memory_db.scalar(select(WorkForInventory).order_by(WorkForInventory.id.desc()))
+    assert work is not None
+    assert work.kind == WorkKind.OTHER
+    assert work.amount_from_client == 4000
+    assert work.client_payment_kind == ClientPaymentKind.CASH
+    details = json.loads(work.details_json or "{}")
+    assert details.get("other", {}).get("use_custom_amount") is True
+    assert details.get("other", {}).get("custom_amount") == 4000
+    assert work.master_profit_amount + work.studio_profit_amount == pytest.approx(4000.0)
+
+
+def test_post_work_hair_ext_prep_rejected(memory_db) -> None:
+    master = _seed_master(memory_db)
+    resp = _post_work_form(
+        memory_db,
+        master,
+        {
+            "performed_date": "2025-06-01",
+            "scope": "IN_STOCK",
+            "kind": "HAIR_EXT_PREP",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_work_kind_options_exclude_hair_ext_prep() -> None:
+    from app.routes.work_plans import _kind_options
+
+    values = {x["value"] for x in _kind_options()}
+    assert "MIX" in values
+    assert "OTHER" in values
+    assert "HAIR_EXT_PREP" not in values

@@ -189,3 +189,48 @@ def test_try_fill_stock_and_cost_from_composition_lines(memory_db) -> None:
     try_fill_kit_admin_cost_total_from_composition(memory_db, d)
     assert d.stock_price_total == pytest.approx(1000.0)
     assert d.cost_total == pytest.approx(160.0 + 10.0)
+
+
+def test_parse_kit_admin_form_edit_all_available_equals_inventory() -> None:
+    form = FormData(
+        [
+            ("sku", "T-SKU"),
+            ("title", "T"),
+            ("blank_type_se", "on"),
+            ("stock_price_total", "100"),
+            ("cost_total", "40"),
+            ("discount_percent", "0"),
+            ("stock_remainder_mode", "all"),
+            ("pieces_available", "1"),
+            ("kit_line_0_key", "SE_BRAID_LONG"),
+            ("kit_line_0_qty_0", "10"),
+            ("kit_line_1_key", "SE_TRIM_SHORT"),
+            ("kit_line_1_qty_0", "2"),
+        ]
+    )
+    d = parse_kit_admin_form(form, for_create=False)
+    assert d.pieces_total == 10
+    assert d.pieces_available == 10
+
+
+def test_parse_kit_admin_form_edit_choose_sums_blank_stock() -> None:
+    form = FormData(
+        [
+            ("sku", "T-SKU"),
+            ("title", "T"),
+            ("blank_type_se", "on"),
+            ("stock_price_total", "100"),
+            ("cost_total", "40"),
+            ("discount_percent", "0"),
+            ("stock_remainder_mode", "choose"),
+            ("blank_stock_qty__SE_BRAID_LONG", "7"),
+            ("blank_stock_qty__DE_BRAID_LONG", "2"),
+            ("kit_line_0_key", "SE_BRAID_LONG"),
+            ("kit_line_0_qty_0", "10"),
+            ("kit_line_1_key", "DE_BRAID_LONG"),
+            ("kit_line_1_qty_0", "2"),
+        ]
+    )
+    d = parse_kit_admin_form(form, for_create=False)
+    assert d.pieces_total == 12
+    assert d.pieces_available == 9
