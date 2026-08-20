@@ -118,6 +118,44 @@
       });
     }
 
+    function inventoryFromLines(lines, st) {
+      var ex = {};
+      (st.excludeFromInventoryPieceCount || []).forEach(function (k) { ex[k] = true; });
+      var total = 0;
+      var byKey = {};
+      lines.forEach(function (ln) {
+        var key = ln.key || '';
+        var qty = lineQty(ln);
+        if (!key || qty <= 0 || ex[key]) return;
+        byKey[key] = (byKey[key] || 0) + qty;
+        total += qty;
+      });
+      return { total: total, byKey: byKey };
+    }
+    function remainderMode() {
+      var el = document.querySelector('input.kit-remainder-mode:checked');
+      return el ? String(el.value || 'all') : 'all';
+    }
+    function syncRemainderUi(inv) {
+      var wrap = document.getElementById('kit_blank_stock_wrap');
+      var availInp = document.getElementById('kit_pieces_available');
+      var choose = remainderMode() === 'choose';
+      if (wrap) wrap.style.display = choose ? '' : 'none';
+      document.querySelectorAll('.kit-blank-stock-qty').forEach(function (inp) {
+        inp.disabled = !choose;
+      });
+      if (!availInp) return;
+      if (!choose) {
+        availInp.value = String(inv && inv.total ? inv.total : 0);
+        return;
+      }
+      var sum = 0;
+      document.querySelectorAll('.kit-blank-stock-qty').forEach(function (inp) {
+        sum += parseInt(String(inp.value || '0'), 10) || 0;
+      });
+      availInp.value = String(sum);
+    }
+
     window.kitAdminSyncDerivedFields = function () {
       var lines = (typeof window.kitCompositionCollectLines === 'function')
         ? window.kitCompositionCollectLines() : [];
@@ -173,6 +211,11 @@
       } else if (costHint && costEst > 0) {
         costHint.innerHTML = 'Примерно по составу: <strong>' + money2(costEst) + ' ₽</strong> (в поле — своё значение).';
       }
+
+      var inv = inventoryFromLines(lines, st);
+      var totalInp = document.getElementById('kit_pieces_total');
+      if (totalInp) totalInp.value = String(inv.total);
+      syncRemainderUi(inv);
     };
 
     window.kitCompositionOnChange = function () {
@@ -228,6 +271,19 @@
       weightEl.addEventListener('input', window.kitAdminSyncDerivedFields);
       weightEl.addEventListener('change', window.kitAdminSyncDerivedFields);
     }
+    document.querySelectorAll('input.kit-remainder-mode').forEach(function (el) {
+      el.addEventListener('change', function () {
+        if (typeof window.kitAdminSyncDerivedFields === 'function') window.kitAdminSyncDerivedFields();
+      });
+    });
+    document.querySelectorAll('.kit-blank-stock-qty').forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        if (typeof window.kitAdminSyncDerivedFields === 'function') window.kitAdminSyncDerivedFields();
+      });
+      inp.addEventListener('change', function () {
+        if (typeof window.kitAdminSyncDerivedFields === 'function') window.kitAdminSyncDerivedFields();
+      });
+    });
     applyGlobalUsedPct();
     function scheduleSync() {
       if (typeof window.kitAdminSyncDerivedFields === 'function') window.kitAdminSyncDerivedFields();

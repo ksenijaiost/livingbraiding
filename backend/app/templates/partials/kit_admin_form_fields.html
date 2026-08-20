@@ -31,34 +31,30 @@
   {% endif %}
   <div class="row" style="margin-top:12px;">
     <div>
-      <label>Всего заготовок (изначально) <span class="muted">*</span></label>
-      <input name="{{ field_prefix }}pieces_total" type="number" min="1" required value="{{ fp.get('pieces_total', kit.pieces_total) }}" {% if kit_table_state_json %}readonly{% endif %} />
-      {% if kit_table_state_json %}
-        <div class="muted" style="font-size:12px;margin-top:4px;">Поле пересчитывается автоматически из состава.</div>
-      {% endif %}
+      <label>Всего заготовок <span class="muted">*</span></label>
+      <input name="{{ field_prefix }}pieces_total" id="kit_pieces_total" type="number" min="1" required value="{{ fp.get('pieces_total', kit.pieces_total) }}" {% if kit_table_state_json %}readonly{% endif %} />
+      <div class="muted" style="font-size:12px;margin-top:4px;">Сумма состава по видам (стрижки в сумму не входят).</div>
     </div>
     <div>
       <label>Остаток на складе <span class="muted">*</span></label>
-      <input name="{{ field_prefix }}pieces_available" type="number" min="0" required value="{{ fp.get('pieces_available', kit.pieces_available) }}" />
+      <input name="{{ field_prefix }}pieces_available" id="kit_pieces_available" type="number" min="0" required value="{{ fp.get('pieces_available', kit.pieces_available) }}" readonly />
+      {% set remainder_mode = (fp.get('stock_remainder_mode') or 'all') %}
+      <div class="muted" style="margin-top:8px;margin-bottom:4px;">Что лежит на складе</div>
+      <label style="display:inline-flex;align-items:center;gap:6px;margin-right:14px;cursor:pointer;">
+        <input type="radio" name="{{ field_prefix }}stock_remainder_mode" value="all" class="kit-remainder-mode" {% if remainder_mode != 'choose' %}checked{% endif %} />
+        Все заготовки
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="radio" name="{{ field_prefix }}stock_remainder_mode" value="choose" class="kit-remainder-mode" {% if remainder_mode == 'choose' %}checked{% endif %} />
+        Выбрать
+      </label>
+      <div class="muted" style="font-size:12px;margin-top:4px;">«Все заготовки» — остаток равен составу. «Выбрать» — указать количество по каждому виду.</div>
     </div>
   </div>
-{% endif %}
-
-{% if kit_table_state_json %}
-  <div style="margin-top:10px;">
-    <label style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-      <span class="muted" style="font-size:13px;">% цены для всех строк «б/у»</span>
-      <input id="kit_used_pct_global" type="number" min="1" max="100" step="1" placeholder="например, 50" style="width:6rem;" />
-      <button id="kit_used_pct_apply_btn" type="button" class="secondary" style="padding:4px 10px;">Применить</button>
-    </label>
-    <div class="muted" style="font-size:12px;margin-top:4px;">Заполняет % по всем строкам состава с галочкой «б/у». Можно потом поправить в отдельных строках.</div>
-  </div>
-{% endif %}
-
-{% if not is_new and blank_stock_rows %}
-  <div style="margin-top:16px;padding:12px;border-radius:8px;border:1px solid #e2e8f0;background:#f8fafc;">
+  <div id="kit_blank_stock_wrap" style="margin-top:16px;padding:12px;border-radius:8px;border:1px solid #e2e8f0;background:#f8fafc;{% if (fp.get('stock_remainder_mode') or 'all') != 'choose' %}display:none;{% endif %}">
     <div style="font-weight:600;margin-bottom:8px;">Остаток по видам заготовок</div>
-    <p class="muted" style="font-size:13px;margin:0 0 10px;">Ключи из состава комплекта и каталога «Заказ» → «Заготовки поштучно». После сохранения непустых строк включается складской учёт по видам (списание в визите/брони — по разбивке).</p>
+    <p class="muted" style="font-size:13px;margin:0 0 10px;">Сколько штук каждого вида сейчас на складе. Сумма станет остатком комплекта.</p>
+    {% if blank_stock_rows %}
     <table style="width:100%;max-width:720px;border-collapse:collapse;font-size:14px;">
       <thead>
         <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
@@ -75,12 +71,26 @@
             <td style="padding:8px;">{{ row.label }}</td>
             <td style="padding:8px;">{% if row.price is not none %}{{ row.price|round(2) }}{% else %}—{% endif %}</td>
             <td style="padding:8px;">
-              <input type="number" min="0" step="1" name="blank_stock_qty__{{ row.key }}" value="{{ fp.get('blank_stock_qty__' ~ row.key, row.qty) }}" style="width:100px;" />
+              <input type="number" min="0" step="1" class="kit-blank-stock-qty" name="blank_stock_qty__{{ row.key }}" value="{{ fp.get('blank_stock_qty__' ~ row.key, row.qty) }}" style="width:100px;" {% if (fp.get('stock_remainder_mode') or 'all') != 'choose' %}disabled{% endif %} />
             </td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
+    {% else %}
+      <p class="muted" style="margin:0;">Нет видов в составе — сначала заполните таблицу состава.</p>
+    {% endif %}
+  </div>
+{% endif %}
+
+{% if kit_table_state_json %}
+  <div style="margin-top:10px;">
+    <label style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <span class="muted" style="font-size:13px;">% цены для всех строк «б/у»</span>
+      <input id="kit_used_pct_global" type="number" min="1" max="100" step="1" placeholder="например, 50" style="width:6rem;" />
+      <button id="kit_used_pct_apply_btn" type="button" class="secondary" style="padding:4px 10px;">Применить</button>
+    </label>
+    <div class="muted" style="font-size:12px;margin-top:4px;">Заполняет % по всем строкам состава с галочкой «б/у». Можно потом поправить в отдельных строках.</div>
   </div>
 {% endif %}
 

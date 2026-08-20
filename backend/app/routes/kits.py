@@ -62,19 +62,19 @@ from app.kit_composition import (
 from app.kit_composition_lines import lines_to_json
 from app.zakaz_blanks import kit_composition_catalog_items
 from app.kit_blank_stock_core import (
+    apply_kit_admin_stock_remainder,
     blank_stock_edit_rows_for_kit,
     blank_stock_qty_map,
     build_usage_breakdown_keyed,
-    composition_keys_intersection_catalog,
     consume_blank_stock_for_reserve,
     ensure_blank_stock_from_composition,
+    infer_stock_remainder_mode,
     kit_inventory_is_keyed,
     catalog_kit_key_hint_rows,
     load_catalog_kit_maps,
     max_take_by_key_for_client,
     parse_composition_totals,
     read_blank_stock_qty_from_admin_form,
-    replace_blank_stock_for_kit,
     return_reserve_row_to_stock,
     sync_kit_pieces_available_from_blank_lines,
 )
@@ -633,6 +633,8 @@ def admin_kit_edit_get(
     if not kit:
         raise HTTPException(status_code=404, detail="Комплект не найден")
     computed_price, computed_missing = calc_kit_stock_price_total_from_composition(db, kit)
+    fp = kit_to_form_prefill(kit)
+    fp["stock_remainder_mode"] = infer_stock_remainder_mode(db, kit)
     return templates.TemplateResponse(
         "admin_kit_form.html",
         _ctx(
@@ -640,7 +642,7 @@ def admin_kit_edit_get(
             current_user=current_user,
             is_new=False,
             kit=kit,
-            fp=kit_to_form_prefill(kit),
+            fp=fp,
             form_action=f"/kits/{kit_id}/edit",
             error=None,
             staff_for_kit_authors=list_masters_for_kit_author_pick(db),
@@ -787,16 +789,13 @@ async def admin_kit_edit_post(
         except ValueError as exc:
             raise ValueError(str(exc)) from None
         sync_kit_authors(db, kit, form)
-        blank_qty = read_blank_stock_qty_from_admin_form(form)
-        if blank_qty:
-            comp = parse_composition_totals(kit)
-            _, meta, _ = load_catalog_kit_maps(db)
-            allowed = set(composition_keys_intersection_catalog(comp, meta)) if comp else set()
-            if not allowed and comp:
-                allowed = set(comp.keys())
-            if not allowed:
-                raise ValueError("Нет ключей состава для остатков по видам (заполните composition_json).")
-            replace_blank_stock_for_kit(db, kit, quantities=blank_qty, allowed_keys=allowed)
+        mode = str(form.get("stock_remainder_mode") or "all")
+        apply_kit_admin_stock_remainder(
+            db,
+            kit,
+            mode=mode,
+            blank_qty=read_blank_stock_qty_from_admin_form(form),
+        )
         after_auth_ids = sorted([l.user_id for l in (kit.author_staff_links or [])])
         kit.updated_at = utcnow_naive()
         kit.updated_by_user_id = current_user.id
