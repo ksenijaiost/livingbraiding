@@ -24,12 +24,14 @@ def admin_master_statistics_page(
     request: Request,
     master_id: str | None = Query(None),
     report_mode: str | None = Query(None),
+    display_mode: str | None = Query(None),
     period_id: str | None = Query(None),
     df: str | None = Query(None),
     dt: str | None = Query(None),
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
+    selected_display_mode = "all" if str(display_mode or "").strip().lower() == "all" else "categories"
     closed_periods = list_closed_payroll_periods(db)
     today = date.today()
     month_start = today.replace(day=1)
@@ -71,6 +73,7 @@ def admin_master_statistics_page(
             selected_master_id=selected_master_id,
             closed_periods=closed_periods,
             report_mode=mode,
+            display_mode=selected_display_mode,
             selected_period_id=selected_period_id,
             form_df=d0.isoformat(),
             form_dt=d1.isoformat(),

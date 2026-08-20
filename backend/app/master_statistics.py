@@ -94,6 +94,23 @@ class MasterStatsHourlyRow:
 
 
 @dataclass
+class MasterStatsEventRow:
+    event_date: datetime
+    event_label: str
+    event_short_label: str
+    event_id: int
+    event_url: str
+    master_payroll: float
+
+
+@dataclass
+class MasterStatsDailyRow:
+    day: date
+    total_master_payroll: float
+    events: list[MasterStatsEventRow]
+
+
+@dataclass
 class MasterStatisticsResult:
     master_id: int
     master_name: str
@@ -109,6 +126,7 @@ class MasterStatisticsResult:
     sales: list[MasterStatsSaleRow]
     consultations: list[MasterStatsConsultationRow]
     hourly_works: list[MasterStatsHourlyRow]
+    daily_rows: list[MasterStatsDailyRow]
 
 
 def format_discounts(percents: list[int]) -> str:
@@ -242,6 +260,84 @@ def _consultation_master_payroll(db: Session, consultation_id: int, master_id: i
         user_id=master_id,
     )
     return money_q2(by_src.get(consultation_id, 0.0))
+
+
+def _event_rows_for_statistics(stats: "MasterStatisticsResult") -> list[MasterStatsEventRow]:
+    rows: list[MasterStatsEventRow] = []
+    for row in stats.visits:
+        rows.append(
+            MasterStatsEventRow(
+                event_date=row.visit_date,
+                event_label="визит",
+                event_short_label="визит",
+                event_id=row.visit_id,
+                event_url=f"/visits/{row.visit_id}",
+                master_payroll=money_q2(row.master_payroll),
+            )
+        )
+    for row in stats.works:
+        rows.append(
+            MasterStatsEventRow(
+                event_date=row.work_date,
+                event_label="работа",
+                event_short_label="работа",
+                event_id=row.work_id,
+                event_url=f"/admin/sales/work/{row.work_id}",
+                master_payroll=money_q2(row.master_payroll),
+            )
+        )
+    for row in stats.sales:
+        rows.append(
+            MasterStatsEventRow(
+                event_date=row.sale_date,
+                event_label="продажа",
+                event_short_label="продажа",
+                event_id=row.sale_id,
+                event_url=f"/admin/sales/products/{row.sale_id}",
+                master_payroll=money_q2(row.master_payroll),
+            )
+        )
+    for row in stats.consultations:
+        rows.append(
+            MasterStatsEventRow(
+                event_date=row.consultation_date,
+                event_label="консультация",
+                event_short_label="конс",
+                event_id=row.consultation_id,
+                event_url=f"/consultations/{row.consultation_id}",
+                master_payroll=money_q2(row.master_payroll),
+            )
+        )
+    for row in stats.hourly_works:
+        rows.append(
+            MasterStatsEventRow(
+                event_date=row.work_date,
+                event_label="почасовая работа",
+                event_short_label="почас",
+                event_id=row.entry_id,
+                event_url=f"/hourly-work/{row.entry_id}",
+                master_payroll=money_q2(row.master_payroll),
+            )
+        )
+    rows.sort(key=lambda x: (x.event_date, x.event_id), reverse=True)
+    return rows
+
+
+def _daily_rows_from_events(events: list[MasterStatsEventRow]) -> list[MasterStatsDailyRow]:
+    by_day: dict[date, list[MasterStatsEventRow]] = {}
+    for row in events:
+        by_day.setdefault(row.event_date.date(), []).append(row)
+    out: list[MasterStatsDailyRow] = []
+    for day in sorted(by_day.keys(), reverse=True):
+        items = sorted(by_day[day], key=lambda x: (x.event_date, x.event_id), reverse=True)
+        out.append(
+            MasterStatsDailyRow(
+                day=day,
+                total_master_payroll=money_q2(sum(float(x.master_payroll or 0) for x in items)),
+                events=items,
+            )
+        )
+    return out
 
 
 def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> MasterStatisticsResult | None:
@@ -430,7 +526,7 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
             )
         )
 
-    return MasterStatisticsResult(
+    result = MasterStatisticsResult(
         master_id=master_id,
         master_name=master.display_name,
         date_from=d0,
@@ -445,4 +541,7 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
         sales=sales_out,
         consultations=consultations_out,
         hourly_works=hourly_out,
+        daily_rows=[],
     )
+    result.daily_rows = _daily_rows_from_events(_event_rows_for_statistics(result))
+    return result

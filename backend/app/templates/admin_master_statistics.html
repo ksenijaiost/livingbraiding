@@ -7,6 +7,37 @@
       Выберите мастера и период. Финансовый блок — по журналу фонда ЗП (дата проводки).
       Таблицы — по дате события (визит / работа / продажа / консультация).
     </p>
+    <p class="muted" style="font-size:12px; margin-top:0;">
+      Сокращения для мобильной версии: визит, работа, продажа, конс, почас.
+    </p>
+    <style>
+      .ms-display-mode {
+        display:flex;
+        flex-wrap:wrap;
+        gap:10px 16px;
+        align-items:center;
+        margin-top:10px;
+      }
+      .ms-display-mode label {
+        display:flex;
+        align-items:center;
+        gap:6px;
+        cursor:pointer;
+        margin:0;
+      }
+      .ms-day-events {
+        margin:0;
+        padding-left:18px;
+      }
+      .ms-day-events li + li {
+        margin-top:4px;
+      }
+      @media (max-width: 700px) {
+        .ms-stats-table {
+          font-size:12px;
+        }
+      }
+    </style>
 
     <form method="get" action="/admin/statistics" id="ms_form" class="card" style="background: #f8f9fb; margin-bottom: 20px;">
       <input type="hidden" name="report_mode" id="ms_mode_hidden" value="{{ report_mode|default('custom_dates') }}" />
@@ -45,6 +76,12 @@
             {% endfor %}
           </select>
         </div>
+        <div style="flex: 0 1 auto; min-width: 280px;">
+          <div class="ms-display-mode">
+            <label><input type="radio" name="display_mode" value="categories" {% if display_mode != 'all' %}checked{% endif %} /> По категориям</label>
+            <label><input type="radio" name="display_mode" value="all" {% if display_mode == 'all' %}checked{% endif %} /> Общий список</label>
+          </div>
+        </div>
         <div style="flex: 0;">
           <button type="submit" id="ms_btn_period">Показать</button>
         </div>
@@ -58,6 +95,12 @@
         <div style="flex: 1; min-width: 140px;">
           <label for="ms_dt">По дату</label>
           <input type="date" name="dt" id="ms_dt" value="{{ form_dt }}" />
+        </div>
+        <div style="flex: 0 1 auto; min-width: 280px;">
+          <div class="ms-display-mode">
+            <label><input type="radio" name="display_mode" value="categories" {% if display_mode != 'all' %}checked{% endif %} /> По категориям</label>
+            <label><input type="radio" name="display_mode" value="all" {% if display_mode == 'all' %}checked{% endif %} /> Общий список</label>
+          </div>
         </div>
         <div style="flex: 0;">
           <button type="submit" id="ms_btn_dates">Показать</button>
@@ -130,199 +173,221 @@
           <div style="font-size: 1.25rem; font-weight: 700;">{{ "%.2f"|format(stats.fund_balance_end) }} <span class="muted" style="font-size: 0.85rem; font-weight: 500;">руб.</span></div>
         </div>
       </div>
-
-      <h3 style="margin: 0 0 10px; font-size: 15px;">Визиты (услуги)</h3>
-      {% if stats.visits %}
+      <h3 style="margin: 0 0 10px; font-size: 15px;">ЗП за день</h3>
+      {% if stats.daily_rows %}
         <div style="overflow-x: auto; margin-bottom: 24px;">
-          <table>
+          <table class="ms-stats-table">
             <thead>
               <tr>
-                <th>ID / дата</th>
-                <th>От клиента</th>
-                <th>Скидка, %</th>
-                <th>Себестоимость</th>
-                <th>Сумма ЗП мастеров</th>
-                <th>ЗП выбранного мастера</th>
-                <th>ЗП студии</th>
+                <th>День</th>
+                <th>Сумма ЗП</th>
+                <th>События</th>
               </tr>
             </thead>
             <tbody>
-              {% for row in stats.visits %}
+              {% for day in stats.daily_rows %}
                 <tr>
+                  <td>{{ day.day.strftime('%d.%m.%Y') }}</td>
+                  <td>{{ "%.2f"|format(day.total_master_payroll) }}</td>
                   <td>
-                    <a href="/visits/{{ row.visit_id }}">№{{ row.visit_id }}</a>,
-                    <a href="/visits/{{ row.visit_id }}">{{ row.visit_date.strftime('%d.%m.%Y') }}</a>
+                    {% for ev in day.events %}
+                      {% if not loop.first %}, {% endif %}
+                      {{ ev.event_short_label }} <a href="{{ ev.event_url }}">№{{ ev.event_id }}</a>
+                    {% endfor %}
                   </td>
-                  <td>
-                    {{ "%.2f"|format(row.amount_from_client) }}
-                    {% if row.payment_display and row.payment_display != '—' %}
-                      <span class="muted">({{ row.payment_display }})</span>
-                    {% endif %}
-                  </td>
-                  <td>{{ row.discount_display }}</td>
-                  <td>{{ "%.2f"|format(row.cost_total) }}</td>
-                  <td>{{ "%.2f"|format(row.masters_pay_total) }}</td>
-                  <td>{{ "%.2f"|format(row.master_payroll) }}</td>
-                  <td>{{ "%.2f"|format(row.studio_payroll) }}</td>
                 </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
       {% else %}
-        <p class="muted" style="margin-bottom: 24px;">Нет визитов за период.</p>
+        <p class="muted" style="margin-bottom:24px;">Нет событий за период.</p>
       {% endif %}
 
-      <h3 style="margin: 0 0 10px; font-size: 15px;">Работы (изготовление товаров)</h3>
-      {% if stats.works %}
-        <div style="overflow-x: auto; margin-bottom: 24px;">
-          <table>
-            <thead>
-              <tr>
-                <th>ID / дата</th>
-                <th>От клиента</th>
-                <th>Скидка, %</th>
-                <th>Себестоимость</th>
-                <th>ЗП мастера</th>
-                <th>ЗП студии</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in stats.works %}
+      {% if display_mode == 'all' %}
+        <h3 style="margin: 0 0 10px; font-size: 15px;">Общий список</h3>
+        {% if stats.daily_rows %}
+          <div style="overflow-x: auto; margin-bottom: 24px;">
+            <table class="ms-stats-table">
+              <thead>
                 <tr>
-                  <td>
-                    <a href="/admin/sales/work/{{ row.work_id }}">№{{ row.work_id }}</a>,
-                    <a href="/admin/sales/work/{{ row.work_id }}">{{ row.work_date.strftime('%d.%m.%Y') }}</a>
-                  </td>
-                  <td>
-                    {{ "%.2f"|format(row.amount_from_client) }}
-                    {% if row.payment_display and row.payment_display != '—' %}
-                      <span class="muted">({{ row.payment_display }})</span>
-                    {% endif %}
-                  </td>
-                  <td>{{ row.discount_display }}</td>
-                  <td>{{ "%.2f"|format(row.cost_total) }}</td>
-                  <td>{{ "%.2f"|format(row.master_payroll) }}</td>
-                  <td>{{ "%.2f"|format(row.studio_payroll) }}</td>
+                  <th>Дата</th>
+                  <th>ЗП за день</th>
+                  <th>Вид события</th>
+                  <th>ID</th>
+                  <th>ЗП мастера</th>
                 </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {% for day in stats.daily_rows %}
+                  {% for ev in day.events %}
+                    <tr>
+                      {% if loop.first %}
+                        <td rowspan="{{ day.events|length }}">{{ day.day.strftime('%d.%m.%Y') }}</td>
+                        <td rowspan="{{ day.events|length }}">{{ "%.2f"|format(day.total_master_payroll) }}</td>
+                      {% endif %}
+                      <td>{{ ev.event_short_label }}</td>
+                      <td><a href="{{ ev.event_url }}">№{{ ev.event_id }}</a></td>
+                      <td>{{ "%.2f"|format(ev.master_payroll) }}</td>
+                    </tr>
+                  {% endfor %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
       {% else %}
-        <p class="muted" style="margin-bottom: 24px;">Нет работ за период.</p>
-      {% endif %}
+        <h3 style="margin: 0 0 10px; font-size: 15px;">Визиты (услуги)</h3>
+        {% if stats.visits %}
+          <div style="overflow-x: auto; margin-bottom: 24px;">
+            <table class="ms-stats-table">
+              <thead>
+                <tr>
+                  <th>ID / дата</th>
+                  <th>От клиента</th>
+                  <th>Скидка, %</th>
+                  <th>Себестоимость</th>
+                  <th>Сумма ЗП мастеров</th>
+                  <th>ЗП выбранного мастера</th>
+                  <th>ЗП студии</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in stats.visits %}
+                  <tr>
+                    <td><a href="/visits/{{ row.visit_id }}">№{{ row.visit_id }}</a>, <a href="/visits/{{ row.visit_id }}">{{ row.visit_date.strftime('%d.%m.%Y') }}</a></td>
+                    <td>{{ "%.2f"|format(row.amount_from_client) }}{% if row.payment_display and row.payment_display != '—' %} <span class="muted">({{ row.payment_display }})</span>{% endif %}</td>
+                    <td>{{ row.discount_display }}</td>
+                    <td>{{ "%.2f"|format(row.cost_total) }}</td>
+                    <td>{{ "%.2f"|format(row.masters_pay_total) }}</td>
+                    <td>{{ "%.2f"|format(row.master_payroll) }}</td>
+                    <td>{{ "%.2f"|format(row.studio_payroll) }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="muted" style="margin-bottom: 24px;">Нет визитов за период.</p>
+        {% endif %}
 
-      <h3 style="margin: 0 0 10px; font-size: 15px;">Продажи (товар без услуги)</h3>
-      {% if stats.sales %}
-        <div style="overflow-x: auto; margin-bottom: 24px;">
-          <table>
-            <thead>
-              <tr>
-                <th>ID / дата</th>
-                <th>От клиента</th>
-                <th>Скидка, %</th>
-                <th>Себестоимость</th>
-                <th>ЗП мастера</th>
-                <th>ЗП студии</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in stats.sales %}
+        <h3 style="margin: 0 0 10px; font-size: 15px;">Работы (изготовление товаров)</h3>
+        {% if stats.works %}
+          <div style="overflow-x: auto; margin-bottom: 24px;">
+            <table class="ms-stats-table">
+              <thead>
                 <tr>
-                  <td>
-                    <a href="/admin/sales/products/{{ row.sale_id }}">№{{ row.sale_id }}</a>,
-                    <a href="/admin/sales/products/{{ row.sale_id }}">{{ row.sale_date.strftime('%d.%m.%Y') }}</a>
-                  </td>
-                  <td>
-                    {{ "%.2f"|format(row.amount_from_client) }}
-                    {% if row.payment_display and row.payment_display != '—' %}
-                      <span class="muted">({{ row.payment_display }})</span>
-                    {% endif %}
-                  </td>
-                  <td>{{ row.discount_display }}</td>
-                  <td>{{ "%.2f"|format(row.cost_total) }}</td>
-                  <td>{{ "%.2f"|format(row.master_payroll) }}</td>
-                  <td>{{ "%.2f"|format(row.studio_payroll) }}</td>
+                  <th>ID / дата</th>
+                  <th>От клиента</th>
+                  <th>Скидка, %</th>
+                  <th>Себестоимость</th>
+                  <th>ЗП мастера</th>
+                  <th>ЗП студии</th>
                 </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      {% else %}
-        <p class="muted" style="margin-bottom: 24px;">Нет продаж за период.</p>
-      {% endif %}
+              </thead>
+              <tbody>
+                {% for row in stats.works %}
+                  <tr>
+                    <td><a href="/admin/sales/work/{{ row.work_id }}">№{{ row.work_id }}</a>, <a href="/admin/sales/work/{{ row.work_id }}">{{ row.work_date.strftime('%d.%m.%Y') }}</a></td>
+                    <td>{{ "%.2f"|format(row.amount_from_client) }}{% if row.payment_display and row.payment_display != '—' %} <span class="muted">({{ row.payment_display }})</span>{% endif %}</td>
+                    <td>{{ row.discount_display }}</td>
+                    <td>{{ "%.2f"|format(row.cost_total) }}</td>
+                    <td>{{ "%.2f"|format(row.master_payroll) }}</td>
+                    <td>{{ "%.2f"|format(row.studio_payroll) }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="muted" style="margin-bottom: 24px;">Нет работ за период.</p>
+        {% endif %}
 
-      <h3 style="margin: 0 0 10px; font-size: 15px;">Консультации</h3>
-      {% if stats.consultations %}
-        <div style="overflow-x: auto; margin-bottom: 24px;">
-          <table>
-            <thead>
-              <tr>
-                <th>ID / дата</th>
-                <th>Бронь</th>
-                <th>ЗП мастера</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in stats.consultations %}
+        <h3 style="margin: 0 0 10px; font-size: 15px;">Продажи (товар без услуги)</h3>
+        {% if stats.sales %}
+          <div style="overflow-x: auto; margin-bottom: 24px;">
+            <table class="ms-stats-table">
+              <thead>
                 <tr>
-                  <td>
-                    <a href="/consultations/{{ row.consultation_id }}">№{{ row.consultation_id }}</a>,
-                    <a href="/consultations/{{ row.consultation_id }}">{{ row.consultation_date.strftime('%d.%m.%Y') }}</a>
-                  </td>
-                  <td>
-                    {% if row.booking_id %}
-                      <a href="/admin/bookings/{{ row.booking_id }}">№{{ row.booking_id }}</a>
-                    {% else %}
-                      —
-                    {% endif %}
-                  </td>
-                  <td>{{ "%.2f"|format(row.master_payroll) }}</td>
+                  <th>ID / дата</th>
+                  <th>От клиента</th>
+                  <th>Скидка, %</th>
+                  <th>Себестоимость</th>
+                  <th>ЗП мастера</th>
+                  <th>ЗП студии</th>
                 </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      {% else %}
-        <p class="muted" style="margin-bottom: 24px;">Нет консультаций за период.</p>
-      {% endif %}
+              </thead>
+              <tbody>
+                {% for row in stats.sales %}
+                  <tr>
+                    <td><a href="/admin/sales/products/{{ row.sale_id }}">№{{ row.sale_id }}</a>, <a href="/admin/sales/products/{{ row.sale_id }}">{{ row.sale_date.strftime('%d.%m.%Y') }}</a></td>
+                    <td>{{ "%.2f"|format(row.amount_from_client) }}{% if row.payment_display and row.payment_display != '—' %} <span class="muted">({{ row.payment_display }})</span>{% endif %}</td>
+                    <td>{{ row.discount_display }}</td>
+                    <td>{{ "%.2f"|format(row.cost_total) }}</td>
+                    <td>{{ "%.2f"|format(row.master_payroll) }}</td>
+                    <td>{{ "%.2f"|format(row.studio_payroll) }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="muted" style="margin-bottom: 24px;">Нет продаж за период.</p>
+        {% endif %}
 
-      <h3 style="margin: 0 0 10px; font-size: 15px;">Почасовая работа</h3>
-      {% if stats.hourly_works %}
-        <div style="overflow-x: auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>ID / дата</th>
-                <th>Длительность</th>
-                <th>ЗП мастера</th>
-                <th>Комментарий</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in stats.hourly_works %}
+        <h3 style="margin: 0 0 10px; font-size: 15px;">Консультации</h3>
+        {% if stats.consultations %}
+          <div style="overflow-x: auto; margin-bottom: 24px;">
+            <table class="ms-stats-table">
+              <thead>
                 <tr>
-                  <td>
-                    <a href="/hourly-work/{{ row.entry_id }}">№{{ row.entry_id }}</a>,
-                    <a href="/hourly-work/{{ row.entry_id }}">{{ row.work_date.strftime('%d.%m.%Y') }}</a>
-                  </td>
-                  <td>
-                    {% set h = (row.duration_minutes // 60) %}
-                    {% set m = (row.duration_minutes % 60) %}
-                    {% if h and m %}{{ h }} ч {{ m }} мин
-                    {% elif h %}{{ h }} ч
-                    {% else %}{{ m }} мин{% endif %}
-                  </td>
-                  <td>{{ "%.2f"|format(row.master_payroll) }}</td>
-                  <td>{{ row.comment or '—' }}</td>
+                  <th>ID / дата</th>
+                  <th>Бронь</th>
+                  <th>ЗП мастера</th>
                 </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      {% else %}
-        <p class="muted">Нет почасовой работы за период.</p>
+              </thead>
+              <tbody>
+                {% for row in stats.consultations %}
+                  <tr>
+                    <td><a href="/consultations/{{ row.consultation_id }}">№{{ row.consultation_id }}</a>, <a href="/consultations/{{ row.consultation_id }}">{{ row.consultation_date.strftime('%d.%m.%Y') }}</a></td>
+                    <td>{% if row.booking_id %}<a href="/admin/bookings/{{ row.booking_id }}">№{{ row.booking_id }}</a>{% else %}—{% endif %}</td>
+                    <td>{{ "%.2f"|format(row.master_payroll) }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="muted" style="margin-bottom: 24px;">Нет консультаций за период.</p>
+        {% endif %}
+
+        <h3 style="margin: 0 0 10px; font-size: 15px;">Почасовая работа</h3>
+        {% if stats.hourly_works %}
+          <div style="overflow-x: auto;">
+            <table class="ms-stats-table">
+              <thead>
+                <tr>
+                  <th>ID / дата</th>
+                  <th>Длительность</th>
+                  <th>ЗП мастера</th>
+                  <th>Комментарий</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in stats.hourly_works %}
+                  <tr>
+                    <td><a href="/hourly-work/{{ row.entry_id }}">№{{ row.entry_id }}</a>, <a href="/hourly-work/{{ row.entry_id }}">{{ row.work_date.strftime('%d.%m.%Y') }}</a></td>
+                    <td>{% set h = (row.duration_minutes // 60) %}{% set m = (row.duration_minutes % 60) %}{% if h and m %}{{ h }} ч {{ m }} мин{% elif h %}{{ h }} ч{% else %}{{ m }} мин{% endif %}</td>
+                    <td>{{ "%.2f"|format(row.master_payroll) }}</td>
+                    <td>{{ row.comment or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="muted">Нет почасовой работы за период.</p>
+        {% endif %}
       {% endif %}
     {% elif selected_master_id %}
       <p class="muted">Не удалось загрузить статистику.</p>
