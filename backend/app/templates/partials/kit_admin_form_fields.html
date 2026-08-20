@@ -60,6 +60,7 @@
         <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
           <th style="padding:6px 8px;">Ключ</th>
           <th style="padding:6px 8px;">Подпись</th>
+          <th style="padding:6px 8px;">Сост.</th>
           <th style="padding:6px 8px;">Цена за шт., ₽</th>
           <th style="padding:6px 8px;">Остаток, шт.</th>
         </tr>
@@ -69,9 +70,10 @@
           <tr style="border-bottom:1px solid #e5e7eb;">
             <td style="padding:8px;font-family:monospace;">{{ row.key }}</td>
             <td style="padding:8px;">{{ row.label }}</td>
+            <td style="padding:8px;">{{ row.condition_label }}</td>
             <td style="padding:8px;">{% if row.price is not none %}{{ row.price|round(2) }}{% else %}—{% endif %}</td>
             <td style="padding:8px;">
-              <input type="number" min="0" step="1" class="kit-blank-stock-qty" name="blank_stock_qty__{{ row.key }}" value="{{ fp.get('blank_stock_qty__' ~ row.key, row.qty) }}" style="width:100px;" {% if (fp.get('stock_remainder_mode') or 'all') != 'choose' %}disabled{% endif %} />
+              <input type="number" min="0" step="1" class="kit-blank-stock-qty" name="blank_stock_qty__{{ row.raw_key }}" value="{{ fp.get('blank_stock_qty__' ~ row.raw_key, row.qty) }}" style="width:100px;" {% if (fp.get('stock_remainder_mode') or 'all') != 'choose' %}disabled{% endif %} />
             </td>
           </tr>
         {% endfor %}

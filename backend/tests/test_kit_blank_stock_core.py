@@ -362,9 +362,43 @@ def _mixed_kit(db: Session, *, se_qty: int, de_qty: int, stock: dict[str, int] |
     return kit
 
 
+def _mixed_condition_kit(db: Session, *, stock: dict[str, int] | None = None) -> Kit:
+    kit = Kit(
+        sku="INV-COND",
+        title="Инвентаризация с б/у",
+        pieces_total=80,
+        pieces_available=80 if stock is None else sum(stock.values()),
+        blank_type_se=True,
+        stock_price_total=1000.0,
+        cost_total=400.0,
+        composition_json=json.dumps(
+            [
+                {"key": "SE_CURL", "condition": "NEW", "qty": 28},
+                {"key": "SE_CURL", "condition": "USED", "used_price_pct": 60, "qty": 52},
+            ],
+            ensure_ascii=False,
+        ),
+        created_at=datetime(2026, 8, 20, 12, 0, 0),
+        is_in_stock=True,
+    )
+    db.add(kit)
+    db.flush()
+    if stock is not None:
+        for k, q in stock.items():
+            if int(q) > 0:
+                db.add(KitBlankStock(kit_id=kit.id, kit_key=k, qty=int(q)))
+        db.flush()
+    return kit
+
+
 def test_inventory_qty_by_key_excludes_trims(memory_db: Session) -> None:
     kit = _mixed_kit(memory_db, se_qty=72, de_qty=2, stock=None)
     assert inventory_qty_by_key_from_kit(kit) == {"SE_BRAID_LONG": 72, "DE_BRAID_LONG": 2}
+
+
+def test_inventory_qty_by_key_splits_new_and_used_same_kind(memory_db: Session) -> None:
+    kit = _mixed_condition_kit(memory_db, stock=None)
+    assert inventory_qty_by_key_from_kit(kit) == {"SE_CURL": 28, "SE_CURL__USED__": 52}
 
 
 def test_infer_stock_remainder_mode_all_when_stock_matches_composition(memory_db: Session) -> None:
@@ -415,3 +449,15 @@ def test_blank_stock_edit_rows_skip_trims(memory_db: Session) -> None:
     assert [r["key"] for r in rows] == ["DE_BRAID_LONG", "SE_BRAID_LONG"]
     by_key = {r["key"]: r["qty"] for r in rows}
     assert by_key == {"DE_BRAID_LONG": 1, "SE_BRAID_LONG": 70}
+
+
+def test_blank_stock_edit_rows_split_new_and_used_same_kind(memory_db: Session) -> None:
+    db = memory_db
+    _catalog_blank(db, "SE_CURL")
+    kit = _mixed_condition_kit(db, stock={"SE_CURL": 28, "SE_CURL__USED__": 52})
+    db.commit()
+    rows = blank_stock_edit_rows_for_kit(db, kit)
+    assert [r["key"] for r in rows] == ["SE_CURL", "SE_CURL"]
+    assert [r["condition_label"] for r in rows] == ["нов", "б/у"]
+    by_raw_key = {r["raw_key"]: r["qty"] for r in rows}
+    assert by_raw_key == {"SE_CURL": 28, "SE_CURL__USED__": 52}
