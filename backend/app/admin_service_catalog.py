@@ -42,7 +42,7 @@ templates.env.globals["ru_user_role"] = ru_user_role
 
 router = APIRouter(prefix="/admin/catalog", tags=["admin-catalog"])
 
-_SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
+_CATALOG_EDITOR = Depends(require_role(UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER))
 _PRODUCT_CATALOG_ONLY_CATEGORIES = {"Заказ", "Продажа материала", "Работа по фикс цене"}
 _PRICE_LEVEL_FIELDS: dict[str, tuple[str, str]] = {
     "JUNIOR": ("price_junior_from", "price_junior_to"),
@@ -346,7 +346,7 @@ def _parse_tail_section_override(raw: object | None) -> bool | None:
 def catalog_index(
     request: Request,
     err: str | None = None,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     raw = db.execute(
@@ -394,7 +394,7 @@ def catalog_price_autocalc_form(
     msg: str | None = None,
     selected: int | None = Query(None),
     updated: int | None = Query(None),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     return _render_price_autocalc_page(
@@ -410,7 +410,7 @@ def catalog_price_autocalc_form(
 @router.post("/price-autocalc", response_class=HTMLResponse)
 async def catalog_price_autocalc_apply(
     request: Request,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     form = await request.form()
@@ -512,7 +512,7 @@ async def catalog_price_autocalc_apply(
 def category_new_form(
     request: Request,
     err: str | None = None,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
 ):
     return templates.TemplateResponse(
         "admin_catalog_category_form.html",
@@ -546,7 +546,7 @@ def category_new_save(
     short_name: str | None = Form(None),
     is_active: str | None = Form(None),
     consultation_kind: str = Form(ConsultationKind.BRAIDING.value),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     nm = (name or "").strip()
@@ -572,7 +572,7 @@ def category_edit_form(
     request: Request,
     category_id: int,
     err: str | None = None,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     cat = db.get(ServiceCategory, category_id)
@@ -603,7 +603,7 @@ def category_edit_save(
     short_name: str | None = Form(None),
     is_active: str | None = Form(None),
     consultation_kind: str = Form(ConsultationKind.BRAIDING.value),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     cat = db.get(ServiceCategory, category_id)
@@ -651,7 +651,7 @@ def subcategory_list(
     request: Request,
     category_id: int,
     err: str | None = None,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     cat = db.get(ServiceCategory, category_id)
@@ -698,7 +698,7 @@ def subcategory_new_form(
     request: Request,
     category_id: int = Query(...),
     err: str | None = None,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     cat = db.get(ServiceCategory, category_id)
@@ -736,7 +736,7 @@ def subcategory_new_save(
     show_tail_section: str | None = Form(None),
     show_material_description: str | None = Form(None),
     show_thermo_visit: str | None = Form(None),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     cat = db.get(ServiceCategory, category_id)
@@ -773,7 +773,7 @@ def subcategory_edit_form(
     request: Request,
     subcategory_id: int,
     err: str | None = None,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     sub = db.get(ServiceSubcategory, subcategory_id)
@@ -812,7 +812,7 @@ def subcategory_edit_save(
     show_tail_section: str | None = Form(None),
     show_material_description: str | None = Form(None),
     show_thermo_visit: str | None = Form(None),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     sub = db.get(ServiceSubcategory, subcategory_id)
@@ -884,7 +884,7 @@ def service_list(
     request: Request,
     subcategory_id: int,
     err: str | None = None,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     sub = db.get(ServiceSubcategory, subcategory_id)
@@ -915,7 +915,7 @@ def service_new_form(
     request: Request,
     subcategory_id: int = Query(...),
     err: str | None = None,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     sub = db.get(ServiceSubcategory, subcategory_id)
@@ -973,7 +973,7 @@ def service_new_save(
     retail_material_kudri: str | None = Form(None),
     retail_material_mix: str | None = Form(None),
     estimated_duration_minutes: str = Form(...),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     sub = db.get(ServiceSubcategory, subcategory_id)
@@ -1039,7 +1039,7 @@ def service_edit_form(
     request: Request,
     service_id: int,
     err: str | None = None,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     svc = db.get(Service, service_id)
@@ -1110,7 +1110,7 @@ def service_edit_save(
     retail_material_kudri: str | None = Form(None),
     retail_material_mix: str | None = Form(None),
     estimated_duration_minutes: str = Form(...),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     svc = db.get(Service, service_id)

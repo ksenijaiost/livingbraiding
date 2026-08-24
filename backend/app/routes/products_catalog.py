@@ -50,6 +50,8 @@ from app.rubber_catalog import (
 from app.webui import templates, ctx as _ctx
 
 
+_CATALOG_EDITOR = (UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER)
+
 router = APIRouter()
 
 _BLANK_CATALOG_CATEGORY = "Заказ"
@@ -542,7 +544,7 @@ def products_catalog_view(
 async def products_catalog_row_edit(
     row_id: int,
     request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(*_CATALOG_EDITOR)),
     db: Session = Depends(get_db),
 ):
     row = db.get(CatalogProduct, row_id)
@@ -605,7 +607,7 @@ async def products_catalog_row_edit(
 async def products_catalog_rubber_group_rename(
     row_id: int,
     request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(*_CATALOG_EDITOR)),
     db: Session = Depends(get_db),
 ):
     row = db.get(CatalogProduct, row_id)
@@ -629,7 +631,7 @@ async def products_catalog_rubber_group_rename(
 async def products_catalog_rubber_sizes_toggle(
     row_id: int,
     request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(*_CATALOG_EDITOR)),
     db: Session = Depends(get_db),
 ):
     row = db.get(CatalogProduct, row_id)
@@ -654,7 +656,7 @@ async def products_catalog_rubber_sizes_toggle(
 async def products_catalog_rubber_size_add(
     row_id: int,
     request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(*_CATALOG_EDITOR)),
     db: Session = Depends(get_db),
 ):
     row = db.get(CatalogProduct, row_id)
@@ -678,7 +680,7 @@ async def products_catalog_rubber_size_add(
 @router.post("/products-catalog/new")
 async def products_catalog_row_new(
     request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(*_CATALOG_EDITOR)),
     db: Session = Depends(get_db),
 ):
     form = await request.form()
@@ -752,7 +754,7 @@ async def products_catalog_row_new(
 @router.get("/products-catalog/{row_id}/delete-preview")
 def products_catalog_row_delete_preview(
     row_id: int,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(*_CATALOG_EDITOR)),
     db: Session = Depends(get_db),
 ) -> JSONResponse:
     row = db.get(CatalogProduct, row_id)
@@ -764,7 +766,7 @@ def products_catalog_row_delete_preview(
 @router.post("/products-catalog/{row_id}/delete")
 def products_catalog_row_delete(
     row_id: int,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(*_CATALOG_EDITOR)),
     db: Session = Depends(get_db),
 ):
     row = db.get(CatalogProduct, row_id)

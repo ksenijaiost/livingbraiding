@@ -80,6 +80,7 @@ def ru_master_level(ml: MasterLevel | str | None) -> str:
 
 RU_USER_ROLE: dict[UserRole, str] = {
     UserRole.ADMIN_SUPER: "Суперадмин",
+    UserRole.ADMIN_SENIOR: "Старший админ",
     UserRole.ADMIN: "Админ",
     UserRole.MASTER: "Мастер",
     UserRole.HELPER: "Помощник",
@@ -88,6 +89,7 @@ RU_USER_ROLE: dict[UserRole, str] = {
 
 RU_USER_ROLE_PAYOUT: dict[UserRole, str] = {
     UserRole.ADMIN_SUPER: "суперадмин",
+    UserRole.ADMIN_SENIOR: "старший админ",
     UserRole.ADMIN: "админ",
     UserRole.MASTER: "мастер",
     UserRole.HELPER: "помощник",
@@ -100,9 +102,10 @@ def ru_user_roles_payout_suffix(roles: list[UserRole]) -> str:
     order = {
         UserRole.TECHSPEC: -1,
         UserRole.ADMIN_SUPER: 0,
-        UserRole.ADMIN: 1,
-        UserRole.MASTER: 2,
-        UserRole.HELPER: 3,
+        UserRole.ADMIN_SENIOR: 1,
+        UserRole.ADMIN: 2,
+        UserRole.MASTER: 3,
+        UserRole.HELPER: 4,
     }
     uniq = sorted(set(roles), key=lambda r: order.get(r, 99))
     return ", ".join(RU_USER_ROLE_PAYOUT[r] for r in uniq)

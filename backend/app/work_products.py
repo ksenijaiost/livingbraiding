@@ -505,7 +505,7 @@ def _work_edit_allowed(db: Session, work: WorkForInventory, user: AuthUser | Non
     days = edit_window_days(db)
     inside = within_edit_window(work, days)
 
-    if user.role == UserRole.ADMIN:
+    if user.role in (UserRole.ADMIN, UserRole.ADMIN_SENIOR):
         if inside:
             return True, ""
         return False, _work_edit_window_block_message(days)

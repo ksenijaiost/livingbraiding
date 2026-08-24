@@ -13,6 +13,12 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, get_current_user, require_role
+from app.role_access import (
+    role_can_edit_catalog,
+    role_is_admin_staff,
+    role_is_admin_super,
+    role_is_master_schedule_admin,
+)
 from app.db.models import (
     Booking,
     BookingMaster,
@@ -441,8 +447,10 @@ def home(
         sections_ctx = {
             "is_master": current_user.role == UserRole.MASTER,
             "is_helper": is_helper,
-            "is_admin": current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER),
-            "is_admin_super": current_user.role == UserRole.ADMIN_SUPER,
+            "is_admin": role_is_admin_staff(current_user.role),
+            "is_admin_super": role_is_admin_super(current_user.role),
+            "is_catalog_editor": role_can_edit_catalog(current_user.role),
+            "is_master_schedule_admin": role_is_master_schedule_admin(current_user.role),
         }
 
     return templates.TemplateResponse(

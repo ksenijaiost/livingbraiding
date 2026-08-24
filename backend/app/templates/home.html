@@ -320,8 +320,10 @@
               {% if sections_ctx.is_master %}
                 <a href="/master/schedule"><button type="button" class="secondary">Управление графиком</button></a>
               {% endif %}
-              {% if sections_ctx.is_admin_super %}
+              {% if sections_ctx.is_master_schedule_admin %}
                 <a href="/admin/master-schedule"><button type="button" class="secondary">Управление графиком мастеров</button></a>
+              {% endif %}
+              {% if sections_ctx.is_admin_super %}
                 <a href="/admin/settings/staff"><button type="button" class="secondary">Сотрудники</button></a>
               {% endif %}
             </div>
@@ -338,6 +340,14 @@
                 <a href="/admin/catalog"><button type="button" class="secondary">Прайс</button></a>
                 <a href="/admin/settings"><button type="button" class="secondary">Настройки</button></a>
                 <a href="/admin/super/purge"><button type="button" class="secondary" style="color:#b91c1c;border-color:#fecaca;">Удаление данных</button></a>
+              </div>
+            </div>
+          {% elif sections_ctx.is_catalog_editor %}
+            <div class="card" style="background:#f8fafc;">
+              <h4 style="margin:0 0 10px;">Управление</h4>
+              <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                <a href="/admin/expenses"><button type="button" class="secondary">Расходы</button></a>
+                <a href="/admin/catalog"><button type="button" class="secondary">Прайс</button></a>
               </div>
             </div>
           {% endif %}
