@@ -8,7 +8,7 @@
   }
 
   var weekStart = String(cfg.weekStart || '');
-  var colors = { no_data: '#ffffff', day_off: '#fc8580', working: '#bae6fd', booking_dot: '#f97316', free_time_dot: '#22c55e' };
+  var colors = { no_data: '#fc8580', day_off: '#fc8580', working: '#bae6fd', booking_dot: '#f97316', free_time_dot: '#22c55e' };
 
   function esc(s) {
     return String(s || '')
@@ -37,8 +37,15 @@
 
   function cellStyle(state) {
     if (state === 'working') return colors.working;
-    if (state === 'day_off') return colors.day_off;
+    if (state === 'day_off' || state === 'no_data') return colors.day_off;
     return colors.no_data;
+  }
+
+  function cellStateLabel(state) {
+    var style = 'font-size:11px;line-height:1.35;color:#7f1d1d;font-weight:600;';
+    if (state === 'day_off') return '<div style="' + style + '">вых</div>';
+    if (state === 'no_data') return '<div style="' + style + '">нет данных</div>';
+    return '';
   }
 
   function cellContent(cell) {
@@ -49,8 +56,7 @@
       return '<div style="font-size:11px;line-height:1.35;font-weight:600;">' + esc(from) + '</div>' +
         '<div style="font-size:11px;line-height:1.35;">' + esc(to) + '</div>';
     }
-    if (cell.state === 'day_off') return '<div class="muted" style="font-size:11px;">выходной</div>';
-    return '';
+    return cellStateLabel(cell.state);
   }
 
   function renderGrid(data) {
