@@ -30,7 +30,7 @@ from app.display_time import get_display_timezone
 from app.master_schedule import day_state, get_default_work_hours, resolve_day_interval
 from app.user_roles import select_users_with_role
 
-COLOR_SCHEDULE_WORKING = "#bae6fd"
+COLOR_SCHEDULE_WORKING = "#ffffff"
 COLOR_BOOKING_DOT = "#f97316"
 COLOR_FREE_TIME_DOT = "#22c55e"
 

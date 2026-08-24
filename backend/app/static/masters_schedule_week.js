@@ -8,7 +8,7 @@
   }
 
   var weekStart = String(cfg.weekStart || '');
-  var colors = { no_data: '#fc8580', day_off: '#fc8580', working: '#bae6fd', booking_dot: '#f97316', free_time_dot: '#22c55e' };
+  var colors = { no_data: '#fecaca', day_off: '#fc8580', working: '#ffffff', booking_dot: '#f97316', free_time_dot: '#22c55e' };
 
   function esc(s) {
     return String(s || '')
@@ -37,7 +37,8 @@
 
   function cellStyle(state) {
     if (state === 'working') return colors.working;
-    if (state === 'day_off' || state === 'no_data') return colors.day_off;
+    if (state === 'day_off') return colors.day_off;
+    if (state === 'no_data') return colors.no_data;
     return colors.no_data;
   }
 
