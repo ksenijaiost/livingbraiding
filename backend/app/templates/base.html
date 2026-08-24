@@ -209,6 +209,7 @@
             {% if current_user.role.value == "TECHSPEC" %}
               <a href="/">Главная</a>
               <a href="/techspec/data">Технические данные</a>
+              <a href="/techspec/sql">SQL</a>
             {% elif current_user.role.value == "HELPER" %}
               <a href="/">Главная</a>
               <details class="nav-dd">
@@ -341,6 +342,7 @@
         <a class="md-link" href="/" onclick="window.lbToggleMobileNav(false)"><strong>Главная</strong></a>
         {% if current_user.role.value == "TECHSPEC" %}
           <a class="md-link" href="/techspec/data" onclick="window.lbToggleMobileNav(false)"><strong>Технические данные</strong></a>
+          <a class="md-link" href="/techspec/sql" onclick="window.lbToggleMobileNav(false)"><strong>SQL</strong></a>
         {% elif current_user.role.value == "HELPER" %}
           <details>
             <summary><strong>Работа</strong></summary>

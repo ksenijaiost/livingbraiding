@@ -28,6 +28,11 @@
               <a href="/techspec/data"><button type="button" class="secondary">Технические данные</button></a>
             </div>
             <div id="techspec-media-restore-status" class="muted" style="margin-top: 8px; font-size: 12px;"></div>
+            <div id="techspec-media-restore-progress-wrap" style="display:none; margin-top: 8px; max-width: 28rem;">
+              <div style="background:#e5e7eb; border-radius:6px; height:10px; overflow:hidden;">
+                <div id="techspec-media-restore-progress-bar" style="background:#2563eb; height:100%; width:0%; transition:width 0.15s;"></div>
+              </div>
+            </div>
           </div>
           <div>
             <div class="muted" style="font-size: 12px;">Каталог загрузок</div>
@@ -347,25 +352,76 @@
     (function () {
       var restoreForm = document.getElementById('techspec-media-restore-form');
       var restoreStatus = document.getElementById('techspec-media-restore-status');
+      var progressWrap = document.getElementById('techspec-media-restore-progress-wrap');
+      var progressBar = document.getElementById('techspec-media-restore-progress-bar');
       if (restoreForm && restoreStatus) {
-        restoreForm.addEventListener('submit', async function (e) {
+        function fmtBytes(n) {
+          if (n < 1024) return n + ' Б';
+          if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' КБ';
+          return (n / (1024 * 1024)).toFixed(1) + ' МБ';
+        }
+        function setProgress(pct, label) {
+          if (progressWrap) progressWrap.style.display = '';
+          if (progressBar) progressBar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+          if (label) restoreStatus.textContent = label;
+        }
+        function hideProgress() {
+          if (progressWrap) progressWrap.style.display = 'none';
+          if (progressBar) progressBar.style.width = '0%';
+        }
+        restoreForm.addEventListener('submit', function (e) {
           e.preventDefault();
-          restoreStatus.className = 'muted';
-          restoreStatus.textContent = 'Загрузка архива...';
-          try {
-            var res = await fetch('/techspec/media/restore', {
-              method: 'POST',
-              body: new FormData(restoreForm)
-            });
-            var data = await res.json();
-            if (!res.ok) throw new Error(data && data.detail ? data.detail : ('HTTP ' + res.status));
-            restoreStatus.className = 'ok';
-            restoreStatus.textContent = 'Сохранено: ' + (data.restored || 0) + ', пропущено: ' + (data.skipped || 0) + '.';
-            restoreForm.reset();
-          } catch (err) {
+          var fileInput = restoreForm.querySelector('input[type="file"][name="archive"]');
+          if (!fileInput || !fileInput.files || !fileInput.files.length) {
             restoreStatus.className = 'error';
-            restoreStatus.textContent = err && err.message ? err.message : 'Не удалось восстановить архив.';
+            restoreStatus.textContent = 'Выберите .zip архив.';
+            return;
           }
+          var submitBtn = restoreForm.querySelector('button[type="submit"]');
+          restoreStatus.className = 'muted';
+          setProgress(0, 'Загрузка архива…');
+          if (submitBtn) submitBtn.disabled = true;
+          var xhr = new XMLHttpRequest();
+          xhr.open('POST', '/techspec/media/restore');
+          xhr.responseType = 'json';
+          xhr.upload.addEventListener('progress', function (ev) {
+            if (ev.lengthComputable && ev.total > 0) {
+              var pct = Math.round((ev.loaded / ev.total) * 100);
+              setProgress(pct, 'Загрузка архива: ' + pct + '% (' + fmtBytes(ev.loaded) + ' из ' + fmtBytes(ev.total) + ')');
+            } else {
+              setProgress(0, 'Загрузка архива: ' + fmtBytes(ev.loaded) + '…');
+            }
+          });
+          xhr.upload.addEventListener('load', function () {
+            setProgress(100, 'Распаковка на сервере…');
+          });
+          xhr.addEventListener('load', function () {
+            hideProgress();
+            if (submitBtn) submitBtn.disabled = false;
+            var data = xhr.response;
+            if (xhr.status >= 200 && xhr.status < 300) {
+              restoreStatus.className = 'ok';
+              restoreStatus.textContent = 'Сохранено: ' + (data.restored || 0) + ', пропущено: ' + (data.skipped || 0) + '.';
+              restoreForm.reset();
+              return;
+            }
+            var detail = data && data.detail ? data.detail : ('HTTP ' + xhr.status);
+            restoreStatus.className = 'error';
+            restoreStatus.textContent = detail;
+          });
+          xhr.addEventListener('error', function () {
+            hideProgress();
+            if (submitBtn) submitBtn.disabled = false;
+            restoreStatus.className = 'error';
+            restoreStatus.textContent = 'Не удалось восстановить архив.';
+          });
+          xhr.addEventListener('abort', function () {
+            hideProgress();
+            if (submitBtn) submitBtn.disabled = false;
+            restoreStatus.className = 'error';
+            restoreStatus.textContent = 'Загрузка прервана.';
+          });
+          xhr.send(new FormData(restoreForm));
         });
       }
 
