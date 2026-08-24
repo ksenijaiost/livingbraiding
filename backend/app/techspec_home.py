@@ -72,7 +72,7 @@ _TABLE_DESCRIPTIONS: dict[str, str] = {
     "work_rates": "Ставки и проценты для расчета работ.",
     "payroll_periods": "Периоды зарплатного учета.",
     "payroll_fund_ledger": "Журнал начислений, сторно и выплат.",
-    "super_admin_purge_logs": "Логи удаления данных суперадмином.",
+    "super_admin_purge_logs": "Логи безвозвратных удалений (purge, удаление комплектов и др.).",
     "hourly_work_entries": "Записи почасовой работы.",
     "visits": "Проведенные визиты.",
     "visit_drafts": "Черновики визитов.",
