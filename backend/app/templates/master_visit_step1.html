@@ -1493,12 +1493,32 @@
         const any = document.querySelector('input[name$="_service_master_on"][value="' + String(mid) + '"]');
         if (any) cb = any;
       }
-      if (!cb) return 'ID ' + mid;
-      const lab = cb.closest('label');
-      if (!lab) return 'ID ' + mid;
-      // Remove percent input value from label text.
-      const t = (lab.textContent || '').replace(/\s+/g, ' ').trim();
-      return t || ('ID ' + mid);
+      if (cb) {
+        const lab = cb.closest('label');
+        if (lab) {
+          // Remove percent input value from label text.
+          const t = (lab.textContent || '').replace(/\s+/g, ' ').trim();
+          if (t) return t;
+        }
+      }
+      const hhOpt = document.querySelector('.hourly-help-master-select option[value="' + String(mid) + '"]');
+      if (hhOpt) {
+        const t = (hhOpt.textContent || '').replace(/\s+/g, ' ').trim();
+        if (t) return t;
+      }
+      try {
+        const el = document.getElementById('hourly_help_masters_json');
+        if (el && el.textContent) {
+          const list = JSON.parse(el.textContent);
+          for (const m of list || []) {
+            if (parseInt(m.id, 10) === mid) {
+              const n = String(m.name || '').trim();
+              if (n) return n;
+            }
+          }
+        }
+      } catch (e) {}
+      return 'ID ' + mid;
     }
     function readMasterAllocRows(ids, pctPrefix) {
       if (!ids.length) return null;
@@ -2156,7 +2176,9 @@
         totalsByMaster[mid].bonus += bonus;
       }
 
-      function linePreviewMastersPool(idx) {
+      // Доп. продажи — на уровне визита; в cost_total сервера входят в себестоимость строки.
+      // В предрасчёте учитываем один раз (на первой услуге), иначе ЗП завысится на половину доп. продаж.
+      function linePreviewMastersPool(idx, includeVisitAddons) {
         const fpPool = lineFixedMastersPool(idx);
         if (fpPool != null) return fpPool;
         let lineAmount = effectiveAmountFromClient(idx);
@@ -2166,15 +2188,21 @@
         const meta = visitLineServiceMeta(idx);
         const kit = lineKitCostParts(idx, meta);
         lineCost += kit.kitCost;
+        if (includeVisitAddons) {
+          lineCost += Math.max(0, numVal('input[name="addon_sales_amount"]'));
+        }
         lineAmount += kit.kitClient || 0;
         const profitBefore = lineAmount - lineCost;
         return profitBefore - profitBefore * salonRate;
       }
 
+      const previewLineIdxs = visitLineIndicesForPreview();
+      const addonLineIdx = previewLineIdxs.length ? previewLineIdxs[0] : null;
+
       if (scope === 'PER_SERVICE') {
-        visitLineIndicesForPreview().forEach(function (idx) {
+        previewLineIdxs.forEach(function (idx) {
           const mix = lineMixCostAndBonus(idx);
-          const mastersPool = linePreviewMastersPool(idx);
+          const mastersPool = linePreviewMastersPool(idx, idx === addonLineIdx);
           const alloc = readLineAllocationsForPreview(idx);
           if (!alloc) return;
           for (const r of alloc) {
@@ -2185,15 +2213,15 @@
         });
       } else {
         const alloc = readAllocationsForPreview();
-        visitLineIndicesForPreview().forEach(function (idx) {
-          const mastersPool = linePreviewMastersPool(idx);
+        previewLineIdxs.forEach(function (idx) {
+          const mastersPool = linePreviewMastersPool(idx, idx === addonLineIdx);
           if (alloc) {
             for (const r of alloc) {
               addMasterPay(r.mid, mastersPool * (r.pct / 100.0), 0);
             }
           }
         });
-        visitLineIndicesForPreview().forEach(function (idx) {
+        previewLineIdxs.forEach(function (idx) {
           const mix = lineMixCostAndBonus(idx);
           if (mix.mixBonus > 0 && mix.bonusMasterId) {
             addMasterPay(mix.bonusMasterId, 0, mix.mixBonus);
