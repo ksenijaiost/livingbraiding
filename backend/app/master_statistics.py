@@ -340,6 +340,20 @@ def _daily_rows_from_events(events: list[MasterStatsEventRow]) -> list[MasterSta
     return out
 
 
+def sort_master_stats_daily_rows(
+    rows: list[MasterStatsDailyRow],
+    *,
+    order: str = "desc",
+) -> list[MasterStatsDailyRow]:
+    """Сортировка дневных строк по дате (asc / desc)."""
+    reverse = str(order or "desc").strip().lower() != "asc"
+    return sorted(rows, key=lambda r: r.day, reverse=reverse)
+
+
+def parse_master_statistics_date_sort(raw: str | None) -> str:
+    return "asc" if str(raw or "").strip().lower() == "asc" else "desc"
+
+
 def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> MasterStatisticsResult | None:
     master = db.get(User, master_id)
     if master is None:

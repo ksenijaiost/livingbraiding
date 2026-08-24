@@ -26,7 +26,7 @@ from app.db.models import (
     VisitClientType,
     VisitMastersScope,
 )
-from app.master_statistics import build_master_statistics, format_discounts
+from app.master_statistics import build_master_statistics, format_discounts, sort_master_stats_daily_rows
 from app.payroll_fund import append_ledger
 from app.visit_multi_service import (
     MultiServiceVisitInput,
@@ -318,3 +318,20 @@ def test_build_master_statistics_daily_rows(memory_db) -> None:
     assert len(day0.events) == 2
     assert {x.event_short_label for x in day0.events} == {"визит", "почас"}
     assert day0.total_master_payroll == pytest.approx(sum(x.master_payroll for x in day0.events))
+
+
+def test_sort_master_stats_daily_rows_asc_desc() -> None:
+    from datetime import date as date_cls
+
+    from app.master_statistics import MasterStatsDailyRow, sort_master_stats_daily_rows
+
+    d1 = date_cls(2026, 1, 10)
+    d2 = date_cls(2026, 1, 12)
+    rows = [
+        MasterStatsDailyRow(day=d2, total_master_payroll=200.0, events=[]),
+        MasterStatsDailyRow(day=d1, total_master_payroll=100.0, events=[]),
+    ]
+    asc = sort_master_stats_daily_rows(rows, order="asc")
+    assert [r.day for r in asc] == [d1, d2]
+    desc = sort_master_stats_daily_rows(rows, order="desc")
+    assert [r.day for r in desc] == [d2, d1]

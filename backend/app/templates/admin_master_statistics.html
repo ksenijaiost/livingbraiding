@@ -37,10 +37,45 @@
           font-size:12px;
         }
       }
+      .ms-date-sort {
+        display:inline-flex;
+        flex-direction:column;
+        vertical-align:middle;
+        margin-left:6px;
+        line-height:1;
+        gap:1px;
+      }
+      .ms-sort-arrow {
+        display:block;
+        font-size:10px;
+        color:#9ca3af;
+        text-decoration:none;
+        padding:0 2px;
+      }
+      .ms-sort-arrow:hover {
+        color:#374151;
+      }
+      .ms-sort-arrow.ms-sort-active {
+        color:#2563eb;
+        font-weight:700;
+      }
     </style>
+
+    {% macro ms_date_sort_th(label) %}
+      <th>
+        {{ label }}
+        {% if sort_url_asc and sort_url_desc %}
+          <span class="ms-date-sort" aria-label="Сортировка по дате">
+            <a href="{{ sort_url_asc }}" class="ms-sort-arrow{% if date_sort == 'asc' %} ms-sort-active{% endif %}" title="Сначала старые">▲</a>
+            <a href="{{ sort_url_desc }}" class="ms-sort-arrow{% if date_sort != 'asc' %} ms-sort-active{% endif %}" title="Сначала новые">▼</a>
+          </span>
+        {% endif %}
+      </th>
+    {% endmacro %}
 
     <form method="get" action="/admin/statistics" id="ms_form" class="card" style="background: #f8f9fb; margin-bottom: 20px;">
       <input type="hidden" name="report_mode" id="ms_mode_hidden" value="{{ report_mode|default('custom_dates') }}" />
+      <input type="hidden" name="date_sort" value="{{ date_sort|default('desc') }}" />
 
       <div style="margin-bottom: 16px;">
         <label for="ms_master">Мастер</label>
@@ -179,7 +214,7 @@
           <table class="ms-stats-table">
             <thead>
               <tr>
-                <th>День</th>
+                {{ ms_date_sort_th('День') }}
                 <th>Сумма ЗП</th>
                 <th>События</th>
               </tr>
@@ -211,7 +246,7 @@
             <table class="ms-stats-table">
               <thead>
                 <tr>
-                  <th>Дата</th>
+                  {{ ms_date_sort_th('Дата') }}
                   <th>ЗП за день</th>
                   <th>Вид события</th>
                   <th>ID</th>
