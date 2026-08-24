@@ -148,7 +148,7 @@
     var cConsultation = occColors.consultation || '#f7d368';
     var cDayOff = occColors.day_off || '#fc8580';
     var cUnavailable = occColors.unavailable || '#cfcfcf';
-    var cNoData = occColors.no_data || '#ffffff';
+    var cNoData = occColors.no_data || '#fecaca';
     var cBlock = occColors.block || '#cfcfcf';
     var cWorkPlan = occColors.work_plan || '#D8BFD8';
     var hasAnyConflict = false;
@@ -242,8 +242,9 @@
       html += '<div style="font-size:12px; font-weight:600; text-align:center; height:' + occHeaderH + 'px; line-height:' + occHeaderH + 'px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + esc(m.name || '') + '</div>';
       var sc = schedule[String(m.id)] || {};
       var colState = sc.column_state || sc.state || 'working';
-      var colBg = cNoData;
-      if (colState === 'day_off' || colState === 'no_data') colBg = cDayOff;
+      var colBg = '#ffffff';
+      if (colState === 'day_off') colBg = cDayOff;
+      else if (colState === 'no_data') colBg = cNoData;
       html += '<div style="position:relative; height:' + gridH + 'px; border-left:1px solid #e2e8f0; border-bottom:1px solid #e2e8f0; background:' + colBg + ';">';
       html += renderOccupancyGridLines(hourFrom, hourTo, spanMin);
       if (colState === 'working') {

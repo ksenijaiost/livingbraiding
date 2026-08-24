@@ -305,7 +305,8 @@
       var state = d && d.state ? d.state : (inMonth ? 'no_data' : null);
       var bg = '#e5e7eb';
       if (state === 'working') bg = '#ffffff';
-      else if (state === 'day_off' || state === 'no_data') bg = '#fc8580';
+      else if (state === 'day_off') bg = '#fc8580';
+      else if (state === 'no_data') bg = '#fecaca';
       var opacity = inMonth ? '1' : '0.45';
       tbodyHtml += '<td style="vertical-align:top; padding:8px 10px; cursor:' + (inMonth ? 'pointer' : 'default') + '; opacity:' + opacity + '; background:' + bg + '; border:1px solid #f1f5f9;">';
       if (inMonth) {
