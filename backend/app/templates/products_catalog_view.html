@@ -173,7 +173,7 @@
           <a href="/service-catalog">Прайс — услуги</a>
           <span class="lb-top-sep">·</span>
           <a href="/products-calc">Калькулятор</a>
-          {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
+          {% if role_is_admin_staff(current_user.role) %}
             <span class="lb-top-sep">·</span>
             <a href="/bookings/new">Новая бронь</a>
           {% endif %}
@@ -239,7 +239,7 @@
                   {% if show_work %}<th class="pcat-num"><span class="lb-th-full">Работа</span><span class="lb-th-short" title="Работа">Раб.</span></th>{% endif %}
                   {% if show_expense_col %}<th class="pcat-num"><span class="lb-th-full">Расход</span><span class="lb-th-short" title="Расход">Расх.</span></th>{% endif %}
                   <th class="pcat-active"><span class="lb-th-full">Актуально</span><span class="lb-th-short" title="Актуально">Акт.</span></th>
-                  {% if current_user.role.value == "ADMIN_SUPER" %}
+                  {% if role_can_edit_catalog(current_user.role) %}
                     <th class="pcat-actions"></th>
                   {% endif %}
                 </tr>
@@ -250,14 +250,14 @@
                   {% set price_locked = r.price_locked if r.price_locked is defined else false %}
                   <tr>
                     <td class="pcat-name">
-                      {% if row_kind == 'group_parent' and current_user.role.value == "ADMIN_SUPER" and r.id %}
+                      {% if row_kind == 'group_parent' and role_can_edit_catalog(current_user.role) and r.id %}
                         <input form="rubber-group-{{ r.id }}" name="name" type="text" value="{{ r.base_name }}" maxlength="200" required style="width:100%;max-width:100%;box-sizing:border-box;" />
                       {% elif row_kind == 'size_child' or row_kind == 'size_placeholder' %}
                         <div class="pcat-size-indent">{{ r.size_label }}{% if row_kind == 'size_placeholder' %} <span class="muted">— нет в прайсе</span>{% endif %}</div>
-                        {% if row_kind == 'size_child' and current_user.role.value == "ADMIN_SUPER" and r.id %}
+                        {% if row_kind == 'size_child' and role_can_edit_catalog(current_user.role) and r.id %}
                           <input form="row-edit-{{ r.id }}" type="hidden" name="name" value="{{ r.name }}" />
                         {% endif %}
-                      {% elif current_user.role.value == "ADMIN_SUPER" and r.id %}
+                      {% elif role_can_edit_catalog(current_user.role) and r.id %}
                         <input form="row-edit-{{ r.id }}" name="name" type="text" value="{{ r.name }}" maxlength="200" required style="width:100%;max-width:100%;box-sizing:border-box;" />
                         {% if g.subcategory_name == "Заготовки поштучно" %}
                           <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
@@ -272,7 +272,7 @@
                     </td>
                     {% if show_size_col %}
                       <td class="pcat-size">
-                        {% if (row_kind == 'group_parent' or row_kind == 'plain') and current_user.role.value == "ADMIN_SUPER" and r.id %}
+                        {% if (row_kind == 'group_parent' or row_kind == 'plain') and role_can_edit_catalog(current_user.role) and r.id %}
                           <form method="post" action="/products-catalog/{{ r.id }}/rubber-sizes" class="pcat-size-toggle-form" data-enable="{{ '0' if r.size_checked else '1' }}" data-checked="{{ '1' if r.size_checked else '0' }}">
                             <input type="hidden" name="category" value="{{ selected_category }}" />
                             <input type="hidden" name="enable" value="{{ '1' if r.size_checked else '0' }}" />
@@ -286,7 +286,7 @@
                     {% if show_labels_col %}
                       <td class="pcat-labels">
                         {% set is_kit = r.is_used_in_kit_form %}
-                        {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
+                        {% if role_can_edit_catalog(current_user.role) and r.id %}
                           <div class="pcat-label-stack">
                             <label><input form="row-edit-{{ r.id }}" type="checkbox" name="is_used_in_kit_form" {% if is_kit %}checked{% endif %} />кальк</label>
                             <label><input form="row-edit-{{ r.id }}" type="checkbox" name="ignore_in_calc" {% if r.ignore_in_calc %}checked{% endif %} />техн</label>
@@ -300,7 +300,7 @@
                         {% endif %}
                       </td>
                     {% endif %}
-                    {% if current_user.role.value == "ADMIN_SUPER" and r.id and row_kind == 'group_parent' %}
+                    {% if role_can_edit_catalog(current_user.role) and r.id and row_kind == 'group_parent' %}
                       <td class="pcat-num"><input class="pcat-price-locked" type="text" value="" disabled tabindex="-1" /></td>
                       {% if show_work %}<td class="pcat-num"><input class="pcat-price-locked" type="text" value="" disabled tabindex="-1" /></td>{% endif %}
                       {% if show_expense_col %}<td class="pcat-num"><input class="pcat-price-locked" type="text" value="" disabled tabindex="-1" /></td>{% endif %}
@@ -311,7 +311,7 @@
                           <button type="submit" class="secondary" style="padding:4px 10px;">Сохранить</button>
                         </form>
                       </td>
-                    {% elif current_user.role.value == "ADMIN_SUPER" and row_kind == 'size_placeholder' %}
+                    {% elif role_can_edit_catalog(current_user.role) and row_kind == 'size_placeholder' %}
                       <td class="pcat-num"><input class="pcat-price-locked" type="text" value="" disabled tabindex="-1" /></td>
                       {% if show_work %}<td class="pcat-num"><input class="pcat-price-locked" type="text" value="" disabled tabindex="-1" /></td>{% endif %}
                       {% if show_expense_col %}<td class="pcat-num"><input class="pcat-price-locked" type="text" value="" disabled tabindex="-1" /></td>{% endif %}
@@ -324,7 +324,7 @@
                           <button type="submit" class="secondary" style="padding:4px 10px;">Добавить</button>
                         </form>
                       </td>
-                    {% elif current_user.role.value == "ADMIN_SUPER" and r.id %}
+                    {% elif role_can_edit_catalog(current_user.role) and r.id %}
                       <td class="pcat-num">
                         <input form="row-edit-{{ r.id }}" name="price" type="text" inputmode="decimal" value="{{ '' if r.price is none else r.price }}" />
                       </td>
@@ -380,7 +380,7 @@
                         <td class="pcat-num">{% if r.fixed_expense is not none %}{{ r.fixed_expense }}{% else %}<span class="muted">—</span>{% endif %}</td>
                       {% endif %}
                       <td class="pcat-active">{% if r.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
-                      {% if current_user.role.value == "ADMIN_SUPER" %}
+                      {% if role_can_edit_catalog(current_user.role) %}
                         <td class="pcat-actions"><span class="muted">—</span></td>
                       {% endif %}
                     {% endif %}
@@ -395,7 +395,7 @@
                   {% for r in g.inactive_rows %}
                   <tr style="opacity:0.85;">
                     <td class="pcat-name">
-                      {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
+                      {% if role_can_edit_catalog(current_user.role) and r.id %}
                         <input form="row-edit-{{ r.id }}" name="name" type="text" value="{{ r.name }}" maxlength="200" required style="width:100%;max-width:100%;box-sizing:border-box;" />
                         {% if g.subcategory_name == "Заготовки поштучно" %}
                           <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
@@ -412,7 +412,7 @@
                     {% if show_labels_col %}
                       <td class="pcat-labels">
                         {% set is_kit = r.is_used_in_kit_form %}
-                        {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
+                        {% if role_can_edit_catalog(current_user.role) and r.id %}
                           <div class="pcat-label-stack">
                             <label><input form="row-edit-{{ r.id }}" type="checkbox" name="is_used_in_kit_form" {% if is_kit %}checked{% endif %} />кальк</label>
                             <label><input form="row-edit-{{ r.id }}" type="checkbox" name="ignore_in_calc" {% if r.ignore_in_calc %}checked{% endif %} />техн</label>
@@ -426,7 +426,7 @@
                         {% endif %}
                       </td>
                     {% endif %}
-                    {% if current_user.role.value == "ADMIN_SUPER" and r.id %}
+                    {% if role_can_edit_catalog(current_user.role) and r.id %}
                       <td class="pcat-num">
                         <input form="row-edit-{{ r.id }}" name="price" type="text" inputmode="decimal" value="{{ '' if r.price is none else r.price }}" />
                       </td>
@@ -480,14 +480,14 @@
                         <td class="pcat-num">{% if r.fixed_expense is not none %}{{ r.fixed_expense }}{% else %}<span class="muted">—</span>{% endif %}</td>
                       {% endif %}
                       <td class="pcat-active">{% if r.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
-                      {% if current_user.role.value == "ADMIN_SUPER" %}
+                      {% if role_can_edit_catalog(current_user.role) %}
                         <td class="pcat-actions"><span class="muted">—</span></td>
                       {% endif %}
                     {% endif %}
                   </tr>
                   {% endfor %}
                 {% endif %}
-                {% if current_user.role.value == "ADMIN_SUPER" and is_catalog_products_category %}
+                {% if role_can_edit_catalog(current_user.role) and is_catalog_products_category %}
                   <tr>
                     <td colspan="{% if show_labels_col %}6{% elif show_expense_col %}5{% elif show_work %}5{% else %}4{% endif %}" class="muted" style="padding:14px 8px 6px;font-size:13px;">
                       <strong>Добавить новый элемент</strong> — заполняется и сразу появляется в прайсе.

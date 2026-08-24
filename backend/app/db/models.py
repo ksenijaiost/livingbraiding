@@ -38,6 +38,7 @@ def _enum_values(enum_cls: type[enum.Enum]) -> list[str]:
 
 class UserRole(str, enum.Enum):
     ADMIN_SUPER = "ADMIN_SUPER"
+    ADMIN_SENIOR = "ADMIN_SENIOR"
     ADMIN = "ADMIN"
     MASTER = "MASTER"
     HELPER = "HELPER"

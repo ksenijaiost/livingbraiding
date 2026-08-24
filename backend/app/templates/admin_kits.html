@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-  {% set is_admin_kit = current_user.role.value in ['ADMIN', 'ADMIN_SUPER'] %}
+  {% set is_admin_kit = role_is_admin_staff(current_user.role) %}
   <div class="card">
     <div class="lb-flex-between-center">
       <h2 class="lb-mt-0">Комплекты</h2>
@@ -209,9 +209,9 @@
               <td>{{ k.title }}</td>
               <td>{{ k.pieces_available }} / {{ k.pieces_total }}</td>
               <td style="white-space:nowrap;">
-                {% if is_admin_kit and current_user.role.value == 'ADMIN_SUPER' %}
+                {% if role_can_delete_kit(current_user.role) %}
                   <a href="/kits/{{ k.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
-                  <form method="post" action="/kits/{{ k.id }}/delete" style="display:inline;margin:0;" onsubmit="return confirm('Удалить комплект «{{ k.sku }}» из базы безвозвратно?');">
+                  <form method="post" action="/kits/{{ k.id }}/delete" style="display:inline;margin:0;" onsubmit="return confirm('Точно удалить?');">
                     <button type="submit" class="secondary" style="color:#b91c1c;border-color:#fecaca;">Удалить</button>
                   </form>
                 {% elif is_admin_kit %}

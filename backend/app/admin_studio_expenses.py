@@ -32,7 +32,7 @@ from app.visit_edit_policy import ensure_event_date_in_open_payroll_period
 from app.webui import ctx as _ctx, templates
 
 router = APIRouter(prefix="/admin/expenses", tags=["admin-studio-expenses"])
-_SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
+_EXPENSES_EDITOR = Depends(require_role(UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER))
 
 
 def _g_str(form: Any, name: str, default: str = "") -> str:
@@ -100,7 +100,7 @@ def _subcats_for_category(db: Session, category_id: int) -> list[StudioExpenseSu
 @router.get("/api/subcategories", response_class=JSONResponse)
 def api_subcategories(
     category_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _EXPENSES_EDITOR,
     db: Session = Depends(get_db),
 ):
     rows = _subcats_for_category(db, category_id)
@@ -110,7 +110,7 @@ def api_subcategories(
 @router.get("", response_class=HTMLResponse)
 def studio_expenses_list(
     request: Request,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _EXPENSES_EDITOR,
     db: Session = Depends(get_db),
     date_from: str | None = None,
     date_to: str | None = None,
@@ -183,7 +183,7 @@ def studio_expenses_list(
 @router.get("/{expense_id}/audit", response_class=JSONResponse)
 def studio_expense_audit(
     expense_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _EXPENSES_EDITOR,
     db: Session = Depends(get_db),
 ):
     row = db.get(StudioExpense, expense_id)
@@ -218,7 +218,7 @@ def studio_expense_audit(
 @router.post("/new")
 async def studio_expense_new(
     request: Request,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _EXPENSES_EDITOR,
     db: Session = Depends(get_db),
 ):
     form = await request.form()
@@ -279,7 +279,7 @@ async def studio_expense_new(
 async def studio_expense_save(
     expense_id: int,
     request: Request,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _EXPENSES_EDITOR,
     db: Session = Depends(get_db),
 ):
     row = db.get(StudioExpense, expense_id)
@@ -361,7 +361,7 @@ async def studio_expense_save(
 @router.post("/{expense_id}/void")
 async def studio_expense_void(
     expense_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _EXPENSES_EDITOR,
     db: Session = Depends(get_db),
 ):
     row = db.get(StudioExpense, expense_id)

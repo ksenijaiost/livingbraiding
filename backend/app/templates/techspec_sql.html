@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top:0;">SQL</h2>
+    <p class="muted" style="margin-top:0;">
+      Read-only запросы к БД: <code>SELECT</code>, <code>WITH</code>, <code>EXPLAIN</code>. Показаны первые 200 строк.
+      <a href="/techspec/data">← Технические данные</a>
+    </p>
+
+    <form method="post" action="/techspec/sql">
+      <label for="sql_query">Запрос</label>
+      <textarea id="sql_query" name="sql_query" rows="10" style="font-family: ui-monospace, SFMono-Regular, Consolas, monospace;">{{ sql_query or "SELECT * FROM users LIMIT 20" }}</textarea>
+      <div style="margin-top:10px;">
+        <button type="submit">Выполнить</button>
+      </div>
+    </form>
+
+    {% if sql_error %}
+      <div class="error" style="margin-top:12px;">{{ sql_error }}</div>
+    {% endif %}
+
+    {% if sql_result %}
+      <div style="margin-top:14px;">
+        <div class="muted" style="font-size:12px;">Выполнен запрос</div>
+        <div style="margin-top:4px;"><code>{{ sql_result.sql }}</code></div>
+        <div class="muted" style="margin-top:8px; font-size:12px;">
+          Строк: <strong>{{ sql_result.row_count }}</strong>{% if sql_result.truncated %} (показаны первые 200){% endif %}
+        </div>
+
+        {% if sql_result.columns %}
+          <div style="overflow-x:auto; margin-top:10px;">
+            <table>
+              <thead>
+                <tr>
+                  {% for col in sql_result.columns %}
+                    <th><code>{{ col }}</code></th>
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in sql_result.rows %}
+                  <tr>
+                    {% for col in sql_result.columns %}
+                      <td style="vertical-align:top; white-space:pre-wrap;">{{ row[col] }}</td>
+                    {% endfor %}
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="muted" style="margin-top:10px;">Запрос выполнен без табличного результата.</div>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}

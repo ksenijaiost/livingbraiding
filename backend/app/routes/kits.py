@@ -84,6 +84,8 @@ from app.kit_inlay_visit import (
     kit_reserve_slots_used,
     suggest_kits_for_stock,
 )
+from app.kit_deletion import KIT_DELETE_SOURCE_CARD, hard_delete_kit, kit_hard_delete_error
+from app.role_access import role_can_delete_kit
 from app.user_roles import select_users_with_any_role, user_has_any_role
 from app.webui import templates, ctx as _ctx
 from app.time_utils import utcnow_naive
@@ -106,6 +108,7 @@ def _redirect_admin_kits_to_canon(request: Request, *, suffix: str = "") -> Redi
 
 _KITS_STAFF = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _KITS_ADMIN = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER))
+_KITS_DELETE = Depends(require_role(UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER))
 _KITS_SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
 
 
@@ -379,34 +382,28 @@ def admin_kits_list(
 
 
 @router.post("/{kit_id}/delete")
-def admin_kit_delete(
+async def admin_kit_delete(
     kit_id: int,
-    current_user: AuthUser = _KITS_SUPER,
+    request: Request,
+    current_user: AuthUser = _KITS_DELETE,
     db: Session = Depends(get_db),
 ):
+    form = await request.form()
+    redirect_to = str(form.get("redirect_to") or "").strip().lower()
+    back_url = f"/kits/{kit_id}" if redirect_to == "detail" else "/kits"
+
     kit = db.get(Kit, kit_id)
     if kit is None:
         raise HTTPException(status_code=404, detail="Комплект не найден")
-    if kit.is_active:
-        return RedirectResponse(
-            url="/kits?err=" + quote("Удалять можно только неактуальные комплекты (снимите галочку «Актуален»)."),
-            status_code=303,
-        )
-    used = int(
-        db.scalar(select(func.count()).select_from(VisitKitUsage).where(VisitKitUsage.kit_id == kit_id)) or 0
-    )
-    if used > 0:
-        return RedirectResponse(
-            url="/kits?err=" + quote("Нельзя удалить: комплект уже использован в визитах."),
-            status_code=303,
-        )
-    if kit.reserves:
-        return RedirectResponse(
-            url="/kits?err=" + quote("Снимите все резервы перед удалением комплекта."),
-            status_code=303,
-        )
-    db.delete(kit)
-    db.commit()
+    err = kit_hard_delete_error(db, kit)
+    if err:
+        return RedirectResponse(url=f"{back_url}?err=" + quote(err), status_code=303)
+    try:
+        hard_delete_kit(db, kit, actor_user_id=current_user.id, source=KIT_DELETE_SOURCE_CARD)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(url=f"{back_url}?err=" + quote(str(exc)), status_code=303)
     return RedirectResponse(url="/kits?msg=deleted", status_code=303)
 
 
@@ -599,6 +596,7 @@ def admin_kit_detail(
         and int(kit.pieces_available or 0) > 0
         and not kit_inventory_is_keyed(db, int(kit_id))
     )
+    kit_delete_error = kit_hard_delete_error(db, kit) if role_can_delete_kit(current_user.role) else None
     return templates.TemplateResponse(
         "admin_kit_detail.html",
         _ctx(
@@ -616,6 +614,8 @@ def admin_kit_detail(
             kit_reserve_slots_used=kit_reserve_slots_used(db, kit_id),
             display_tz=display_tz,
             clear_modal_items_json=json.dumps(_kit_clear_modal_items(kit, display_tz), ensure_ascii=False),
+            kit_can_delete=kit_delete_error is None,
+            kit_delete_block_reason=kit_delete_error,
             msg=msg,
             err=err,
         ),

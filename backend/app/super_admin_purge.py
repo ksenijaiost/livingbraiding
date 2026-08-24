@@ -28,6 +28,7 @@ from app.db.models import (
 from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.forms_parse import parse_int
 from app.payroll_fund import PayrollFundSourceKind, storno_source_accruals
+from app.kit_deletion import KIT_DELETE_SOURCE_PURGE, hard_delete_kit, kit_hard_delete_error
 from app.kit_blank_stock_core import parse_usage_breakdown_json, return_reserve_row_to_stock
 from app.routes.bookings import release_booking_kit_reserves
 from app.routes.visits import _visit_cancel_revert_stock
@@ -259,6 +260,9 @@ def run_purge(
         purge_kits_hard(db, ids, actor_user_id=actor_user_id)
     else:
         raise ValueError("Неизвестный тип объекта.")
+
+    if kind == "kit":
+        return
 
     ids = entity_id if isinstance(entity_id, list) else [int(entity_id)]
     ids_text = ", ".join(str(i) for i in ids[:40]) + ("…" if len(ids) > 40 else "")
@@ -530,16 +534,6 @@ def purge_kits_hard(db: Session, kit_ids: list[int], *, actor_user_id: int | Non
     if not ids:
         raise ValueError("ID комплекта не указан.")
 
-    bad: list[str] = []
-    for kid in ids:
-        used_v = int(db.scalar(select(func.count()).select_from(VisitKitUsage).where(VisitKitUsage.kit_id == kid)) or 0)
-        used_s = int(db.scalar(select(func.count()).select_from(ProductSale).where(ProductSale.kit_id == kid)) or 0)
-        used_w = int(db.scalar(select(func.count()).select_from(WorkForInventory).where(WorkForInventory.created_kit_id == kid)) or 0)
-        if used_v or used_s or used_w:
-            bad.append(f"{kid} (визиты:{used_v}, продажи:{used_s}, работы:{used_w})")
-    if bad:
-        raise ValueError("Нельзя удалить: комплект(ы) использованы в данных. " + "; ".join(bad[:12]) + ("…" if len(bad) > 12 else ""))
-
     kits = list(db.scalars(select(Kit).where(Kit.id.in_(ids)).order_by(Kit.id.asc())).all())
     found_ids = {int(k.id) for k in kits}
     missing = [str(i) for i in ids if int(i) not in found_ids]
@@ -547,6 +541,8 @@ def purge_kits_hard(db: Session, kit_ids: list[int], *, actor_user_id: int | Non
         raise ValueError("Не найдены комплекты: " + ", ".join(missing[:40]) + ("…" if len(missing) > 40 else ""))
 
     for k in kits:
-        db.execute(delete(KitReserve).where(KitReserve.kit_id == int(k.id)))
-        db.execute(delete(KitAuditLog).where(KitAuditLog.kit_id == int(k.id)))
-        db.delete(k)
+        err = kit_hard_delete_error(db, k)
+        if err:
+            raise ValueError(err)
+    for k in kits:
+        hard_delete_kit(db, k, actor_user_id=actor_user_id, source=KIT_DELETE_SOURCE_PURGE)

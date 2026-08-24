@@ -136,7 +136,7 @@ def finalize_material_sale_fields(
     # Смешка: источник для админа только из наличия.
     mix_src = sale.material_mix_source
     if svc.retail_material_mix:
-        if active_role in (UserRole.ADMIN, UserRole.ADMIN_SUPER):
+        if active_role in (UserRole.ADMIN, UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER):
             mix_src = MixSource.FROM_STOCK
             sale.material_mix_source = mix_src
         if mix_src and mix_src != MixSource.NO_MIX:

@@ -32,8 +32,14 @@ from app.ru_labels import (
     ru_questionnaire_field_type,
     ru_user_role,
 )
+from app.role_access import (
+    role_can_edit_catalog,
+    role_is_admin_staff,
+    role_is_admin_super,
+    role_is_master_schedule_admin,
+    role_can_delete_kit,
+)
 from app.db.models import MasterLevel, UserRole
-
 
 templates = Jinja2Templates(directory="app/templates")
 
@@ -80,6 +86,11 @@ templates.env.globals["booking_kind_label"] = booking_kind_label
 templates.env.globals["client_payment_kind_label"] = client_payment_kind_label
 templates.env.globals["UserRole"] = UserRole
 templates.env.globals["master_levels"] = tuple(MasterLevel)
+templates.env.globals["role_is_admin_staff"] = role_is_admin_staff
+templates.env.globals["role_can_edit_catalog"] = role_can_edit_catalog
+templates.env.globals["role_is_master_schedule_admin"] = role_is_master_schedule_admin
+templates.env.globals["role_can_delete_kit"] = role_can_delete_kit
+templates.env.globals["role_is_admin_super"] = role_is_admin_super
 
 
 def ctx(request: Request, current_user: Any = None, **kwargs):

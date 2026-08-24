@@ -43,7 +43,7 @@ templates.env.globals["reveal_block_choices"] = [(b, REVEAL_BLOCK_LABELS[b]) for
 
 router = APIRouter(prefix="/admin/catalog", tags=["admin-questionnaire"])
 
-_SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
+_CATALOG_EDITOR = Depends(require_role(UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER))
 
 FIELD_TYPE_CHOICES = [
     ("TEXT", "Однострочный текст"),
@@ -300,7 +300,7 @@ def category_fields_list(
     request: Request,
     category_id: int,
     err: str | None = None,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     cat = db.get(ServiceCategory, category_id)
@@ -332,7 +332,7 @@ def category_fields_list(
 def category_field_new_form(
     request: Request,
     category_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     cat = db.get(ServiceCategory, category_id)
@@ -371,7 +371,7 @@ def category_field_new_save(
     max_value: str | None = Form(None),
     reveal_block: list[str] = Form([]),
     reveal_field_keys: str | None = Form(None),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     cat = db.get(ServiceCategory, category_id)
@@ -512,7 +512,7 @@ def category_field_edit_form(
     request: Request,
     category_id: int,
     field_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     cat = db.get(ServiceCategory, category_id)
@@ -567,7 +567,7 @@ def category_field_edit_save(
     max_value: str | None = Form(None),
     reveal_block: list[str] = Form([]),
     reveal_field_keys: str | None = Form(None),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     cat = db.get(ServiceCategory, category_id)
@@ -676,7 +676,7 @@ def category_field_edit_save(
 def category_field_delete(
     category_id: int,
     field_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     field = db.get(CategoryQuestionnaireField, field_id)
@@ -692,7 +692,7 @@ def category_field_move(
     category_id: int,
     field_id: int,
     direction: str = Form(...),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     d = (direction or "").lower()
@@ -712,7 +712,7 @@ def subcategory_fields_list(
     request: Request,
     subcategory_id: int,
     err: str | None = None,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     sub = db.get(ServiceSubcategory, subcategory_id)
@@ -745,7 +745,7 @@ def subcategory_fields_list(
 def subcategory_field_new_form(
     request: Request,
     subcategory_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     sub = db.get(ServiceSubcategory, subcategory_id)
@@ -785,7 +785,7 @@ def subcategory_field_new_save(
     max_value: str | None = Form(None),
     reveal_block: list[str] = Form([]),
     reveal_field_keys: str | None = Form(None),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     sub = db.get(ServiceSubcategory, subcategory_id)
@@ -932,7 +932,7 @@ def subcategory_field_edit_form(
     request: Request,
     subcategory_id: int,
     field_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     sub = db.get(ServiceSubcategory, subcategory_id)
@@ -988,7 +988,7 @@ def subcategory_field_edit_save(
     max_value: str | None = Form(None),
     reveal_block: list[str] = Form([]),
     reveal_field_keys: str | None = Form(None),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     sub = db.get(ServiceSubcategory, subcategory_id)
@@ -1098,7 +1098,7 @@ def subcategory_field_edit_save(
 def subcategory_field_delete(
     subcategory_id: int,
     field_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     field = db.get(SubcategoryQuestionnaireField, field_id)
@@ -1114,7 +1114,7 @@ def subcategory_field_move(
     subcategory_id: int,
     field_id: int,
     direction: str = Form(...),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     d = (direction or "").lower()
@@ -1134,7 +1134,7 @@ def service_fields_list(
     request: Request,
     service_id: int,
     err: str | None = None,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     svc = db.get(Service, service_id)
@@ -1168,7 +1168,7 @@ def service_fields_list(
 def service_field_new_form(
     request: Request,
     service_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     svc = db.get(Service, service_id)
@@ -1209,7 +1209,7 @@ def service_field_new_save(
     max_value: str | None = Form(None),
     reveal_block: list[str] = Form([]),
     reveal_field_keys: str | None = Form(None),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     svc = db.get(Service, service_id)
@@ -1353,7 +1353,7 @@ def service_field_edit_form(
     request: Request,
     service_id: int,
     field_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     svc = db.get(Service, service_id)
@@ -1410,7 +1410,7 @@ def service_field_edit_save(
     max_value: str | None = Form(None),
     reveal_block: list[str] = Form([]),
     reveal_field_keys: str | None = Form(None),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     svc = db.get(Service, service_id)
@@ -1521,7 +1521,7 @@ def service_field_edit_save(
 def service_field_delete(
     service_id: int,
     field_id: int,
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     field = db.get(ServiceQuestionnaireField, field_id)
@@ -1537,7 +1537,7 @@ def service_field_move(
     service_id: int,
     field_id: int,
     direction: str = Form(...),
-    current_user: AuthUser = _SUPER,
+    current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
     d = (direction or "").lower()

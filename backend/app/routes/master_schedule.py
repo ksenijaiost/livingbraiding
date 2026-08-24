@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, require_role
 from app.db.models import MasterScheduleDay, MasterScheduleStatus, User, UserRole
+from app.role_access import role_is_master_schedule_admin
 from app.db.session import get_db
 from app.user_roles import select_users_with_role
 from app.forms_parse import parse_date_iso
@@ -49,6 +50,8 @@ def _month_range_utc(db: Session, ym: str) -> tuple[datetime, datetime]:
     end_utc = next_month_local_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
     return start_utc, end_utc
 
+
+_SCHEDULE_ADMIN = (UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER)
 
 router = APIRouter()
 
@@ -100,7 +103,7 @@ def _day_row_to_payload(row: MasterScheduleDay | None, *, hour_from: int, hour_t
 def api_master_schedule_month(
     m: str,
     user_id: int | None = None,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, *_SCHEDULE_ADMIN)),
     db: Session = Depends(get_db),
 ):
     year, month = _parse_ym(m)
@@ -224,7 +227,7 @@ def api_schedule_month_stats(
 def api_admin_master_schedule_day(
     d: str,
     user_id: int | None = None,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, *_SCHEDULE_ADMIN)),
     db: Session = Depends(get_db),
 ):
     day = parse_date_iso(d, field_name="d")
@@ -253,7 +256,7 @@ async def api_save_master_schedule_day(
     break_enabled: str | None = Form(None),
     break_from: str | None = Form(None),
     break_to: str | None = Form(None),
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, *_SCHEDULE_ADMIN)),
     db: Session = Depends(get_db),
 ):
     day = parse_date_iso(d, field_name="d")
@@ -314,7 +317,7 @@ async def api_save_master_schedule_bulk(
     break_enabled: str | None = Form(None),
     break_from: str | None = Form(None),
     break_to: str | None = Form(None),
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, *_SCHEDULE_ADMIN)),
     db: Session = Depends(get_db),
 ):
     d_from = parse_date_iso(date_from, field_name="date_from")
@@ -401,7 +404,7 @@ def _resolve_master_id_for_schedule_api(
 def api_list_master_time_blocks(
     d: str,
     user_id: int | None = None,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, *_SCHEDULE_ADMIN)),
     db: Session = Depends(get_db),
 ):
     day = parse_date_iso(d, field_name="d")
@@ -417,7 +420,7 @@ async def api_create_master_time_block(
     time_from: str = Form(...),
     time_to: str = Form(...),
     comment: str | None = Form(None),
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, *_SCHEDULE_ADMIN)),
     db: Session = Depends(get_db),
 ):
     day = parse_date_iso(d, field_name="d")
@@ -446,7 +449,7 @@ async def api_create_master_time_block(
 def api_delete_master_time_block(
     block_id: int,
     user_id: int | None = None,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, *_SCHEDULE_ADMIN)),
     db: Session = Depends(get_db),
 ):
     master_id = _resolve_master_id_for_schedule_api(current_user, user_id)
@@ -484,9 +487,9 @@ def masters_schedule_week_page(
 ):
     today = date.today()
     week_start = monday_of_week(today)
-    is_super = current_user.role == UserRole.ADMIN_SUPER
+    is_schedule_admin = role_is_master_schedule_admin(current_user.role)
     is_master = current_user.role == UserRole.MASTER
-    manage_url = "/admin/master-schedule" if is_super else ("/master/schedule" if is_master else None)
+    manage_url = "/admin/master-schedule" if is_schedule_admin else ("/master/schedule" if is_master else None)
     return templates.TemplateResponse(
         "masters_schedule_week.html",
         _ctx(
@@ -495,8 +498,8 @@ def masters_schedule_week_page(
             today_iso=today.isoformat(),
             week_start_iso=week_start.isoformat(),
             manage_schedule_url=manage_url,
-            manage_schedule_label="Управление графиком мастеров" if is_super else "Редактировать мой график",
-            is_super=is_super,
+            manage_schedule_label="Управление графиком мастеров" if is_schedule_admin else "Редактировать мой график",
+            is_super=is_schedule_admin,
         ),
     )
 
@@ -504,10 +507,10 @@ def masters_schedule_week_page(
 @router.get("/master/schedule", response_class=HTMLResponse)
 def master_schedule_page(
     request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, *_SCHEDULE_ADMIN)),
     db: Session = Depends(get_db),
 ):
-    if current_user.role == UserRole.ADMIN_SUPER:
+    if role_is_master_schedule_admin(current_user.role):
         return RedirectResponse(url="/admin/master-schedule", status_code=303)
     # Template itself does all loading via API, we only provide initial master list.
     # Provide hour defaults for quick placeholders.
@@ -530,7 +533,7 @@ def master_schedule_page(
 @router.get("/admin/master-schedule", response_class=HTMLResponse)
 def admin_master_schedule_page(
     request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    current_user: AuthUser = Depends(require_role(*_SCHEDULE_ADMIN)),
     db: Session = Depends(get_db),
 ):
     masters = list(db.scalars(select_users_with_role(UserRole.MASTER).order_by(User.display_name.asc())).all())

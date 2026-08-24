@@ -34,6 +34,10 @@
             <span>{{ ru_user_role(UserRole.ADMIN_SUPER) }}</span>
           </label>
           <label class="lb-inline-center-gap lb-mb-6">
+            <input type="checkbox" name="role_admin_senior" value="1" />
+            <span>{{ ru_user_role(UserRole.ADMIN_SENIOR) }}</span>
+          </label>
+          <label class="lb-inline-center-gap lb-mb-6">
             <input type="checkbox" name="role_admin" value="1" />
             <span>{{ ru_user_role(UserRole.ADMIN) }}</span>
           </label>
@@ -101,6 +105,10 @@
           <label class="lb-inline-center-gap lb-mb-6">
             <input type="checkbox" name="role_admin_super" value="1" {% if UserRole.ADMIN_SUPER in roles %}checked{% endif %} />
             <span>{{ ru_user_role(UserRole.ADMIN_SUPER) }}</span>
+          </label>
+          <label class="lb-inline-center-gap lb-mb-6">
+            <input type="checkbox" name="role_admin_senior" value="1" {% if UserRole.ADMIN_SENIOR in roles %}checked{% endif %} />
+            <span>{{ ru_user_role(UserRole.ADMIN_SENIOR) }}</span>
           </label>
           <label class="lb-inline-center-gap lb-mb-6">
             <input type="checkbox" name="role_admin" value="1" {% if UserRole.ADMIN in roles %}checked{% endif %} />

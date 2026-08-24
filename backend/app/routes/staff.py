@@ -35,6 +35,7 @@ router = APIRouter()
 
 _ROLE_FORM_KEYS = (
     (UserRole.ADMIN_SUPER, "role_admin_super"),
+    (UserRole.ADMIN_SENIOR, "role_admin_senior"),
     (UserRole.ADMIN, "role_admin"),
     (UserRole.MASTER, "role_master"),
     (UserRole.HELPER, "role_helper"),

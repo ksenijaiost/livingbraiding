@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-  {% set is_admin_kit = current_user.role.value in ['ADMIN', 'ADMIN_SUPER'] %}
+  {% set is_admin_kit = role_is_admin_staff(current_user.role) %}
   {% set slots_full = kit_reserve_slots_used >= kit_max_reserves %}
   {% set can_open_reserve = kit.pieces_available > 0 and not slots_full %}
   <div class="card">
@@ -12,8 +12,10 @@
       <p style="background:#dbeafe;border:1px solid #93c5fd;color:#1e40af;padding:10px 12px;border-radius:8px;">Резерв снят.</p>
     {% elif msg == "created" %}
       <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Комплект создан.</p>
-    {% elif msg == "saved" %}
+    {%     elif msg == "saved" %}
       <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Изменения сохранены.</p>
+    {% elif msg == "deleted" %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Комплект удалён из базы.</p>
     {% endif %}
     {% if err %}
       <div class="error" style="margin-bottom: 12px;">{{ err }}</div>
@@ -54,6 +56,16 @@
       </div>
       {% if is_admin_kit %}
         <a href="/kits/{{ kit.id }}/edit"><button type="button">Редактировать</button></a>
+      {% endif %}
+      {% if role_can_delete_kit(current_user.role) %}
+        {% if kit_can_delete %}
+          <form method="post" action="/kits/{{ kit.id }}/delete" style="display:inline;margin:0;" onsubmit="return confirm('Точно удалить?');">
+            <input type="hidden" name="redirect_to" value="detail" />
+            <button type="submit" class="secondary" style="color:#b91c1c;border-color:#fecaca;">Удалить</button>
+          </form>
+        {% elif kit_delete_block_reason %}
+          <span class="muted" style="font-size:13px;" title="{{ kit_delete_block_reason }}">Удаление недоступно</span>
+        {% endif %}
       {% endif %}
     </div>
 

@@ -81,7 +81,8 @@
     row.querySelectorAll('.kcl-qty').forEach(function (inp) {
       var mid = parseInt(inp.getAttribute('data-master-id'), 10);
       var q = parseInt(inp.value, 10) || 0;
-      if (mid > 0 && q > 0) data.by_staff[mid] = q;
+      // master id 0 — колонка «Количество в комплекте» в админке /kits
+      if (!isNaN(mid) && q > 0) data.by_staff[mid] = q;
     });
     return data;
   }

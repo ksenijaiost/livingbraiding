@@ -243,7 +243,7 @@
       var sc = schedule[String(m.id)] || {};
       var colState = sc.column_state || sc.state || 'working';
       var colBg = cNoData;
-      if (colState === 'day_off') colBg = cDayOff;
+      if (colState === 'day_off' || colState === 'no_data') colBg = cDayOff;
       html += '<div style="position:relative; height:' + gridH + 'px; border-left:1px solid #e2e8f0; border-bottom:1px solid #e2e8f0; background:' + colBg + ';">';
       html += renderOccupancyGridLines(hourFrom, hourTo, spanMin);
       if (colState === 'working') {

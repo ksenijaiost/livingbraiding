@@ -13,6 +13,7 @@ from starlette.datastructures import UploadFile
 
 from app.auth import AuthUser
 from app.client_validation import format_created_by_label
+from app.role_access import role_is_admin_staff
 from app.db.models import (
     Client,
     Service,
@@ -171,7 +172,7 @@ def user_is_draft_participant(db: Session, user_id: int, draft_id: int) -> bool:
 def user_can_view_draft(user: AuthUser, draft: VisitDraft, db: Session) -> bool:
     if draft.finalized_visit_id is not None:
         return False
-    if user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER) or UserRole.ADMIN_SUPER in user.roles:
+    if role_is_admin_staff(user.role) or UserRole.ADMIN_SUPER in user.roles:
         return True
     if user.role == UserRole.MASTER:
         return user_is_draft_participant(db, user.id, int(draft.id))

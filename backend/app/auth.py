@@ -24,6 +24,7 @@ from app.db.models import MasterLevel, User, UserRole
 from app.db.session import get_db
 from app.security import verify_password
 from app.settings import get_settings
+from app.role_access import active_role_matches
 from app.user_roles import default_active_role, get_roles_for_user, resolve_active_role
 
 
@@ -275,11 +276,13 @@ def get_current_user(
 def require_role(*roles: UserRole):
     """Dependency factory for role-based access control (по активной роли)."""
 
+    allowed = frozenset(roles)
+
     def _dep(user: Annotated[AuthUser, Depends(get_current_user)]) -> AuthUser:
         # TECHSPEC — техническая роль: доступ ко всем страницам независимо от активной роли.
         if UserRole.TECHSPEC in user.roles:
             return user
-        if user.role not in roles:
+        if not active_role_matches(user.role, allowed):
             raise HTTPException(status_code=403, detail="Forbidden")
         return user
 

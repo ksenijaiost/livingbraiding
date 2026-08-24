@@ -10,6 +10,7 @@ from app.db.models import User, UserRole, UserRoleAssignment
 _ROLE_PRIORITY = (
     UserRole.TECHSPEC,
     UserRole.ADMIN_SUPER,
+    UserRole.ADMIN_SENIOR,
     UserRole.ADMIN,
     UserRole.MASTER,
     UserRole.HELPER,
@@ -18,9 +19,10 @@ _ROLE_PRIORITY = (
 _ROLE_SORT_ORDER = {
     UserRole.TECHSPEC: -1,
     UserRole.ADMIN_SUPER: 0,
-    UserRole.ADMIN: 1,
-    UserRole.MASTER: 2,
-    UserRole.HELPER: 3,
+    UserRole.ADMIN_SENIOR: 1,
+    UserRole.ADMIN: 2,
+    UserRole.MASTER: 3,
+    UserRole.HELPER: 4,
 }
 
 
@@ -33,6 +35,8 @@ def default_active_role(roles: list[UserRole]) -> UserRole:
     """Начальный контекст после входа: приоритет админских ролей."""
     if UserRole.ADMIN_SUPER in roles:
         return UserRole.ADMIN_SUPER
+    if UserRole.ADMIN_SENIOR in roles:
+        return UserRole.ADMIN_SENIOR
     if UserRole.ADMIN in roles:
         return UserRole.ADMIN
     if UserRole.MASTER in roles:
