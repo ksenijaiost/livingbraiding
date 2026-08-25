@@ -25,7 +25,28 @@
       <div class="error" style="margin-bottom: 12px;">{{ err }}</div>
     {% endif %}
 
-    <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-start; justify-content:space-between;">
+    {% set missing_price = kit.stock_price_total is none or kit.stock_price_total <= 0 %}
+    <h2 style="margin:0 0 12px; display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
+      {% if missing_price %}<span title="Нет цены продажи">⚠️</span>{% endif %}
+      <span>{{ kit.sku }}</span>
+      {% if kit.is_active %}
+        <span
+          style="display:inline-block;padding:2px 10px;border-radius:6px;background:#d1fae5;border:1px solid #6ee7b7;font-size:14px;font-weight:600;color:#065f46;"
+        >Актуален</span>
+      {% else %}
+        <span
+          style="display:inline-block;padding:2px 10px;border-radius:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-size:14px;font-weight:600;color:#475569;"
+        >Неактуален</span>
+      {% endif %}
+      {% if kit.is_reserved %}
+        <span
+          style="display:inline-block;padding:2px 10px;border-radius:6px;background:#fef3c7;border:1px solid #fbbf24;font-size:14px;font-weight:600;"
+          title="{{ reserve_tooltip }}"
+        >Резервы: {{ kit_reserve_slots_used }} / {{ kit_max_reserves }}</span>
+      {% endif %}
+    </h2>
+
+    <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-start; justify-content:space-between; margin-bottom:14px;">
       <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
         {% if can_open_reserve %}
           <button
@@ -82,7 +103,6 @@
       </div>
     </div>
 
-    {% set missing_price = kit.stock_price_total is none or kit.stock_price_total <= 0 %}
     {% if missing_price %}
       <div class="card" style="margin-bottom:14px; background:#fffbeb; border-color:#fbbf24; color:#92400e;">
         <strong>⚠️ Нет цены продажи.</strong> Списание комплекта в визите, заказе или продаже товара невозможно, пока администратор не укажет цену (редактирование карточки).
@@ -94,28 +114,12 @@
       </div>
     {% endif %}
 
-    <h2 style="margin:16px 0 12px; display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
-      {% if missing_price %}<span title="Нет цены продажи">⚠️</span>{% endif %}
-      <span>{{ kit.sku }}</span>
-      {% if not kit.is_active %}
-        <span
-          style="display:inline-block;padding:2px 10px;border-radius:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-size:14px;font-weight:600;color:#475569;"
-        >Неактуален</span>
-      {% endif %}
-      {% if kit.is_reserved %}
-        <span
-          style="display:inline-block;padding:2px 10px;border-radius:6px;background:#fef3c7;border:1px solid #fbbf24;font-size:14px;font-weight:600;"
-          title="{{ reserve_tooltip }}"
-        >Резервы: {{ kit_reserve_slots_used }} / {{ kit_max_reserves }}</span>
-      {% endif %}
-    </h2>
-
     <dl style="margin:0; display:grid; gap:10px 24px; grid-template-columns: auto 1fr; max-width:720px;">
-      <dt class="muted">Название</dt>
-      <dd style="margin:0;">{{ kit.title }}</dd>
-
       <dt class="muted">Актуален</dt>
       <dd style="margin:0;">{% if kit.is_active %}да{% else %}нет{% endif %}</dd>
+
+      <dt class="muted">Название</dt>
+      <dd style="margin:0;">{{ kit.title }}</dd>
 
       <dt class="muted">Фото</dt>
       <dd style="margin:0;">
