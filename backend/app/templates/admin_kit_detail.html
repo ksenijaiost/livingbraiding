@@ -12,8 +12,12 @@
       <p style="background:#dbeafe;border:1px solid #93c5fd;color:#1e40af;padding:10px 12px;border-radius:8px;">Резерв снят.</p>
     {% elif msg == "created" %}
       <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Комплект создан.</p>
-    {%     elif msg == "saved" %}
+    {% elif msg == "saved" %}
       <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Изменения сохранены.</p>
+    {% elif msg == "active_on" %}
+      <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Комплект снова актуален — виден в списке склада и при выборе «из наличия».</p>
+    {% elif msg == "active_off" %}
+      <p style="background:#dbeafe;border:1px solid #93c5fd;color:#1e40af;padding:10px 12px;border-radius:8px;">Комплект сделан неактуальным — скрыт из выбора «из наличия» (карточка не удалена).</p>
     {% elif msg == "deleted" %}
       <p style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 12px;border-radius:8px;">Комплект удалён из базы.</p>
     {% endif %}
@@ -54,19 +58,28 @@
           <button type="button" class="secondary js-clear-reserves-open" data-kit-id="{{ kit.id }}" data-action-url="/kits/{{ kit.id }}/reserve" data-sku="{{ kit.sku|e }}" data-after="detail">Снять</button>
         {% endif %}
       </div>
-      {% if is_admin_kit %}
-        <a href="/kits/{{ kit.id }}/edit"><button type="button">Редактировать</button></a>
-      {% endif %}
-      {% if role_can_delete_kit(current_user.role) %}
-        {% if kit_can_delete %}
-          <form method="post" action="/kits/{{ kit.id }}/delete" style="display:inline;margin:0;" onsubmit="return confirm('Точно удалить?');">
-            <input type="hidden" name="redirect_to" value="detail" />
-            <button type="submit" class="secondary" style="color:#b91c1c;border-color:#fecaca;">Удалить</button>
-          </form>
-        {% elif kit_delete_block_reason %}
-          <span class="muted" style="font-size:13px; max-width:22rem; line-height:1.35;">{{ kit_delete_block_reason }}</span>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+        {% if is_admin_kit %}
+          <a href="/kits/{{ kit.id }}/edit"><button type="button">Редактировать</button></a>
         {% endif %}
-      {% endif %}
+        {% if role_can_toggle_kit_active(current_user.role) %}
+          <form method="post" action="/kits/{{ kit.id }}/toggle-active" style="display:inline;margin:0;">
+            <button type="submit" class="secondary">
+              {% if kit.is_active %}Сделать неактуальным{% else %}Сделать актуальным{% endif %}
+            </button>
+          </form>
+        {% endif %}
+        {% if role_can_delete_kit(current_user.role) %}
+          {% if kit_can_delete %}
+            <form method="post" action="/kits/{{ kit.id }}/delete" style="display:inline;margin:0;" onsubmit="return confirm('Точно удалить?');">
+              <input type="hidden" name="redirect_to" value="detail" />
+              <button type="submit" class="secondary" style="color:#b91c1c;border-color:#fecaca;">Удалить</button>
+            </form>
+          {% elif kit_delete_block_reason %}
+            <span class="muted" style="font-size:13px; max-width:22rem; line-height:1.35;">{{ kit_delete_block_reason }}</span>
+          {% endif %}
+        {% endif %}
+      </div>
     </div>
 
     {% set missing_price = kit.stock_price_total is none or kit.stock_price_total <= 0 %}
@@ -84,6 +97,11 @@
     <h2 style="margin:16px 0 12px; display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
       {% if missing_price %}<span title="Нет цены продажи">⚠️</span>{% endif %}
       <span>{{ kit.sku }}</span>
+      {% if not kit.is_active %}
+        <span
+          style="display:inline-block;padding:2px 10px;border-radius:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-size:14px;font-weight:600;color:#475569;"
+        >Неактуален</span>
+      {% endif %}
       {% if kit.is_reserved %}
         <span
           style="display:inline-block;padding:2px 10px;border-radius:6px;background:#fef3c7;border:1px solid #fbbf24;font-size:14px;font-weight:600;"
@@ -95,6 +113,9 @@
     <dl style="margin:0; display:grid; gap:10px 24px; grid-template-columns: auto 1fr; max-width:720px;">
       <dt class="muted">Название</dt>
       <dd style="margin:0;">{{ kit.title }}</dd>
+
+      <dt class="muted">Актуален</dt>
+      <dd style="margin:0;">{% if kit.is_active %}да{% else %}нет{% endif %}</dd>
 
       <dt class="muted">Фото</dt>
       <dd style="margin:0;">

@@ -38,6 +38,7 @@ from app.role_access import (
     role_is_admin_super,
     role_is_master_schedule_admin,
     role_can_delete_kit,
+    role_can_toggle_kit_active,
 )
 from app.db.models import MasterLevel, UserRole
 
@@ -90,6 +91,7 @@ templates.env.globals["role_is_admin_staff"] = role_is_admin_staff
 templates.env.globals["role_can_edit_catalog"] = role_can_edit_catalog
 templates.env.globals["role_is_master_schedule_admin"] = role_is_master_schedule_admin
 templates.env.globals["role_can_delete_kit"] = role_can_delete_kit
+templates.env.globals["role_can_toggle_kit_active"] = role_can_toggle_kit_active
 templates.env.globals["role_is_admin_super"] = role_is_admin_super
 
 

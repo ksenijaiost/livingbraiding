@@ -109,6 +109,7 @@ def _redirect_admin_kits_to_canon(request: Request, *, suffix: str = "") -> Redi
 _KITS_STAFF = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _KITS_ADMIN = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _KITS_DELETE = Depends(require_role(UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER))
+_KITS_TOGGLE_ACTIVE = Depends(require_role(UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER))
 _KITS_SUPER = Depends(require_role(UserRole.ADMIN_SUPER))
 
 
@@ -405,6 +406,34 @@ async def admin_kit_delete(
         db.rollback()
         return RedirectResponse(url=f"{back_url}?err=" + quote(str(exc)), status_code=303)
     return RedirectResponse(url="/kits?msg=deleted", status_code=303)
+
+
+@router.post("/{kit_id}/toggle-active")
+async def admin_kit_toggle_active(
+    kit_id: int,
+    current_user: AuthUser = _KITS_TOGGLE_ACTIVE,
+    db: Session = Depends(get_db),
+):
+    """Быстрое переключение «Актуален» на карточке (старший / суперадмин)."""
+    kit = db.get(Kit, kit_id)
+    if kit is None:
+        raise HTTPException(status_code=404, detail="Комплект не найден")
+    before = SimpleNamespace(is_active=bool(kit.is_active))
+    kit.is_active = not bool(kit.is_active)
+    kit.updated_at = utcnow_naive()
+    kit.updated_by_user_id = current_user.id
+    after = SimpleNamespace(is_active=bool(kit.is_active))
+    write_audit_rows(
+        db,
+        log_model=KitAuditLog,
+        entity_field="kit_id",
+        entity_id=kit.id,
+        changed_by_user_id=current_user.id,
+        changes=diff_fields(before, after, ("is_active",)),
+    )
+    db.commit()
+    msg = "active_on" if kit.is_active else "active_off"
+    return RedirectResponse(url=f"/kits/{kit_id}?msg={msg}", status_code=303)
 
 
 @router.get("/new", response_class=HTMLResponse)

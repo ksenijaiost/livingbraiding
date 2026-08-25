@@ -48,6 +48,16 @@ def test_kit_hard_delete_error_requires_inactive() -> None:
     assert "неактуальн" in err.lower()
 
 
+def test_role_can_toggle_kit_active() -> None:
+    from app.db.models import UserRole
+    from app.role_access import role_can_toggle_kit_active
+
+    assert role_can_toggle_kit_active(UserRole.ADMIN_SUPER) is True
+    assert role_can_toggle_kit_active(UserRole.ADMIN_SENIOR) is True
+    assert role_can_toggle_kit_active(UserRole.ADMIN) is False
+    assert role_can_toggle_kit_active(UserRole.MASTER) is False
+
+
 def test_hard_delete_kit_unlinks_created_work() -> None:
     db = _db()
     kit = _seed_kit(db, is_active=False)

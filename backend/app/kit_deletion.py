@@ -72,7 +72,10 @@ def write_kit_deletion_log(
 
 def kit_hard_delete_error(db: Session, kit: Kit) -> str | None:
     if kit.is_active:
-        return "Удалять можно только неактуальные комплекты (снимите галочку «Актуален» и сохраните)."
+        return (
+            "Удалять можно только неактуальные комплекты "
+            "(кнопка «Сделать неактуальным» или галочка в редактировании)."
+        )
     kid = int(kit.id)
     used_v = int(
         db.scalar(select(func.count()).select_from(VisitKitUsage).where(VisitKitUsage.kit_id == kid)) or 0
