@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -72,7 +72,7 @@ def write_kit_deletion_log(
 
 def kit_hard_delete_error(db: Session, kit: Kit) -> str | None:
     if kit.is_active:
-        return "Удалять можно только неактуальные комплекты (снимите галочку «Актуален»)."
+        return "Удалять можно только неактуальные комплекты (снимите галочку «Актуален» и сохраните)."
     kid = int(kit.id)
     used_v = int(
         db.scalar(select(func.count()).select_from(VisitKitUsage).where(VisitKitUsage.kit_id == kid)) or 0
@@ -80,19 +80,18 @@ def kit_hard_delete_error(db: Session, kit: Kit) -> str | None:
     used_s = int(
         db.scalar(select(func.count()).select_from(ProductSale).where(ProductSale.kit_id == kid)) or 0
     )
-    used_w = int(
-        db.scalar(
-            select(func.count()).select_from(WorkForInventory).where(WorkForInventory.created_kit_id == kid)
-        )
-        or 0
-    )
-    if used_v or used_s or used_w:
+    if used_v or used_s:
         return (
             f"Нельзя удалить: комплект использован в данных "
-            f"(визиты:{used_v}, продажи:{used_s}, работы:{used_w})."
+            f"(визиты:{used_v}, продажи:{used_s})."
         )
     reserves = int(
-        db.scalar(select(func.count()).select_from(KitReserve).where(KitReserve.kit_id == kid)) or 0
+        db.scalar(
+            select(func.count())
+            .select_from(KitReserve)
+            .where(KitReserve.kit_id == kid, KitReserve.pieces_reserved > 0)
+        )
+        or 0
     )
     if reserves:
         return "Снимите все резервы перед удалением комплекта."
@@ -111,6 +110,12 @@ def hard_delete_kit(
         raise ValueError(err)
     write_kit_deletion_log(db, kit, actor_user_id=actor_user_id, source=source)
     kid = int(kit.id)
+    # Работа, создавшая комплект, остаётся в истории — только отвязываем указатель.
+    db.execute(
+        update(WorkForInventory)
+        .where(WorkForInventory.created_kit_id == kid)
+        .values(created_kit_id=None)
+    )
     db.execute(delete(KitReserve).where(KitReserve.kit_id == kid))
     db.execute(delete(KitAuditLog).where(KitAuditLog.kit_id == kid))
     db.delete(kit)

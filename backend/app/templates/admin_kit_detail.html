@@ -64,7 +64,7 @@
             <button type="submit" class="secondary" style="color:#b91c1c;border-color:#fecaca;">Удалить</button>
           </form>
         {% elif kit_delete_block_reason %}
-          <span class="muted" style="font-size:13px;" title="{{ kit_delete_block_reason }}">Удаление недоступно</span>
+          <span class="muted" style="font-size:13px; max-width:22rem; line-height:1.35;">{{ kit_delete_block_reason }}</span>
         {% endif %}
       {% endif %}
     </div>

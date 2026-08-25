@@ -43,7 +43,33 @@ def test_kit_hard_delete_error_requires_inactive() -> None:
     db = _db()
     kit = _seed_kit(db, is_active=True)
     db.commit()
-    assert kit_hard_delete_error(db, kit) is not None
+    err = kit_hard_delete_error(db, kit)
+    assert err is not None
+    assert "неактуальн" in err.lower()
+
+
+def test_hard_delete_kit_unlinks_created_work() -> None:
+    db = _db()
+    kit = _seed_kit(db, is_active=False)
+    db.flush()
+    from app.db.models import WorkForInventory, WorkKind, WorkScope
+
+    work = WorkForInventory(
+        created_by_user_id=kit.created_by_user_id,
+        created_kit_id=kit.id,
+        kind=WorkKind.KIT,
+        scope=WorkScope.IN_STOCK,
+        kanekalon_grams=0.0,
+        kudri_grams=0.0,
+    )
+    db.add(work)
+    db.commit()
+    kid = int(kit.id)
+    hard_delete_kit(db, kit, actor_user_id=1, source=KIT_DELETE_SOURCE_CARD)
+    db.commit()
+    assert db.get(Kit, kid) is None
+    db.refresh(work)
+    assert work.created_kit_id is None
 
 
 def test_hard_delete_kit_writes_purge_log() -> None:
