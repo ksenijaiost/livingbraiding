@@ -8,6 +8,7 @@ ROLES_ADMIN_STAFF = frozenset({UserRole.ADMIN, UserRole.ADMIN_SENIOR, UserRole.A
 ROLES_CATALOG_EDITOR = frozenset({UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER})
 ROLES_MASTER_SCHEDULE_ADMIN = frozenset({UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER})
 ROLES_KIT_DELETE = frozenset({UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER})
+ROLES_KIT_TOGGLE_ACTIVE = ROLES_KIT_DELETE
 
 
 def role_is_admin_staff(role: UserRole) -> bool:
@@ -24,6 +25,10 @@ def role_is_master_schedule_admin(role: UserRole) -> bool:
 
 def role_can_delete_kit(role: UserRole) -> bool:
     return role in ROLES_KIT_DELETE
+
+
+def role_can_toggle_kit_active(role: UserRole) -> bool:
+    return role in ROLES_KIT_TOGGLE_ACTIVE
 
 
 def role_is_admin_super(role: UserRole) -> bool:

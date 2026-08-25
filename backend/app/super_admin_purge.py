@@ -510,9 +510,8 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
         for kid in ids[:80]:
             used_v = int(db.scalar(select(func.count()).select_from(VisitKitUsage).where(VisitKitUsage.kit_id == int(kid))) or 0)
             used_s = int(db.scalar(select(func.count()).select_from(ProductSale).where(ProductSale.kit_id == int(kid))) or 0)
-            used_w = int(db.scalar(select(func.count()).select_from(WorkForInventory).where(WorkForInventory.created_kit_id == int(kid))) or 0)
-            if used_v or used_s or used_w:
-                blockers.append(f"{kid} (визиты:{used_v}, продажи:{used_s}, работы:{used_w})")
+            if used_v or used_s:
+                blockers.append(f"{kid} (визиты:{used_v}, продажи:{used_s})")
 
         lines: list[str] = []
         lines.append(f"ID к удалению: {', '.join(str(x) for x in ids[:40])}" + ("…" if len(ids) > 40 else ""))
