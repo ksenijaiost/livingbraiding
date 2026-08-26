@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth import AuthUser, get_current_user, require_role
 from app.role_access import (
     role_can_edit_catalog,
+    role_gets_home_dashboard,
     role_is_admin_staff,
     role_is_admin_super,
     role_is_master_schedule_admin,
@@ -114,7 +115,7 @@ def home(
     def _utc_naive_to_local_date(dt_utc_naive: datetime) -> date:
         return dt_utc_naive.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz).date()
 
-    if current_user.role in (UserRole.MASTER, UserRole.HELPER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
+    if role_gets_home_dashboard(current_user.role):
         is_helper = current_user.role == UserRole.HELPER
         is_self_scoped = current_user.role in (UserRole.MASTER, UserRole.HELPER)
         show_studio = (not is_helper) and (UserRole.ADMIN_SUPER in current_user.roles)
