@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
@@ -29,7 +30,11 @@ from app.db.models import (
     WorkScope,
 )
 from app.operational_report import period_bounds
-from app.hourly_help import master_hourly_help_pay_from_visit
+from app.hourly_help import (
+    hourly_help_rows_from_visit,
+    hourly_help_rows_from_work_details,
+    master_hourly_help_pay_from_visit,
+)
 from app.payroll_fund import (
     employee_payroll_net_in_period,
     employee_payouts_in_period,
@@ -94,6 +99,18 @@ class MasterStatsHourlyRow:
 
 
 @dataclass
+class MasterStatsHourlyHelpRow:
+    """Почасовая помощь из визита или работы (не путать с HourlyWorkEntry)."""
+
+    source_kind: str  # visit | work
+    source_id: int
+    event_date: datetime
+    duration_minutes: int
+    master_payroll: float
+    event_url: str
+
+
+@dataclass
 class MasterStatsEventRow:
     event_date: datetime
     event_label: str
@@ -126,6 +143,7 @@ class MasterStatisticsResult:
     sales: list[MasterStatsSaleRow]
     consultations: list[MasterStatsConsultationRow]
     hourly_works: list[MasterStatsHourlyRow]
+    hourly_helps: list[MasterStatsHourlyHelpRow]
     daily_rows: list[MasterStatsDailyRow]
 
 
@@ -262,6 +280,33 @@ def _consultation_master_payroll(db: Session, consultation_id: int, master_id: i
     return money_q2(by_src.get(consultation_id, 0.0))
 
 
+def _hourly_help_duration_minutes_for_master(rows, master_id: int) -> int:
+    for row in rows:
+        if int(row.master_id) == int(master_id):
+            return max(0, int(row.hours or 0) * 60 + int(row.minutes or 0))
+    return 0
+
+
+def _master_hourly_help_pay_from_work(work: WorkForInventory, master_id: int) -> float:
+    details = _work_details_dict(work)
+    total = 0.0
+    for row in hourly_help_rows_from_work_details(details):
+        if int(row.master_id) == int(master_id):
+            total = money_q2(total + float(row.amount or 0))
+    return total
+
+
+def _work_details_dict(work: WorkForInventory) -> dict:
+    raw = getattr(work, "details_json", None) or ""
+    if not raw:
+        return {}
+    try:
+        details = json.loads(raw)
+    except Exception:
+        return {}
+    return details if isinstance(details, dict) else {}
+
+
 def _event_rows_for_statistics(stats: "MasterStatisticsResult") -> list[MasterStatsEventRow]:
     rows: list[MasterStatsEventRow] = []
     for row in stats.visits:
@@ -319,6 +364,17 @@ def _event_rows_for_statistics(stats: "MasterStatisticsResult") -> list[MasterSt
                 master_payroll=money_q2(row.master_payroll),
             )
         )
+    for row in stats.hourly_helps:
+        rows.append(
+            MasterStatsEventRow(
+                event_date=row.event_date,
+                event_label="почасовая помощь",
+                event_short_label="помощь",
+                event_id=row.source_id,
+                event_url=row.event_url,
+                master_payroll=money_q2(row.master_payroll),
+            )
+        )
     rows.sort(key=lambda x: (x.event_date, x.event_id), reverse=True)
     return rows
 
@@ -370,6 +426,7 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
     fund_balance_end = employee_fund_balance_before(db, master_id, end_excl)
 
     visits_out: list[MasterStatsVisitRow] = []
+    hourly_helps_out: list[MasterStatsHourlyHelpRow] = []
     visits = list(
         db.scalars(
             select(Visit)
@@ -389,28 +446,40 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
     )
     for visit in visits:
         svc_lines = _master_services_on_visit(visit, master_id)
-        if not svc_lines:
-            continue
-        visits_out.append(
-            MasterStatsVisitRow(
-                visit_id=int(visit.id),
-                visit_date=visit.performed_date,
-                amount_from_client=money_q2(sum(float(vs.amount_from_client or 0) for vs in svc_lines)),
-                payment_display=format_client_payment_kinds(
-                    vs.client_payment_kind
-                    for vs in svc_lines
-                    if float(vs.amount_from_client or 0) > 0
-                ),
-                discount_display=format_discounts([int(vs.client_discount_percent or 0) for vs in svc_lines]),
-                cost_total=money_q2(sum(float(vs.cost_total or 0) for vs in svc_lines)),
-                masters_pay_total=_visit_masters_pay_total(visit),
-                master_payroll=money_q2(
-                    sum(_master_visit_service_pay(visit, vs, master_id) for vs in svc_lines)
-                    + master_hourly_help_pay_from_visit(visit, master_id)
-                ),
-                studio_payroll=money_q2(sum(_visit_studio_pay(vs) for vs in svc_lines)),
+        help_pay = master_hourly_help_pay_from_visit(visit, master_id)
+        if svc_lines:
+            visits_out.append(
+                MasterStatsVisitRow(
+                    visit_id=int(visit.id),
+                    visit_date=visit.performed_date,
+                    amount_from_client=money_q2(sum(float(vs.amount_from_client or 0) for vs in svc_lines)),
+                    payment_display=format_client_payment_kinds(
+                        vs.client_payment_kind
+                        for vs in svc_lines
+                        if float(vs.amount_from_client or 0) > 0
+                    ),
+                    discount_display=format_discounts([int(vs.client_discount_percent or 0) for vs in svc_lines]),
+                    cost_total=money_q2(sum(float(vs.cost_total or 0) for vs in svc_lines)),
+                    masters_pay_total=_visit_masters_pay_total(visit),
+                    master_payroll=money_q2(
+                        sum(_master_visit_service_pay(visit, vs, master_id) for vs in svc_lines)
+                    ),
+                    studio_payroll=money_q2(sum(_visit_studio_pay(vs) for vs in svc_lines)),
+                )
             )
-        )
+        if help_pay > 0:
+            hourly_helps_out.append(
+                MasterStatsHourlyHelpRow(
+                    source_kind="visit",
+                    source_id=int(visit.id),
+                    event_date=visit.performed_date,
+                    duration_minutes=_hourly_help_duration_minutes_for_master(
+                        hourly_help_rows_from_visit(visit), master_id
+                    ),
+                    master_payroll=help_pay,
+                    event_url=f"/visits/{int(visit.id)}",
+                )
+            )
 
     works_out: list[MasterStatsWorkRow] = []
     work_start, work_end = _work_event_bounds(d0, d1)
@@ -426,6 +495,22 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
     )
     for work in works:
         if not _work_in_period(work, work_start, work_end):
+            continue
+        help_pay = _master_hourly_help_pay_from_work(work, master_id)
+        if help_pay > 0:
+            details = _work_details_dict(work)
+            hourly_helps_out.append(
+                MasterStatsHourlyHelpRow(
+                    source_kind="work",
+                    source_id=int(work.id),
+                    event_date=work.performed_date or work.created_at,
+                    duration_minutes=_hourly_help_duration_minutes_for_master(
+                        hourly_help_rows_from_work_details(details), master_id
+                    ),
+                    master_payroll=help_pay,
+                    event_url=f"/admin/sales/work/{int(work.id)}",
+                )
+            )
             continue
         staff = next((s for s in work.staff_rows if int(s.user_id) == master_id), None)
         if staff is None:
@@ -555,6 +640,7 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
         sales=sales_out,
         consultations=consultations_out,
         hourly_works=hourly_out,
+        hourly_helps=hourly_helps_out,
         daily_rows=[],
     )
     result.daily_rows = _daily_rows_from_events(_event_rows_for_statistics(result))
