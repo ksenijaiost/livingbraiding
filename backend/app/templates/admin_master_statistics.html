@@ -398,7 +398,7 @@
 
         <h3 style="margin: 0 0 10px; font-size: 15px;">Почасовая работа</h3>
         {% if stats.hourly_works %}
-          <div style="overflow-x: auto;">
+          <div style="overflow-x: auto; margin-bottom: 24px;">
             <table class="ms-stats-table">
               <thead>
                 <tr>
@@ -421,7 +421,37 @@
             </table>
           </div>
         {% else %}
-          <p class="muted">Нет почасовой работы за период.</p>
+          <p class="muted" style="margin-bottom: 24px;">Нет почасовой работы за период.</p>
+        {% endif %}
+
+        <h3 style="margin: 0 0 10px; font-size: 15px;">Почасовая помощь</h3>
+        {% if stats.hourly_helps %}
+          <div style="overflow-x: auto;">
+            <table class="ms-stats-table">
+              <thead>
+                <tr>
+                  <th>Источник / дата</th>
+                  <th>Длительность</th>
+                  <th>ЗП мастера</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in stats.hourly_helps %}
+                  <tr>
+                    <td>
+                      {% if row.source_kind == 'visit' %}визит{% else %}работа{% endif %}
+                      <a href="{{ row.event_url }}">№{{ row.source_id }}</a>,
+                      <a href="{{ row.event_url }}">{{ row.event_date.strftime('%d.%m.%Y') }}</a>
+                    </td>
+                    <td>{% set h = (row.duration_minutes // 60) %}{% set m = (row.duration_minutes % 60) %}{% if h and m %}{{ h }} ч {{ m }} мин{% elif h %}{{ h }} ч{% elif m %}{{ m }} мин{% else %}—{% endif %}</td>
+                    <td>{{ "%.2f"|format(row.master_payroll) }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="muted">Нет почасовой помощи за период.</p>
         {% endif %}
       {% endif %}
     {% elif selected_master_id %}

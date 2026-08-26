@@ -9,6 +9,7 @@ from app.db.models import UserRole
 from app.main import app
 from app.role_access import (
     role_can_edit_catalog,
+    role_gets_home_dashboard,
     role_is_admin_staff,
     role_is_master_schedule_admin,
 )
@@ -52,6 +53,9 @@ def test_role_access_helpers() -> None:
     assert role_can_edit_catalog(UserRole.ADMIN_SENIOR)
     assert role_is_master_schedule_admin(UserRole.ADMIN_SENIOR)
     assert not role_can_edit_catalog(UserRole.ADMIN)
+    assert role_gets_home_dashboard(UserRole.ADMIN_SENIOR)
+    assert role_gets_home_dashboard(UserRole.ADMIN)
+    assert not role_gets_home_dashboard(UserRole.TECHSPEC)
 
 
 def test_senior_admin_can_open_expenses() -> None:

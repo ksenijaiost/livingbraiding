@@ -335,3 +335,155 @@ def test_sort_master_stats_daily_rows_asc_desc() -> None:
     assert [r.day for r in asc] == [d1, d2]
     desc = sort_master_stats_daily_rows(rows, order="desc")
     assert [r.day for r in desc] == [d2, d1]
+
+
+def test_build_master_statistics_visit_hourly_help(memory_db) -> None:
+    from app.hourly_help import HourlyHelpRow, apply_hourly_help_to_visit
+
+    db = memory_db
+    master_id, svc_id, client_id = _seed_master(db)
+    helper = User(
+        username="helper1",
+        password_hash="x",
+        display_name="Помощник",
+        role=UserRole.MASTER,
+        is_active=True,
+    )
+    db.add(helper)
+    db.flush()
+    db.add(UserRoleAssignment(user_id=helper.id, role=UserRole.MASTER))
+    performed = date.today()
+    visit = save_visit_with_services(
+        db,
+        master_id,
+        MultiServiceVisitInput(
+            header=VisitHeaderInput(
+                client_mode="existing",
+                existing_client_id=client_id,
+                draft_name="",
+                draft_phone="",
+                draft_telegram="",
+                draft_vk="",
+                draft_instagram="",
+                draft_other_contact="",
+                client_type=VisitClientType.RETURNING,
+                performed_date=performed,
+                duration_minutes=60,
+                masters_scope=VisitMastersScope.VISIT,
+                same_master_shares_all_services=False,
+                visit_master_allocations=[(master_id, 100)],
+            ),
+            lines=[
+                VisitServiceLineInput(
+                    service_id=svc_id,
+                    client_discount_percent=0,
+                    amount_from_client=10000,
+                    kanekalon_grams=0,
+                    kudri_grams=0,
+                    mix_source=MixSource.NO_MIX,
+                    mix_complexity=None,
+                    mix_bonus_master_id=None,
+                    amortization_level=None,
+                    kit_kind="STOCK",
+                )
+            ],
+        ),
+    )
+    apply_hourly_help_to_visit(
+        visit,
+        [HourlyHelpRow(master_id=helper.id, hours=1, minutes=30, amount=450.0)],
+    )
+    db.commit()
+
+    d0 = performed.replace(day=1)
+    stats_helper = build_master_statistics(db, helper.id, d0, performed)
+    assert stats_helper is not None
+    assert stats_helper.visits == []
+    assert len(stats_helper.hourly_helps) == 1
+    help_row = stats_helper.hourly_helps[0]
+    assert help_row.source_kind == "visit"
+    assert help_row.source_id == int(visit.id)
+    assert help_row.master_payroll == 450.0
+    assert help_row.duration_minutes == 90
+    assert help_row.event_url == f"/visits/{int(visit.id)}"
+    assert any(ev.event_short_label == "помощь" for ev in stats_helper.daily_rows[0].events)
+
+    stats_master = build_master_statistics(db, master_id, d0, performed)
+    assert stats_master is not None
+    assert len(stats_master.visits) == 1
+    assert stats_master.hourly_helps == []
+
+
+def test_build_master_statistics_work_hourly_help_not_double(memory_db) -> None:
+    import json
+
+    from app.db.models import WorkForInventory, WorkForInventoryStaff, WorkKind, WorkScope
+
+    db = memory_db
+    master_id, _svc_id, _client_id = _seed_master(db)
+    helper = User(
+        username="helper2",
+        password_hash="x",
+        display_name="Помощник 2",
+        role=UserRole.MASTER,
+        is_active=True,
+    )
+    db.add(helper)
+    db.flush()
+    db.add(UserRoleAssignment(user_id=helper.id, role=UserRole.MASTER))
+    performed = date.today()
+    work = WorkForInventory(
+        created_by_user_id=master_id,
+        performed_date=datetime.combine(performed, datetime.min.time()),
+        kind=WorkKind.OTHER,
+        scope=WorkScope.CUSTOM_ORDER,
+        kanekalon_grams=0.0,
+        kudri_grams=0.0,
+        materials_cost_total=0.0,
+        cost_total_amount=0.0,
+        master_profit_amount=800.0,
+        studio_profit_amount=0.0,
+        profit_total_amount=1000.0,
+        details_json=json.dumps(
+            {
+                "hourly_help": [
+                    {"master_id": helper.id, "hours": 0, "minutes": 45, "amount": 200.0}
+                ]
+            },
+            ensure_ascii=False,
+        ),
+    )
+    db.add(work)
+    db.flush()
+    db.add_all(
+        [
+            WorkForInventoryStaff(
+                work_id=work.id,
+                user_id=master_id,
+                share=1.0,
+                master_profit_amount=800.0,
+            ),
+            WorkForInventoryStaff(
+                work_id=work.id,
+                user_id=helper.id,
+                share=0.0,
+                master_profit_amount=200.0,
+            ),
+        ]
+    )
+    db.commit()
+
+    d0 = performed.replace(day=1)
+    stats_helper = build_master_statistics(db, helper.id, d0, performed)
+    assert stats_helper is not None
+    assert stats_helper.works == []
+    assert len(stats_helper.hourly_helps) == 1
+    assert stats_helper.hourly_helps[0].master_payroll == 200.0
+    assert stats_helper.hourly_helps[0].event_url == f"/admin/sales/work/{int(work.id)}"
+    assert stats_helper.hourly_helps[0].duration_minutes == 45
+
+    stats_master = build_master_statistics(db, master_id, d0, performed)
+    assert stats_master is not None
+    assert len(stats_master.works) == 1
+    assert stats_master.works[0].master_payroll == 800.0
+    assert stats_master.hourly_helps == []
