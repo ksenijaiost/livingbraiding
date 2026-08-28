@@ -89,6 +89,28 @@ def test_is_client_disconnect_plain_and_group() -> None:
     assert is_client_disconnect(mixed) is False
 
 
+def test_is_client_disconnect_handles_cyclic_exception_chain() -> None:
+    inner = RuntimeError("db")
+    outer = ExceptionGroup("group", [inner])
+    inner.__context__ = outer
+    assert is_client_disconnect(outer) is False
+
+
+def test_get_unhandled_returns_friendly_html() -> None:
+    app = FastAPI()
+    register_tech_error_handlers(app)
+
+    @app.get("/broken")
+    def boom() -> None:
+        raise RuntimeError("db boom")
+
+    client = TestClient(app, raise_server_exceptions=False)
+    res = client.get("/broken")
+    assert res.status_code == 500
+    assert "Техническая ошибка" in res.text
+    assert "Internal Server Error" not in res.text
+
+
 def test_post_client_disconnect_is_not_500() -> None:
     from starlette.requests import ClientDisconnect
 

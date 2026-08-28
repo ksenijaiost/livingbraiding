@@ -305,6 +305,9 @@
         </div>
       </div>
 
+      <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
+      <script type="application/json" id="corr_kit_table_state">{{ (corr_kit_table_state_json or kit_table_state_json) | safe }}</script>
+
       <div id="kit_block" class="card" style="background:#f8fafc; margin: 12px 0; display:none;">
         <h3 style="margin-top:0;">Комплект/Заготовки (поштучно)</h3>
         <p class="muted" style="margin-top:-6px;">
@@ -453,9 +456,7 @@
     {% endif %}
   </div>
 
-  <script type="application/json" id="kit_table_state">{{ kit_table_state_json | safe }}</script>
   <script type="application/json" id="planned_work_masters">{{ (planned_work_masters_json or '[]') | safe }}</script>
-  <script type="application/json" id="corr_kit_table_state">{{ (corr_kit_table_state_json or kit_table_state_json) | safe }}</script>
   <script type="application/json" id="work_price_meta">{{ work_price_meta_json | safe }}</script>
   <script src="/static/correction_custom_amount.js"></script>
   <script>
@@ -657,7 +658,10 @@
     }
     function nameByUserId(state, uid) {
       var ms = (state && state.masters) ? state.masters : [];
-      for (var i = 0; i < ms.length; i++) if (ms[i].id === uid) return ms[i].name;
+      var want = parseInt(uid, 10);
+      for (var i = 0; i < ms.length; i++) {
+        if (parseInt(ms[i].id, 10) === want) return ms[i].name;
+      }
       return 'ID ' + uid;
     }
 
@@ -813,17 +817,19 @@
         var mixBonusTotal = (gramsTotal > 0 && mixSrc === 'SELF_MIXED') ? (gramsTotal * mixRate0) : 0;
         var mixMasterId = st.currentUserId || 0;
 
-        var ids = (typeof window.getKitColumnMasterIds === 'function') ? window.getKitColumnMasterIds() : [st.currentUserId || 0];
+        var columnIds = (typeof window.getKitColumnMasterIds === 'function')
+          ? window.getKitColumnMasterIds() : [st.currentUserId || 0];
+        var masterPays = (typeof window.kitCompositionCalcMasterPay === 'function')
+          ? window.kitCompositionCalcMasterPay(compLines, payRates, columnIds)
+          : {};
+        var ids = (typeof window.kitCompositionMasterIdsForPay === 'function')
+          ? window.kitCompositionMasterIdsForPay(columnIds, compLines)
+          : columnIds;
         var payLines = [];
         for (var ii = 0; ii < ids.length; ii++) {
           var uid = ids[ii];
-          var sum = 0;
-          compLines.forEach(function (ln) {
-            if (ln.is_used) return;
-            var q2 = parseInt((ln.by_staff || {})[uid] || (ln.by_staff || {})[String(uid)] || 0, 10) || 0;
-            if (q2 > 0) sum += (parseFloat(payRates[ln.key]) || 0) * q2;
-          });
-          if (mixBonusTotal > 0 && mixMasterId && uid === mixMasterId) sum += mixBonusTotal;
+          var sum = parseFloat(masterPays[uid] != null ? masterPays[uid] : masterPays[String(uid)]) || 0;
+          if (mixBonusTotal > 0 && mixMasterId && parseInt(mixMasterId, 10) === parseInt(uid, 10)) sum += mixBonusTotal;
           payLines.push('ЗП «' + nameByUserId(st, uid) + '»: ' + money2(sum) + ' ₽');
         }
 
@@ -1493,22 +1499,6 @@
     };
 
     (function () {
-      var stateEl = document.getElementById('kit_table_state');
-      try {
-        if (stateEl && stateEl.textContent && typeof window.kitCompositionInit === 'function') {
-          window.kitCompositionInit(JSON.parse(stateEl.textContent), {
-            mountId: 'kit',
-            linePrefix: 'kit_line',
-            theadId: 'kit_composition_thead',
-            tbodyId: 'kit_composition_tbody',
-            usedOnly: false,
-            seTypeSelector: 'input[name="kit_type_se"]',
-            deTypeSelector: 'input[name="kit_type_de"]',
-            typeFilterRoot: '#kit_block',
-          });
-        }
-      } catch (e) {}
-
       function getKitColumnMasterIds() {
         var st = window._kitCompositionState || {};
         var multi = document.getElementById('kit_use_multi_masters');

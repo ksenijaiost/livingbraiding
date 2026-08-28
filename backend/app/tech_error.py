@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.requests import ClientDisconnect
-from starlette.responses import Response
+from starlette.responses import HTMLResponse, Response
 
 logger = logging.getLogger("livingbraiding.app")
 
@@ -27,16 +27,29 @@ TECH_ERROR_JSON = {
     "message": TECH_ERROR_USER_MESSAGE,
 }
 
+_TECH_ERROR_FALLBACK_HTML = f"""<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Техническая ошибка</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 16px;">
+<h2>Техническая ошибка</h2>
+<p>{TECH_ERROR_USER_MESSAGE}</p>
+<p><a href="javascript:history.back()">Вернуться назад</a> · <a href="/">На главную</a></p>
+</body></html>"""
 
-def is_client_disconnect(exc: BaseException | None) -> bool:
+
+def is_client_disconnect(exc: BaseException | None, _seen: set[int] | None = None) -> bool:
     """Клиент закрыл соединение (вкладка, таймаут, обрыв сети) — не баг сервера."""
     if exc is None:
         return False
+    seen = _seen if _seen is not None else set()
+    exc_id = id(exc)
+    if exc_id in seen:
+        return False
+    seen.add(exc_id)
     if isinstance(exc, ClientDisconnect):
         return True
     if isinstance(exc, BaseExceptionGroup):
-        return bool(exc.exceptions) and all(is_client_disconnect(e) for e in exc.exceptions)
-    if is_client_disconnect(exc.__cause__) or is_client_disconnect(exc.__context__):
+        return bool(exc.exceptions) and all(is_client_disconnect(e, seen) for e in exc.exceptions)
+    if is_client_disconnect(exc.__cause__, seen) or is_client_disconnect(exc.__context__, seen):
         return True
     return False
 
@@ -100,11 +113,15 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> Respo
 
     from app.webui import ctx, templates
 
-    return templates.TemplateResponse(
-        "tech_error.html",
-        ctx(request, current_user=None, message=TECH_ERROR_USER_MESSAGE),
-        status_code=500,
-    )
+    try:
+        return templates.TemplateResponse(
+            "tech_error.html",
+            ctx(request, current_user=None, message=TECH_ERROR_USER_MESSAGE),
+            status_code=500,
+        )
+    except Exception:
+        logger.exception("Failed to render tech_error.html for %s %s", request.method, request.url.path)
+        return HTMLResponse(_TECH_ERROR_FALLBACK_HTML, status_code=500)
 
 
 def register_tech_error_handlers(app: FastAPI) -> None:
