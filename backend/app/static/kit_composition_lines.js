@@ -64,6 +64,57 @@
     return !any;
   }
 
+  function lineQtyForMaster(line, uid) {
+    var bs = (line && line.by_staff) || {};
+    var q = bs[uid];
+    if (q == null) q = bs[String(uid)];
+    if (q == null && uid != null) q = bs[parseInt(uid, 10)];
+    return parseInt(q, 10) || 0;
+  }
+
+  function masterIdsForPay(masterIds, lines) {
+    var set = {};
+    (masterIds || []).forEach(function (id) {
+      var n = parseInt(id, 10);
+      if (!isNaN(n) && n > 0) set[n] = true;
+    });
+    (lines || []).forEach(function (ln) {
+      var bs = ln.by_staff || {};
+      for (var k in bs) {
+        if (!Object.prototype.hasOwnProperty.call(bs, k)) continue;
+        var n = parseInt(k, 10);
+        var q = parseInt(bs[k], 10) || 0;
+        if (!isNaN(n) && n > 0 && q > 0) set[n] = true;
+      }
+    });
+    return Object.keys(set)
+      .map(function (k) {
+        return parseInt(k, 10);
+      })
+      .sort(function (a, b) {
+        return a - b;
+      });
+  }
+
+  function calcMasterPay(lines, payRates, masterIds) {
+    var ids = masterIdsForPay(masterIds, lines);
+    var out = {};
+    ids.forEach(function (uid) {
+      out[uid] = 0;
+    });
+    (lines || []).forEach(function (ln) {
+      if (!ln || ln.is_used) return;
+      var key = ln.key || '';
+      var rate = parseFloat((payRates || {})[key]) || 0;
+      if (rate <= 0) return;
+      ids.forEach(function (uid) {
+        var q = lineQtyForMaster(ln, uid);
+        if (q > 0) out[uid] = (out[uid] || 0) + rate * q;
+      });
+    });
+    return out;
+  }
+
   function readRowData(row, state) {
     var keyEl = row.querySelector('.kcl-key');
     var usedEl = row.querySelector('.kcl-used');
@@ -227,7 +278,11 @@
     headHtml += '</tr>';
     thead.innerHTML = headHtml;
 
-    var lines = state.initialLines || [];
+    var preserved = [];
+    tbody.querySelectorAll('tr.kcl-row').forEach(function (row) {
+      if (!lineIsEmpty(row)) preserved.push(readRowData(row, state));
+    });
+    var lines = preserved.length ? preserved : state.initialLines || [];
     if (!lines.length) lines = [{}];
     tbody.innerHTML = '';
     lines.forEach(function (ln, i) {
@@ -339,4 +394,22 @@
       return ln.is_used;
     });
   };
+
+  window.kitCompositionLineQtyForMaster = lineQtyForMaster;
+  window.kitCompositionMasterIdsForPay = masterIdsForPay;
+  window.kitCompositionCalcMasterPay = calcMasterPay;
+
+  if (typeof window.getKitColumnMasterIds !== 'function') {
+    window.getKitColumnMasterIds = function () {
+      var state = getInstance('kit') || window._kitCompositionState || {};
+      var multi = document.getElementById('kit_use_multi_masters');
+      if (!multi || !multi.checked) return [state.currentUserId || 0];
+      var ids = [];
+      document.querySelectorAll('input[name="kit_master_on"]:checked').forEach(function (cb) {
+        var v = parseInt(cb.value, 10);
+        if (!isNaN(v) && v > 0) ids.push(v);
+      });
+      return ids.length ? ids : [state.currentUserId || 0];
+    };
+  }
 })();

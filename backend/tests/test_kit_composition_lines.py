@@ -125,6 +125,35 @@ def test_work_pay_only_new(memory_db):
     assert pay[1] == pytest.approx(50.0)
 
 
+def test_work_pay_second_master_when_first_zero(memory_db):
+    _seed_catalog(memory_db, master_pay=50.0)
+    lines = [
+        CompositionLine(key="SE_BRAID_LONG", condition=BlankCondition.NEW, by_staff={1: 20}),
+        CompositionLine(key="SE_BRAID_LONG", condition=BlankCondition.NEW, by_staff={2: 10}),
+    ]
+    pay = work_pay_for_lines(memory_db, lines)
+    assert pay[1] == pytest.approx(1000.0)
+    assert pay[2] == pytest.approx(500.0)
+
+
+def test_lines_from_form_second_master_only_qty(memory_db):
+    _seed_catalog(memory_db, master_pay=50.0)
+    form = _FakeForm(
+        {
+            "kit_line_0_key": "SE_BRAID_LONG",
+            "kit_line_0_qty_1": "0",
+            "kit_line_0_qty_2": "10",
+            "kit_line_1_key": "",
+        }
+    )
+    lines = lines_from_form(form)
+    assert len(lines) == 1
+    assert lines[0].by_staff == {2: 10}
+    pay = work_pay_for_lines(memory_db, lines)
+    assert 1 not in pay
+    assert pay[2] == pytest.approx(500.0)
+
+
 def test_inventory_totals_sums_new_and_used():
     lines = [
         CompositionLine(key="SE_BRAID_LONG", condition=BlankCondition.NEW, by_staff={1: 2}),

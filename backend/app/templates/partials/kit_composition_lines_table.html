@@ -70,7 +70,7 @@
   {% if used_only and mount_id == 'corr_kit' %}
   opts.forceMasterIds = [state.currentUserId || 0];
   {% endif %}
-  if (typeof window.kitCompositionInit === 'function') {
+  if (typeof window.kitCompositionInit === 'function' && stateEl && stateEl.textContent) {
     window.kitCompositionInit(state, opts);
   }
 })();

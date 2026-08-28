@@ -425,18 +425,13 @@
       var payRates = st.kitWorkPayByKey || {};
       var compLines = (typeof window.kitCompositionCollectLines === 'function')
         ? window.kitCompositionCollectLines() : [];
-      var ids = getKitColumnMasterIds();
-      var masterPays = {};
-      ids.forEach(function (uid) { masterPays[uid] = 0; });
-
-      compLines.forEach(function (ln) {
-        var key = ln.key || '';
-        if (ln.is_used) return;
-        ids.forEach(function (uid) {
-          var q2 = parseInt((ln.by_staff || {})[uid] || (ln.by_staff || {})[String(uid)] || 0, 10) || 0;
-          if (q2 > 0) masterPays[uid] = (masterPays[uid] || 0) + (parseFloat(payRates[key]) || 0) * q2;
-        });
-      });
+      var columnIds = getKitColumnMasterIds();
+      var masterPays = (typeof window.kitCompositionCalcMasterPay === 'function')
+        ? window.kitCompositionCalcMasterPay(compLines, payRates, columnIds)
+        : {};
+      var ids = (typeof window.kitCompositionMasterIdsForPay === 'function')
+        ? window.kitCompositionMasterIdsForPay(columnIds, compLines)
+        : columnIds;
 
       var kan = readFieldFloat('kanekalon_grams');
       var kud = readFieldFloat('kudri_grams');
