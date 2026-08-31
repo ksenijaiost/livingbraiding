@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import zipfile
@@ -14,16 +15,25 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.background import BackgroundTask
 
 from app.auth import AuthUser, require_techspec_user
-from app.media_store import is_stored_media_backup_filename, iter_media_backup_paths, media_root_dir
+from app.media_store import (
+    MediaBackupEntry,
+    build_media_manifest,
+    filter_entries_missing_from_manifest,
+    is_stored_media_backup_filename,
+    iter_media_backup_entries,
+    iter_media_backup_paths,
+    media_root_dir,
+    parse_media_manifest,
+)
 
 router = APIRouter(prefix="/techspec/media", tags=["techspec-media"])
 
-_MAX_RESTORE_UNCOMPRESSED = int(os.environ.get("LB_MEDIA_RESTORE_MAX_BYTES", str(500 * 1024 * 1024)))
-_MAX_UPLOAD_ZIP = int(os.environ.get("LB_MEDIA_RESTORE_MAX_ZIP_BYTES", str(600 * 1024 * 1024)))
+_MAX_RESTORE_UNCOMPRESSED = int(os.environ.get("LB_MEDIA_RESTORE_MAX_BYTES", str(1200 * 1024 * 1024)))
+_MAX_UPLOAD_ZIP = int(os.environ.get("LB_MEDIA_RESTORE_MAX_ZIP_BYTES", str(1024 * 1024 * 1024)))
 _MAX_RESTORE_FILES = int(os.environ.get("LB_MEDIA_RESTORE_MAX_FILES", "20000"))
 
 # Служебные файлы в каталоге uploads (не попадают в бэкап; при restore пропускаются).
@@ -59,29 +69,116 @@ def _safe_arc_basename(member: str) -> str | None:
     return base
 
 
+def _build_backup_zip(paths: list[Path]) -> str:
+    fd, tmp_path = tempfile.mkstemp(prefix="lb-media-", suffix=".zip")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for p in paths:
+                zf.write(p, arcname=p.name)
+    except Exception:
+        _unlink_quiet(tmp_path)
+        raise HTTPException(status_code=500, detail="Не удалось собрать архив.")
+    return tmp_path
+
+
+def _estimate_zip_bytes(entries: list[MediaBackupEntry]) -> int:
+    return sum(e.size for e in entries)
+
+
+@router.get("/manifest.json")
+def techspec_media_manifest(
+    current_user: Annotated[AuthUser, Depends(require_techspec_user())],
+):
+    """Скачать полный манифест файлов медиа-бэкапа."""
+    root = media_root_dir().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    manifest = build_media_manifest(root)
+    body = json.dumps(manifest, ensure_ascii=False, separators=(",", ":"))
+    fname = f"lb-media-manifest-{date.today().isoformat()}.json"
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @router.get("/backup.zip")
-def techspec_media_backup_zip(
+def techspec_media_backup_zip_get(
     current_user: Annotated[AuthUser, Depends(require_techspec_user())],
 ):
     """Скачать архив всех файлов из каталога загрузок (только файлы в корне каталога)."""
     root = media_root_dir().resolve()
     root.mkdir(parents=True, exist_ok=True)
-
-    fd, tmp_path = tempfile.mkstemp(prefix="lb-media-", suffix=".zip")
-    os.close(fd)
-    try:
-        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for p in iter_media_backup_paths(root):
-                zf.write(p, arcname=p.name)
-    except Exception:
-        _unlink_quiet(tmp_path)
-        raise HTTPException(status_code=500, detail="Не удалось собрать архив.")
-
+    paths = iter_media_backup_paths(root)
+    tmp_path = _build_backup_zip(paths)
     fname = f"lb-media-backup-{date.today().isoformat()}.zip"
     return FileResponse(
         tmp_path,
         filename=fname,
         media_type="application/zip",
+        background=BackgroundTask(_unlink_quiet, tmp_path),
+    )
+
+
+@router.post("/backup.zip")
+async def techspec_media_backup_zip_post(
+    current_user: Annotated[AuthUser, Depends(require_techspec_user())],
+    manifest: UploadFile = File(..., description="Сохранённый manifest.json — в архив попадут только новые файлы"),
+):
+    """Инкрементальный бэкап: zip только файлов, которых нет в загруженном манифесте."""
+    if not manifest.filename or not str(manifest.filename).lower().endswith(".json"):
+        raise HTTPException(status_code=400, detail="Ожидается manifest.json")
+
+    raw_bytes = await manifest.read()
+    if len(raw_bytes) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Файл манифеста слишком большой.")
+    try:
+        raw = json.loads(raw_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Некорректный JSON в манифесте.")
+
+    try:
+        parsed_manifest = parse_media_manifest(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    root = media_root_dir().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    entries = iter_media_backup_entries(root)
+    missing = filter_entries_missing_from_manifest(entries, parsed_manifest)
+
+    if not missing:
+        return JSONResponse(
+            {
+                "ok": True,
+                "new_files": 0,
+                "new_bytes": 0,
+                "message": "Новых файлов нет — манифест актуален. Скачайте свежий manifest.json при необходимости.",
+            }
+        )
+
+    est_bytes = _estimate_zip_bytes(missing)
+    if est_bytes > _MAX_UPLOAD_ZIP:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Слишком много новых файлов (~{est_bytes // (1024 * 1024)} МБ). "
+                "Скачайте полный backup.zip или обновите манифест после промежуточной синхронизации."
+            ),
+        )
+
+    paths = [e.path for e in missing]
+    tmp_path = _build_backup_zip(paths)
+    fname = f"lb-media-delta-{date.today().isoformat()}.zip"
+    return FileResponse(
+        tmp_path,
+        filename=fname,
+        media_type="application/zip",
+        headers={
+            "X-LB-Media-New-Files": str(len(missing)),
+            "X-LB-Media-New-Bytes": str(est_bytes),
+        },
         background=BackgroundTask(_unlink_quiet, tmp_path),
     )
 

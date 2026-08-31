@@ -20,12 +20,24 @@
               <strong>{{ techspec_home.media.total_size_human }}</strong>
             </div>
             <div style="margin-top: 8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-              <a href="/techspec/media/backup.zip"><button type="button" class="secondary">Скачать backup.zip</button></a>
+              <a href="/techspec/media/manifest.json"><button type="button" class="secondary">Скачать manifest.json</button></a>
+              <a href="/techspec/media/backup.zip"><button type="button" class="secondary">Скачать всё (backup.zip)</button></a>
+            </div>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb;">
+              <div class="muted" style="font-size: 12px; margin-bottom: 6px;">Только новые (загрузите сохранённый manifest.json)</div>
+              <form id="techspec-media-delta-form" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0;">
+                <input type="file" name="manifest" accept=".json,application/json" style="max-width: 18rem; padding: 8px;" />
+                <button type="submit" class="secondary">Скачать дельта-zip</button>
+              </form>
+              <div id="techspec-media-delta-status" class="muted" style="margin-top: 8px; font-size: 12px;"></div>
+            </div>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb;">
+              <div class="muted" style="font-size: 12px; margin-bottom: 6px;">Восстановить на сервер (zip-часть)</div>
               <form id="techspec-media-restore-form" method="post" action="/techspec/media/restore" enctype="multipart/form-data" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0;">
                 <input type="file" name="archive" accept=".zip,application/zip" style="max-width: 18rem; padding: 8px;" />
                 <button type="submit" class="secondary">Сохранить</button>
               </form>
-              <a href="/techspec/data"><button type="button" class="secondary">Технические данные</button></a>
+              <a href="/techspec/data" style="margin-top: 8px; display: inline-block;"><button type="button" class="secondary">Технические данные</button></a>
             </div>
             <div id="techspec-media-restore-status" class="muted" style="margin-top: 8px; font-size: 12px;"></div>
             <div id="techspec-media-restore-progress-wrap" style="display:none; margin-top: 8px; max-width: 28rem;">
@@ -360,16 +372,89 @@
   <script src="/static/calendar_occupancy_grid.js?v=20260805"></script>
   <script>
     (function () {
+      function fmtBytes(n) {
+        if (n < 1024) return n + ' Б';
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' КБ';
+        return (n / (1024 * 1024)).toFixed(1) + ' МБ';
+      }
+
+      var deltaForm = document.getElementById('techspec-media-delta-form');
+      var deltaStatus = document.getElementById('techspec-media-delta-status');
+      if (deltaForm && deltaStatus) {
+        deltaForm.addEventListener('submit', function (e) {
+          e.preventDefault();
+          var fileInput = deltaForm.querySelector('input[type="file"][name="manifest"]');
+          if (!fileInput || !fileInput.files || !fileInput.files.length) {
+            deltaStatus.className = 'error';
+            deltaStatus.textContent = 'Выберите manifest.json.';
+            return;
+          }
+          var submitBtn = deltaForm.querySelector('button[type="submit"]');
+          deltaStatus.className = 'muted';
+          deltaStatus.textContent = 'Формирование архива…';
+          if (submitBtn) submitBtn.disabled = true;
+          var xhr = new XMLHttpRequest();
+          xhr.open('POST', '/techspec/media/backup.zip');
+          xhr.responseType = 'blob';
+          xhr.addEventListener('load', function () {
+            if (submitBtn) submitBtn.disabled = false;
+            if (xhr.status >= 200 && xhr.status < 300) {
+              var ct = (xhr.getResponseHeader('Content-Type') || '').toLowerCase();
+              if (ct.indexOf('application/json') >= 0) {
+                xhr.response.text().then(function (text) {
+                  try {
+                    var data = JSON.parse(text);
+                    deltaStatus.className = 'ok';
+                    deltaStatus.textContent = data.message || 'Новых файлов нет.';
+                  } catch (err) {
+                    deltaStatus.className = 'error';
+                    deltaStatus.textContent = 'Неожиданный ответ сервера.';
+                  }
+                });
+                return;
+              }
+              var disp = xhr.getResponseHeader('Content-Disposition') || '';
+              var fname = 'lb-media-delta.zip';
+              var m = /filename="([^"]+)"/.exec(disp);
+              if (m) fname = m[1];
+              var url = URL.createObjectURL(xhr.response);
+              var a = document.createElement('a');
+              a.href = url;
+              a.download = fname;
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              URL.revokeObjectURL(url);
+              var nf = xhr.getResponseHeader('X-LB-Media-New-Files') || '?';
+              var nb = parseInt(xhr.getResponseHeader('X-LB-Media-New-Bytes') || '0', 10) || 0;
+              deltaStatus.className = 'ok';
+              deltaStatus.textContent = 'Скачан архив: ' + nf + ' новых файлов (' + fmtBytes(nb) + '). Сохраните свежий manifest.json.';
+              return;
+            }
+            xhr.response.text().then(function (text) {
+              var detail = 'HTTP ' + xhr.status;
+              try {
+                var data = JSON.parse(text);
+                if (data && data.detail) detail = data.detail;
+              } catch (err) { /* keep HTTP status */ }
+              deltaStatus.className = 'error';
+              deltaStatus.textContent = detail;
+            });
+          });
+          xhr.addEventListener('error', function () {
+            if (submitBtn) submitBtn.disabled = false;
+            deltaStatus.className = 'error';
+            deltaStatus.textContent = 'Не удалось скачать дельта-архив.';
+          });
+          xhr.send(new FormData(deltaForm));
+        });
+      }
+
       var restoreForm = document.getElementById('techspec-media-restore-form');
       var restoreStatus = document.getElementById('techspec-media-restore-status');
       var progressWrap = document.getElementById('techspec-media-restore-progress-wrap');
       var progressBar = document.getElementById('techspec-media-restore-progress-bar');
       if (restoreForm && restoreStatus) {
-        function fmtBytes(n) {
-          if (n < 1024) return n + ' Б';
-          if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' КБ';
-          return (n / (1024 * 1024)).toFixed(1) + ' МБ';
-        }
         function setProgress(pct, label) {
           if (progressWrap) progressWrap.style.display = '';
           if (progressBar) progressBar.style.width = Math.max(0, Math.min(100, pct)) + '%';
