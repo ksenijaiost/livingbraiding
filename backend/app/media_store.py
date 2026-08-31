@@ -3,9 +3,14 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from starlette.datastructures import UploadFile
+
+MANIFEST_VERSION = 1
 
 
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
@@ -29,6 +34,81 @@ def is_stored_media_backup_filename(name: str) -> bool:
 
 def iter_media_backup_paths(root: Path) -> list[Path]:
     return sorted(p for p in root.iterdir() if p.is_file() and is_stored_media_backup_filename(p.name))
+
+
+@dataclass(frozen=True, slots=True)
+class MediaBackupEntry:
+    name: str
+    size: int
+    mtime: int
+    path: Path
+
+
+def iter_media_backup_entries(root: Path) -> list[MediaBackupEntry]:
+    out: list[MediaBackupEntry] = []
+    for p in iter_media_backup_paths(root):
+        st = p.stat()
+        out.append(
+            MediaBackupEntry(
+                name=p.name,
+                size=int(st.st_size),
+                mtime=int(st.st_mtime),
+                path=p,
+            )
+        )
+    return out
+
+
+def build_media_manifest(root: Path) -> dict[str, Any]:
+    entries = iter_media_backup_entries(root)
+    total_bytes = sum(e.size for e in entries)
+    return {
+        "version": MANIFEST_VERSION,
+        "generated_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "file_count": len(entries),
+        "total_bytes": total_bytes,
+        "files": [{"name": e.name, "size": e.size, "mtime": e.mtime} for e in entries],
+    }
+
+
+def parse_media_manifest(raw: object) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError("Манифест должен быть JSON-объектом.")
+    files_raw = raw.get("files")
+    if not isinstance(files_raw, list):
+        raise ValueError("В манифесте нет списка files.")
+    files: list[dict[str, Any]] = []
+    for item in files_raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not is_stored_media_backup_filename(name):
+            continue
+        try:
+            size = int(item.get("size"))
+        except (TypeError, ValueError):
+            size = -1
+        try:
+            mtime = int(item.get("mtime"))
+        except (TypeError, ValueError):
+            mtime = 0
+        files.append({"name": name, "size": size, "mtime": mtime})
+    return {"files": files}
+
+
+def filter_entries_missing_from_manifest(
+    entries: list[MediaBackupEntry],
+    manifest: dict[str, Any],
+) -> list[MediaBackupEntry]:
+    """Файлы на сервере, которых нет в сохранённом манифесте (сверка по name)."""
+    known: set[str] = set()
+    for item in manifest.get("files") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if is_stored_media_backup_filename(name):
+            known.add(name)
+    return [e for e in entries if e.name not in known]
 
 
 def media_backup_stats() -> dict[str, int | str]:
