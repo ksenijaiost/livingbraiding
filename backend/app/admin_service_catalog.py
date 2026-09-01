@@ -13,7 +13,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -33,12 +32,9 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.price_ordering import price_sort_key, service_sort_price
-from app.ru_labels import ru_master_level, ru_user_role
 from app.time_utils import utcnow_naive
-
-templates = Jinja2Templates(directory="app/templates")
-templates.env.globals["ru_master_level"] = ru_master_level
-templates.env.globals["ru_user_role"] = ru_user_role
+from app.webui import ctx as _ctx
+from app.webui import templates
 
 router = APIRouter(prefix="/admin/catalog", tags=["admin-catalog"])
 
@@ -49,10 +45,6 @@ _PRICE_LEVEL_FIELDS: dict[str, tuple[str, str]] = {
     "MIDDLE": ("price_middle_from", "price_middle_to"),
     "SENIOR": ("price_senior_from", "price_senior_to"),
 }
-
-
-def _ctx(request: Request, current_user: AuthUser, **kwargs):
-    return {"request": request, "current_user": current_user, **kwargs}
 
 
 def _parse_estimated_duration(raw: object) -> int:

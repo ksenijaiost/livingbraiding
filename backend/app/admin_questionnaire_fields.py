@@ -9,7 +9,6 @@ from datetime import datetime
 from types import SimpleNamespace
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -32,13 +31,10 @@ from app.db.models import (
 from app.db.session import get_db
 from app.questionnaire_field_validate import NormalizedQuestionnaireField, validate_questionnaire_field_form
 from app.questionnaire.reveal import REVEAL_BLOCK_LABELS, REVEAL_BLOCKS
-from app.ru_labels import ru_master_level, ru_questionnaire_field_type, ru_user_role
 from app.time_utils import utcnow_naive
+from app.webui import ctx as _ctx
+from app.webui import templates
 
-templates = Jinja2Templates(directory="app/templates")
-templates.env.globals["ru_master_level"] = ru_master_level
-templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_type
-templates.env.globals["ru_user_role"] = ru_user_role
 templates.env.globals["reveal_block_choices"] = [(b, REVEAL_BLOCK_LABELS[b]) for b in REVEAL_BLOCKS]
 
 router = APIRouter(prefix="/admin/catalog", tags=["admin-questionnaire"])
@@ -52,10 +48,6 @@ FIELD_TYPE_CHOICES = [
     ("CHECKBOX", "Галочка"),
     ("SELECT", "Выбор из списка"),
 ]
-
-
-def _ctx(request: Request, current_user: AuthUser, **kwargs):
-    return {"request": request, "current_user": current_user, **kwargs}
 
 
 def _is_checked(raw: object | None) -> bool:
