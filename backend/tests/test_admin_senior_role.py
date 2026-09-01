@@ -88,3 +88,30 @@ def test_ru_label_for_senior_admin() -> None:
     from app.ru_labels import ru_user_role
 
     assert ru_user_role(UserRole.ADMIN_SENIOR) == "Старший админ"
+
+
+def test_admin_catalog_template_has_role_helpers() -> None:
+    """admin_service_catalog must use shared webui templates (base.html needs role_* globals)."""
+    from starlette.requests import Request
+
+    from app.webui import ctx, templates
+    import app.admin_service_catalog as catalog_mod
+
+    assert catalog_mod.templates is templates
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/admin/catalog",
+        "headers": [],
+        "query_string": b"",
+    }
+    html = templates.get_template("admin_catalog_index.html").render(
+        ctx(
+            Request(scope),
+            current_user=_senior_user(),
+            cat_rows=[],
+            total_services=0,
+            err=None,
+        )
+    )
+    assert "Прайс" in html or "категор" in html.lower() or "Новая" in html
