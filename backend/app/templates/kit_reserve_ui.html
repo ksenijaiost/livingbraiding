@@ -1,5 +1,5 @@
   <div id="reserve_overlay" data-lb-kit-reserve="1" style="display:none;pointer-events:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:50;align-items:center;justify-content:center;padding:16px;">
-    <div class="card" data-lb-kit-reserve-inner="1" style="max-width:480px;width:100%;margin:0;position:relative;">
+    <div class="card" data-lb-kit-reserve-inner="1" style="max-width:560px;width:100%;margin:0;position:relative;">
       <h3 style="margin-top:0;">Резерв комплекта <span id="reserve_sku_label"></span></h3>
       <form id="reserve_form" method="post" action="">
         <input type="hidden" name="action" value="set" />
@@ -12,14 +12,30 @@
         <div style="margin-bottom:12px;">
           <div style="font-weight:600;margin-bottom:8px;">Объём резерва *</div>
           <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;">
-            <input type="checkbox" name="reserve_full" id="reserve_full_cb" value="1" style="margin-top:4px;" />
+            <input type="checkbox" name="reserve_full" id="reserve_full_cb" value="1" checked style="margin-top:4px;" />
             <span>Весь свободный остаток (все доступные сейчас заготовки)</span>
           </label>
-          <div id="reserve_qty_block">
-            <label>Количество заготовок</label>
-            <input type="number" name="reserve_pieces" id="reserve_pieces_inp" min="1" step="1" value="" placeholder="например, 5" />
+          <div id="reserve_keyed_free_list" class="muted" style="font-size:13px;margin:0 0 10px 24px;display:none;"></div>
+          <div id="reserve_keyed_partial_block" style="display:none;margin-bottom:8px;">
+            <div class="muted" style="font-size:12px;margin-bottom:6px;">Поштучно — укажите количество по каждому виду (не больше свободного остатка):</div>
+            <div style="overflow-x:auto;">
+              <table id="reserve_keyed_table" style="width:100%;border-collapse:collapse;font-size:13px;min-width:320px;">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #e5e7eb;">Вид</th>
+                    <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #e5e7eb;">Свободно</th>
+                    <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #e5e7eb;">Зарезервировать</th>
+                  </tr>
+                </thead>
+                <tbody id="reserve_keyed_tbody"></tbody>
+              </table>
+            </div>
           </div>
-          <p class="muted" style="font-size:12px;margin:8px 0 0;">Нужно выбрать галочку «весь остаток» <strong>или</strong> указать число (не больше свободного остатка).</p>
+          <div id="reserve_qty_block">
+            <label style="display:block;margin-bottom:4px;">Количество заготовок</label>
+            <input type="number" name="reserve_pieces" id="reserve_pieces_inp" min="1" step="1" value="" placeholder="например, 5" style="max-width:8rem;" />
+          </div>
+          <p id="reserve_mode_hint" class="muted" style="font-size:12px;margin:8px 0 0;">По умолчанию резервируется весь свободный остаток. Снимите галочку, чтобы указать количество поштучно.</p>
         </div>
 
         <div style="margin-bottom:12px;">

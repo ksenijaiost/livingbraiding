@@ -320,12 +320,20 @@ def max_take_by_key_for_client(
     for k, q in stock_map.items():
         extra = int(res_c.get(k, 0))
         out[k] = int(q) + extra
-    # резерв без ключа — добавляем ко всем ключам пропорционально составу (консервативно: как равномерный бонус к каждому ключу из stock_map)
+    # резерв без ключа — раскладываем по составу комплекта (как при снятии резерва)
     null_extra = int(res_c.get("__NULL__", 0))
-    if null_extra > 0 and stock_map:
-        dist = distribute_integer_by_weights({k: max(1, stock_map[k]) for k in stock_map}, null_extra)
-        for k in stock_map:
-            out[k] = int(out.get(k, 0)) + int(dist.get(k, 0))
+    if null_extra > 0:
+        comp_use = _composition_for_stock_keys(kit, stock_map)
+        if comp_use:
+            dist = distribute_scalar_to_keys(comp_use, null_extra)
+            for k in stock_map:
+                add = int(dist.get(k, 0))
+                if add:
+                    out[k] = int(out.get(k, 0)) + add
+        elif stock_map:
+            dist = distribute_integer_by_weights({k: max(1, stock_map[k]) for k in stock_map}, null_extra)
+            for k in stock_map:
+                out[k] = int(out.get(k, 0)) + int(dist.get(k, 0))
     return out
 
 
@@ -464,6 +472,110 @@ def reserve_kit_stock_for_client(
     )
 
 
+def kit_reserve_free_rows(db: Session, kit: Kit) -> tuple[bool, list[dict[str, Any]]]:
+    """Свободный остаток по ключам для модалки резерва: (keyed, rows)."""
+    if kit.id is None:
+        return False, []
+    keyed = kit_inventory_is_keyed(db, int(kit.id))
+    if not keyed:
+        return False, []
+    stock_map = blank_stock_qty_map(db, int(kit.id))
+    _price, _meta, label_by_key = load_catalog_kit_maps(db)
+    rows: list[dict[str, Any]] = []
+    for kk in sorted(stock_map.keys()):
+        q = int(stock_map.get(kk, 0))
+        if q <= 0:
+            continue
+        rows.append({"key": kk, "label": label_by_key.get(kk) or kk, "qty_free": q})
+    return True, rows
+
+
+def split_unkeyed_kit_reserves_by_composition(db: Session, kit: Kit) -> int:
+    """Разложить legacy-резервы без kit_key на строки по ключам (по составу комплекта)."""
+    if kit.id is None:
+        return 0
+    stock_map = blank_stock_qty_map(db, int(kit.id))
+    comp_use = _composition_for_stock_keys(kit, stock_map)
+    if not comp_use:
+        return 0
+    changed = 0
+    unkeyed = list(
+        db.scalars(
+            select(KitReserve).where(
+                KitReserve.kit_id == int(kit.id),
+                or_(KitReserve.kit_key.is_(None), KitReserve.kit_key == ""),
+            )
+        ).all()
+    )
+    for r in unkeyed:
+        q = int(r.pieces_reserved or 0)
+        if q <= 0:
+            db.delete(r)
+            changed += 1
+            continue
+        dist = distribute_scalar_to_keys(comp_use, q)
+        parts = [(str(kk), int(qn)) for kk, qn in dist.items() if int(qn) > 0]
+        if not parts:
+            continue
+        if len(parts) == 1:
+            r.kit_key = str(parts[0][0])[:80]
+            changed += 1
+            continue
+        db.delete(r)
+        for kk, qn in parts:
+            db.add(
+                KitReserve(
+                    kit_id=r.kit_id,
+                    kit_key=str(kk)[:80],
+                    pieces_reserved=qn,
+                    reserved_at=r.reserved_at,
+                    reserved_by_user_id=r.reserved_by_user_id,
+                    reserved_for_client_id=r.reserved_for_client_id,
+                    reserved_for_user_id=r.reserved_for_user_id,
+                    booking_id=r.booking_id,
+                )
+            )
+        changed += 1
+    return changed
+
+
+def repair_all_unkeyed_kit_reserves(db: Session) -> int:
+    """Разложить все legacy-резервы без kit_key. Возвращает число комплектов с изменениями."""
+    kit_ids = list(
+        db.scalars(
+            select(KitReserve.kit_id)
+            .where(or_(KitReserve.kit_key.is_(None), KitReserve.kit_key == ""))
+            .distinct()
+        ).all()
+    )
+    n = 0
+    for kid in kit_ids:
+        kit = db.get(Kit, int(kid))
+        if kit is None:
+            continue
+        if split_unkeyed_kit_reserves_by_composition(db, kit) > 0:
+            n += 1
+    return n
+
+
+def _composition_for_stock_keys(kit: Kit, stock_map: dict[str, int]) -> dict[str, int]:
+    """Состав комплекта, ограниченный ключами склада (без обрезков вне остатка)."""
+    comp = parse_composition_totals(kit)
+    if not comp:
+        return {}
+    keys = set(stock_map.keys()) if stock_map else set(inventory_qty_by_key_from_kit(kit).keys())
+    keys = {k for k in keys if k not in KIT_INVENTORY_PIECE_EXCLUDE_KEYS}
+    if keys:
+        filtered = {k: int(comp.get(k, 0)) for k in keys if int(comp.get(k, 0)) > 0}
+        if filtered:
+            return filtered
+    return {
+        k: int(v)
+        for k, v in comp.items()
+        if int(v) > 0 and k not in KIT_INVENTORY_PIECE_EXCLUDE_KEYS
+    }
+
+
 def repair_kit_blank_stock_reserve_desync(db: Session, kit: Kit) -> bool:
     """Починить рассинхрон свободного остатка и kit_blank_stock после резерва «на заказ».
 
@@ -522,6 +634,8 @@ def repair_kit_blank_stock_reserve_desync(db: Session, kit: Kit) -> bool:
     before = int(kit.pieces_available or 0)
     sync_kit_pieces_available_from_blank_lines(db, kit)
     if int(kit.pieces_available or 0) != before:
+        changed = True
+    if split_unkeyed_kit_reserves_by_composition(db, kit) > 0:
         changed = True
     return changed
 
