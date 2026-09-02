@@ -1339,18 +1339,91 @@ function initKitReserveUI() {
   var reserveFreeAvail = 0;
   var reserveSlotsUsed = 0;
   var reserveMaxSlots = 3;
+  var reserveKeyed = false;
+  var reserveStockRows = [];
 
   function qid(id) { return document.getElementById(id); }
 
-  function syncReserveQtyDisabled() {
+  function renderReserveKeyedTable() {
+    var tbody = qid("reserve_keyed_tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+    reserveStockRows.forEach(function (row) {
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td style="padding:4px 6px;">' + escapeHtml(row.label || row.key) + "</td>" +
+        '<td style="padding:4px 6px;" class="muted">' + escapeHtml(String(row.qty_free || 0)) + "</td>" +
+        '<td style="padding:4px 6px;">' +
+        '<input type="number" class="js-reserve-key-qty" data-key="' + escapeHtml(row.key) + '" ' +
+        'data-label="' + escapeHtml(row.label || row.key) + '" ' +
+        'data-max="' + escapeHtml(String(row.qty_free || 0)) + '" min="0" step="1" value="" style="max-width:5rem;" />' +
+        "</td>";
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderReserveKeyedFreeList() {
+    var el = qid("reserve_keyed_free_list");
+    if (!el) return;
+    if (!reserveKeyed || !reserveStockRows.length) {
+      el.style.display = "none";
+      el.innerHTML = "";
+      return;
+    }
+    var parts = reserveStockRows.map(function (row) {
+      return escapeHtml(row.label || row.key) + ": " + String(row.qty_free || 0) + " шт.";
+    });
+    el.innerHTML = parts.join("<br />");
+    el.style.display = "block";
+  }
+
+  function syncReserveModeUi() {
     var cb = qid("reserve_full_cb");
     var inp = qid("reserve_pieces_inp");
-    var block = qid("reserve_qty_block");
-    if (!cb || !inp || !block) return;
+    var scalarBlock = qid("reserve_qty_block");
+    var keyedPartial = qid("reserve_keyed_partial_block");
+    var keyedFreeList = qid("reserve_keyed_free_list");
+    var modeHint = qid("reserve_mode_hint");
+    if (!cb) return;
     var full = cb.checked;
-    inp.disabled = full;
-    block.style.opacity = full ? "0.55" : "1";
-    if (full) inp.value = "";
+
+    if (reserveKeyed) {
+      if (scalarBlock) scalarBlock.style.display = "none";
+      if (inp) {
+        inp.disabled = true;
+        inp.value = "";
+      }
+      if (keyedPartial) keyedPartial.style.display = full ? "none" : "block";
+      if (keyedFreeList) keyedFreeList.style.display = full && reserveStockRows.length ? "block" : "none";
+      if (modeHint) {
+        modeHint.textContent = full
+          ? "Будут зарезервированы все свободные заготовки по видам (см. список выше)."
+          : "Укажите количество по каждому виду. Пустые поля = 0.";
+      }
+      if (!full) {
+        qid("reserve_keyed_tbody").querySelectorAll(".js-reserve-key-qty").forEach(function (el) {
+          el.disabled = false;
+        });
+      }
+    } else {
+      if (scalarBlock) scalarBlock.style.display = full ? "none" : "block";
+      if (keyedPartial) keyedPartial.style.display = "none";
+      if (keyedFreeList) keyedFreeList.style.display = "none";
+      if (inp) {
+        inp.disabled = full;
+        if (full) inp.value = "";
+      }
+      if (modeHint) {
+        modeHint.textContent = full
+          ? "Будет зарезервирован весь свободный остаток."
+          : "Укажите количество заготовок (не больше свободного остатка).";
+      }
+    }
+    qid("reserve_breakdown_json").value = "";
+  }
+
+  function syncReserveQtyDisabled() {
+    syncReserveModeUi();
   }
 
   function syncReserveClientUi() {
@@ -1389,6 +1462,8 @@ function initKitReserveUI() {
     reserveFreeAvail = parseInt(String(freeAvail || "0"), 10) || 0;
     reserveSlotsUsed = parseInt(String(slotsUsed || "0"), 10) || 0;
     reserveMaxSlots = parseInt(String(maxSlots || "3"), 10) || 3;
+    reserveKeyed = false;
+    reserveStockRows = [];
 
     if (reserveFreeAvail <= 0) {
       alert("Нет свободного остатка для резерва.");
@@ -1409,9 +1484,9 @@ function initKitReserveUI() {
     qid("reserve_form").action = actionUrl;
     qid("reserve_client_q").value = "";
     qid("reserve_client_list").innerHTML = "";
-    qid("reserve_full_cb").checked = false;
+    qid("reserve_full_cb").checked = true;
     qid("reserve_pieces_inp").value = "";
-    syncReserveQtyDisabled();
+    qid("reserve_breakdown_json").value = "";
     qid("reserve_stock_hint").textContent =
       "Свободно сейчас: " + reserveFreeAvail + " шт. Резервов у комплекта: " + reserveSlotsUsed + " / " + reserveMaxSlots + ".";
 
@@ -1426,6 +1501,31 @@ function initKitReserveUI() {
     sel.value = rawU ? String(parseInt(rawU, 10) || "") : "";
 
     syncReserveClientUi();
+    syncReserveModeUi();
+
+    fetch("/kits/" + kitId + "/reserve-stock.json", { credentials: "same-origin" })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        reserveKeyed = !!data.keyed;
+        reserveStockRows = Array.isArray(data.rows) ? data.rows : [];
+        if (data.pieces_available != null) {
+          reserveFreeAvail = parseInt(String(data.pieces_available), 10) || reserveFreeAvail;
+        }
+        if (data.reserve_slots_used != null) {
+          reserveSlotsUsed = parseInt(String(data.reserve_slots_used), 10) || reserveSlotsUsed;
+        }
+        if (data.reserve_slots_max != null) {
+          reserveMaxSlots = parseInt(String(data.reserve_slots_max), 10) || reserveMaxSlots;
+        }
+        qid("reserve_stock_hint").textContent =
+          "Свободно сейчас: " + reserveFreeAvail + " шт. Резервов у комплекта: " + reserveSlotsUsed + " / " + reserveMaxSlots + ".";
+        renderReserveKeyedTable();
+        renderReserveKeyedFreeList();
+        syncReserveModeUi();
+      })
+      .catch(function () { /* scalar fallback */ });
+
     if (!cid) {
       setTimeout(function () { qid("reserve_client_q").focus(); }, 0);
     }
@@ -1527,26 +1627,87 @@ function initKitReserveUI() {
       }
       var full = qid("reserve_full_cb").checked;
       var pq = String(qid("reserve_pieces_inp").value || "").trim();
-      if (full && pq) {
-        e.preventDefault();
-        alert("Выберите либо «весь остаток», либо укажите количество.");
-        return;
-      }
-      if (!full && !pq) {
-        e.preventDefault();
-        alert("Укажите «весь остаток» или количество заготовок.");
-        return;
-      }
-      if (!full) {
-        var qn = parseInt(String(pq || "0"), 10) || 0;
-        if (qn <= 0) {
+      var breakdown = {};
+      var reserveSlotCost = 1;
+
+      if (reserveKeyed) {
+        if (!full) {
+          var qtyError = null;
+          var hasQty = false;
+          qid("reserve_keyed_tbody").querySelectorAll(".js-reserve-key-qty").forEach(function (inp) {
+            if (qtyError) return;
+            var key = inp.getAttribute("data-key") || "";
+            var label = inp.getAttribute("data-label") || key;
+            var maxQ = parseInt(inp.getAttribute("data-max") || "0", 10) || 0;
+            var qn = parseInt(String(inp.value || "0"), 10) || 0;
+            if (qn < 0) qn = 0;
+            if (qn > maxQ) {
+              qtyError = "По виду «" + label + "» нельзя зарезервировать больше " + maxQ + ".";
+              return;
+            }
+            if (qn > 0 && key) {
+              breakdown[key] = qn;
+              hasQty = true;
+            }
+          });
+          if (qtyError) {
+            e.preventDefault();
+            alert(qtyError);
+            return;
+          }
+          if (!hasQty) {
+            e.preventDefault();
+            alert("Укажите количество хотя бы по одному виду заготовки.");
+            return;
+          }
+          qid("reserve_breakdown_json").value = JSON.stringify(breakdown);
+        } else {
+          var hasFree = false;
+          reserveStockRows.forEach(function (row) {
+            var qn = parseInt(String(row.qty_free || 0), 10) || 0;
+            if (qn > 0 && row.key) {
+              breakdown[row.key] = qn;
+              hasFree = true;
+            }
+          });
+          if (!hasFree) {
+            e.preventDefault();
+            alert("Нет свободного остатка для резерва.");
+            return;
+          }
+        }
+        if (su + reserveSlotCost > mx) {
           e.preventDefault();
-          alert("Некорректное количество заготовок.");
+          alert("Достигнут лимит резервов на этот комплект (" + mx + "). Снимите часть резервов.");
           return;
         }
-        if (qn > fa) {
+      } else {
+        if (full && pq) {
           e.preventDefault();
-          alert("Нельзя зарезервировать больше свободного остатка (" + fa + ").");
+          alert("Выберите либо «весь остаток», либо укажите количество.");
+          return;
+        }
+        if (!full && !pq) {
+          e.preventDefault();
+          alert("Укажите «весь остаток» или количество заготовок.");
+          return;
+        }
+        if (!full) {
+          var qn = parseInt(String(pq || "0"), 10) || 0;
+          if (qn <= 0) {
+            e.preventDefault();
+            alert("Некорректное количество заготовок.");
+            return;
+          }
+          if (qn > fa) {
+            e.preventDefault();
+            alert("Нельзя зарезервировать больше свободного остатка (" + fa + ").");
+            return;
+          }
+        }
+        if (su + reserveSlotCost > mx) {
+          e.preventDefault();
+          alert("Достигнут лимит резервов на этот комплект (" + mx + ").");
           return;
         }
       }

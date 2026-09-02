@@ -1432,10 +1432,19 @@ def list_kits_for_stock(db: Session) -> list[Kit]:
 
 def kit_reserved_for_visit_label(kit: Kit) -> str | None:
     """Краткое описание резервов в анкете визита (без даты и автора)."""
+    from app.kit_blank_stock_core import reserve_row_per_key_map
+
     rows = list(kit.reserves or [])
     if not rows:
         return None
-    bits = [f"{r.pieces_reserved} шт. — {_kit_reserve_target_short(r)}" for r in rows]
+    bits: list[str] = []
+    for r in rows:
+        per_key = reserve_row_per_key_map(r)
+        if per_key and len(per_key) > 1:
+            qty = f"{r.pieces_reserved} шт. ({len(per_key)} вида)"
+        else:
+            qty = f"{r.pieces_reserved} шт."
+        bits.append(f"{qty} — {_kit_reserve_target_short(r)}")
     return "; ".join(bits)
 
 

@@ -70,9 +70,11 @@ from app.kit_blank_stock_core import (
     ensure_blank_stock_from_composition,
     infer_stock_remainder_mode,
     kit_inventory_is_keyed,
+    kit_reserve_free_rows,
     catalog_kit_key_hint_rows,
+    kit_reserve_fields_from_breakdown,
     load_catalog_kit_maps,
-    max_take_by_key_for_client,
+    reserve_row_per_key_map,
     parse_composition_totals,
     read_blank_stock_qty_from_admin_form,
     return_reserve_row_to_stock,
@@ -243,6 +245,7 @@ def _kit_reservation_tooltip(kit: Kit, db: Session) -> str:
     if not rows:
         return ""
     tz = get_display_timezone(db)
+    _price, _meta, label_by_key = load_catalog_kit_maps(db)
     chunks: list[str] = []
     for r in rows:
         who: list[str] = []
@@ -255,8 +258,21 @@ def _kit_reservation_tooltip(kit: Kit, db: Session) -> str:
         if r.booking_id:
             who.append(f"бронь #{int(r.booking_id)}")
         when = format_naive_utc_datetime(r.reserved_at, tz)
+        per_key = reserve_row_per_key_map(r)
+        if per_key and len(per_key) > 1:
+            parts = []
+            for k, v in sorted(per_key.items()):
+                human = label_by_key.get(k) or k
+                parts.append(f"{human}: {v}")
+            qty_label = ", ".join(parts) + f" (всего {r.pieces_reserved} шт.)"
+        else:
+            kk = (r.kit_key or "").strip()
+            qty_label = f"{r.pieces_reserved} шт."
+            if kk:
+                human = label_by_key.get(kk) or kk
+                qty_label = f"{human}: {r.pieces_reserved} шт."
         chunks.append(
-            f"{r.pieces_reserved} шт. ({', '.join(who) if who else 'цель не указана'}) · {when} ({timezone_label(tz)})"
+            f"{qty_label} ({', '.join(who) if who else 'цель не указана'}) · {when} ({timezone_label(tz)})"
         )
     return " | ".join(chunks)
 
@@ -902,6 +918,29 @@ async def admin_kit_edit_post(
         )
 
 
+@router.get("/{kit_id}/reserve-stock.json")
+@legacy_kits_admin_router.get("/{kit_id}/reserve-stock.json")
+def kit_reserve_stock_json(
+    kit_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    del current_user
+    kit = db.get(Kit, kit_id)
+    if not kit:
+        raise HTTPException(status_code=404, detail="Комплект не найден")
+    keyed, rows = kit_reserve_free_rows(db, kit)
+    return JSONResponse(
+        {
+            "keyed": keyed,
+            "rows": rows,
+            "pieces_available": int(kit.pieces_available or 0),
+            "reserve_slots_used": kit_reserve_slots_used(db, kit.id),
+            "reserve_slots_max": get_kit_max_reserves_per_kit(db),
+        }
+    )
+
+
 @router.post("/{kit_id}/reserve")
 @legacy_kits_admin_router.post("/{kit_id}/reserve")
 async def admin_kit_reserve_post(
@@ -1018,11 +1057,11 @@ async def admin_kit_reserve_post(
 
     if kit_inventory_is_keyed(db, kit.id):
         if reserve_full and qty_raw and not raw_j:
-            return _err("Выберите либо «весь остаток», либо количество, либо отправьте разбивку по видам.")
-        if not raw_j and not reserve_full and not qty_raw:
-            return _err("Укажите «весь остаток», количество или разбивку по видам (JSON).")
+            return _err("Выберите либо «весь остаток», либо укажите количества по видам заготовок.")
+        if not reserve_full and not raw_j:
+            return _err("Укажите «весь остаток» или количества по каждому виду заготовки.")
         sm = blank_stock_qty_map(db, kit.id)
-        max_by = max_take_by_key_for_client(db, kit=kit, client_id=cid, stock_map=sm)
+        max_by = {k: int(v) for k, v in sm.items() if int(v) > 0}
         if sum(max_by.values()) <= 0:
             return _err("Нет свободного остатка для резерва.")
         usage_by_key: dict[str, int] | None = None
@@ -1033,14 +1072,12 @@ async def admin_kit_reserve_post(
                     usage_by_key = {str(k): int(v) for k, v in d.items() if int(v) > 0}
             except Exception:
                 usage_by_key = None
-        try:
-            blanks_used = parse_int(qty_raw, min=0, field_name="reserve_pieces") if qty_raw else 0
-        except ValueError:
-            blanks_used = 0
+            if not usage_by_key and not reserve_full:
+                return _err("Некорректная разбивка по видам заготовок.")
         try:
             bd = build_usage_breakdown_keyed(
                 use_entire=reserve_full,
-                blanks_used=blanks_used,
+                blanks_used=0,
                 usage_by_key=usage_by_key,
                 max_by_key=max_by,
             )
@@ -1049,7 +1086,7 @@ async def admin_kit_reserve_post(
         n_rows = sum(1 for _k, n in bd.items() if int(n) > 0)
         if n_rows <= 0:
             return _err("Укажите ненулевой резерв.")
-        if kit_reserve_slots_used(db, kit.id) + n_rows > max_slots:
+        if kit_reserve_slots_used(db, kit.id) + 1 > max_slots:
             return _err(f"Достигнут лимит резервов на комплект ({max_slots}). Увеличьте лимит в настройках.")
         before = SimpleNamespace(pieces_available=kit.pieces_available)
         for kk, n in bd.items():
@@ -1057,17 +1094,19 @@ async def admin_kit_reserve_post(
             if qn <= 0:
                 continue
             consume_blank_stock_for_reserve(db, kit, kit_key=str(kk), qty=qn, sync_after=False)
-            db.add(
-                KitReserve(
-                    kit_id=kit.id,
-                    kit_key=str(kk)[:80],
-                    pieces_reserved=qn,
-                    reserved_at=utcnow_naive(),
-                    reserved_by_user_id=current_user.id,
-                    reserved_for_client_id=cid,
-                    reserved_for_user_id=uid,
-                )
+        kit_key, breakdown_json, total = kit_reserve_fields_from_breakdown(bd)
+        db.add(
+            KitReserve(
+                kit_id=kit.id,
+                kit_key=kit_key,
+                reserve_breakdown_json=breakdown_json,
+                pieces_reserved=total,
+                reserved_at=utcnow_naive(),
+                reserved_by_user_id=current_user.id,
+                reserved_for_client_id=cid,
+                reserved_for_user_id=uid,
             )
+        )
         sync_kit_pieces_available_from_blank_lines(db, kit)
         kit.updated_at = utcnow_naive()
         kit.updated_by_user_id = current_user.id

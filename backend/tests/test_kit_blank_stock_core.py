@@ -22,11 +22,17 @@ from app.kit_blank_stock_core import (
     infer_stock_remainder_mode,
     inventory_qty_by_key_from_kit,
     keyed_cost_selected,
+    kit_reserve_free_rows,
+    max_take_by_key_for_client,
+    merge_keyed_kit_reserve_rows_by_batch,
     release_client_kit_reserves_into_free_pool,
     repair_all_kits_pieces_available_from_blank_stock,
     repair_kit_blank_stock_reserve_desync,
     require_composition_stock_rows_or_scalar_ok,
     reserve_kit_stock_for_client,
+    reserve_row_per_key_map,
+    split_unkeyed_kit_reserves_by_composition,
+    sum_reserved_by_key_for_client,
     sync_kit_pieces_available_from_blank_lines,
 )
 
@@ -461,3 +467,113 @@ def test_blank_stock_edit_rows_split_new_and_used_same_kind(memory_db: Session) 
     assert [r["condition_label"] for r in rows] == ["нов", "б/у"]
     by_raw_key = {r["raw_key"]: r["qty"] for r in rows}
     assert by_raw_key == {"SE_CURL": 28, "SE_CURL__USED__": 52}
+
+
+def test_max_take_by_key_null_reserve_uses_composition(memory_db: Session) -> None:
+    db = memory_db
+    _catalog_blank(db, "DE_BRAID_LONG")
+    _catalog_blank(db, "SE_BRAID_LONG")
+    user, client = _user_and_client(db)
+    kit = _mixed_kit(db, se_qty=40, de_qty=20, stock={"DE_BRAID_LONG": 0, "SE_BRAID_LONG": 0})
+    db.add(
+        KitReserve(
+            kit_id=kit.id,
+            pieces_reserved=60,
+            kit_key=None,
+            reserved_by_user_id=user.id,
+            reserved_for_client_id=client.id,
+        )
+    )
+    db.commit()
+    db.refresh(kit)
+
+    out = max_take_by_key_for_client(
+        db,
+        kit=kit,
+        client_id=int(client.id),
+        stock_map={"DE_BRAID_LONG": 0, "SE_BRAID_LONG": 0},
+    )
+    assert out == {"DE_BRAID_LONG": 20, "SE_BRAID_LONG": 40}
+
+
+def test_split_unkeyed_reserves_by_composition(memory_db: Session) -> None:
+    db = memory_db
+    _catalog_blank(db, "DE_BRAID_LONG")
+    _catalog_blank(db, "SE_BRAID_LONG")
+    user, client = _user_and_client(db)
+    kit = _mixed_kit(db, se_qty=40, de_qty=20, stock={"DE_BRAID_LONG": 0, "SE_BRAID_LONG": 0})
+    db.add(
+        KitReserve(
+            kit_id=kit.id,
+            pieces_reserved=60,
+            kit_key=None,
+            reserved_by_user_id=user.id,
+            reserved_for_client_id=client.id,
+        )
+    )
+    db.commit()
+
+    n = split_unkeyed_kit_reserves_by_composition(db, kit)
+    db.commit()
+    assert n == 1
+    rows = list(db.scalars(select(KitReserve).where(KitReserve.kit_id == kit.id)).all())
+    assert len(rows) == 1
+    r = rows[0]
+    assert int(r.pieces_reserved) == 60
+    assert json.loads(r.reserve_breakdown_json or "{}") == {"DE_BRAID_LONG": 20, "SE_BRAID_LONG": 40}
+
+
+def test_merge_keyed_kit_reserve_rows_by_batch(memory_db: Session) -> None:
+    db = memory_db
+    _catalog_blank(db, "DE_BRAID_LONG")
+    _catalog_blank(db, "SE_BRAID_LONG")
+    user, client = _user_and_client(db)
+    kit = _mixed_kit(db, se_qty=40, de_qty=20, stock={"DE_BRAID_LONG": 0, "SE_BRAID_LONG": 0})
+    when = datetime(2026, 9, 2, 10, 0, 0)
+    db.add_all(
+        [
+            KitReserve(
+                kit_id=kit.id,
+                kit_key="DE_BRAID_LONG",
+                pieces_reserved=20,
+                reserved_at=when,
+                reserved_by_user_id=user.id,
+                reserved_for_client_id=client.id,
+            ),
+            KitReserve(
+                kit_id=kit.id,
+                kit_key="SE_BRAID_LONG",
+                pieces_reserved=40,
+                reserved_at=when,
+                reserved_by_user_id=user.id,
+                reserved_for_client_id=client.id,
+            ),
+        ]
+    )
+    db.commit()
+
+    n = merge_keyed_kit_reserve_rows_by_batch(db, kit)
+    db.commit()
+    assert n == 1
+    rows = list(db.scalars(select(KitReserve).where(KitReserve.kit_id == kit.id)).all())
+    assert len(rows) == 1
+    assert json.loads(rows[0].reserve_breakdown_json or "{}") == {"DE_BRAID_LONG": 20, "SE_BRAID_LONG": 40}
+    assert sum_reserved_by_key_for_client(db, kit_id=int(kit.id), client_id=int(client.id)) == {
+        "DE_BRAID_LONG": 20,
+        "SE_BRAID_LONG": 40,
+    }
+
+
+def test_kit_reserve_free_rows_labels(memory_db: Session) -> None:
+    db = memory_db
+    _catalog_blank(db, "DE_BRAID_LONG")
+    _catalog_blank(db, "SE_BRAID_LONG")
+    kit = _mixed_kit(db, se_qty=40, de_qty=20, stock={"DE_BRAID_LONG": 20, "SE_BRAID_LONG": 40})
+    db.commit()
+    keyed, rows = kit_reserve_free_rows(db, kit)
+    assert keyed is True
+    by_key = {r["key"]: r for r in rows}
+    assert by_key["DE_BRAID_LONG"]["qty_free"] == 20
+    assert by_key["SE_BRAID_LONG"]["qty_free"] == 40
+    assert by_key["DE_BRAID_LONG"]["label"] == "DE_BRAID_LONG"
+
