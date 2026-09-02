@@ -301,9 +301,63 @@ def sum_reserved_by_key_for_client(db: Session, *, kit_id: int, client_id: int) 
         ).all()
     )
     for r in rows:
-        key = (r.kit_key or "").strip() or "__NULL__"
-        out[key] = out.get(key, 0) + int(r.pieces_reserved or 0)
+        per_key = reserve_row_per_key_map(r)
+        if per_key is not None:
+            for k, v in per_key.items():
+                out[k] = out.get(k, 0) + int(v)
+        else:
+            out["__NULL__"] = out.get("__NULL__", 0) + int(r.pieces_reserved or 0)
     return out
+
+
+def reserve_row_per_key_map(r: KitReserve) -> dict[str, int] | None:
+    """Явная разбивка по ключам (breakdown_json или один kit_key); None — legacy scalar без ключа."""
+    raw = getattr(r, "reserve_breakdown_json", None)
+    if raw:
+        try:
+            d = json.loads(str(raw))
+            if isinstance(d, dict) and d:
+                return {str(k): int(v) for k, v in d.items() if int(v) > 0}
+        except Exception:
+            pass
+    kk = (r.kit_key or "").strip()
+    if kk:
+        return {kk: int(r.pieces_reserved or 0)}
+    return None
+
+
+def reserve_row_stock_deltas(db: Session, kit: Kit, r: KitReserve) -> dict[str, int]:
+    """Сколько вернуть на склад по каждому ключу при снятии резерва."""
+    per_key = reserve_row_per_key_map(r)
+    if per_key is not None:
+        return dict(per_key)
+    q = int(r.pieces_reserved or 0)
+    if q <= 0:
+        return {}
+    sm = blank_stock_qty_map(db, int(kit.id))
+    comp_use = _composition_for_stock_keys(kit, sm)
+    if comp_use:
+        return distribute_scalar_to_keys(comp_use, q)
+    if sm:
+        return distribute_integer_by_weights({k: max(1, sm[k]) for k in sm}, q)
+    return {}
+
+
+def reserve_breakdown_json_from_map(breakdown: dict[str, int]) -> str | None:
+    bd = {str(k): int(v) for k, v in breakdown.items() if int(v) > 0}
+    if len(bd) <= 1:
+        return None
+    return json.dumps(bd, ensure_ascii=False)
+
+
+def kit_reserve_fields_from_breakdown(breakdown: dict[str, int]) -> tuple[str | None, str | None, int]:
+    """(kit_key, reserve_breakdown_json, pieces_reserved) для одной строки резерва."""
+    bd = {str(k): int(v) for k, v in breakdown.items() if int(v) > 0}
+    total = int(sum(bd.values()))
+    if len(bd) == 1:
+        kk = next(iter(bd.keys()))
+        return str(kk)[:80], None, total
+    return None, reserve_breakdown_json_from_map(bd), total
 
 
 def max_take_by_key_for_client(
@@ -353,17 +407,12 @@ def release_client_kit_reserves_into_free_pool(db: Session, *, kit: Kit, client_
         return
     if kit_inventory_is_keyed(db, int(kit.id)):
         deltas: dict[str, int] = {}
-        comp = parse_composition_totals(kit)
         for r in rows:
             q = int(r.pieces_reserved or 0)
             if q <= 0:
                 continue
-            kk = (r.kit_key or "").strip()
-            if kk:
-                deltas[kk] = deltas.get(kk, 0) + q
-            else:
-                for ck, dq in distribute_scalar_to_keys(comp if comp else {k: 1 for k in blank_stock_qty_map(db, int(kit.id))}, q).items():
-                    deltas[ck] = deltas.get(ck, 0) + int(dq)
+            for ck, dq in reserve_row_stock_deltas(db, kit, r).items():
+                deltas[ck] = deltas.get(ck, 0) + int(dq)
             db.delete(r)
         increment_blank_stock_keys(db, int(kit.id), deltas)
         sync_kit_pieces_available_from_blank_lines(db, kit)
@@ -380,18 +429,8 @@ def return_reserve_row_to_stock(db: Session, kit: Kit, r: KitReserve) -> None:
     if qty <= 0:
         return
     if kit_inventory_is_keyed(db, int(kit.id)):
-        kk = (r.kit_key or "").strip()
-        if kk:
-            increment_blank_stock_keys(db, int(kit.id), {kk: qty})
-        else:
-            comp = parse_composition_totals(kit)
-            sm = blank_stock_qty_map(db, int(kit.id))
-            if comp:
-                deltas = distribute_scalar_to_keys(comp, qty)
-            elif sm:
-                deltas = distribute_integer_by_weights({k: 1 for k in sm}, qty)
-            else:
-                deltas = {}
+        deltas = reserve_row_stock_deltas(db, kit, r)
+        if deltas:
             increment_blank_stock_keys(db, int(kit.id), deltas)
         sync_kit_pieces_available_from_blank_lines(db, kit)
     else:
@@ -517,26 +556,65 @@ def split_unkeyed_kit_reserves_by_composition(db: Session, kit: Kit) -> int:
         parts = [(str(kk), int(qn)) for kk, qn in dist.items() if int(qn) > 0]
         if not parts:
             continue
-        if len(parts) == 1:
-            r.kit_key = str(parts[0][0])[:80]
-            changed += 1
-            continue
-        db.delete(r)
-        for kk, qn in parts:
-            db.add(
-                KitReserve(
-                    kit_id=r.kit_id,
-                    kit_key=str(kk)[:80],
-                    pieces_reserved=qn,
-                    reserved_at=r.reserved_at,
-                    reserved_by_user_id=r.reserved_by_user_id,
-                    reserved_for_client_id=r.reserved_for_client_id,
-                    reserved_for_user_id=r.reserved_for_user_id,
-                    booking_id=r.booking_id,
-                )
-            )
+        kit_key, breakdown_json, total = kit_reserve_fields_from_breakdown(dict(parts))
+        r.kit_key = kit_key
+        r.reserve_breakdown_json = breakdown_json
+        r.pieces_reserved = total
         changed += 1
     return changed
+
+
+def merge_keyed_kit_reserve_rows_by_batch(db: Session, kit: Kit) -> int:
+    """Слить несколько строк резерва одной «порции» (разные kit_key) в одну с breakdown_json."""
+    from collections import defaultdict
+
+    rows = list(db.scalars(select(KitReserve).where(KitReserve.kit_id == int(kit.id))).all())
+    groups: dict[tuple, list[KitReserve]] = defaultdict(list)
+    for r in rows:
+        if getattr(r, "reserve_breakdown_json", None):
+            continue
+        if not (r.kit_key or "").strip():
+            continue
+        batch_key = (
+            int(r.reserved_for_client_id or 0),
+            int(r.reserved_for_user_id or 0),
+            int(r.reserved_by_user_id or 0),
+            r.reserved_at,
+            int(r.booking_id or 0),
+        )
+        groups[batch_key].append(r)
+    changed = 0
+    for batch in groups.values():
+        if len(batch) < 2:
+            continue
+        breakdown: dict[str, int] = {}
+        for r in batch:
+            kk = (r.kit_key or "").strip()
+            if kk:
+                breakdown[kk] = breakdown.get(kk, 0) + int(r.pieces_reserved or 0)
+        if len(breakdown) < 2:
+            continue
+        keep = batch[0]
+        keep.kit_key, keep.reserve_breakdown_json, keep.pieces_reserved = kit_reserve_fields_from_breakdown(
+            breakdown
+        )
+        for r in batch[1:]:
+            db.delete(r)
+        changed += 1
+    return changed
+
+
+def repair_all_merged_keyed_kit_reserves(db: Session) -> int:
+    """Слить разнесённые по ключам строки резерва в одну на комплект. Возвращает число комплектов с изменениями."""
+    kit_ids = list(db.scalars(select(KitReserve.kit_id).distinct()).all())
+    n = 0
+    for kid in kit_ids:
+        kit = db.get(Kit, int(kid))
+        if kit is None:
+            continue
+        if merge_keyed_kit_reserve_rows_by_batch(db, kit) > 0:
+            n += 1
+    return n
 
 
 def repair_all_unkeyed_kit_reserves(db: Session) -> int:
@@ -636,6 +714,8 @@ def repair_kit_blank_stock_reserve_desync(db: Session, kit: Kit) -> bool:
     if int(kit.pieces_available or 0) != before:
         changed = True
     if split_unkeyed_kit_reserves_by_composition(db, kit) > 0:
+        changed = True
+    if merge_keyed_kit_reserve_rows_by_batch(db, kit) > 0:
         changed = True
     return changed
 

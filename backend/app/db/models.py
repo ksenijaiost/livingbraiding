@@ -609,8 +609,10 @@ class KitReserve(Base):
     reserved_for_client_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("clients.id"), nullable=True)
     reserved_for_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     booking_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("bookings.id", ondelete="SET NULL"), nullable=True)
-    # Ключ состава; NULL — старый резерв «без разбивки по видам» (только scalar pieces_available).
+    # Ключ состава; NULL — резерв без одного ключа (scalar legacy или breakdown_json).
     kit_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Разбивка по видам в одном резерве: {"DE_BRAID_LONG": 20, "SE_BRAID_LONG": 40}
+    reserve_breakdown_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     kit: Mapped["Kit"] = relationship(back_populates="reserves")
     reserved_by_user: Mapped["User"] = relationship(foreign_keys=[reserved_by_user_id])

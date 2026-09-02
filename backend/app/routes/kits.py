@@ -72,8 +72,9 @@ from app.kit_blank_stock_core import (
     kit_inventory_is_keyed,
     kit_reserve_free_rows,
     catalog_kit_key_hint_rows,
+    kit_reserve_fields_from_breakdown,
     load_catalog_kit_maps,
-    max_take_by_key_for_client,
+    reserve_row_per_key_map,
     parse_composition_totals,
     read_blank_stock_qty_from_admin_form,
     return_reserve_row_to_stock,
@@ -257,11 +258,19 @@ def _kit_reservation_tooltip(kit: Kit, db: Session) -> str:
         if r.booking_id:
             who.append(f"бронь #{int(r.booking_id)}")
         when = format_naive_utc_datetime(r.reserved_at, tz)
-        kk = (r.kit_key or "").strip()
-        qty_label = f"{r.pieces_reserved} шт."
-        if kk:
-            human = label_by_key.get(kk) or kk
-            qty_label = f"{human}: {r.pieces_reserved} шт."
+        per_key = reserve_row_per_key_map(r)
+        if per_key and len(per_key) > 1:
+            parts = []
+            for k, v in sorted(per_key.items()):
+                human = label_by_key.get(k) or k
+                parts.append(f"{human}: {v}")
+            qty_label = ", ".join(parts) + f" (всего {r.pieces_reserved} шт.)"
+        else:
+            kk = (r.kit_key or "").strip()
+            qty_label = f"{r.pieces_reserved} шт."
+            if kk:
+                human = label_by_key.get(kk) or kk
+                qty_label = f"{human}: {r.pieces_reserved} шт."
         chunks.append(
             f"{qty_label} ({', '.join(who) if who else 'цель не указана'}) · {when} ({timezone_label(tz)})"
         )
@@ -1077,7 +1086,7 @@ async def admin_kit_reserve_post(
         n_rows = sum(1 for _k, n in bd.items() if int(n) > 0)
         if n_rows <= 0:
             return _err("Укажите ненулевой резерв.")
-        if kit_reserve_slots_used(db, kit.id) + n_rows > max_slots:
+        if kit_reserve_slots_used(db, kit.id) + 1 > max_slots:
             return _err(f"Достигнут лимит резервов на комплект ({max_slots}). Увеличьте лимит в настройках.")
         before = SimpleNamespace(pieces_available=kit.pieces_available)
         for kk, n in bd.items():
@@ -1085,17 +1094,19 @@ async def admin_kit_reserve_post(
             if qn <= 0:
                 continue
             consume_blank_stock_for_reserve(db, kit, kit_key=str(kk), qty=qn, sync_after=False)
-            db.add(
-                KitReserve(
-                    kit_id=kit.id,
-                    kit_key=str(kk)[:80],
-                    pieces_reserved=qn,
-                    reserved_at=utcnow_naive(),
-                    reserved_by_user_id=current_user.id,
-                    reserved_for_client_id=cid,
-                    reserved_for_user_id=uid,
-                )
+        kit_key, breakdown_json, total = kit_reserve_fields_from_breakdown(bd)
+        db.add(
+            KitReserve(
+                kit_id=kit.id,
+                kit_key=kit_key,
+                reserve_breakdown_json=breakdown_json,
+                pieces_reserved=total,
+                reserved_at=utcnow_naive(),
+                reserved_by_user_id=current_user.id,
+                reserved_for_client_id=cid,
+                reserved_for_user_id=uid,
             )
+        )
         sync_kit_pieces_available_from_blank_lines(db, kit)
         kit.updated_at = utcnow_naive()
         kit.updated_by_user_id = current_user.id

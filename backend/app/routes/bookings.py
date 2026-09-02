@@ -80,6 +80,7 @@ from app.kit_blank_stock_core import (
     build_usage_breakdown_keyed,
     consume_blank_stock_for_reserve,
     kit_inventory_is_keyed,
+    kit_reserve_fields_from_breakdown,
     max_take_by_key_for_client,
     return_reserve_row_to_stock,
     sync_kit_pieces_available_from_blank_lines,
@@ -2170,7 +2171,7 @@ def _apply_booking_auto_reserves(
             slot_rows = sum(1 for _k, n in bd.items() if int(n) > 0)
             if slot_rows <= 0:
                 return
-            if kit_reserve_slots_used(db, kit.id) + slot_rows > get_kit_max_reserves_per_kit(db):
+            if kit_reserve_slots_used(db, kit.id) + 1 > get_kit_max_reserves_per_kit(db):
                 return
             before = SimpleNamespace(pieces_available=kit.pieces_available)
             for kk, n in bd.items():
@@ -2180,18 +2181,20 @@ def _apply_booking_auto_reserves(
                 consume_blank_stock_for_reserve(
                     db, kit, kit_key=kk, qty=qn, sync_after=False
                 )
-                db.add(
-                    KitReserve(
-                        kit_id=kit.id,
-                        kit_key=str(kk)[:80],
-                        pieces_reserved=qn,
-                        reserved_at=utcnow_naive(),
-                        reserved_by_user_id=changed_by_user_id,
-                        reserved_for_client_id=booking_client_id,
-                        reserved_for_user_id=None,
-                        booking_id=int(booking_id),
-                    )
+            kit_key, breakdown_json, total = kit_reserve_fields_from_breakdown(bd)
+            db.add(
+                KitReserve(
+                    kit_id=kit.id,
+                    kit_key=kit_key,
+                    reserve_breakdown_json=breakdown_json,
+                    pieces_reserved=total,
+                    reserved_at=utcnow_naive(),
+                    reserved_by_user_id=changed_by_user_id,
+                    reserved_for_client_id=booking_client_id,
+                    reserved_for_user_id=None,
+                    booking_id=int(booking_id),
                 )
+            )
             sync_kit_pieces_available_from_blank_lines(db, kit)
             kit.updated_at = utcnow_naive()
             kit.updated_by_user_id = changed_by_user_id

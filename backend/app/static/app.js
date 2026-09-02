@@ -1628,11 +1628,12 @@ function initKitReserveUI() {
       var full = qid("reserve_full_cb").checked;
       var pq = String(qid("reserve_pieces_inp").value || "").trim();
       var breakdown = {};
-      var nRows = 0;
+      var reserveSlotCost = 1;
 
       if (reserveKeyed) {
         if (!full) {
           var qtyError = null;
+          var hasQty = false;
           qid("reserve_keyed_tbody").querySelectorAll(".js-reserve-key-qty").forEach(function (inp) {
             if (qtyError) return;
             var key = inp.getAttribute("data-key") || "";
@@ -1646,7 +1647,7 @@ function initKitReserveUI() {
             }
             if (qn > 0 && key) {
               breakdown[key] = qn;
-              nRows += 1;
+              hasQty = true;
             }
           });
           if (qtyError) {
@@ -1654,29 +1655,30 @@ function initKitReserveUI() {
             alert(qtyError);
             return;
           }
-          if (nRows <= 0) {
+          if (!hasQty) {
             e.preventDefault();
             alert("Укажите количество хотя бы по одному виду заготовки.");
             return;
           }
           qid("reserve_breakdown_json").value = JSON.stringify(breakdown);
         } else {
+          var hasFree = false;
           reserveStockRows.forEach(function (row) {
             var qn = parseInt(String(row.qty_free || 0), 10) || 0;
             if (qn > 0 && row.key) {
               breakdown[row.key] = qn;
-              nRows += 1;
+              hasFree = true;
             }
           });
-          if (nRows <= 0) {
+          if (!hasFree) {
             e.preventDefault();
             alert("Нет свободного остатка для резерва.");
             return;
           }
         }
-        if (su + nRows > mx) {
+        if (su + reserveSlotCost > mx) {
           e.preventDefault();
-          alert("Для этого резерва нужно " + nRows + " слот(ов), а свободно " + (mx - su) + " из " + mx + ". Снимите часть резервов или уменьшите объём.");
+          alert("Достигнут лимит резервов на этот комплект (" + mx + "). Снимите часть резервов.");
           return;
         }
       } else {
@@ -1703,8 +1705,7 @@ function initKitReserveUI() {
             return;
           }
         }
-        nRows = 1;
-        if (su + nRows > mx) {
+        if (su + reserveSlotCost > mx) {
           e.preventDefault();
           alert("Достигнут лимит резервов на этот комплект (" + mx + ").");
           return;
