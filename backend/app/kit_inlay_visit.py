@@ -112,8 +112,11 @@ from app.kit_blank_stock_core import (
     apply_discount_capped,
     blank_stock_qty_map,
     build_usage_breakdown_keyed,
+    inventory_qty_by_key_from_kit,
     keyed_client_price_selected,
     keyed_cost_selected,
+    keyed_stock_price_selected,
+    keyed_stock_unit_prices_from_catalog_weights,
     kit_inventory_is_keyed,
     load_catalog_kit_maps,
     max_take_by_key_for_client,
@@ -371,7 +374,7 @@ def _apply_stock_kit_usage(
         from app.kit_composition_lines import composition_has_v2_lines, keyed_client_price_selected_v2
 
         if composition_has_v2_lines(kit.composition_json):
-            selected_price = keyed_client_price_selected_v2(
+            catalog_price = keyed_client_price_selected_v2(
                 db,
                 kit.composition_json,
                 bd,
@@ -379,7 +382,20 @@ def _apply_stock_kit_usage(
                 meta_by_key=meta_by_key,
             )
         else:
-            selected_price = keyed_client_price_selected(bd, price_map=price_map, meta_by_key=meta_by_key)
+            catalog_price = keyed_client_price_selected(bd, price_map=price_map, meta_by_key=meta_by_key)
+        # Приоритет: доля «цены на складе» по соотношению прайсовых весов видов.
+        inv_comp = inventory_qty_by_key_from_kit(kit) or comp
+        unit_stock = keyed_stock_unit_prices_from_catalog_weights(
+            db,
+            kit,
+            stock_price_total=price,
+            composition_qty=inv_comp if inv_comp else comp,
+            price_map=price_map,
+            meta_by_key=meta_by_key,
+            extra_keys=list(bd.keys()),
+        )
+        stock_price = keyed_stock_price_selected(bd, unit_stock_by_key=unit_stock)
+        selected_price = float(stock_price) if stock_price is not None else float(catalog_price)
         selected_cost = keyed_cost_selected(bd, comp=comp, kit_cost_total=max(0.0, float(kit.cost_total or 0.0)))
         _disc, net = apply_discount_capped(
             selected_price, discount_percent=int(kit.discount_percent or 0), cost_floor=selected_cost
@@ -1516,22 +1532,34 @@ def kit_suggest_dict_for_kit(db: Session, k: Kit, *, for_client_id: int | None) 
     if not out["inventory_keyed"]:
         return out
     sm = blank_stock_qty_map(db, int(k.id))
-    price_map, _meta, label_by_key = load_catalog_kit_maps(db)
+    price_map, meta_by_key, label_by_key = load_catalog_kit_maps(db)
     max_by = max_take_by_key_for_client(db, kit=k, client_id=cid, stock_map=sm)
     cond_meta = _per_key_condition_meta(k)
+    inv_comp = inventory_qty_by_key_from_kit(k) or comp
+    unit_stock = keyed_stock_unit_prices_from_catalog_weights(
+        db,
+        k,
+        stock_price_total=float(sp or 0.0),
+        composition_qty=inv_comp if inv_comp else comp,
+        price_map=price_map,
+        meta_by_key=meta_by_key,
+        extra_keys=list(set(sm.keys()) | set(max_by.keys())),
+    )
     hints: list[dict[str, Any]] = []
     keys = sorted(set(sm.keys()) | set(max_by.keys()))
     for kk in keys:
         p = price_map.get(kk)
         cm = cond_meta.get(kk) or cond_meta.get("*") or {}
+        stock_unit = unit_stock.get(kk)
         hints.append(
             {
                 "key": kk,
                 "qty_free": int(sm.get(kk, 0)),
                 "qty_max_for_client": int(max_by.get(kk, 0)),
                 "price_per_piece": float(p) if p is not None else None,
+                "stock_price_per_piece": float(stock_unit) if stock_unit is not None else None,
                 "label": label_by_key.get(kk, kk),
-                "composition_qty": int(comp.get(kk, 0)),
+                "composition_qty": int((inv_comp or comp).get(kk, 0)),
                 "condition": str(cm.get("condition") or "NEW"),
                 "used_price_pct": cm.get("used_price_pct"),
             }

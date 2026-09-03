@@ -23,6 +23,7 @@ from app.kit_blank_stock_core import (
     inventory_qty_by_key_from_kit,
     keyed_cost_selected,
     kit_reserve_free_rows,
+    load_catalog_kit_maps,
     max_take_by_key_for_client,
     merge_keyed_kit_reserve_rows_by_batch,
     release_client_kit_reserves_into_free_pool,
@@ -61,6 +62,81 @@ def test_keyed_cost_selected_linear_in_piece_count() -> None:
     per_piece_share = 60.0 / 3.0  # cost_total / sum(comp)
     assert keyed_cost_selected({"DE": 2}, comp=comp, kit_cost_total=60.0) == pytest.approx(2 * per_piece_share)
     assert keyed_cost_selected({"DE": 1, "SE": 2}, comp=comp, kit_cost_total=60.0) == pytest.approx(3 * per_piece_share)
+
+
+def test_keyed_stock_price_allocates_by_catalog_weights(memory_db: Session) -> None:
+    """Цена склада 6460 раскладывается как 72*x+2*y при x:y = 85:170."""
+    from app.kit_blank_stock_core import (
+        keyed_stock_price_selected,
+        keyed_stock_unit_prices_from_catalog_weights,
+    )
+
+    db = memory_db
+    _catalog_blank(db, "DE_BRAID_LONG")
+    # override prices: SE=85, DE=170
+    for r in db.scalars(select(CatalogProduct)).all():
+        meta = json.loads(r.meta_json or "{}")
+        if meta.get("kit_key") == "DE_BRAID_LONG":
+            r.price = 170.0
+            r.name = "D.E. коса"
+    db.add(
+        CatalogProduct(
+            is_active=True,
+            category_name="Заказ",
+            subcategory_name="Заготовки поштучно",
+            name="S.E. коса",
+            price=85.0,
+            meta_json=json.dumps({"kit_key": "SE_BRAID_LONG"}),
+        )
+    )
+    kit = Kit(
+        sku="C1",
+        title="Kit",
+        pieces_total=74,
+        pieces_available=74,
+        stock_price_total=6460.0,
+        cost_total=1.0,
+        composition_json=json.dumps(
+            [
+                {"key": "SE_BRAID_LONG", "qty": 72},
+                {"key": "DE_BRAID_LONG", "qty": 2},
+            ],
+            ensure_ascii=False,
+        ),
+        created_at=datetime(2026, 9, 3, 12, 0, 0),
+        is_in_stock=True,
+    )
+    db.add(kit)
+    db.flush()
+    price_map, meta, _ = load_catalog_kit_maps(db)
+    assert price_map["SE_BRAID_LONG"] == 85.0
+    assert price_map["DE_BRAID_LONG"] == 170.0
+    units = keyed_stock_unit_prices_from_catalog_weights(
+        db,
+        kit,
+        stock_price_total=6460.0,
+        composition_qty={"SE_BRAID_LONG": 72, "DE_BRAID_LONG": 2},
+        price_map=price_map,
+        meta_by_key=meta,
+    )
+    assert units["SE_BRAID_LONG"] == pytest.approx(85.0)
+    assert units["DE_BRAID_LONG"] == pytest.approx(170.0)
+    assert keyed_stock_price_selected(
+        {"SE_BRAID_LONG": 10}, unit_stock_by_key=units
+    ) == pytest.approx(850.0)
+    # если цена склада другая — пропорция прайса сохраняется
+    units2 = keyed_stock_unit_prices_from_catalog_weights(
+        db,
+        kit,
+        stock_price_total=7000.0,
+        composition_qty={"SE_BRAID_LONG": 72, "DE_BRAID_LONG": 2},
+        price_map=price_map,
+        meta_by_key=meta,
+    )
+    assert units2["SE_BRAID_LONG"] / units2["DE_BRAID_LONG"] == pytest.approx(85.0 / 170.0)
+    assert keyed_stock_price_selected(
+        {"SE_BRAID_LONG": 10}, unit_stock_by_key=units2
+    ) == pytest.approx(7000.0 * 85.0 / 6460.0 * 10)
 
 
 def test_build_usage_breakdown_keyed_explicit_usage() -> None:

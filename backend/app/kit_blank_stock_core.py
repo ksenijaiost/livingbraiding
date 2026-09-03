@@ -774,6 +774,102 @@ def keyed_client_price_selected(
     return float(s)
 
 
+def catalog_unit_weight_for_kit_key(
+    db: Session,
+    kit: Kit,
+    kit_key: str,
+    *,
+    price_map: dict[str, float],
+    meta_by_key: dict[str, dict[str, Any]],
+) -> float | None:
+    """Вес ключа для разложения цены склада (= прайсовая цена единицы, с учётом б/у в v2)."""
+    from app.kit_composition_lines import (
+        composition_has_v2_lines,
+        lines_from_json,
+        unit_client_price_for_key,
+    )
+
+    kk = str(kit_key or "").strip()
+    if not kk or kit_key_excluded_from_client_price(meta_by_key.get(kk) or {}, kk):
+        return None
+    base_k, _cond = _split_stock_key_condition(kk)
+    lookup = base_k or kk
+    if composition_has_v2_lines(getattr(kit, "composition_json", None)):
+        lines = lines_from_json(str(kit.composition_json or ""))
+        unit = unit_client_price_for_key(
+            db, lines, lookup, price_map=price_map, meta_by_key=meta_by_key
+        )
+        if unit is not None:
+            return float(unit)
+    p = price_map.get(kk)
+    if p is None and lookup != kk:
+        p = price_map.get(lookup)
+    return float(p) if p is not None else None
+
+
+def keyed_stock_unit_prices_from_catalog_weights(
+    db: Session,
+    kit: Kit,
+    *,
+    stock_price_total: float,
+    composition_qty: dict[str, int],
+    price_map: dict[str, float],
+    meta_by_key: dict[str, dict[str, Any]],
+    extra_keys: list[str] | None = None,
+) -> dict[str, float]:
+    """Цена 1 шт. каждого вида из «цены на складе», веса — прайс (соотношение x:y).
+
+    stock_total = Σ composition_qty[k] * unit[k],
+    unit[k] = stock_total * catalog_weight[k] / Σ(composition_qty[i] * catalog_weight[i]).
+    """
+    gross = max(0.0, float(stock_price_total or 0.0))
+    if gross <= 0:
+        return {}
+    keys = set(str(k) for k, q in (composition_qty or {}).items() if int(q) > 0)
+    for k in extra_keys or []:
+        if str(k or "").strip():
+            keys.add(str(k).strip())
+    weights: dict[str, float] = {}
+    for k in keys:
+        w = catalog_unit_weight_for_kit_key(
+            db, kit, k, price_map=price_map, meta_by_key=meta_by_key
+        )
+        if w is not None and float(w) > 0:
+            weights[k] = float(w)
+    denom = 0.0
+    for k, q in (composition_qty or {}).items():
+        qi = int(q)
+        if qi <= 0:
+            continue
+        w = weights.get(str(k))
+        if w is None:
+            continue
+        denom += float(qi) * float(w)
+    if denom <= 0:
+        return {}
+    return {k: gross * float(w) / denom for k, w in weights.items()}
+
+
+def keyed_stock_price_selected(
+    breakdown: dict[str, int],
+    *,
+    unit_stock_by_key: dict[str, float],
+) -> float | None:
+    """Сумма по списанию из unit-цен склада. None — нет разложения, нужен fallback на прайс."""
+    if not unit_stock_by_key:
+        return None
+    s = 0.0
+    for k, n in breakdown.items():
+        ni = int(n)
+        if ni <= 0:
+            continue
+        u = unit_stock_by_key.get(str(k))
+        if u is None:
+            return None
+        s += float(u) * float(ni)
+    return float(s)
+
+
 def keyed_cost_selected(breakdown: dict[str, int], *, comp: dict[str, int], kit_cost_total: float) -> float:
     """Себестоимость выбранных заготовок: каждая штука = cost_total / sum(comp)."""
     if not breakdown:
