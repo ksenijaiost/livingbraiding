@@ -374,21 +374,27 @@ def max_take_by_key_for_client(
     for k, q in stock_map.items():
         extra = int(res_c.get(k, 0))
         out[k] = int(q) + extra
+    # ключи только в резерве (строки склада уже 0/удалены) — тоже доступны клиенту
+    for k, v in res_c.items():
+        if k == "__NULL__":
+            continue
+        if k not in out:
+            out[k] = int(v)
     # резерв без ключа — раскладываем по составу комплекта (как при снятии резерва)
     null_extra = int(res_c.get("__NULL__", 0))
     if null_extra > 0:
-        comp_use = _composition_for_stock_keys(kit, stock_map)
+        comp_use = _composition_for_stock_keys(kit, stock_map if stock_map else out)
         if comp_use:
             dist = distribute_scalar_to_keys(comp_use, null_extra)
-            for k in stock_map:
-                add = int(dist.get(k, 0))
-                if add:
-                    out[k] = int(out.get(k, 0)) + add
+            for k, add in dist.items():
+                if int(add) > 0:
+                    out[k] = int(out.get(k, 0)) + int(add)
         elif stock_map:
             dist = distribute_integer_by_weights({k: max(1, stock_map[k]) for k in stock_map}, null_extra)
-            for k in stock_map:
-                out[k] = int(out.get(k, 0)) + int(dist.get(k, 0))
-    return out
+            for k, add in dist.items():
+                if int(add) > 0:
+                    out[k] = int(out.get(k, 0)) + int(add)
+    return {k: int(v) for k, v in out.items() if int(v) > 0}
 
 
 def release_client_kit_reserves_into_free_pool(db: Session, *, kit: Kit, client_id: int | None) -> None:

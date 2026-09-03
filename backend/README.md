@@ -73,9 +73,20 @@ chmod +x scripts/start_uvicorn.sh   # один раз
 ./scripts/start_uvicorn.sh
 ```
 
-По умолчанию `--host 0.0.0.0 --port 80`. Иначе: `HOST=127.0.0.1 PORT=8010 ./scripts/start_uvicorn.sh`.
+По умолчанию `--host 0.0.0.0 --port 8080` (переменная `PORT`). На VPS без прокси часто нужно `PORT=80 ./scripts/start_uvicorn.sh`.
 
-В **systemd** вместо прямого `ExecStart=uvicorn …` укажите этот скрипт (или `ExecStartPre=` с `alembic upgrade head`, затем `ExecStart=` с uvicorn).
+#### Timeweb Cloud Apps (и аналоги)
+
+Платформа по умолчанию запускает только `uvicorn …` — миграции **не** выполнятся, пока вы **явно** не зададите команду запуска.
+
+1. **Run Command** (рабочий каталог `backend/`):
+   ```bash
+   bash scripts/start_uvicorn.sh
+   ```
+2. **Порт HTTP** в панели приложения: **8080** (или тот же, что в переменной `PORT`).
+3. Переменная окружения: `PORT=8080` (если в логах видите `Uvicorn running on …:80`, а в деплое — `No HTTP ports discovered`, прокси и приложение слушают **разные** порты → белый экран).
+4. **Health check** (если есть): путь `/health`, начальная задержка ≥ 30 с (миграции идут до uvicorn).
+5. Хост `*.twc1.net` из панели — правильный; белый экран при «успешном» контейнере почти всегда = порт/маршрутизация, не «неверный домен».
 
 #### DigitalOcean App Platform (и аналоги)
 

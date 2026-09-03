@@ -4,7 +4,12 @@ import json
 from types import SimpleNamespace
 
 from app.db.models import VisitMastersScope
-from app.ui_visit_display import build_service_human_display, build_visit_master_pay_rows, build_visit_masters_lines
+from app.ui_visit_display import (
+    build_service_human_display,
+    build_visit_cost_breakdown_rows,
+    build_visit_master_pay_rows,
+    build_visit_masters_lines,
+)
 
 
 def test_build_service_human_display_shows_custom_correction_amount() -> None:
@@ -262,3 +267,37 @@ def test_build_visit_masters_lines_visit_scope() -> None:
     lines = build_visit_masters_lines(visit)
     assert len(lines) == 1
     assert lines[0].masters_text == "Ira (100%, 800 ₽)"
+
+
+def test_build_visit_cost_breakdown_rows_parts() -> None:
+    visit = SimpleNamespace(
+        cost_total=7224.0,
+        materials_cost_total=1200.0,
+        addons_total=500.0,
+        mix_cost_amount=0.0,
+        amortization_amount=100.0,
+        kit_usages=[
+            SimpleNamespace(cost_amount=5424.0),
+        ],
+    )
+    rows = build_visit_cost_breakdown_rows(visit)
+    by_label = {r.label: r.amount for r in rows}
+    assert by_label == {
+        "Материалы": 1200.0,
+        "Комплект": 5424.0,
+        "Доп. расходы": 500.0,
+        "Амортизация": 100.0,
+    }
+
+
+def test_build_visit_cost_breakdown_rows_other_residual() -> None:
+    visit = SimpleNamespace(
+        cost_total=1100.0,
+        materials_cost_total=1000.0,
+        addons_total=0.0,
+        mix_cost_amount=0.0,
+        amortization_amount=0.0,
+        kit_usages=[],
+    )
+    rows = build_visit_cost_breakdown_rows(visit)
+    assert [(r.label, r.amount) for r in rows] == [("Материалы", 1000.0), ("Прочее", 100.0)]

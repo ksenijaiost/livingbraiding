@@ -20,7 +20,7 @@ from app.tech_error import CLIENT_DISCONNECT_STATUS, client_disconnect_response,
 
 ACCESS_LOGGER_NAME = "livingbraiding.access"
 APP_LOGGER_NAME = "livingbraiding.app"
-_SKIP_USER_DB_PREFIXES: tuple[str, ...] = ("/static/", "/media/")
+_SKIP_USER_DB_PREFIXES: tuple[str, ...] = ("/static/", "/media/", "/health", "/healthz")
 
 
 def _stream_handler_with_level() -> logging.StreamHandler:

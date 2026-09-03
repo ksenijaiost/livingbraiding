@@ -48,7 +48,6 @@ from app.forms_parse import parse_bool, parse_date_iso, parse_float
 from app.hourly_help import (
     HourlyHelpRow,
     apply_hourly_help_to_visit,
-    collect_visit_participant_master_ids,
     parse_hourly_help_from_form,
     validate_hourly_help_rows,
 )
@@ -845,7 +844,7 @@ def save_visit_with_services(
     )
     assert visit is not None
     recalc_visit_totals(visit)
-    _apply_visit_hourly_help(db, visit, inp, line_master_rows, editor_user_id=master_id)
+    _apply_visit_hourly_help(db, visit, inp)
     post_visit_accruals(db, visit, visit.created_by_user_id)
     db.commit()
     db.refresh(visit)
@@ -1302,42 +1301,13 @@ def parse_multi_service_visit_form(
     return MultiServiceVisitInput(header=header, lines=lines, hourly_help=hourly_help)
 
 
-def _participant_master_ids_from_input(
-    inp: MultiServiceVisitInput,
-    line_master_rows: dict[int, list[tuple[int, float]]],
-    *,
-    editor_user_id: int | None = None,
-) -> set[int]:
-    mix_ids: set[int] = set()
-    corr_ids: set[int] = set()
-    for line in inp.lines:
-        if line.mix_bonus_master_id:
-            mix_ids.add(int(line.mix_bonus_master_id))
-        elif line.mix_source == MixSource.SELF_MIXED and editor_user_id:
-            mix_ids.add(int(editor_user_id))
-        if line.own_corr_master_id:
-            corr_ids.add(int(line.own_corr_master_id))
-    return collect_visit_participant_master_ids(
-        masters_scope=inp.header.masters_scope,
-        visit_master_allocations=inp.header.visit_master_allocations,
-        line_master_rows=line_master_rows,
-        mix_bonus_master_ids=mix_ids,
-        correction_master_ids=corr_ids,
-    )
-
-
 def _apply_visit_hourly_help(
     db: Session,
     visit: Visit,
     inp: MultiServiceVisitInput,
-    line_master_rows: dict[int, list[tuple[int, float]]],
-    *,
-    editor_user_id: int | None = None,
 ) -> None:
-    participant_ids = _participant_master_ids_from_input(
-        inp, line_master_rows, editor_user_id=editor_user_id
-    )
-    validate_hourly_help_rows(db, inp.hourly_help, participant_ids)
+    # В визите не исключаем участников услуг: тот же мастер может быть и мастером, и помощником.
+    validate_hourly_help_rows(db, inp.hourly_help, set())
     apply_hourly_help_to_visit(visit, inp.hourly_help)
 
 
@@ -1694,7 +1664,7 @@ def update_visit_with_services(
     )
     assert visit is not None
     recalc_visit_totals(visit)
-    _apply_visit_hourly_help(db, visit, inp, line_master_rows, editor_user_id=editor_user_id)
+    _apply_visit_hourly_help(db, visit, inp)
 
     after = {
         "client_id": visit.client_id,

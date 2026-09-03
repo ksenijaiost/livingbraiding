@@ -17,5 +17,7 @@ cd "$(dirname "$0")/.."
 alembic upgrade head
 
 HOST="${HOST:-0.0.0.0}"
-PORT="${PORT:-80}"
+# Timeweb / App Platform обычно проксируют на PORT=8080; VPS без Docker часто слушает 80.
+PORT="${PORT:-8080}"
+echo "[livingbraiding] migrations OK; starting uvicorn on http://${HOST}:${PORT}"
 exec python -m uvicorn app.main:app --host "$HOST" --port "$PORT"

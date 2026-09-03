@@ -1542,31 +1542,6 @@
       if (sum !== 100) return null;
       return rows;
     }
-    function collectVisitParticipantMasterIds() {
-      const ids = new Set();
-      const scope = (document.querySelector('input[name="masters_scope"]:checked') || {}).value || 'VISIT';
-      if (scope === 'PER_SERVICE') {
-        visitLineIndicesForPreview().forEach(function (idx) {
-          const alloc = readLineAllocationsForPreview(idx);
-          if (alloc) alloc.forEach(function (r) { ids.add(r.mid); });
-        });
-      } else {
-        const alloc = readAllocationsForPreview();
-        if (alloc) alloc.forEach(function (r) { ids.add(r.mid); });
-      }
-      visitLineIndicesForPreview().forEach(function (idx) {
-        const mix = lineMixCostAndBonus(idx);
-        if (mix.bonusMasterId) ids.add(mix.bonusMasterId);
-        const corrName = idx === 0 ? 'own_corr_master_id' : ('line_' + idx + '_own_corr_master_id');
-        const corrSel = document.querySelector('select[name="' + corrName + '"]');
-        if (corrSel && corrSel.value) {
-          const mid = parseInt(corrSel.value, 10);
-          if (mid > 0) ids.add(mid);
-        }
-      });
-      return ids;
-    }
-
     function hourlyHelpTotal() {
       let total = 0;
       document.querySelectorAll('input[name^="hourly_help_amount_"]').forEach(function (inp) {
@@ -1577,7 +1552,8 @@
       return total;
     }
 
-    window.getHourlyHelpExcludedMasterIds = collectVisitParticipantMasterIds;
+    // В визите не исключаем участников: мастер может быть в одной услуге мастером, в помощи — помощником.
+    window.getHourlyHelpExcludedMasterIds = function () { return new Set(); };
     window.onHourlyHelpChange = function () { syncVisitPreview(); };
     function syncHourlyHelpRowStates() {
       if (typeof window.rebuildHourlyHelpOptions === 'function') {

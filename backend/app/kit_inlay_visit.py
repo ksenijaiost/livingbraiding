@@ -256,11 +256,10 @@ def _validate_stock_selection(
 
     if kit_inventory_is_keyed(db, int(kit_id)):
         stock_map = blank_stock_qty_map(db, int(kit_id))
-        if not stock_map or sum(stock_map.values()) <= 0:
-            raise ValueError("Нет заготовок на складе по этому комплекту (остатки по видам).")
         max_by_key = max_take_by_key_for_client(db, kit=kit, client_id=client_id, stock_map=stock_map)
-        if sum(max_by_key.values()) <= 0:
-            raise ValueError("Нет заготовок на складе по этому комплекту")
+        # Свободный остаток может быть 0, если всё ушло в резерв клиента — это нормально.
+        if sum(int(v) for v in max_by_key.values()) <= 0:
+            raise ValueError("Нет заготовок на складе по этому комплекту (остатки по видам).")
         try:
             build_usage_breakdown_keyed(
                 use_entire=use_entire,
@@ -1521,7 +1520,8 @@ def kit_suggest_dict_for_kit(db: Session, k: Kit, *, for_client_id: int | None) 
     max_by = max_take_by_key_for_client(db, kit=k, client_id=cid, stock_map=sm)
     cond_meta = _per_key_condition_meta(k)
     hints: list[dict[str, Any]] = []
-    for kk in sorted(sm.keys()):
+    keys = sorted(set(sm.keys()) | set(max_by.keys()))
+    for kk in keys:
         p = price_map.get(kk)
         cm = cond_meta.get(kk) or cond_meta.get("*") or {}
         hints.append(

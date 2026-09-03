@@ -33,6 +33,7 @@ from app.forms_parse import parse_bool, parse_int
 from app.form_validation_log import log_user_validation_error
 from app.ui_visit_display import (
     build_service_human_display,
+    build_visit_cost_breakdown_rows,
     build_visit_master_pay_rows,
     build_visit_masters_lines,
     kit_usages_empty_explanation,
@@ -217,6 +218,7 @@ def admin_visit_detail(
 
     sorted_services = sorted(visit.services or [], key=lambda s: (int(s.sort_order or 0), int(s.id or 0)))
     active_sorted_services = [vs for vs in sorted_services if not vs.is_cancelled]
+    cancelled_sorted_services = [vs for vs in sorted_services if vs.is_cancelled]
     service_displays = {vs.id: build_service_human_display(vs) for vs in sorted_services}
     active_services_amount_total = sum(float(vs.amount_from_client or 0) for vs in active_sorted_services)
 
@@ -238,6 +240,7 @@ def admin_visit_detail(
         visit_closed_period and user_may_edit_closed_payroll_period(current_user)
     )
     visit_master_pay_rows = build_visit_master_pay_rows(visit, db)
+    visit_cost_breakdown_rows = build_visit_cost_breakdown_rows(visit)
     visit_masters_lines = build_visit_masters_lines(visit, db)
     from app.hourly_help import build_hourly_help_display_rows, hourly_help_rows_from_visit
 
@@ -253,6 +256,7 @@ def admin_visit_detail(
             service_displays=service_displays,
             sorted_services=sorted_services,
             active_sorted_services=active_sorted_services,
+            cancelled_sorted_services=cancelled_sorted_services,
             active_services_amount_total=active_services_amount_total,
             mix_bonus_master_label=mix_bonus_master_label,
             mix_source_ru=ru_mix_source(visit.mix_source),
@@ -270,6 +274,7 @@ def admin_visit_detail(
             visit_super_priv=visit_super_priv,
             visit_techspec_closed_override=visit_techspec_closed_override,
             visit_master_pay_rows=visit_master_pay_rows,
+            visit_cost_breakdown_rows=visit_cost_breakdown_rows,
             visit_masters_lines=visit_masters_lines,
             hourly_help_rows=hourly_help_rows,
         ),
