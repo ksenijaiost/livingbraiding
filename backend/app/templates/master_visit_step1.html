@@ -1691,8 +1691,10 @@
           }
         }
         const piecesUsed = Object.values(take).reduce((a, b) => a + b, 0);
-        if (piecesUsed <= 0) return { piecesUsed: 0, cost: 0, warn: '', kitParts: '' };
+        if (piecesUsed <= 0) return { piecesUsed: 0, cost: 0, warn: '', kitParts: '', catalogCost: 0 };
         let selCatalog = 0;
+        let selStock = 0;
+        let stockOk = true;
         let warn = '';
         const parts = [];
         for (const row of kit.per_key) {
@@ -1701,21 +1703,30 @@
           const p = row.price_per_piece;
           if (p == null || isNaN(parseFloat(p))) warn = 'Нет цены в каталоге по одному из ключей — проверьте прайс.';
           else selCatalog += q * parseFloat(p);
+          const sp = row.stock_price_per_piece;
+          if (sp == null || isNaN(parseFloat(sp))) stockOk = false;
+          else selStock += q * parseFloat(sp);
           const lbl = (row.label || row.key || '').trim();
           parts.push(lbl + ' ×' + q);
         }
+        const baseGross = stockOk && selStock > 0 ? selStock : selCatalog;
         const dPct = Math.max(0, Math.min(100, parseInt(String(kit.discount_percent ?? 0), 10) || 0));
-        const rawDisc = selCatalog * dPct / 100.0;
+        const rawDisc = baseGross * dPct / 100.0;
         const csum = Math.max(1, parseInt(String(kit.composition_sum || 0), 10) || 1);
         const ct = parseFloat(String(kit.cost_total || 0)) || 0;
         const per = ct / csum;
         const ntot = piecesUsed;
         const costFloor = per * ntot;
-        const maxM = Math.max(0, selCatalog - costFloor);
-        const disc = Math.min(rawDisc, maxM, selCatalog);
-        const net = Math.max(0, selCatalog - disc);
+        const maxM = Math.max(0, baseGross - costFloor);
+        const disc = Math.min(rawDisc, maxM, baseGross);
+        const net = Math.max(0, baseGross - disc);
+        const catalogNet = (function () {
+          const rd = selCatalog * dPct / 100.0;
+          const mm = Math.max(0, selCatalog - costFloor);
+          return Math.max(0, selCatalog - Math.min(rd, mm, selCatalog));
+        })();
         const kitParts = parts.length ? ('по выбранным заготовкам: ' + parts.join(', ')) : '';
-        return { piecesUsed, cost: net, warn, kitParts };
+        return { piecesUsed, cost: net, catalogCost: catalogNet, warn, kitParts };
       }
       const avail = kitEffectiveAvailablePieces(kit);
       const total = parseInt(String(kit.pieces_total || 0), 10) || 0;
@@ -1723,9 +1734,10 @@
       const dPct = Math.max(0, Math.min(100, parseInt(String(kit.discount_percent ?? 0), 10) || 0));
       const price = gross * (100 - dPct) / 100.0;
       const piecesUsed = useEntire ? avail : blanks;
-      if (piecesUsed <= 0) return { piecesUsed: 0, cost: 0, warn: '', kitParts: '' };
-      if (total <= 0 || price <= 0) return { piecesUsed, cost: 0, warn: 'Нет цены/кол-ва заготовок у комплекта для расчёта себестоимости.', kitParts: '' };
-      return { piecesUsed, cost: price * (piecesUsed / total), warn: '', kitParts: '' };
+      if (piecesUsed <= 0) return { piecesUsed: 0, cost: 0, catalogCost: 0, warn: '', kitParts: '' };
+      if (total <= 0 || price <= 0) return { piecesUsed, cost: 0, catalogCost: 0, warn: 'Нет цены/кол-ва заготовок у комплекта для расчёта себестоимости.', kitParts: '' };
+      const scalarCost = price * (piecesUsed / total);
+      return { piecesUsed, cost: scalarCost, catalogCost: scalarCost, warn: '', kitParts: '' };
     }
 
     function visitLineRow(idx) {
@@ -1935,28 +1947,14 @@
         if (!isNaN(n) && n >= 0) return n;
         return Math.max(0, calcCost || 0);
       }
-      function warehousePriceForUsage(kit, piecesUsed) {
-        if (!kit || piecesUsed <= 0) return 0;
-        const gross = parseFloat(String(kit.stock_price_total || 0)) || 0;
-        if (gross <= 0) return 0;
-        const dPct = Math.max(0, Math.min(100, parseInt(String(kit.discount_percent ?? 0), 10) || 0));
-        const price = gross * (100 - dPct) / 100.0;
-        const total = Math.max(
-          1,
-          parseInt(String(kit.pieces_total || 0), 10) || 0,
-          parseInt(String(kit.composition_sum || 0), 10) || 0,
-          kitEffectiveAvailablePieces(kit) || 0,
-        );
-        return price * (piecesUsed / total);
-      }
-      function refreshCalcPriceUi(kitRow, calcCost, piecesUsed, kit) {
+      function refreshCalcPriceUi(kitRow, calcCost, catalogCost) {
         const el = kitRow.querySelector('.lb-kit-calc-price');
         if (el) el.textContent = calcCost > 0 ? money2(calcCost) : '—';
         const note = kitRow.querySelector('.lb-kit-stock-price-note');
         if (!note) return;
-        const wh = warehousePriceForUsage(kit, piecesUsed || 0);
-        if (wh > 0 && calcCost > 0 && Math.abs(wh - calcCost) >= 0.5) {
-          note.textContent = '(Цена на складе: ' + money2(wh) + ' ₽)';
+        const cat = Math.max(0, parseFloat(String(catalogCost || 0)) || 0);
+        if (cat > 0 && calcCost > 0 && Math.abs(cat - calcCost) >= 0.5) {
+          note.textContent = '(по прайсу: ' + money2(cat) + ' ₽)';
         } else {
           note.textContent = '';
         }
@@ -1984,7 +1982,7 @@
             Object.keys(bd).forEach(function (k) { bu += parseInt(String(bd[k] || 0), 10) || 0; });
           }
           const r = kitUsageCost(kit, ue, bu, bd);
-          refreshCalcPriceUi(kitRow, r.cost, r.piecesUsed, kit);
+          refreshCalcPriceUi(kitRow, r.cost, r.catalogCost);
           if (paidSeparately) {
             if (r.warn) out.warn = r.warn;
             if (r.kitParts) out.stockParts = out.stockParts ? (out.stockParts + ' · ' + r.kitParts) : r.kitParts;
@@ -2021,7 +2019,7 @@
             Object.keys(bd).forEach(function (k) { bu += parseInt(String(bd[k] || 0), 10) || 0; });
           }
           const r2 = kitUsageCost(kit, ue, bu, bd);
-          refreshCalcPriceUi(kitRow, r2.cost, r2.piecesUsed, kit);
+          refreshCalcPriceUi(kitRow, r2.cost, r2.catalogCost);
           const amt2 = kitRowClientAmt(kitRow, r2.cost);
           out.kitCost += amt2;
           out.kitClient += amt2;

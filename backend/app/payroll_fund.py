@@ -14,8 +14,11 @@ from app.time_utils import utcnow_naive
 HOURLY_HELP_LEDGER_COMMENT = "Почасовая помощь"
 from app.kit_blank_stock_core import (
     apply_discount_capped,
+    inventory_qty_by_key_from_kit,
     keyed_client_price_selected,
     keyed_cost_selected,
+    keyed_stock_price_selected,
+    keyed_stock_unit_prices_from_catalog_weights,
     kit_inventory_is_keyed,
     load_catalog_kit_maps,
     parse_composition_totals,
@@ -833,9 +836,23 @@ def _product_sale_kit_line_price_deduction(
     if kit_inventory_is_keyed(db, int(kit.id)) and breakdown:
         price_map, meta_by_key, _labels = load_catalog_kit_maps(db)
         comp = parse_composition_totals(kit)
-        selected_price = keyed_client_price_selected(
-            breakdown, price_map=price_map, meta_by_key=meta_by_key
+        inv_comp = inventory_qty_by_key_from_kit(kit) or comp
+        unit_stock = keyed_stock_unit_prices_from_catalog_weights(
+            db,
+            kit,
+            stock_price_total=float(raw_price),
+            composition_qty=inv_comp if inv_comp else comp,
+            price_map=price_map,
+            meta_by_key=meta_by_key,
+            extra_keys=list(breakdown.keys()),
         )
+        stock_price = keyed_stock_price_selected(breakdown, unit_stock_by_key=unit_stock)
+        if stock_price is None:
+            selected_price = keyed_client_price_selected(
+                breakdown, price_map=price_map, meta_by_key=meta_by_key
+            )
+        else:
+            selected_price = float(stock_price)
         selected_cost = keyed_cost_selected(
             breakdown, comp=comp, kit_cost_total=max(0.0, float(kit.cost_total or 0.0))
         )
