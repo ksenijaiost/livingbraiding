@@ -14,6 +14,7 @@ from app.hourly_help import (
     collect_visit_participant_master_ids,
     hourly_help_total,
     parse_hourly_help_from_form,
+    validate_hourly_help_rows,
 )
 
 
@@ -121,6 +122,20 @@ def test_collect_visit_participant_master_ids_visit_scope():
         correction_master_ids={4},
     )
     assert ids == {1, 2, 3, 4}
+
+
+def test_validate_hourly_help_rows_visit_allows_participant(monkeypatch):
+    """В визите participant_master_ids пустой — мастер услуги может быть и помощником."""
+    monkeypatch.setattr("app.hourly_help._validate_master", lambda db, mid: None)
+    rows = [HourlyHelpRow(master_id=10, hours=1, minutes=0, amount=100.0)]
+    validate_hourly_help_rows(None, rows, set())
+
+
+def test_validate_hourly_help_rows_work_rejects_participant(monkeypatch):
+    monkeypatch.setattr("app.hourly_help._validate_master", lambda db, mid: None)
+    rows = [HourlyHelpRow(master_id=10, hours=1, minutes=0, amount=100.0)]
+    with pytest.raises(ValueError, match="не может быть помощником"):
+        validate_hourly_help_rows(None, rows, {10})
 
 
 def test_hourly_help_total():

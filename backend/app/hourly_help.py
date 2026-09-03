@@ -159,6 +159,7 @@ def validate_hourly_help_rows(
     rows: list[HourlyHelpRow],
     participant_master_ids: set[int],
 ) -> None:
+    """Validate help rows. For works pass participant ids to exclude; for visits pass empty set."""
     seen: set[int] = set()
     for row in rows:
         if row.master_id in seen:
