@@ -510,6 +510,43 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
 
 
 @dataclass(frozen=True)
+class VisitCostBreakdownRow:
+    """Подстрока себестоимости визита (материалы / комплект / доп. и т.д.)."""
+
+    label: str
+    amount: float
+
+
+def build_visit_cost_breakdown_rows(visit: Visit) -> list[VisitCostBreakdownRow]:
+    """Разбивка visit.cost_total на составляющие для карточки визита."""
+    materials = money_q2(float(getattr(visit, "materials_cost_total", 0) or 0))
+    addons = money_q2(float(getattr(visit, "addons_total", 0) or 0))
+    mix = money_q2(float(getattr(visit, "mix_cost_amount", 0) or 0))
+    amort = money_q2(float(getattr(visit, "amortization_amount", 0) or 0))
+    kit = money_q2(
+        sum(float(getattr(u, "cost_amount", 0) or 0) for u in (getattr(visit, "kit_usages", None) or []))
+    )
+    cost_total = money_q2(float(getattr(visit, "cost_total", 0) or 0))
+    known = money_q2(materials + kit + addons + mix + amort)
+    other = money_q2(cost_total - known)
+
+    rows: list[VisitCostBreakdownRow] = []
+    if materials > 0:
+        rows.append(VisitCostBreakdownRow(label="Материалы", amount=materials))
+    if kit > 0:
+        rows.append(VisitCostBreakdownRow(label="Комплект", amount=kit))
+    if addons > 0:
+        rows.append(VisitCostBreakdownRow(label="Доп. расходы", amount=addons))
+    if mix > 0:
+        rows.append(VisitCostBreakdownRow(label="Смешка", amount=mix))
+    if amort > 0:
+        rows.append(VisitCostBreakdownRow(label="Амортизация", amount=amort))
+    if other > 0.005:
+        rows.append(VisitCostBreakdownRow(label="Прочее", amount=other))
+    return rows
+
+
+@dataclass(frozen=True)
 class VisitServiceMastersLine:
     service_number: int
     masters_text: str

@@ -88,18 +88,17 @@
     {% endif %}
 
     <h3>Услуги визита</h3>
-    {% if visit.services %}
-      {% for vs in visit.services|sort(attribute='sort_order') %}
+    {% if active_sorted_services %}
+      {% for vs in active_sorted_services %}
         {% set disp = service_displays.get(vs.id) %}
-        <div class="card" style="margin-bottom:10px;{% if vs.is_cancelled %}opacity:0.65;{% endif %}">
+        <div class="card" style="margin-bottom:10px;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
             <div>
               <strong>{{ vs.service_name }}</strong>
-              {% if vs.is_cancelled %}<span class="muted"> (отменена)</span>{% endif %}
               <p class="muted" style="margin:4px 0 0;font-size:13px;">{{ vs.category_name }} → {{ vs.subcategory_name }}</p>
               <p style="margin:6px 0 0;">С клиента: <strong>{{ vs.amount_from_client|round(0) }} ₽</strong> <span class="muted">({{ client_payment_kind_label(vs.client_payment_kind) }})</span></p>
             </div>
-            {% if visit_super_priv and not visit.is_cancelled and not vs.is_cancelled and (not visit_closed_period or visit_techspec_closed_override) %}
+            {% if visit_super_priv and not visit.is_cancelled and (not visit_closed_period or visit_techspec_closed_override) %}
               <form method="post" action="/visits/{{ visit.id }}/services/{{ vs.id }}/cancel" style="margin:0;" class="{% if visit_techspec_closed_override %}js-closed-period-form{% endif %}">
                 {% if visit_techspec_closed_override %}
                   <input type="hidden" name="closed_period_ack" value="" />
@@ -173,7 +172,15 @@
     <table>
       <tr><td>Выручка (с клиента)</td><td>{{ "%.0f"|format(visit.amount_from_client) }} ₽</td></tr>
       <tr><td>Скидка от прайса (история)</td><td>{% if visit.client_discount_percent and visit.client_discount_percent > 0 %}{{ visit.client_discount_percent }}%{% else %}—{% endif %}</td></tr>
-      <tr><td>Себестоимость (материалы + комплект)</td><td>{{ "%.0f"|format(visit.cost_total) }} ₽</td></tr>
+      <tr><td>Себестоимость (суммарно)</td><td>{{ "%.0f"|format(visit.cost_total) }} ₽</td></tr>
+      {% if visit_cost_breakdown_rows %}
+        {% for row in visit_cost_breakdown_rows %}
+          <tr>
+            <td style="padding-left: 1.25rem; color: #6b7280;">{{ row.label }}</td>
+            <td>{{ "%.0f"|format(row.amount) }} ₽</td>
+          </tr>
+        {% endfor %}
+      {% endif %}
       <tr><td>Прибыль до распределения</td><td>{{ "%.0f"|format(visit.profit_before_split) }} ₽</td></tr>
       <tr><td>Амортизация</td><td>{{ "%.0f"|format(visit.amortization_amount or 0) }} ₽</td></tr>
       <tr><td>Доля салона</td><td>{{ visit.salon_cut_pct_at_time }}</td></tr>
@@ -234,6 +241,24 @@
       <div class="card" style="border-color:#fde68a; background:#fffbeb; margin-top: 12px;">
         {{ visit_edit_block_msg }}
       </div>
+    {% endif %}
+
+    {% if cancelled_sorted_services %}
+      <h3 style="margin-top: 18px;">Отменённые услуги</h3>
+      {% for vs in cancelled_sorted_services %}
+        {% set disp = service_displays.get(vs.id) %}
+        <div class="card" style="margin-bottom:10px; opacity:0.7;">
+          <div>
+            <strong>{{ vs.service_name }}</strong>
+            <span class="muted"> (отменена)</span>
+            <p class="muted" style="margin:4px 0 0;font-size:13px;">{{ vs.category_name }} → {{ vs.subcategory_name }}</p>
+            <p style="margin:6px 0 0;" class="muted">С клиента: {{ vs.amount_from_client|round(0) }} ₽ ({{ client_payment_kind_label(vs.client_payment_kind) }})</p>
+            {% if disp %}
+              <p style="margin:8px 0 0;" class="muted">{{ disp.catalog_line }}</p>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
     {% endif %}
 
     {% if current_user and visit_super_priv %}
