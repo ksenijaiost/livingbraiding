@@ -113,6 +113,12 @@ from app.routes.auth_routes import router as auth_routes_router  # noqa: E402
 app.include_router(auth_routes_router)
 
 
+@app.get("/health")
+def health() -> dict[str, bool]:
+    """Проверка живости для балансировщика / App Platform (без БД и авторизации)."""
+    return {"ok": True}
+
+
 @app.on_event("startup")
 def _startup():
     """Access-лог (время, user) + optional dev seed + audit retention."""

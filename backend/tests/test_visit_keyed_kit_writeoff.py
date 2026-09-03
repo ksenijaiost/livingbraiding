@@ -29,8 +29,8 @@ from app.db.models import (
     VisitMastersScope,
     VisitService,
 )
-from app.kit_blank_stock_core import blank_stock_qty_map
-from app.kit_inlay_visit import StockKitLineInput
+from app.kit_blank_stock_core import blank_stock_qty_map, max_take_by_key_for_client
+from app.kit_inlay_visit import StockKitLineInput, kit_suggest_dict_for_kit
 from app.visit_multi_service import (
     MultiServiceVisitInput,
     VisitHeaderInput,
@@ -233,3 +233,107 @@ def test_empty_keyed_stock_still_blocked(memory_db) -> None:
             master.id,
             MultiServiceVisitInput(header=_header(client_id, master.id), lines=[line]),
         )
+
+
+def test_keyed_writeoff_uses_client_reserve_when_free_stock_zero(memory_db) -> None:
+    """1.76: весь остаток в резерве клиента — в визите всё равно можно списать."""
+    from app.db.models import KitReserve
+
+    db = memory_db
+    master, svc_id, client_id, kit = _seed(db, blank_qty=0)
+    db.add(
+        KitReserve(
+            kit_id=kit.id,
+            kit_key="DE_BRAID_LONG",
+            pieces_reserved=91,
+            reserved_by_user_id=master.id,
+            reserved_for_client_id=client_id,
+        )
+    )
+    db.commit()
+    db.refresh(kit)
+
+    sm = blank_stock_qty_map(db, int(kit.id))
+    assert sum(sm.values()) == 0
+    max_by = max_take_by_key_for_client(db, kit=kit, client_id=client_id, stock_map=sm)
+    assert max_by == {"DE_BRAID_LONG": 91}
+
+    preview = kit_suggest_dict_for_kit(db, kit, for_client_id=client_id)
+    assert preview["reserved_for_selected_client"] == 91
+    by_key = {r["key"]: r for r in preview["per_key"]}
+    assert by_key["DE_BRAID_LONG"]["qty_free"] == 0
+    assert by_key["DE_BRAID_LONG"]["qty_max_for_client"] == 91
+
+    line = _stock_line(int(kit.id), use_entire=True)
+    line.service_id = svc_id
+    save_visit_with_services(
+        db,
+        master.id,
+        MultiServiceVisitInput(header=_header(client_id, master.id), lines=[line]),
+    )
+    db.commit()
+    db.refresh(kit)
+    assert int(kit.pieces_available or 0) == 0
+    assert blank_stock_qty_map(db, int(kit.id)).get("DE_BRAID_LONG") == 0
+    reserves = list(db.scalars(select(KitReserve).where(KitReserve.kit_id == kit.id)).all())
+    assert reserves == []
+
+
+def test_keyed_writeoff_uses_breakdown_json_reserve(memory_db) -> None:
+    """1.76: резерв с reserve_breakdown_json при нулевом свободном остатке."""
+    from app.db.models import KitReserve
+
+    db = memory_db
+    master, svc_id, client_id, kit = _seed(db, blank_qty=0)
+    db.add(
+        CatalogProduct(
+            is_active=True,
+            category_name="Заказ",
+            subcategory_name="Заготовки поштучно",
+            name="S.E. коса",
+            price=100.0,
+            meta_json=json.dumps({"kit_key": "SE_BRAID_LONG"}),
+        )
+    )
+    kit.composition_json = json.dumps(
+        [
+            {"key": "DE_BRAID_LONG", "qty": 30},
+            {"key": "SE_BRAID_LONG", "qty": 61},
+        ],
+        ensure_ascii=False,
+    )
+    db.add(KitBlankStock(kit_id=kit.id, kit_key="SE_BRAID_LONG", qty=0))
+    db.add(
+        KitReserve(
+            kit_id=kit.id,
+            kit_key=None,
+            pieces_reserved=91,
+            reserve_breakdown_json=json.dumps({"DE_BRAID_LONG": 30, "SE_BRAID_LONG": 61}),
+            reserved_by_user_id=master.id,
+            reserved_for_client_id=client_id,
+        )
+    )
+    db.commit()
+    db.refresh(kit)
+
+    sm = blank_stock_qty_map(db, int(kit.id))
+    max_by = max_take_by_key_for_client(db, kit=kit, client_id=client_id, stock_map=sm)
+    assert max_by == {"DE_BRAID_LONG": 30, "SE_BRAID_LONG": 61}
+
+    line = _stock_line(
+        int(kit.id),
+        use_entire=False,
+        blanks_used=91,
+        usage_by_key={"DE_BRAID_LONG": 30, "SE_BRAID_LONG": 61},
+    )
+    line.service_id = svc_id
+    save_visit_with_services(
+        db,
+        master.id,
+        MultiServiceVisitInput(header=_header(client_id, master.id), lines=[line]),
+    )
+    db.commit()
+    reserves = list(db.scalars(select(KitReserve).where(KitReserve.kit_id == kit.id)).all())
+    assert reserves == []
+    assert blank_stock_qty_map(db, int(kit.id)).get("DE_BRAID_LONG") == 0
+    assert blank_stock_qty_map(db, int(kit.id)).get("SE_BRAID_LONG") == 0
