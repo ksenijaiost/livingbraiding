@@ -112,6 +112,7 @@ from app.kit_blank_stock_core import (
     apply_discount_capped,
     blank_stock_qty_map,
     build_usage_breakdown_keyed,
+    catalog_unit_weight_for_kit_key,
     inventory_qty_by_key_from_kit,
     keyed_client_price_selected,
     keyed_cost_selected,
@@ -1464,32 +1465,31 @@ def kit_reserved_for_visit_label(kit: Kit) -> str | None:
 
 
 def _per_key_condition_meta(kit: Kit) -> dict[str, dict[str, Any]]:
-    """Состояние и % б/у по ключу заготовки (для таблицы списания в визите/брони)."""
-    from collections import defaultdict
+    """Состояние и % б/у по ключу склада (NEW и …__USED__ отдельно) для таблицы списания."""
+    from app.kit_blank_stock_core import _stock_key_for_condition
+    from app.kit_composition_lines import BlankCondition, filter_nonempty, lines_from_json
 
-    from app.kit_composition_lines import BlankCondition, lines_from_json
-
-    by_key: dict[str, list[Any]] = defaultdict(list)
-    for ln in lines_from_json(kit.composition_json):
-        if ln.key:
-            by_key[str(ln.key)].append(ln)
     fallback = str(getattr(kit, "blanks_condition", None) or "NEW").upper()
     out: dict[str, dict[str, Any]] = {}
-    for kk, lns in by_key.items():
-        conds = {ln.condition for ln in lns}
-        if BlankCondition.USED in conds and BlankCondition.NEW in conds:
-            cond = "MIXED"
-        elif BlankCondition.USED in conds:
-            cond = "USED"
-        else:
-            cond = "NEW"
-        pct: int | None = None
-        used_lns = [ln for ln in lns if ln.condition == BlankCondition.USED]
-        if used_lns:
-            pcts = [int(ln.used_price_pct or 100) for ln in used_lns]
-            if len(set(pcts)) == 1:
-                pct = pcts[0]
-        out[kk] = {"condition": cond, "used_price_pct": pct}
+    for ln in filter_nonempty(lines_from_json(kit.composition_json)):
+        if not ln.key:
+            continue
+        stock_key = _stock_key_for_condition(ln.key, getattr(ln.condition, "value", ln.condition))
+        if not stock_key:
+            continue
+        cond = "USED" if ln.condition == BlankCondition.USED else "NEW"
+        pct = int(ln.used_price_pct or 100) if ln.condition == BlankCondition.USED else None
+        prev = out.get(stock_key)
+        if prev is None:
+            out[stock_key] = {"condition": cond, "used_price_pct": pct}
+            continue
+        # несколько строк одного stock_key — усреднять % б/у только если все USED
+        if prev.get("condition") != cond:
+            out[stock_key] = {"condition": "MIXED", "used_price_pct": None}
+        elif cond == "USED" and pct is not None:
+            old = prev.get("used_price_pct")
+            if old is not None and int(old) != int(pct):
+                out[stock_key] = {"condition": "USED", "used_price_pct": None}
     if not out and fallback in ("NEW", "USED", "MIXED"):
         out["*"] = {"condition": fallback, "used_price_pct": None}
     return out
@@ -1548,17 +1548,24 @@ def kit_suggest_dict_for_kit(db: Session, k: Kit, *, for_client_id: int | None) 
     hints: list[dict[str, Any]] = []
     keys = sorted(set(sm.keys()) | set(max_by.keys()))
     for kk in keys:
-        p = price_map.get(kk)
         cm = cond_meta.get(kk) or cond_meta.get("*") or {}
         stock_unit = unit_stock.get(kk)
+        catalog_unit = catalog_unit_weight_for_kit_key(
+            db, k, kk, price_map=price_map, meta_by_key=meta_by_key
+        )
+        base_k = kk
+        if kk.endswith("__USED__"):
+            base_k = kk[: -len("__USED__")]
+        elif kk.endswith("_USED"):
+            base_k = kk[: -len("_USED")]
         hints.append(
             {
                 "key": kk,
                 "qty_free": int(sm.get(kk, 0)),
                 "qty_max_for_client": int(max_by.get(kk, 0)),
-                "price_per_piece": float(p) if p is not None else None,
+                "price_per_piece": float(catalog_unit) if catalog_unit is not None else None,
                 "stock_price_per_piece": float(stock_unit) if stock_unit is not None else None,
-                "label": label_by_key.get(kk, kk),
+                "label": label_by_key.get(kk) or label_by_key.get(base_k, kk),
                 "composition_qty": int((inv_comp or comp).get(kk, 0)),
                 "condition": str(cm.get("condition") or "NEW"),
                 "used_price_pct": cm.get("used_price_pct"),

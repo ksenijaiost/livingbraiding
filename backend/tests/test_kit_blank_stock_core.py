@@ -545,6 +545,82 @@ def test_blank_stock_edit_rows_split_new_and_used_same_kind(memory_db: Session) 
     assert by_raw_key == {"SE_CURL": 28, "SE_CURL__USED__": 52}
 
 
+def test_stock_price_alloc_respects_used_pct_per_stock_key(memory_db: Session) -> None:
+    """NEW и б/у одного вида — разные веса; 60% б/у не усредняется с новыми."""
+    from app.kit_blank_stock_core import (
+        catalog_unit_weight_for_kit_key,
+        keyed_stock_price_selected,
+        keyed_stock_unit_prices_from_catalog_weights,
+    )
+    from app.kit_inlay_visit import kit_suggest_dict_for_kit
+
+    db = memory_db
+    db.add(
+        CatalogProduct(
+            is_active=True,
+            category_name="Заказ",
+            subcategory_name="Заготовки поштучно",
+            name="SE Curl",
+            price=100.0,
+            meta_json=json.dumps({"kit_key": "SE_CURL"}),
+        )
+    )
+    # 28*100 + 52*60 = 5920
+    kit = Kit(
+        sku="BU-MIX",
+        title="Смесь",
+        pieces_total=80,
+        pieces_available=80,
+        stock_price_total=5920.0,
+        cost_total=1.0,
+        composition_json=json.dumps(
+            [
+                {"key": "SE_CURL", "condition": "NEW", "qty": 28},
+                {"key": "SE_CURL", "condition": "USED", "used_price_pct": 60, "qty": 52},
+            ],
+            ensure_ascii=False,
+        ),
+        created_at=datetime(2026, 9, 4, 12, 0, 0),
+        is_in_stock=True,
+    )
+    db.add(kit)
+    db.flush()
+    db.add(KitBlankStock(kit_id=kit.id, kit_key="SE_CURL", qty=28))
+    db.add(KitBlankStock(kit_id=kit.id, kit_key="SE_CURL__USED__", qty=52))
+    db.commit()
+    db.refresh(kit)
+
+    price_map, meta, _ = load_catalog_kit_maps(db)
+    assert catalog_unit_weight_for_kit_key(
+        db, kit, "SE_CURL", price_map=price_map, meta_by_key=meta
+    ) == pytest.approx(100.0)
+    assert catalog_unit_weight_for_kit_key(
+        db, kit, "SE_CURL__USED__", price_map=price_map, meta_by_key=meta
+    ) == pytest.approx(60.0)
+
+    inv = {"SE_CURL": 28, "SE_CURL__USED__": 52}
+    units = keyed_stock_unit_prices_from_catalog_weights(
+        db,
+        kit,
+        stock_price_total=5920.0,
+        composition_qty=inv,
+        price_map=price_map,
+        meta_by_key=meta,
+    )
+    assert units["SE_CURL"] == pytest.approx(100.0)
+    assert units["SE_CURL__USED__"] == pytest.approx(60.0)
+    assert keyed_stock_price_selected(
+        {"SE_CURL__USED__": 10}, unit_stock_by_key=units
+    ) == pytest.approx(600.0)
+
+    preview = kit_suggest_dict_for_kit(db, kit, for_client_id=None)
+    by_key = {r["key"]: r for r in preview["per_key"]}
+    assert by_key["SE_CURL"]["price_per_piece"] == pytest.approx(100.0)
+    assert by_key["SE_CURL__USED__"]["price_per_piece"] == pytest.approx(60.0)
+    assert by_key["SE_CURL__USED__"]["condition"] == "USED"
+    assert by_key["SE_CURL__USED__"]["used_price_pct"] == 60
+
+
 def test_max_take_by_key_null_reserve_uses_composition(memory_db: Session) -> None:
     db = memory_db
     _catalog_blank(db, "DE_BRAID_LONG")
