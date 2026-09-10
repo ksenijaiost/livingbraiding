@@ -61,3 +61,63 @@ def test_ctx_autoloads_page_help_doc() -> None:
     )
     assert out["page_help_doc"] is not None
     assert out["page_help_doc"].title == "Главная"
+
+
+def test_mvp_page_help_files_load_for_roles() -> None:
+    """Ключевые экраны шага 2.6: файл есть и роли из front-matter совпадают."""
+    cases: list[tuple[str, UserRole]] = [
+        ("clients_list", UserRole.MASTER),
+        ("visits_list", UserRole.ADMIN),
+        ("master_visit_form", UserRole.MASTER),
+        ("kits_list", UserRole.ADMIN_SENIOR),
+        ("product_sales_list", UserRole.MASTER),
+        ("bookings_list", UserRole.ADMIN),
+        ("studio_expenses", UserRole.ADMIN_SENIOR),
+        ("payroll_periods", UserRole.ADMIN_SUPER),
+        ("payroll_fund", UserRole.ADMIN_SUPER),
+        ("operational_report", UserRole.ADMIN_SUPER),
+        ("admin_settings", UserRole.ADMIN_SUPER),
+    ]
+    for page_id, role in cases:
+        doc = get_page_help(page_id, role)
+        assert doc is not None, f"{page_id} for {role}"
+        assert doc.body_html
+    # Обычный админ не видит расходы старшего
+    assert get_page_help("studio_expenses", UserRole.ADMIN) is None
+    assert get_page_help("payroll_periods", UserRole.MASTER) is None
+
+
+def test_help_page_id_block_does_not_leak_into_body() -> None:
+    """{% block help_page_id %} не должен печатать id видимым текстом в начале страницы."""
+    from pathlib import Path
+
+    from starlette.requests import Request
+
+    from app.webui import templates
+
+    probe = Path(__file__).resolve().parents[1] / "app" / "templates" / "_help_block_probe.html"
+    probe.write_text(
+        "{% extends \"base.html\" %}\n"
+        "{% block help_page_id %}clients_list{% endblock %}\n"
+        "{% block content %}<div id=\"probe-ok\">OK</div>{% endblock %}\n",
+        encoding="utf-8",
+    )
+    try:
+        html = templates.get_template("_help_block_probe.html").render(
+            {
+                "request": Request(
+                    {"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""}
+                ),
+                "current_user": _master_user(),
+                "title": "probe",
+                "display_tz": "UTC",
+            }
+        )
+    finally:
+        probe.unlink(missing_ok=True)
+
+    assert 'id="probe-ok"' in html
+    assert 'id="lbPageHelpOpen"' in html
+    brand_at = html.find("Живем Плетем")
+    assert brand_at > 0
+    assert "clients_list" not in html[:brand_at]

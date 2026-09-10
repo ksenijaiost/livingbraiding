@@ -227,7 +227,8 @@
     <script src="/static/app.js?v=20260910a" defer></script>
   </head>
   <body>
-    {% block help_page_id %}{% endblock %}
+    {# help_page_id задаётся дочерним шаблоном; сам id в DOM не выводим #}
+    {% if false %}{% block help_page_id %}{% endblock %}{% endif %}
     <header class="lb-sticky-header">
       <div><strong>Живем Плетем</strong></div>
       <div class="nav">

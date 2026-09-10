@@ -1,5 +1,4 @@
-# Реестр page-help. Заполняется по мере появления текстов в pages/.
-# page_id должен совпадать с именем файла pages/<page_id>.md (без .md).
+# Реестр page-help. page_id = имя файла pages/<page_id>.md (без .md).
 
 pages:
   home:
@@ -10,3 +9,47 @@ pages:
     title: Справка кабинета
     roles: [master, helper, admin, admin_senior, admin_super, techspec]
     file: help_faq.md
+  clients_list:
+    title: Клиенты
+    roles: [master, admin, admin_senior, admin_super]
+    file: clients_list.md
+  visits_list:
+    title: Визиты
+    roles: [master, admin, admin_senior, admin_super]
+    file: visits_list.md
+  master_visit_form:
+    title: Форма визита
+    roles: [master, admin, admin_senior, admin_super]
+    file: master_visit_form.md
+  kits_list:
+    title: Комплекты (склад)
+    roles: [master, admin, admin_senior, admin_super]
+    file: kits_list.md
+  product_sales_list:
+    title: Продажа товаров
+    roles: [master, admin, admin_senior, admin_super]
+    file: product_sales_list.md
+  bookings_list:
+    title: Брони
+    roles: [master, admin, admin_senior, admin_super]
+    file: bookings_list.md
+  studio_expenses:
+    title: Расходы студии
+    roles: [admin_senior, admin_super]
+    file: studio_expenses.md
+  payroll_periods:
+    title: Расчётные периоды
+    roles: [admin_super]
+    file: payroll_periods.md
+  payroll_fund:
+    title: Фонды и выплаты
+    roles: [admin_super]
+    file: payroll_fund.md
+  operational_report:
+    title: Операционный отчёт
+    roles: [admin_super]
+    file: operational_report.md
+  admin_settings:
+    title: Настройки студии
+    roles: [admin_super]
+    file: admin_settings.md
