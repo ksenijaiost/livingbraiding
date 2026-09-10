@@ -70,6 +70,10 @@ def test_get_faq_all_roles_have_files() -> None:
     for role in UserRole:
         doc = get_faq(role)
         assert doc is not None, f"missing FAQ for {role}"
+        assert "будет заполнен" not in doc.body_md
+        assert "шаге 5" not in doc.body_md
+        assert "Что умеет кабинет" in doc.body_md
+        assert "Важные ограничения" in doc.body_md
 
 
 def test_get_page_help_example_not_valid_id() -> None:
