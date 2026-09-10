@@ -87,6 +87,34 @@ def test_mvp_page_help_files_load_for_roles() -> None:
     assert get_page_help("payroll_periods", UserRole.MASTER) is None
 
 
+def test_step7_remaining_pages_sample() -> None:
+    """Выборка экранов шага 2.7 + роль-фильтр."""
+    cases: list[tuple[str, UserRole]] = [
+        ("client_detail", UserRole.MASTER),
+        ("booking_form", UserRole.ADMIN),
+        ("consultations_list", UserRole.MASTER),
+        ("kit_detail", UserRole.ADMIN_SENIOR),
+        ("product_sale_new", UserRole.MASTER),
+        ("work_products_list", UserRole.ADMIN),
+        ("catalog_admin_index", UserRole.ADMIN_SENIOR),
+        ("service_catalog_view", UserRole.MASTER),
+        ("master_mywork", UserRole.HELPER),
+        ("hourly_work_list", UserRole.HELPER),
+        ("work_plans_list", UserRole.MASTER),
+        ("staff_list", UserRole.ADMIN_SUPER),
+        ("super_purge", UserRole.ADMIN_SUPER),
+        ("report_visits", UserRole.ADMIN_SUPER),
+        ("techspec_sql", UserRole.TECHSPEC),
+    ]
+    for page_id, role in cases:
+        doc = get_page_help(page_id, role)
+        assert doc is not None, f"{page_id} for {role}"
+        assert "Что делать здесь" in doc.body_md
+    assert get_page_help("catalog_admin_index", UserRole.ADMIN) is None
+    assert get_page_help("techspec_data", UserRole.MASTER) is None
+    assert get_page_help("staff_list", UserRole.ADMIN_SENIOR) is None
+
+
 def test_help_page_id_block_does_not_leak_into_body() -> None:
     """{% block help_page_id %} не должен печатать id видимым текстом в начале страницы."""
     from pathlib import Path

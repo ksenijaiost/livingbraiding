@@ -1,55 +1,457 @@
-# Реестр page-help. page_id = имя файла pages/<page_id>.md (без .md).
+# Реестр page-help. page_id = имя файла pages/<page_id>.md
 
 pages:
-  home:
-    title: Главная
-    roles: [master, helper, admin, admin_senior, admin_super, techspec]
-    file: home.md
-  help_faq:
-    title: Справка кабинета
-    roles: [master, helper, admin, admin_senior, admin_super, techspec]
-    file: help_faq.md
-  clients_list:
-    title: Клиенты
-    roles: [master, admin, admin_senior, admin_super]
-    file: clients_list.md
-  visits_list:
-    title: Визиты
-    roles: [master, admin, admin_senior, admin_super]
-    file: visits_list.md
-  master_visit_form:
-    title: Форма визита
-    roles: [master, admin, admin_senior, admin_super]
-    file: master_visit_form.md
-  kits_list:
-    title: Комплекты (склад)
-    roles: [master, admin, admin_senior, admin_super]
-    file: kits_list.md
-  product_sales_list:
-    title: Продажа товаров
-    roles: [master, admin, admin_senior, admin_super]
-    file: product_sales_list.md
-  bookings_list:
-    title: Брони
-    roles: [master, admin, admin_senior, admin_super]
-    file: bookings_list.md
-  studio_expenses:
-    title: Расходы студии
-    roles: [admin_senior, admin_super]
-    file: studio_expenses.md
-  payroll_periods:
-    title: Расчётные периоды
-    roles: [admin_super]
-    file: payroll_periods.md
-  payroll_fund:
-    title: Фонды и выплаты
-    roles: [admin_super]
-    file: payroll_fund.md
-  operational_report:
-    title: Операционный отчёт
-    roles: [admin_super]
-    file: operational_report.md
   admin_settings:
     title: Настройки студии
-    roles: [admin_super]
+    roles:
+    - admin_super
     file: admin_settings.md
+  booking_detail:
+    title: Карточка брони
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: booking_detail.md
+  booking_form:
+    title: Форма брони
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: booking_form.md
+  bookings_list:
+    title: Брони
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: bookings_list.md
+  catalog_admin_index:
+    title: Управление прайсом
+    roles:
+    - admin_senior
+    - admin_super
+    file: catalog_admin_index.md
+  catalog_category_form:
+    title: Форма категории
+    roles:
+    - admin_senior
+    - admin_super
+    file: catalog_category_form.md
+  catalog_price_autocalc:
+    title: Авторасчёт цен
+    roles:
+    - admin_senior
+    - admin_super
+    file: catalog_price_autocalc.md
+  catalog_service_form:
+    title: Форма услуги
+    roles:
+    - admin_senior
+    - admin_super
+    file: catalog_service_form.md
+  catalog_services:
+    title: Каталог услуг (админ)
+    roles:
+    - admin_senior
+    - admin_super
+    file: catalog_services.md
+  catalog_subcategories:
+    title: Подкатегории
+    roles:
+    - admin_senior
+    - admin_super
+    file: catalog_subcategories.md
+  catalog_subcategory_form:
+    title: Форма подкатегории
+    roles:
+    - admin_senior
+    - admin_super
+    file: catalog_subcategory_form.md
+  client_detail:
+    title: Карточка клиента
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: client_detail.md
+  client_form:
+    title: Форма клиента
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: client_form.md
+  clients_list:
+    title: Клиенты
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: clients_list.md
+  consultation_detail:
+    title: Карточка консультации
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: consultation_detail.md
+  consultation_form:
+    title: Форма консультации
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: consultation_form.md
+  consultations_list:
+    title: Консультации
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: consultations_list.md
+  help_faq:
+    title: Справка кабинета
+    roles:
+    - master
+    - helper
+    - admin
+    - admin_senior
+    - admin_super
+    - techspec
+    file: help_faq.md
+  home:
+    title: Главная
+    roles:
+    - master
+    - helper
+    - admin
+    - admin_senior
+    - admin_super
+    - techspec
+    file: home.md
+  hourly_work_detail:
+    title: Карточка почасовой работы
+    roles:
+    - master
+    - helper
+    - admin
+    - admin_senior
+    - admin_super
+    file: hourly_work_detail.md
+  hourly_work_form:
+    title: Форма почасовой работы
+    roles:
+    - master
+    - helper
+    - admin
+    - admin_senior
+    - admin_super
+    file: hourly_work_form.md
+  hourly_work_list:
+    title: Почасовая работа
+    roles:
+    - master
+    - helper
+    - admin
+    - admin_senior
+    - admin_super
+    file: hourly_work_list.md
+  kit_detail:
+    title: Карточка комплекта
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: kit_detail.md
+  kit_form:
+    title: Форма комплекта
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: kit_form.md
+  kits_bulk_import:
+    title: Массовый импорт комплектов
+    roles:
+    - admin_senior
+    - admin_super
+    file: kits_bulk_import.md
+  kits_list:
+    title: Комплекты (склад)
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: kits_list.md
+  master_mywork:
+    title: Моя работа
+    roles:
+    - master
+    - helper
+    - admin
+    - admin_senior
+    - admin_super
+    file: master_mywork.md
+  master_schedule:
+    title: Мой график
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: master_schedule.md
+  master_statistics:
+    title: Статистика мастеров
+    roles:
+    - admin_super
+    file: master_statistics.md
+  master_visit_form:
+    title: Новый визит
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: master_visit_form.md
+  masters_schedule_week:
+    title: График всех мастеров
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: masters_schedule_week.md
+  operational_report:
+    title: Операционный отчёт
+    roles:
+    - admin_super
+    file: operational_report.md
+  payroll_fund:
+    title: Фонды и выплаты
+    roles:
+    - admin_super
+    file: payroll_fund.md
+  payroll_periods:
+    title: Расчётные периоды
+    roles:
+    - admin_super
+    file: payroll_periods.md
+  price_index:
+    title: Прайс
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: price_index.md
+  product_sale_detail:
+    title: Карточка продажи
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: product_sale_detail.md
+  product_sale_edit:
+    title: Редактирование продажи
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: product_sale_edit.md
+  product_sale_new:
+    title: Новая продажа
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: product_sale_new.md
+  product_sales_list:
+    title: Продажа товаров
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: product_sales_list.md
+  products_calc:
+    title: Калькулятор товаров
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: products_calc.md
+  products_catalog_view:
+    title: Прайс — товары
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: products_catalog_view.md
+  questionnaire_field_form:
+    title: Форма поля анкеты
+    roles:
+    - admin_super
+    file: questionnaire_field_form.md
+  questionnaire_fields_list:
+    title: Поля анкеты
+    roles:
+    - admin_super
+    file: questionnaire_fields_list.md
+  report_consultations:
+    title: 'Отчёт: консультации'
+    roles:
+    - admin_super
+    file: report_consultations.md
+  report_hourly:
+    title: 'Отчёт: почасовая'
+    roles:
+    - admin_super
+    file: report_hourly.md
+  report_sales:
+    title: 'Отчёт: продажи'
+    roles:
+    - admin_super
+    file: report_sales.md
+  report_visits:
+    title: 'Отчёт: визиты'
+    roles:
+    - admin_super
+    file: report_visits.md
+  report_works:
+    title: 'Отчёт: работы'
+    roles:
+    - admin_super
+    file: report_works.md
+  service_catalog_view:
+    title: Прайс — услуги
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: service_catalog_view.md
+  staff_form:
+    title: Форма сотрудника
+    roles:
+    - admin_super
+    file: staff_form.md
+  staff_list:
+    title: Сотрудники
+    roles:
+    - admin_super
+    file: staff_list.md
+  studio_expenses:
+    title: Расходы студии
+    roles:
+    - admin_senior
+    - admin_super
+    file: studio_expenses.md
+  super_purge:
+    title: Удаление данных
+    roles:
+    - admin_super
+    file: super_purge.md
+  techspec_data:
+    title: Технические данные
+    roles:
+    - techspec
+    file: techspec_data.md
+  techspec_sql:
+    title: SQL
+    roles:
+    - techspec
+    file: techspec_sql.md
+  visit_detail:
+    title: Карточка визита
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: visit_detail.md
+  visits_list:
+    title: Визиты
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: visits_list.md
+  work_plan_detail:
+    title: Карточка плана работ
+    roles:
+    - master
+    - helper
+    - admin
+    - admin_senior
+    - admin_super
+    file: work_plan_detail.md
+  work_plan_form:
+    title: Форма плана работ
+    roles:
+    - master
+    - helper
+    - admin
+    - admin_senior
+    - admin_super
+    file: work_plan_form.md
+  work_plans_list:
+    title: План работ
+    roles:
+    - master
+    - helper
+    - admin
+    - admin_senior
+    - admin_super
+    file: work_plans_list.md
+  work_products_detail:
+    title: Карточка работы с товарами
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: work_products_detail.md
+  work_products_edit:
+    title: Редактирование работы с товарами
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: work_products_edit.md
+  work_products_list:
+    title: Работа с товарами
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: work_products_list.md
+  work_products_new:
+    title: Новая работа с товарами
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: work_products_new.md
