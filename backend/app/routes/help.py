@@ -30,5 +30,6 @@ def help_faq_page(
             title=f"Справка — {role_label}",
             help_doc=doc,
             role_label=role_label,
+            help_page_id="help_faq",
         ),
     )

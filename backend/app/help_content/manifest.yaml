@@ -1,11 +1,12 @@
 # Реестр page-help. Заполняется по мере появления текстов в pages/.
 # page_id должен совпадать с именем файла pages/<page_id>.md (без .md).
-#
-# Пример:
-# pages:
-#   admin_clients_list:
-#     title: Клиенты
-#     roles: [admin, admin_senior, admin_super]
-#     file: admin_clients_list.md
 
-pages: {}
+pages:
+  home:
+    title: Главная
+    roles: [master, helper, admin, admin_senior, admin_super, techspec]
+    file: home.md
+  help_faq:
+    title: Справка кабинета
+    roles: [master, helper, admin, admin_senior, admin_super, techspec]
+    file: help_faq.md

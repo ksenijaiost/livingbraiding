@@ -1,0 +1,24 @@
+{# Модалка справки страницы — ожидает page_help_doc в контексте. #}
+<div
+  id="lb-page-help-modal"
+  class="lb-page-help-modal"
+  hidden
+  aria-hidden="true"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="lbPageHelpTitle"
+>
+  <div class="lb-page-help-modal__backdrop" data-lb-page-help-close tabindex="-1" aria-hidden="true"></div>
+  <div class="lb-page-help-modal__panel" role="document">
+    <div class="lb-page-help-modal__head">
+      <h2 id="lbPageHelpTitle" class="lb-page-help-modal__title">{{ page_help_doc.title }}</h2>
+      <button type="button" class="lb-page-help-modal__close" data-lb-page-help-close aria-label="Закрыть">×</button>
+    </div>
+    <div class="lb-page-help-modal__body lb-help-body">
+      {{ page_help_doc.body_html | safe }}
+    </div>
+    <div class="lb-page-help-modal__foot">
+      <a href="/help">Открыть общую справку</a>
+    </div>
+  </div>
+</div>

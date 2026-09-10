@@ -27,7 +27,9 @@ FAQ показывается по **`active_role`** (текущий кабине
 ## `help_page_id`
 
 - Стабильный идентификатор в `snake_case` (не URL и не русское название).
-- В шаблоне страницы: `{% set help_page_id = "admin_clients_list" %}`.
+- Способы привязки страницы:
+  1. В роуте: `_ctx(..., help_page_id="admin_clients_list")` — предпочтительно.
+  2. В шаблоне: `{% block help_page_id %}admin_clients_list{% endblock %}`.
 - Файл справки: `pages/<help_page_id>.md`.
 - Если файла нет или роль не в `roles` front-matter — кнопку «?» не показывать.
 

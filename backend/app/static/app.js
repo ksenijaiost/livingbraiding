@@ -33,7 +33,71 @@ document.addEventListener("DOMContentLoaded", function () {
   initLbFormGuards();
   initLbDoubleSubmitGuard();
   initImageLightbox();
+  initPageHelpModal();
 });
+
+/**
+ * Модалка справки страницы (кнопка «?» в base.html).
+ */
+function initPageHelpModal() {
+  var root = document.getElementById("lb-page-help-modal");
+  var openBtn = document.getElementById("lbPageHelpOpen");
+  if (!root || !openBtn) return;
+  if (root.dataset.lbInited === "1") return;
+  root.dataset.lbInited = "1";
+
+  var bodyEl = document.body;
+
+  function isOpen() {
+    return !root.hasAttribute("hidden");
+  }
+
+  function openHelp() {
+    root.removeAttribute("hidden");
+    root.setAttribute("aria-hidden", "false");
+    bodyEl.style.overflow = "hidden";
+    try {
+      var closeBtn = root.querySelector(".lb-page-help-modal__close");
+      if (closeBtn) closeBtn.focus();
+    } catch (e) {}
+  }
+
+  function closeHelp() {
+    if (!isOpen()) return;
+    root.setAttribute("hidden", "");
+    root.setAttribute("aria-hidden", "true");
+    bodyEl.style.overflow = "";
+    try {
+      openBtn.focus();
+    } catch (e) {}
+  }
+
+  openBtn.addEventListener("click", function (e) {
+    e.preventDefault();
+    openHelp();
+  });
+
+  root.addEventListener("click", function (e) {
+    var el = e.target;
+    if (!el || !el.getAttribute) return;
+    if (el.getAttribute("data-lb-page-help-close") != null) {
+      e.preventDefault();
+      closeHelp();
+    }
+  });
+
+  document.addEventListener(
+    "keydown",
+    function (e) {
+      if (!e || e.key !== "Escape") return;
+      if (!isOpen()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeHelp();
+    },
+    true
+  );
+}
 
 /**
  * Click any <a class="lb-lightbox" href="..."> to show image fullscreen in-page (see base.html + app.css).

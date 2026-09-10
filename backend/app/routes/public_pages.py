@@ -459,6 +459,7 @@ def home(
         _ctx(
             request,
             current_user=current_user,
+            help_page_id="home",
             payroll_home=payroll_home,
             calendar_ctx=calendar_ctx,
             sections_ctx=sections_ctx,
