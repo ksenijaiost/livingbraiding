@@ -42,13 +42,20 @@ def test_help_faq_page_for_master() -> None:
         assert "Справка" in r.text
         assert "мастер" in r.text.lower()
         assert 'href="/help"' in r.text
-        # Кнопка «?» и модалка (page-help help_faq)
-        assert 'id="lbPageHelpOpen"' in r.text
-        assert 'id="lb-page-help-modal"' in r.text
-        assert "Справка по странице" in r.text
-        assert "Открыть общую справку" in r.text
+        assert "lb-help-body" in r.text
+        # На самой /help кнопка «?» не нужна — пользователь уже в справке.
+        assert 'id="lbPageHelpOpen"' not in r.text
+        assert 'id="lb-page-help-modal"' not in r.text
     finally:
         app.dependency_overrides.clear()
+
+
+def test_login_has_no_page_help_button() -> None:
+    client = TestClient(app)
+    r = client.get("/login", follow_redirects=False)
+    assert r.status_code == 200
+    assert 'id="lbPageHelpOpen"' not in r.text
+    assert 'id="lb-page-help-modal"' not in r.text
 
 
 def test_ctx_autoloads_page_help_doc() -> None:

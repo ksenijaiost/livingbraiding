@@ -56,10 +56,12 @@ _ALLOWED_TAGS = [
     "td",
 ]
 _ALLOWED_ATTRIBUTES = {
-    "a": ["href", "title", "rel"],
+    "a": ["href", "title", "rel", "target"],
     "code": ["class"],
 }
 _ALLOWED_PROTOCOLS = ["http", "https", "mailto"]
+
+_LEADING_H1_RE = re.compile(r"\A\s*#\s+[^\n]*\n+", re.UNICODE)
 
 
 @dataclass(frozen=True)
@@ -94,7 +96,7 @@ def clear_help_cache() -> None:
 def get_faq(role: UserRole) -> HelpDocument | None:
     """FAQ кабинета для роли. Нет файла → None."""
     path = FAQ_DIR / f"{role_slug(role)}.md"
-    doc = _load_markdown_file(str(path))
+    doc = _load_markdown_file(str(path), page_id=None, strip_leading_h1=False)
     if doc is None:
         return None
     if not _role_allowed(doc.roles, role):
@@ -107,7 +109,8 @@ def get_page_help(page_id: str, role: UserRole) -> HelpDocument | None:
     if not is_valid_page_id(page_id):
         return None
     path = PAGES_DIR / f"{page_id}.md"
-    doc = _load_markdown_file(str(path), page_id=page_id)
+    # У page-help заголовок уже в модалке — ведущий H1 из markdown убираем.
+    doc = _load_markdown_file(str(path), page_id=page_id, strip_leading_h1=True)
     if doc is None:
         return None
     if not _role_allowed(doc.roles, role):
@@ -129,7 +132,12 @@ def render_markdown_safe(text: str) -> str:
         protocols=_ALLOWED_PROTOCOLS,
         strip=True,
     )
-    return bleach.linkify(cleaned, parse_email=False, skip_tags=["pre", "code"])
+    return bleach.linkify(
+        cleaned,
+        parse_email=False,
+        skip_tags=["pre", "code"],
+        callbacks=[_bleach_link_rel],
+    )
 
 
 def parse_front_matter(raw: str) -> tuple[dict[str, Any], str]:
@@ -148,10 +156,30 @@ def parse_front_matter(raw: str) -> tuple[dict[str, Any], str]:
     return meta, body
 
 
+def strip_leading_atx_h1(md: str) -> str:
+    """Убрать первый ATX-заголовок `# ...` (дубль title в модалке)."""
+    return _LEADING_H1_RE.sub("", md or "", count=1)
+
+
+def _bleach_link_rel(attrs: dict, new: bool = False) -> dict:
+    """Для внешних ссылок — rel=noopener; внутренние /path не трогаем target."""
+    href = attrs.get((None, "href")) or attrs.get("href") or ""
+    href_s = str(href)
+    if href_s.startswith(("http://", "https://")):
+        attrs[(None, "rel")] = "noopener noreferrer"
+    return attrs
+
+
 def _role_allowed(roles: frozenset[str] | None, role: UserRole) -> bool:
+    """Как active_role_matches: старший админ видит материалы с ролью admin."""
     if roles is None:
         return True
-    return role_slug(role) in roles
+    slug = role_slug(role)
+    if slug in roles:
+        return True
+    if role == UserRole.ADMIN_SENIOR and "admin" in roles:
+        return True
+    return False
 
 
 def _normalize_roles(value: Any) -> frozenset[str] | None:
@@ -167,8 +195,12 @@ def _normalize_roles(value: Any) -> frozenset[str] | None:
     return frozenset(out) if out else None
 
 
-@lru_cache(maxsize=256)
-def _load_markdown_file(path_str: str, page_id: str | None = None) -> HelpDocument | None:
+@lru_cache(maxsize=512)
+def _load_markdown_file(
+    path_str: str,
+    page_id: str | None = None,
+    strip_leading_h1: bool = False,
+) -> HelpDocument | None:
     path = Path(path_str)
     if not path.is_file():
         return None
@@ -184,7 +216,8 @@ def _load_markdown_file(path_str: str, page_id: str | None = None) -> HelpDocume
     meta, body_md = parse_front_matter(raw)
     title = str(meta.get("title") or "").strip() or _default_title(path, page_id)
     roles = _normalize_roles(meta.get("roles"))
-    body_html = render_markdown_safe(body_md)
+    body_for_html = strip_leading_atx_h1(body_md) if strip_leading_h1 else body_md
+    body_html = render_markdown_safe(body_for_html)
     return HelpDocument(
         title=title,
         body_md=body_md,

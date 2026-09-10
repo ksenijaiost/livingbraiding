@@ -1,18 +1,17 @@
 {% extends "base.html" %}
-{% block help_page_id %}help_faq{% endblock %}
 {% block content %}
-  <div class="card">
-    <div style="display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:8px 16px;">
-      <h2 style="margin:0;">Справка</h2>
-      <div class="muted" style="font-size:13px;">Кабинет: {{ role_label }}</div>
+  <div class="card lb-help-faq">
+    <div class="lb-help-faq__head">
+      <h2 class="lb-help-faq__title">Справка</h2>
+      <div class="muted lb-help-faq__role">Кабинет: {{ role_label }}</div>
     </div>
 
     {% if help_doc %}
-      <div class="lb-help-body" style="margin-top:14px; line-height:1.5;">
+      <div class="lb-help-body">
         {{ help_doc.body_html | safe }}
       </div>
     {% else %}
-      <p class="muted" style="margin-top:14px;">
+      <p class="muted lb-help-faq__empty">
         Справка для кабинета «{{ role_label }}» пока не заполнена.
       </p>
     {% endif %}

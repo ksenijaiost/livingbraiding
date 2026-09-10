@@ -47,15 +47,21 @@ function initPageHelpModal() {
   root.dataset.lbInited = "1";
 
   var bodyEl = document.body;
+  var panel = root.querySelector(".lb-page-help-modal__panel");
 
   function isOpen() {
     return !root.hasAttribute("hidden");
+  }
+
+  function setExpanded(on) {
+    openBtn.setAttribute("aria-expanded", on ? "true" : "false");
   }
 
   function openHelp() {
     root.removeAttribute("hidden");
     root.setAttribute("aria-hidden", "false");
     bodyEl.style.overflow = "hidden";
+    setExpanded(true);
     try {
       var closeBtn = root.querySelector(".lb-page-help-modal__close");
       if (closeBtn) closeBtn.focus();
@@ -67,6 +73,7 @@ function initPageHelpModal() {
     root.setAttribute("hidden", "");
     root.setAttribute("aria-hidden", "true");
     bodyEl.style.overflow = "";
+    setExpanded(false);
     try {
       openBtn.focus();
     } catch (e) {}
@@ -86,14 +93,38 @@ function initPageHelpModal() {
     }
   });
 
+  // Не закрывать по клику внутри панели (только backdrop/крестик).
+  if (panel) {
+    panel.addEventListener("click", function (e) {
+      e.stopPropagation();
+    });
+  }
+
   document.addEventListener(
     "keydown",
     function (e) {
-      if (!e || e.key !== "Escape") return;
-      if (!isOpen()) return;
-      e.preventDefault();
-      e.stopPropagation();
-      closeHelp();
+      if (!e || !isOpen()) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeHelp();
+        return;
+      }
+      // Простой focus trap: Tab циклом внутри модалки.
+      if (e.key !== "Tab") return;
+      var focusable = root.querySelectorAll(
+        'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusable.length) return;
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     },
     true
   );

@@ -12,6 +12,7 @@ from app.help_docs import (
     parse_front_matter,
     render_markdown_safe,
     role_slug,
+    strip_leading_atx_h1,
 )
 
 
@@ -85,3 +86,43 @@ def test_get_page_help_example_not_valid_id() -> None:
 def test_get_page_help_rejects_path_traversal() -> None:
     assert get_page_help("../faq/master", UserRole.MASTER) is None
     assert get_page_help("foo/bar", UserRole.MASTER) is None
+
+
+def test_page_help_strips_leading_h1_faq_keeps_it() -> None:
+    page = get_page_help("clients_list", UserRole.MASTER)
+    assert page is not None
+    assert "<h1>" not in page.body_html.lower()
+    assert "Что делать здесь" in page.body_html
+    faq = get_faq(UserRole.MASTER)
+    assert faq is not None
+    assert "<h1>" in faq.body_html.lower()
+
+
+def test_admin_senior_inherits_admin_page_help_roles() -> None:
+    """Как active_role_matches: senior видит материалы с roles: [admin]."""
+    from app.help_docs import HELP_CONTENT_DIR
+
+    path = HELP_CONTENT_DIR / "pages" / "admin_only_tmp.md"
+    path.write_text(
+        "---\ntitle: Only admin\nroles: [admin]\n---\n\n# Only admin\n\nBody.\n",
+        encoding="utf-8",
+    )
+    try:
+        clear_help_cache()
+        assert get_page_help("admin_only_tmp", UserRole.ADMIN) is not None
+        assert get_page_help("admin_only_tmp", UserRole.ADMIN_SENIOR) is not None
+        assert get_page_help("admin_only_tmp", UserRole.MASTER) is None
+    finally:
+        path.unlink(missing_ok=True)
+        clear_help_cache()
+
+
+def test_strip_leading_atx_h1() -> None:
+    assert strip_leading_atx_h1("# Title\n\nBody\n").startswith("Body")
+    assert strip_leading_atx_h1("## Not h1\n").startswith("## Not h1")
+
+
+def test_external_links_get_noopener() -> None:
+    html = render_markdown_safe("[x](https://example.com/a)")
+    assert 'rel="noopener noreferrer"' in html
+    assert "https://example.com/a" in html
