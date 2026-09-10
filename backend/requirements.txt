@@ -12,3 +12,6 @@ tzdata>=2025.1
 pytest==8.4.2
 Pillow
 pillow-heif
+markdown>=3.5
+bleach>=6.0
+PyYAML>=6.0

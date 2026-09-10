@@ -9,7 +9,7 @@
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; font-size: 14px; margin: 0; background: #f6f7fb; color: #111; }
       header { background: #111827; color: #fff; padding: 12px 16px; display:flex; align-items:center; justify-content: space-between; }
       a { color: inherit; }
-      .container { max-width: 980px; margin: 0 auto; padding: 16px; }
+      .container { max-width: 980px; margin: 0 auto; padding: 16px; position: relative; }
       .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; }
       .row { display:flex; gap: 12px; flex-wrap: wrap; }
       .row > * { flex: 1; min-width: 260px; }
@@ -183,9 +183,11 @@
       .ok { background: #f0fdf4; border: 1px solid #86efac; color: #166534; padding: 10px 12px; border-radius: 8px; }
     </style>
     <script src="/static/kit_stock_pick.js?v=3" defer></script>
-    <script src="/static/app.js?v=20260902b" defer></script>
+    <script src="/static/app.js?v=20260910c" defer></script>
   </head>
   <body>
+    {# help_page_id задаётся дочерним шаблоном; сам id в DOM не выводим #}
+    {% if false %}{% block help_page_id %}{% endblock %}{% endif %}
     <header class="lb-sticky-header">
       <div><strong>Живем Плетем</strong></div>
       <div class="nav">
@@ -322,6 +324,7 @@
               {% endif %}
             {% endif %}
 
+            <a href="/help">Справка</a>
             <a href="/logout">Выйти</a>
           </div>
 
@@ -445,10 +448,27 @@
           {% endif %}
         {% endif %}
 
+        <a class="md-link" href="/help" onclick="window.lbToggleMobileNav(false)">Справка</a>
         <a class="md-link" href="/logout">Выйти</a>
       </aside>
     {% endif %}
     <div class="container">
+      {% set ns_help = namespace(doc=none) %}
+      {% if page_help_doc is defined and page_help_doc %}
+        {% set ns_help.doc = page_help_doc %}
+      {% else %}
+        {% set _help_page_id = help_page_id if (help_page_id is defined and help_page_id) else (self.help_page_id()|trim) %}
+        {% if _help_page_id and current_user %}
+          {% set ns_help.doc = resolve_page_help(_help_page_id, current_user) %}
+        {% endif %}
+      {% endif %}
+      {% if ns_help.doc %}
+        <div class="lb-page-help-bar">
+          {% with page_help_doc = ns_help.doc %}
+            {% include "partials/page_help_button.html" %}
+          {% endwith %}
+        </div>
+      {% endif %}
       {% if request is defined and request.query_params.get('tech_err') in ('1', 'true', 'yes') %}
         <div class="error" style="margin-bottom: 14px;" role="alert">
           Произошла техническая ошибка. Напишите техническому специалисту и опишите все ваши действия.
@@ -458,6 +478,12 @@
       {% endif %}
       {% block content %}{% endblock %}
     </div>
+
+    {% if ns_help.doc %}
+      {% with page_help_doc = ns_help.doc %}
+        {% include "partials/page_help_modal.html" %}
+      {% endwith %}
+    {% endif %}
 
     <div
       id="lb-image-lightbox"

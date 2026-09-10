@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block help_page_id %}master_visit_form{% endblock %}
 {% block content %}
   {% set fp = form_prefill %}
   <div class="card" {% if draft_readonly %}style="pointer-events: none; opacity: 0.92;"{% endif %}>
