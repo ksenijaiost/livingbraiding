@@ -19,6 +19,7 @@ from app.db.models import (
     VisitServiceMaster,
 )
 from app.questionnaire.schemas import VisitServiceDetailsPayload, parse_visit_service_details
+from app.visit_multi_service import addon_details_dict, addon_revenue_amount
 
 
 def _set(fp: dict[str, str], key: str, val: Any) -> None:
@@ -213,6 +214,28 @@ def _apply_questionnaire_to_fp(fp: dict[str, str], prefix: str, payload: VisitSe
             fp[key] = str(v) if v is not None else ""
 
 
+def _remember_visit_addon_prefill(fp: dict[str, str], vs: VisitService, *, service_no: int) -> None:
+    """Одна доп. продажа визита: галочка и номер услуги, без привязки к полям строки."""
+    if fp.get("addon_sales_amount"):
+        return
+    details = addon_details_dict(vs.addons_details_json)
+    description = str(details.get("description") or "").strip()
+    revenue = addon_revenue_amount(vs.addons_details_json)
+    cost = float(vs.addons_total or 0)
+    if revenue > 0:
+        _set(fp, "addon_sales_amount", int(round(revenue)) if revenue == int(revenue) else revenue)
+        _set(fp, "addon_service_no", service_no)
+        if description:
+            _set(fp, "addon_sales_description", description)
+        return
+    if cost > 0:
+        _set(fp, "addon_sales_amount", int(round(cost)) if cost == int(cost) else cost)
+        _set(fp, "addon_service_no", service_no)
+        fp["addon_included_in_cost"] = "on"
+        if description:
+            _set(fp, "addon_sales_description", description)
+
+
 def _apply_service_line_to_fp(
     db: Session,
     visit: Visit,
@@ -229,7 +252,9 @@ def _apply_service_line_to_fp(
     else:
         _set(fp, f"{p}service_id", vs.service_id)
 
-    _set(fp, f"{p}amount_from_client", int(vs.amount_from_client or 0))
+    revenue_addon = addon_revenue_amount(vs.addons_details_json)
+    service_client_amount = max(0.0, float(vs.amount_from_client or 0) - revenue_addon)
+    _set(fp, f"{p}amount_from_client", int(round(service_client_amount)))
     if vs.client_payment_kind:
         _set(fp, f"{p}client_payment_kind", vs.client_payment_kind.value)
     _set(fp, f"{p}client_discount_percent", vs.client_discount_percent or 0)
@@ -255,7 +280,7 @@ def _apply_service_line_to_fp(
         _set(fp, f"{p}started_time", vs.started_at.strftime("%H:%M"))
 
     if idx == 0:
-        _set(fp, "amount_from_client", int(vs.amount_from_client or 0))
+        _set(fp, "amount_from_client", int(round(service_client_amount)))
         if vs.client_payment_kind:
             _set(fp, "client_payment_kind", vs.client_payment_kind.value)
         _set(fp, "client_discount_percent", vs.client_discount_percent or 0)
@@ -272,15 +297,7 @@ def _apply_service_line_to_fp(
         if vs.amortization_level:
             _set(fp, "amortization_level", vs.amortization_level.value)
 
-    if vs.addons_total and float(vs.addons_total) > 0:
-        _set(fp, f"{p}addon_sales_amount", vs.addons_total)
-        if vs.addons_details_json:
-            try:
-                ad = json.loads(vs.addons_details_json)
-                if isinstance(ad, dict) and ad.get("description"):
-                    _set(fp, f"{p}addon_sales_description", ad["description"])
-            except Exception:
-                pass
+    _remember_visit_addon_prefill(fp, vs, service_no=idx + 1)
 
     try:
         raw = json.loads(vs.details_json or "{}")
