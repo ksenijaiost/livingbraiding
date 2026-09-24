@@ -374,6 +374,9 @@ async def admin_client_edit_post(
             continue
         form[k] = str(v or "")
     form["is_confirmed"] = "1" if any(parse_bool(v) for v in form_raw.getlist("is_confirmed")) else "0"
+    for photo_field in ("photo_1", "photo_2"):
+        if not (form.get(photo_field) or "").strip():
+            form[photo_field] = getattr(client, photo_field) or ""
 
     name = (str(form.get("name") or "")).strip()
     phone = str(form.get("phone") or "")

@@ -161,6 +161,8 @@ class VisitServiceLineInput:
     questionnaire_raw: dict[str, str] = field(default_factory=dict)
     addon_sales_amount: float = 0.0
     addon_sales_description: str = ""
+    # Доп. продажа, которая прибавляется к сумме с клиента, а не входит в себестоимость.
+    addon_client_amount: float = 0.0
     thermo_parsed: Any = None
     started_at: datetime | None = None
     comment: str | None = None
@@ -431,10 +433,17 @@ def compute_visit_service_line(
                 kit_studio_fund += float(sf)
 
     addons = max(0.0, float(line.addon_sales_amount or 0.0))
+    addon_client = max(0.0, float(line.addon_client_amount or 0.0))
     addons_detail: dict[str, Any] = {}
     ad = (line.addon_sales_description or "").strip()
     if ad:
         addons_detail["description"] = ad
+    if addons > 0:
+        addons_detail["mode"] = "cost"
+        addons_detail["amount"] = addons
+    elif addon_client > 0:
+        addons_detail["mode"] = "revenue"
+        addons_detail["amount"] = addon_client
     addons_details_json = json.dumps(addons_detail, ensure_ascii=False) if addons_detail else None
 
     grams_total = max(0.0, line.kanekalon_grams) + max(0.0, line.kudri_grams)
@@ -458,7 +467,7 @@ def compute_visit_service_line(
         amort_amount = float(AMORTIZATION_LEVEL_RUBLES.get(line.amortization_level.value, 0.0))
 
     cost_total = mat_cost + kit_cost_total + addons + mix_cost + amort_amount
-    base_amount_from_client = float(line.amount_from_client or 0)
+    base_amount_from_client = float(line.amount_from_client or 0) + addon_client
     # Сумма за услугу + сумма за комплект(ы) из наличия (если не «уже оплачены»).
     amount_from_client = base_amount_from_client + float(kit_client_total or 0.0)
     client_payment_kind = line.client_payment_kind
@@ -1230,6 +1239,53 @@ def _parse_service_master_allocations_from_form(form: Any, line_idx: int) -> lis
     return rows
 
 
+def addon_details_dict(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def addon_revenue_amount(raw: str | None) -> float:
+    """Сумма доп. продажи, уже включённая в amount_from_client строки."""
+    data = addon_details_dict(raw)
+    if str(data.get("mode") or "") != "revenue":
+        return 0.0
+    try:
+        return max(0.0, float(data.get("amount") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def apply_visit_addon_sales(
+    lines: list[VisitServiceLineInput],
+    *,
+    amount: float,
+    description: str,
+    included_in_cost: bool,
+    service_no: int,
+) -> None:
+    """Одна доп. продажа на визит: расход выбранной услуги или плюс к её «с клиента»."""
+    for line in lines:
+        line.addon_sales_amount = 0.0
+        line.addon_sales_description = ""
+        line.addon_client_amount = 0.0
+    amt = max(0.0, float(amount or 0))
+    if amt <= 0:
+        return
+    if service_no < 1 or service_no > len(lines):
+        raise ValueError("Укажите номер услуги для доп. продажи.")
+    target = lines[service_no - 1]
+    target.addon_sales_description = (description or "").strip()
+    if included_in_cost:
+        target.addon_sales_amount = amt
+    else:
+        target.addon_client_amount = amt
+
+
 def parse_multi_service_visit_form(
     form: Any,
     *,
@@ -1297,6 +1353,15 @@ def parse_multi_service_visit_form(
     )
 
     lines = [_parse_line_from_form(form, i) for i in indices]
+    addon_raw = g("addon_sales_amount", "").strip()
+    addon_amount = parse_float(addon_raw or "0", field_name="addon_sales_amount") if addon_raw else 0.0
+    apply_visit_addon_sales(
+        lines,
+        amount=addon_amount,
+        description=g("addon_sales_description", ""),
+        included_in_cost=g_bool("addon_included_in_cost"),
+        service_no=g_int("addon_service_no", 0),
+    )
     hourly_help = parse_hourly_help_from_form(form)
     return MultiServiceVisitInput(header=header, lines=lines, hourly_help=hourly_help)
 

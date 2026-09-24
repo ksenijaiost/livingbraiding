@@ -171,39 +171,10 @@
         <h3>Фото</h3>
         <p class="section-hint">Можно загрузить до 2 фото (JPG/PNG/WebP, до 10MB каждое). Ссылки будут храниться в базе.</p>
 
+        {% from "partials/photo_slot.html" import photo_slot %}
         <div class="row">
-          <div>
-            <label class="label-sub">Фото 1</label>
-            {% if not is_new and form.get('photo_1') %}
-              <div class="muted" style="margin:-2px 0 8px;">
-                <a href="{{ form.get('photo_1') }}" class="lb-lightbox" title="Фото 1">Открыть</a>
-                <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
-                  <input type="checkbox" name="clear_photo_1" value="1" />
-                  <span>Удалить</span>
-                </label>
-              </div>
-              <a href="{{ form.get('photo_1') }}" class="lb-lightbox" title="Фото 1">
-                <img src="{{ form.get('photo_1') }}" alt="Фото 1" style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:10px;" />
-              </a>
-            {% endif %}
-            <input type="file" name="photo_1" accept="image/*,.heic,.heif" />
-          </div>
-          <div>
-            <label class="label-sub">Фото 2</label>
-            {% if not is_new and form.get('photo_2') %}
-              <div class="muted" style="margin:-2px 0 8px;">
-                <a href="{{ form.get('photo_2') }}" class="lb-lightbox" title="Фото 2">Открыть</a>
-                <label class="lb-inline-center-gap" style="display:inline-flex; margin-left:12px;">
-                  <input type="checkbox" name="clear_photo_2" value="1" />
-                  <span>Удалить</span>
-                </label>
-              </div>
-              <a href="{{ form.get('photo_2') }}" class="lb-lightbox" title="Фото 2">
-                <img src="{{ form.get('photo_2') }}" alt="Фото 2" style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:10px;" />
-              </a>
-            {% endif %}
-            <input type="file" name="photo_2" accept="image/*,.heic,.heif" />
-          </div>
+          {{ photo_slot('photo_1', 'Фото 1', form.get('photo_1', '') if not is_new else '', form.get('clear_photo_1', '')) }}
+          {{ photo_slot('photo_2', 'Фото 2', form.get('photo_2', '') if not is_new else '', form.get('clear_photo_2', '')) }}
         </div>
       </section>
 

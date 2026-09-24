@@ -273,6 +273,26 @@ async def save_upload_image(upload: object) -> str:
     return f"/media/{rel_name}"
 
 
+async def replace_or_clear_photo(form: object, current: str | None, field: str) -> tuple[str | None, bool]:
+    """Удалить текущее фото (clear_<field>) или заменить файлом. Возвращает (url, изменилось)."""
+    from app.forms_parse import parse_bool
+
+    url = current or None
+    changed = False
+    if parse_bool(getattr(form, "get", lambda _k, _d=None: None)(f"clear_{field}")):
+        delete_media_by_url(url)
+        url = None
+        changed = True
+    upload = get_nonempty_upload(form, field)
+    if upload is not None:
+        new_url = await save_upload_image(upload)
+        if url:
+            delete_media_by_url(url)
+        url = new_url
+        changed = True
+    return url, changed
+
+
 def delete_media_by_url(url: str | None) -> None:
     """
     Best-effort delete of a previously stored local media URL.

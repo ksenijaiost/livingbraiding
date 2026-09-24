@@ -59,7 +59,7 @@ from app.audit_field_labels import audit_field_label
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
 )
-from app.media_store import get_nonempty_upload, save_upload_image
+from app.media_store import replace_or_clear_photo
 from app.routes.master_visit import _master_visit_step1_template_response, _visit_master_state_from_prefill
 from app.thermo_visit import collect_thermo_prefill_from_form
 from app.webui import templates, ctx as _ctx
@@ -390,6 +390,9 @@ def _visit_edit_form_error_response(
     closed_period_confirm_required = False
     if visit:
         photos = [p for p in (visit.photo_1, visit.photo_2, visit.photo_3) if p]
+        for photo_field in ("photo_1", "photo_2", "photo_3"):
+            if photo_field not in fp:
+                fp[photo_field] = getattr(visit, photo_field) or ""
         closed_period_confirm_required = bool(
             is_in_closed_payroll_period(db, visit.performed_date)
             and user_may_edit_closed_payroll_period(current_user)
@@ -451,16 +454,13 @@ async def admin_visit_edit_post(
         visit = db.get(Visit, visit_id)
         assert visit is not None
         try:
-            p1 = get_nonempty_upload(form, "photo_1")
-            p2 = get_nonempty_upload(form, "photo_2")
-            p3 = get_nonempty_upload(form, "photo_3")
-            if p1 is not None:
-                visit.photo_1 = await save_upload_image(p1)
-            if p2 is not None:
-                visit.photo_2 = await save_upload_image(p2)
-            if p3 is not None:
-                visit.photo_3 = await save_upload_image(p3)
-            if p1 or p2 or p3:
+            photo_changed = False
+            for photo_field in ("photo_1", "photo_2", "photo_3"):
+                new_url, did = await replace_or_clear_photo(form, getattr(visit, photo_field), photo_field)
+                if did:
+                    setattr(visit, photo_field, new_url)
+                    photo_changed = True
+            if photo_changed:
                 db.commit()
         except ValueError as exc:
             db.rollback()

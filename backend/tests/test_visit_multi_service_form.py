@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
 from starlette.datastructures import FormData
 
 from app.visit_multi_service import (
     _discover_line_indices,
+    addon_revenue_amount,
     form_uses_multi_service_lines,
     parse_multi_service_visit_form,
 )
@@ -229,3 +231,61 @@ def test_own_kit_kind_coerced_to_stock_when_stock_lines_filled() -> None:
     line = _parse_line_from_form(form, 0)
     assert line.kit_kind == "STOCK"
     assert line.stock_kit_lines and line.stock_kit_lines[0].kit_id == 111
+
+
+def _three_services(**extra: str) -> dict[str, str]:
+    data = {
+        "service_id": "5",
+        "amount_from_client": "500",
+        "line_1_service_id": "7",
+        "line_1_amount_from_client": "1000",
+        "line_2_service_id": "9",
+        "line_2_amount_from_client": "12250",
+        "client_mode": "existing",
+        "existing_client_id": "1",
+        "performed_date": "2026-09-18",
+        "masters_scope": "VISIT",
+        "addon_sales_amount": "4200",
+        "addon_sales_description": "Арт 157",
+        "addon_service_no": "3",
+    }
+    data.update(extra)
+    return data
+
+
+def test_addon_included_in_cost_is_deducted_from_chosen_service() -> None:
+    multi = parse_multi_service_visit_form(
+        _form(_three_services(addon_included_in_cost="on")),
+        single_master_default_id=1,
+    )
+    assert multi.lines[0].addon_sales_amount == 0
+    assert multi.lines[0].addon_client_amount == 0
+    assert multi.lines[2].addon_sales_amount == 4200
+    assert multi.lines[2].addon_client_amount == 0
+    assert multi.lines[2].addon_sales_description == "Арт 157"
+    assert multi.lines[2].amount_from_client == 12250
+
+
+def test_addon_not_in_cost_is_added_to_client_of_chosen_service() -> None:
+    multi = parse_multi_service_visit_form(
+        _form(_three_services()),
+        single_master_default_id=1,
+    )
+    assert multi.lines[0].addon_sales_amount == 0
+    assert multi.lines[2].addon_sales_amount == 0
+    assert multi.lines[2].addon_client_amount == 4200
+    assert multi.lines[2].amount_from_client == 12250
+
+
+def test_addon_requires_service_number() -> None:
+    with pytest.raises(ValueError, match="номер услуги"):
+        parse_multi_service_visit_form(
+            _form(_three_services(addon_service_no="")),
+            single_master_default_id=1,
+        )
+
+
+def test_addon_revenue_amount_reads_only_revenue_mode() -> None:
+    assert addon_revenue_amount('{"mode":"revenue","amount":4200,"description":"арт"}') == 4200
+    assert addon_revenue_amount('{"mode":"cost","amount":4200}') == 0
+    assert addon_revenue_amount(None) == 0

@@ -764,6 +764,9 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
             fp["consultation_duration_on"] = "1"
             fp["consultation_duration_h"] = str(consult_dur // 60)
             fp["consultation_duration_m"] = str(consult_dur % 60)
+    fp["photo_1"] = b.photo_1 or ""
+    fp["photo_2"] = b.photo_2 or ""
+    fp["photo_3"] = b.photo_3 or ""
     master_ids = [bm.master_id for bm in (b.masters or [])]
     if not master_ids:
         for ps in (b.planned_services or []):

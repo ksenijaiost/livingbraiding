@@ -145,31 +145,12 @@
       </div>
 
       <h3>Фото (до 3)</h3>
-      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.{% if is_edit %} Загрузите новый файл, чтобы заменить существующее.{% endif %}</p>
-      {% if is_edit and visit_photos %}
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
-          {% for p in visit_photos %}
-            {% if p %}
-              <a href="{{ p }}" class="lb-lightbox" title="Текущее фото">
-                <img src="{{ p }}" alt="Фото" style="max-width:120px; max-height:120px; border-radius:8px; border:1px solid #e5e7eb;" />
-              </a>
-            {% endif %}
-          {% endfor %}
-        </div>
-      {% endif %}
+      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.{% if is_edit %} Новый файл заменяет текущее. «Удалить» убирает фото при сохранении.{% endif %}</p>
+      {% from "partials/photo_slot.html" import photo_slot %}
       <div class="row">
-        <div>
-          <label>Фото 1</label>
-          <input type="file" name="photo_1" accept="image/*,.heic,.heif" />
-        </div>
-        <div>
-          <label>Фото 2</label>
-          <input type="file" name="photo_2" accept="image/*,.heic,.heif" />
-        </div>
-        <div>
-          <label>Фото 3</label>
-          <input type="file" name="photo_3" accept="image/*,.heic,.heif" />
-        </div>
+        {{ photo_slot('photo_1', 'Фото 1', fp.get('photo_1', ''), fp.get('clear_photo_1', '')) }}
+        {{ photo_slot('photo_2', 'Фото 2', fp.get('photo_2', ''), fp.get('clear_photo_2', '')) }}
+        {{ photo_slot('photo_3', 'Фото 3', fp.get('photo_3', ''), fp.get('clear_photo_3', '')) }}
       </div>
       <div class="card" style="margin-top: 12px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Режим мастеров</div>
@@ -386,7 +367,7 @@
       </p>
 
       <h3>Доп. продажи</h3>
-      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">Необязательно. Сумма учитывается как расход при расчёте выручки визита.</p>
+      <p class="muted" id="addon_sales_hint" style="font-size: 12px; margin: -6px 0 10px;">Необязательно. Без галочки сумма прибавляется к «с клиента» выбранной услуги.</p>
       <div class="card" style="margin-bottom: 14px; background: #fafafa;">
         <div class="row">
           <div>
@@ -397,6 +378,18 @@
             <label>Описание</label>
             <input type="text" name="addon_sales_description" maxlength="500" value="{{ fp.get('addon_sales_description', '') }}" placeholder="Что было продано" style="width:100%;" />
           </div>
+        </div>
+        <div style="margin-top: 10px;">
+          <label style="margin: 0;">
+            <input type="checkbox" name="addon_included_in_cost" id="addon_included_in_cost" value="on" {% if fp.get('addon_included_in_cost') %}checked{% endif %} />
+            Входит в стоимость
+          </label>
+        </div>
+        <div style="margin-top: 8px; max-width: 280px;">
+          <label id="addon_service_no_label" for="addon_service_no">Номер услуги, к сумме с клиента которой добавить</label>
+          <select name="addon_service_no" id="addon_service_no" data-selected="{{ fp.get('addon_service_no', '1') }}">
+            <option value="1">1</option>
+          </select>
         </div>
       </div>
 
@@ -1236,8 +1229,11 @@
       _disc.addEventListener('input', function () { updateRecommendedPriceHint(); });
       _disc.addEventListener('change', function () { updateRecommendedPriceHint(); });
     }
-    document.querySelectorAll('input[name="addon_sales_amount"], input[name="mix_source"], input[name="mix_complexity"], input[name="amortization_level"], input[name="own_corr_trim_qty"], input[name="own_corr_hourly_hours"], input[name="own_corr_wash"], input[name="own_corr_steam"], input[name="own_corr_circle"], input[name="own_correction"]').forEach(function (el) {
-      el.addEventListener('change', syncVisitPreview);
+    document.querySelectorAll('input[name="addon_sales_amount"], input[name="addon_included_in_cost"], select[name="addon_service_no"], input[name="mix_source"], input[name="mix_complexity"], input[name="amortization_level"], input[name="own_corr_trim_qty"], input[name="own_corr_hourly_hours"], input[name="own_corr_wash"], input[name="own_corr_steam"], input[name="own_corr_circle"], input[name="own_correction"]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        if (el.name === 'addon_service_no') el.setAttribute('data-selected', el.value);
+        syncVisitPreview();
+      });
       el.addEventListener('input', syncVisitPreview);
     });
     document.querySelectorAll('input[name="visit_master_on"]').forEach(function (el) {
@@ -2090,6 +2086,50 @@
       }
     }
 
+    function syncAddonServiceSelect() {
+      const sel = document.getElementById('addon_service_no');
+      if (!sel) return;
+      const idxs = visitLineIndicesForPreview();
+      const want = idxs.map(function (i) { return String(i + 1); }).join(',');
+      if (sel.getAttribute('data-options') !== want) {
+        const selected = sel.getAttribute('data-selected') || sel.value || '1';
+        sel.innerHTML = '';
+        idxs.forEach(function (_idx, pos) {
+          const opt = document.createElement('option');
+          opt.value = String(pos + 1);
+          opt.textContent = String(pos + 1);
+          sel.appendChild(opt);
+        });
+        sel.setAttribute('data-options', want);
+        if (Array.from(sel.options).some(function (o) { return o.value === String(selected); })) {
+          sel.value = String(selected);
+        }
+      }
+      const included = !!(document.getElementById('addon_included_in_cost') || {}).checked;
+      const label = document.getElementById('addon_service_no_label');
+      const hint = document.getElementById('addon_sales_hint');
+      if (label) {
+        label.textContent = included
+          ? 'Номер услуги, из которой вычесть'
+          : 'Номер услуги, к сумме с клиента которой добавить';
+      }
+      if (hint) {
+        hint.textContent = included
+          ? 'Сумма вычитается из прибыли выбранной услуги и входит в её себестоимость.'
+          : 'Сумма прибавляется к «с клиента» выбранной услуги и в себестоимость не входит.';
+      }
+    }
+
+    function addonPreviewState() {
+      syncAddonServiceSelect();
+      const amount = Math.max(0, numVal('input[name="addon_sales_amount"]'));
+      const included = !!(document.getElementById('addon_included_in_cost') || {}).checked;
+      const no = parseInt((document.getElementById('addon_service_no') || {}).value || '1', 10) || 1;
+      const idxs = visitLineIndicesForPreview();
+      const lineIdx = idxs[no - 1];
+      return { amount: amount, included: included, lineIdx: lineIdx };
+    }
+
     function syncVisitPreview() {
       const payEl = document.getElementById('visit_preview_master_lines');
       const costEl = document.getElementById('visit_preview_cost_line');
@@ -2098,13 +2138,14 @@
       if (!payEl || !costEl) return;
       syncHourlyHelpRowStates();
 
-      const addons = Math.max(0, numVal('input[name="addon_sales_amount"]'));
+      const addon = addonPreviewState();
+      const addons = addon.included ? addon.amount : 0;
       let amountTotal = 0;
       let matTotal = 0;
       let amortTotal = 0;
       let kitTotal = 0;
       let corrExtraTotal = 0;
-      let costTotal = addons;
+      let costTotal = 0;
       let mixBonusTotal = 0;
       let fpExpenseTotal = 0;
       let stockKitParts = '';
@@ -2135,8 +2176,15 @@
         if (kit.warn) warn = kit.warn;
       });
 
+      if (addon.amount > 0 && addon.included) costTotal += addon.amount;
+      if (addon.amount > 0 && !addon.included) amountTotal += addon.amount;
+
       if (clientTotalEl) {
-        clientTotalEl.textContent = 'С клиента (итого): ' + money2(amountTotal) + ' ₽';
+        let clientText = 'С клиента (итого): ' + money2(amountTotal) + ' ₽';
+        if (addon.amount > 0 && !addon.included) {
+          clientText += ' (в том числе доп. продажа ' + money2(addon.amount) + ' ₽)';
+        }
+        clientTotalEl.textContent = clientText;
       }
 
       const scope = (document.querySelector('input[name="masters_scope"]:checked') || {}).value || 'VISIT';
@@ -2150,9 +2198,7 @@
         totalsByMaster[mid].bonus += bonus;
       }
 
-      // Доп. продажи — на уровне визита; в cost_total сервера входят в себестоимость строки.
-      // В предрасчёте учитываем один раз (на первой услуге), иначе ЗП завысится на половину доп. продаж.
-      function linePreviewMastersPool(idx, includeVisitAddons) {
+      function linePreviewMastersPool(idx) {
         const fpPool = lineFixedMastersPool(idx);
         if (fpPool != null) return fpPool;
         let lineAmount = effectiveAmountFromClient(idx);
@@ -2162,8 +2208,9 @@
         const meta = visitLineServiceMeta(idx);
         const kit = lineKitCostParts(idx, meta);
         lineCost += kit.kitCost;
-        if (includeVisitAddons) {
-          lineCost += Math.max(0, numVal('input[name="addon_sales_amount"]'));
+        if (addon.amount > 0 && idx === addon.lineIdx) {
+          if (addon.included) lineCost += addon.amount;
+          else lineAmount += addon.amount;
         }
         lineAmount += kit.kitClient || 0;
         const profitBefore = lineAmount - lineCost;
@@ -2171,12 +2218,11 @@
       }
 
       const previewLineIdxs = visitLineIndicesForPreview();
-      const addonLineIdx = previewLineIdxs.length ? previewLineIdxs[0] : null;
 
       if (scope === 'PER_SERVICE') {
         previewLineIdxs.forEach(function (idx) {
           const mix = lineMixCostAndBonus(idx);
-          const mastersPool = linePreviewMastersPool(idx, idx === addonLineIdx);
+          const mastersPool = linePreviewMastersPool(idx);
           const alloc = readLineAllocationsForPreview(idx);
           if (!alloc) return;
           for (const r of alloc) {
@@ -2188,7 +2234,7 @@
       } else {
         const alloc = readAllocationsForPreview();
         previewLineIdxs.forEach(function (idx) {
-          const mastersPool = linePreviewMastersPool(idx, idx === addonLineIdx);
+          const mastersPool = linePreviewMastersPool(idx);
           if (alloc) {
             for (const r of alloc) {
               addMasterPay(r.mid, mastersPool * (r.pct / 100.0), 0);
@@ -2246,9 +2292,11 @@
           'Комплект: ' + money2(kitTotal) + ' ₽' + (stockKitParts || extraKitParts
             ? ' (' + [stockKitParts ? ('из наличия: ' + stockKitParts) : '', extraKitParts ? ('доп.: ' + extraKitParts) : ''].filter(Boolean).join('; ') + ')'
             : ''),
-          'Доп. продажи: ' + money2(addons) + ' ₽',
           'Амортизация: ' + money2(amortTotal) + ' ₽',
         ];
+        if (addon.included && addon.amount > 0) {
+          parts.splice(2, 0, 'Доп. продажи: ' + money2(addons) + ' ₽');
+        }
         if (fpExpenseTotal > 0) parts.push('Фикс. расход: ' + money2(fpExpenseTotal) + ' ₽');
         if (corrExtraTotal > 0) parts.push('Коррекция (доп.): ' + money2(corrExtraTotal) + ' ₽');
         if (warn) parts.push(warn);
@@ -3515,6 +3563,7 @@
       syncExtraLinesVisibility();
       syncMastersScopeUi();
       syncPerServiceMasterPctInputs();
+      syncVisitPreview();
     }
 
     function nextExtraLineIndex() {

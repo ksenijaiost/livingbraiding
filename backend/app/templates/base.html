@@ -476,6 +476,22 @@
     </div>
 
     <script src="/static/app_shell.js" defer></script>
+    <script>
+      document.addEventListener('click', function (ev) {
+        var btn = ev.target && ev.target.closest ? ev.target.closest('.lb-photo-delete') : null;
+        if (!btn) return;
+        var box = btn.closest('.lb-photo-existing');
+        if (!box) return;
+        var hidden = box.querySelector('input[name^="clear_photo_"]');
+        if (hidden) hidden.value = '1';
+        var note = document.createElement('p');
+        note.className = 'muted';
+        note.style.margin = '0 0 8px';
+        note.textContent = 'Фото будет удалено при сохранении.';
+        box.replaceWith(note);
+        if (hidden) note.insertAdjacentElement('beforebegin', hidden);
+      });
+    </script>
   </body>
 </html>
 
