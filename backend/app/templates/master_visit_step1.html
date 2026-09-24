@@ -145,31 +145,12 @@
       </div>
 
       <h3>Фото (до 3)</h3>
-      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.{% if is_edit %} Загрузите новый файл, чтобы заменить существующее.{% endif %}</p>
-      {% if is_edit and visit_photos %}
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
-          {% for p in visit_photos %}
-            {% if p %}
-              <a href="{{ p }}" class="lb-lightbox" title="Текущее фото">
-                <img src="{{ p }}" alt="Фото" style="max-width:120px; max-height:120px; border-radius:8px; border:1px solid #e5e7eb;" />
-              </a>
-            {% endif %}
-          {% endfor %}
-        </div>
-      {% endif %}
+      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.{% if is_edit %} Новый файл заменяет текущее. «Удалить» убирает фото при сохранении.{% endif %}</p>
+      {% from "partials/photo_slot.html" import photo_slot %}
       <div class="row">
-        <div>
-          <label>Фото 1</label>
-          <input type="file" name="photo_1" accept="image/*,.heic,.heif" />
-        </div>
-        <div>
-          <label>Фото 2</label>
-          <input type="file" name="photo_2" accept="image/*,.heic,.heif" />
-        </div>
-        <div>
-          <label>Фото 3</label>
-          <input type="file" name="photo_3" accept="image/*,.heic,.heif" />
-        </div>
+        {{ photo_slot('photo_1', 'Фото 1', fp.get('photo_1', ''), fp.get('clear_photo_1', '')) }}
+        {{ photo_slot('photo_2', 'Фото 2', fp.get('photo_2', ''), fp.get('clear_photo_2', '')) }}
+        {{ photo_slot('photo_3', 'Фото 3', fp.get('photo_3', ''), fp.get('clear_photo_3', '')) }}
       </div>
       <div class="card" style="margin-top: 12px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Режим мастеров</div>

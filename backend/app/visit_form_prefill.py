@@ -353,6 +353,9 @@ def visit_to_form_prefill(
         fp["same_master_shares_all_services"] = "on"
     if visit.booking_id:
         _set(fp, "booking_id", visit.booking_id)
+    _set(fp, "photo_1", visit.photo_1 or "")
+    _set(fp, "photo_2", visit.photo_2 or "")
+    _set(fp, "photo_3", visit.photo_3 or "")
 
     vm_on_ids: list[int] = []
     vm_pct_str: dict[int, str] = {}
