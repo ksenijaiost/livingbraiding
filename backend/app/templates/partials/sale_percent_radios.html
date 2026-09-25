@@ -1,0 +1,8 @@
+{% set sp = (fp.get('sale_percent') or '')|string %}
+{% for p in sale_percent_options %}
+  <label style="display:inline-block;margin:0 14px 0 0;">
+    <input type="radio" name="sale_percent" value="{{ p }}" {% if loop.first %}required{% endif %} {% if sp == p|string %}checked{% endif %}/> {{ p }}%
+  </label>
+{% else %}
+  <p class="error" style="margin:0;">Нет доступных процентов. Добавьте их в настройках.</p>
+{% endfor %}

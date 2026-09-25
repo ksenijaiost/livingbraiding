@@ -9,6 +9,7 @@ from typing import Any, Sequence
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.sale_percent_options import stored_sale_percent
 from app.time_utils import utcnow_naive
 
 HOURLY_HELP_LEDGER_COMMENT = "Почасовая помощь"
@@ -894,12 +895,9 @@ def _product_sale_kit_line_cost(
 
 
 def product_sale_seller_commission(sale: ProductSale) -> float:
-    """Доля оформившего продажу: сумма с клиента × 10% или 15%."""
-    pct_raw = getattr(sale, "sale_percent", None)
-    if pct_raw is None:
-        return 0.0
-    pct = int(pct_raw)
-    if pct not in (10, 15):
+    """Доля оформившего продажу: сумма с клиента × сохранённый процент."""
+    pct = stored_sale_percent(sale)
+    if pct is None:
         return 0.0
     return money_q2(float(sale.amount_from_client or 0) * (pct / 100.0))
 
@@ -939,7 +937,7 @@ def compute_product_sale_studio_margin(db: Session, sale: ProductSale) -> float:
     """
     amt = float(sale.amount_from_client or 0)
     commission = product_sale_seller_commission(sale)
-    if commission > 0 or (getattr(sale, "sale_percent", None) in (10, 15)):
+    if commission > 0 or stored_sale_percent(sale) is not None:
         if sale.kind == ProductSaleKind.MATERIAL and bool(sale.material_cost_review_pending):
             return 0.0
         cost = product_sale_goods_cost(db, sale)

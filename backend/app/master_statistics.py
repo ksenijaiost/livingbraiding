@@ -30,6 +30,7 @@ from app.db.models import (
     WorkScope,
 )
 from app.operational_report import period_bounds
+from app.sale_percent_options import stored_sale_percent
 from app.hourly_help import (
     hourly_help_rows_from_visit,
     hourly_help_rows_from_work_details,
@@ -264,7 +265,7 @@ def _sale_cost_total(sale: ProductSale) -> float:
     amt = float(sale.amount_from_client or 0)
     commission = product_sale_seller_commission(sale)
     margin = float(sale.studio_margin_amount or 0)
-    if commission > 0 or (getattr(sale, "sale_percent", None) in (10, 15)):
+    if commission > 0 or stored_sale_percent(sale) is not None:
         return money_q2(max(0.0, amt - commission - margin))
     return money_q2(max(0.0, amt - margin))
 

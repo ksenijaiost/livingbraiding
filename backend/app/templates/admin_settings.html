@@ -50,7 +50,7 @@
     <hr class="lb-hr" />
 
     <details {% if work_rates_open %}open{% endif %} class="lb-mt-4">
-      <summary class="lb-summary-strong">Коэффициенты расчётов</summary>
+      <summary class="lb-summary-strong">Расчётные показатели</summary>
       <div class="card lb-card-subtle lb-mt-12">
         <p class="muted lb-mt-0">
           Эти значения используются для новых записей «Работа с товарами». Цены/ЗП/расходы по фиксированным позициям — в прайсе.
@@ -143,8 +143,33 @@
             </div>
           </div>
 
-          <button type="submit">Сохранить коэффициенты</button>
+          <button type="submit">Сохранить показатели</button>
         </form>
+
+        <div class="card lb-card-info lb-mt-16" style="max-width: 36rem;">
+          <div style="font-weight:600; margin-bottom:10px;">Процент с продаж</div>
+          <p class="muted lb-font-12" style="margin:-4px 0 10px;">Варианты в форме продажи. Уже оформленная продажа хранит свой процент.</p>
+          {% if sale_percents_saved %}
+            <div class="card lb-card-ok lb-mb-12">Сохранено.</div>
+          {% endif %}
+          {% if sale_percents_error %}
+            <div class="error lb-mb-12">{{ sale_percents_error }}</div>
+          {% endif %}
+          {% for p in sale_percents %}
+            <form method="post" action="/admin/settings/sale-percents" class="lb-row-center-gap lb-mb-8">
+              <input type="hidden" name="original" value="{{ p }}" />
+              <input name="percent" type="number" step="1" min="1" max="100" required value="{{ p }}" class="lb-input-narrow" />
+              <span class="muted">%</span>
+              <button type="submit" name="action" value="save">Сохранить</button>
+              <button type="submit" name="action" value="delete" class="secondary">Удалить</button>
+            </form>
+          {% endfor %}
+          <form method="post" action="/admin/settings/sale-percents" class="lb-row-center-gap">
+            <input name="percent" type="number" step="1" min="1" max="100" placeholder="Новый" class="lb-input-narrow" />
+            <span class="muted">%</span>
+            <button type="submit" name="action" value="save">Сохранить</button>
+          </form>
+        </div>
       </div>
     </details>
 
