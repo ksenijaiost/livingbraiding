@@ -761,8 +761,18 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
             consult_dur = int(fp.get("consultation_duration_minutes") or "60")
         except ValueError:
             consult_dur = 60
-        if consult_dur != 60 and not parse_bool(fp.get("consultation_duration_on")):
-            fp["consultation_duration_on"] = "1"
+        had_custom = parse_bool(fp.get("consultation_duration_on")) or (
+            str(fp.get("consultation_duration_h") or "").strip() != ""
+            or str(fp.get("consultation_duration_m") or "").strip() != ""
+        )
+        if parse_bool(fp.get("consultation_duration_default")):
+            pass
+        elif consult_dur == CONSULTATION_BOOKING_DEFAULT_DURATION_MINUTES and not had_custom:
+            fp["consultation_duration_default"] = "1"
+            fp.pop("consultation_duration_h", None)
+            fp.pop("consultation_duration_m", None)
+        else:
+            fp.pop("consultation_duration_default", None)
             fp["consultation_duration_h"] = str(consult_dur // 60)
             fp["consultation_duration_m"] = str(consult_dur % 60)
     fp["photo_1"] = b.photo_1 or ""
@@ -877,20 +887,22 @@ CONSULTATION_BOOKING_DEFAULT_DURATION_MINUTES = 60
 
 
 def _consultation_booking_duration_minutes(fp: dict[str, str]) -> int:
-    if parse_bool(fp.get("consultation_duration_on")):
-        try:
-            hh = int(parse_float(str(fp.get("consultation_duration_h") or "0"), min=0.0, field_name="consultation_duration_h"))
-        except ValueError:
-            hh = 0
-        try:
-            mm = int(parse_float(str(fp.get("consultation_duration_m") or "0"), min=0.0, field_name="consultation_duration_m"))
-        except ValueError:
-            mm = 0
-        if mm > 59:
-            mm = 59
-        total = int(hh) * 60 + int(mm)
-        if total > 0:
-            return total
+    """Длительность консультации: галочка «по умолчанию» → 60 мин, иначе часы/минуты с формы."""
+    if parse_bool(fp.get("consultation_duration_default")):
+        return CONSULTATION_BOOKING_DEFAULT_DURATION_MINUTES
+    try:
+        hh = int(parse_float(str(fp.get("consultation_duration_h") or "0"), min=0.0, field_name="consultation_duration_h"))
+    except ValueError:
+        hh = 0
+    try:
+        mm = int(parse_float(str(fp.get("consultation_duration_m") or "0"), min=0.0, field_name="consultation_duration_m"))
+    except ValueError:
+        mm = 0
+    if mm > 59:
+        mm = 59
+    total = int(hh) * 60 + int(mm)
+    if total > 0:
+        return total
     return CONSULTATION_BOOKING_DEFAULT_DURATION_MINUTES
 
 
@@ -1925,6 +1937,7 @@ def _booking_details_from_form(db: Session, fp: dict[str, str]) -> dict[str, obj
             "other_text",
             "comment",
             "consultation_duration_on",
+            "consultation_duration_default",
             "consultation_duration_h",
             "consultation_duration_m",
             "consultation_duration_minutes",
