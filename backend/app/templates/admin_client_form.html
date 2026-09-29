@@ -189,12 +189,53 @@
           <span>Клиент подтверждён (не черновик)</span>
         </label>
         <input type="hidden" name="is_confirmed" value="0" />
+
+        <section class="form-section" style="margin-top:18px;">
+          <h3>Чёрный список</h3>
+          <label class="checkbox-row">
+            <input type="checkbox" name="is_blacklisted" id="is_blacklisted" value="1" {% if form.get('is_blacklisted') == '1' %}checked{% endif %} data-initial="{% if form.get('is_blacklisted') == '1' %}1{% else %}0{% endif %}" />
+            <span>Добавить в ЧС</span>
+          </label>
+          <input type="hidden" name="is_blacklisted" value="0" />
+          <input type="hidden" name="blacklist_change_ack" id="blacklist_change_ack" value="" />
+          <p class="section-hint">Напиши комментарий с причиной. При смене галочки потребуется подтверждение.</p>
+          <div>
+            <label class="label-sub">Комментарий ЧС</label>
+            <textarea name="blacklist_comment" id="blacklist_comment" rows="2" maxlength="2000" placeholder="Причина блокировки">{{ form.get('blacklist_comment', '') }}</textarea>
+          </div>
+        </section>
       {% endif %}
 
       <div class="form-actions">
-        <button type="submit">{{ submit_label }}</button>
+        <button type="submit" id="client-form-submit">{{ submit_label }}</button>
         <a href="/clients" class="muted" style="margin-left: 16px;">Отмена</a>
       </div>
     </form>
   </div>
+  {% if not is_new %}
+  <script>
+    (function () {
+      var form = document.querySelector('.client-form form');
+      var cb = document.getElementById('is_blacklisted');
+      var ack = document.getElementById('blacklist_change_ack');
+      if (!form || !cb || !ack) return;
+      form.addEventListener('submit', function (ev) {
+        var initial = cb.getAttribute('data-initial') === '1';
+        var now = !!cb.checked;
+        if (initial === now) {
+          ack.value = '';
+          return;
+        }
+        var msg = now
+          ? 'Добавить клиента в чёрный список?'
+          : 'Убрать клиента из чёрного списка?';
+        if (!window.confirm(msg)) {
+          ev.preventDefault();
+          return;
+        }
+        ack.value = '1';
+      });
+    })();
+  </script>
+  {% endif %}
 {% endblock %}

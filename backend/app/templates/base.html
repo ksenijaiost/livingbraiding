@@ -222,7 +222,13 @@
               </details>
             {% else %}
               <a href="/">Главная</a>
-              <a href="/clients">Клиенты</a>
+              <details class="nav-dd">
+                <summary>Клиенты</summary>
+                <div class="dd">
+                  <a href="/clients">Список</a>
+                  <a href="/clients/stats">Статистика</a>
+                </div>
+              </details>
 
               <details class="nav-dd">
                 <summary>Записи</summary>
@@ -361,7 +367,11 @@
             <a class="md-link" href="/work-plans" onclick="window.lbToggleMobileNav(false)">План работ</a>
           </details>
         {% else %}
-          <a class="md-link" href="/clients" onclick="window.lbToggleMobileNav(false)"><strong>Клиенты</strong></a>
+          <details>
+            <summary><strong>Клиенты</strong></summary>
+            <a class="md-link" href="/clients" onclick="window.lbToggleMobileNav(false)">Список</a>
+            <a class="md-link" href="/clients/stats" onclick="window.lbToggleMobileNav(false)">Статистика</a>
+          </details>
 
           <details>
             <summary><strong>Записи</strong></summary>

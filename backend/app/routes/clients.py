@@ -38,6 +38,19 @@ from app.db.models import (
     VisitKitUsage,
 )
 from app.client_export import build_all_clients_csv_bytes
+from app.client_status import (
+    CLIENT_STATUS_FILTER_OPTIONS,
+    CLIENT_STATS_CARD_STATUSES,
+    ClientActivity,
+    aggregate_client_status_counts,
+    client_display_status,
+    display_status,
+    filter_client_ids_by_status,
+    load_client_activities,
+    parse_client_status,
+    status_hint,
+    status_label,
+)
 from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.audit import diff_fields, write_audit_rows
@@ -122,6 +135,7 @@ def admin_clients_export_csv_legacy_redirect(request: Request):
 def admin_clients(
     request: Request,
     q: str | None = None,
+    status: str | None = None,
     created: int | None = None,
     updated: int | None = None,
     current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
@@ -129,6 +143,7 @@ def admin_clients(
 ):
     """Список клиентов (админ + мастер; создание/редактирование — только админ)."""
     q_norm = (q or "").strip()
+    status_filter = parse_client_status(status)
     where = []
     if q_norm:
         like = f"%{q_norm}%"
@@ -142,6 +157,12 @@ def admin_clients(
                 Client.other_contact.ilike(like),
             )
         )
+    if status_filter is not None:
+        matched_ids = filter_client_ids_by_status(db, status_filter)
+        if not matched_ids:
+            where.append(Client.id == -1)
+        else:
+            where.append(Client.id.in_(matched_ids))
 
     # One row per visit in the join; sum 1 only for real, non-cancelled visits
     visits_count = func.coalesce(func.sum(case((Visit.is_cancelled.is_(False), 1), else_=0)), 0)
@@ -168,6 +189,7 @@ def admin_clients(
             Client.id.label("id"),
             Client.name.label("name"),
             Client.is_confirmed.label("is_confirmed"),
+            Client.is_blacklisted.label("is_blacklisted"),
             contact_preview,
             visits_count.label("visits_count"),
             has_active_booking,
@@ -176,11 +198,20 @@ def admin_clients(
         .join(Visit, Visit.client_id == Client.id, isouter=True)
         .join(Booking, Booking.client_id == Client.id, isouter=True)
         .where(*where)
-        .group_by(Client.id, Client.name, Client.is_confirmed)
+        .group_by(Client.id, Client.name, Client.is_confirmed, Client.is_blacklisted)
         .order_by(Client.name.asc())
         .limit(500)
     )
     rows = list(db.execute(stmt).mappings().all())
+    acts = load_client_activities(db, [int(r["id"]) for r in rows])
+    enriched = []
+    for r in rows:
+        row = dict(r)
+        act = acts.get(int(row["id"]), ClientActivity(dates=()))
+        st = display_status(is_blacklisted=bool(row.get("is_blacklisted")), activity=act)
+        row["status"] = st
+        row["status_label"] = status_label(st)
+        enriched.append(row)
     created_ok = db.get(Client, created) if created is not None else None
     updated_ok = db.get(Client, updated) if updated is not None else None
     return templates.TemplateResponse(
@@ -188,10 +219,44 @@ def admin_clients(
         _ctx(
             request,
             current_user=current_user,
-            rows=rows,
+            rows=enriched,
             q=q_norm,
+            status_filter=status_filter.value if status_filter else "",
+            status_filter_options=[
+                {"value": s.value, "label": status_label(s), "hint": status_hint(s)}
+                for s in CLIENT_STATUS_FILTER_OPTIONS
+            ],
             created_ok=created_ok,
             updated_ok=updated_ok,
+        ),
+    )
+
+
+@router.get("/stats", response_class=HTMLResponse)
+def admin_clients_stats(
+    request: Request,
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    total = int(db.scalar(select(func.count()).select_from(Client)) or 0)
+    counts = aggregate_client_status_counts(db)
+    cards = [
+        {
+            "status": s.value,
+            "label": status_label(s),
+            "hint": status_hint(s),
+            "count": int(counts.get(s, 0)),
+            "url": f"/clients?status={s.value}",
+        }
+        for s in CLIENT_STATS_CARD_STATUSES
+    ]
+    return templates.TemplateResponse(
+        "admin_clients_stats.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            total_clients=total,
+            cards=cards,
         ),
     )
 
@@ -358,6 +423,8 @@ async def admin_client_edit_post(
                 "source_other",
                 "comment",
                 "is_confirmed",
+                "is_blacklisted",
+                "blacklist_comment",
                 "birth_day",
                 "birth_month",
                 "birth_year",
@@ -367,13 +434,14 @@ async def admin_client_edit_post(
     form_raw = await request.form()
     form: dict[str, str] = {}
     for k in form_raw.keys():
-        if k == "is_confirmed":
+        if k in ("is_confirmed", "is_blacklisted"):
             continue
         v = form_raw.get(k)
         if isinstance(v, UploadFile):
             continue
         form[k] = str(v or "")
     form["is_confirmed"] = "1" if any(parse_bool(v) for v in form_raw.getlist("is_confirmed")) else "0"
+    form["is_blacklisted"] = "1" if any(parse_bool(v) for v in form_raw.getlist("is_blacklisted")) else "0"
     for photo_field in ("photo_1", "photo_2"):
         if not (form.get(photo_field) or "").strip():
             form[photo_field] = getattr(client, photo_field) or ""
@@ -387,12 +455,20 @@ async def admin_client_edit_post(
     source = str(form.get("source") or "")
     source_other = str(form.get("source_other") or "")
     comment = str(form.get("comment") or "")
+    blacklist_comment = str(form.get("blacklist_comment") or "")
+    is_blacklisted = form["is_blacklisted"] == "1"
 
     err: str | None = None
     if not name:
         err = "Укажите имя клиента."
     elif not client_has_any_contact(phone, telegram, vk, instagram, other_contact):
         err = "Нужен хотя бы один контакт: телефон или любая из соцсетей."
+    elif is_blacklisted and not blacklist_comment.strip():
+        err = "Для чёрного списка укажите комментарий с причиной."
+    elif bool(getattr(client, "is_blacklisted", False)) != is_blacklisted and not parse_bool(
+        form_raw.get("blacklist_change_ack")
+    ):
+        err = "Подтвердите изменение статуса чёрного списка."
 
     bd_raw = str(form.get("birth_day") or "")
     bm_raw = str(form.get("birth_month") or "")
@@ -435,6 +511,8 @@ async def admin_client_edit_post(
     client.source_other = strip_or_none(source_other, 200)
     client.comment = strip_or_none(comment) or None
     client.is_confirmed = is_confirmed
+    client.is_blacklisted = is_blacklisted
+    client.blacklist_comment = strip_or_none(blacklist_comment) if is_blacklisted else None
     client.birth_day = birth_day
     client.birth_month = birth_month
     client.birth_year = birth_year
@@ -491,6 +569,8 @@ async def admin_client_edit_post(
             "source_other",
             "comment",
             "is_confirmed",
+            "is_blacklisted",
+            "blacklist_comment",
             "birth_day",
             "birth_month",
             "birth_year",
@@ -641,12 +721,16 @@ def admin_client_detail(
 
     show_admin_actions = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
     display_tz = get_display_timezone(db)
+    client_status = client_display_status(db, client)
     return templates.TemplateResponse(
         "admin_client_detail.html",
         _ctx(
             request,
             current_user=current_user,
             client=client,
+            client_status=client_status,
+            client_status_label=status_label(client_status),
+            client_status_hint=status_hint(client_status),
             audit_rows=audit_rows,
             visit_rows=visit_rows,
             kit_rows=kit_rows,

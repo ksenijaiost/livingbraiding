@@ -25,6 +25,7 @@ from app.booking_audit_labels import (
 
 _logger = logging.getLogger("livingbraiding.bookings")
 from app.auth import AuthUser, require_role
+from app.client_status import is_first_non_cancelled_booking
 from app.client_validation import format_created_by_label, strip_or_none
 from app.consultation_booking import (
     booking_is_open,
@@ -3001,6 +3002,7 @@ def admin_booking_detail(
             request,
             current_user=current_user,
             booking=b,
+            booking_client_is_new=is_first_non_cancelled_booking(db, b),
             kind_label=_booking_kind_label(b.kind.value),
             status_label=_booking_status_label(b.status.value),
             product_kind_label=_product_kind_label(b.planned_product_kind),

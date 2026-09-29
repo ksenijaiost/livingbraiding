@@ -201,6 +201,8 @@ class Client(Base):
     source_other: Mapped[str | None] = mapped_column(String(200), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_blacklisted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    blacklist_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Optional birthday: all null = unknown; day+month without year = "only DM"
     birth_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
     birth_month: Mapped[int | None] = mapped_column(Integer, nullable=True)

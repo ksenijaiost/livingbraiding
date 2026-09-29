@@ -35,6 +35,8 @@ AUDIT_FIELD_LABELS: dict[str, str] = {
     "client_id": "Клиент",
     "is_active": "Активен",
     "is_confirmed": "Подтверждён",
+    "is_blacklisted": "Чёрный список",
+    "blacklist_comment": "Комментарий ЧС",
     "is_voided": "Аннулирован",
     "is_cancelled": "Отменён",
     "voided_at": "Дата аннулирования",
