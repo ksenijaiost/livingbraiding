@@ -928,15 +928,53 @@ def kit_inlay_to_multi(inp: KitInlayFormInput, *, booking_id: int | None = None)
     return MultiServiceVisitInput(header=header, lines=[line])
 
 
+def _enum_audit_val(v: Any) -> str | None:
+    if v is None:
+        return None
+    return str(getattr(v, "value", v))
+
+
+def _service_masters_payload(vs: VisitService) -> list[dict[str, Any]]:
+    return [
+        {
+            "master_id": int(m.master_id or 0),
+            "percent": round(float(m.percent or 0), 2),
+        }
+        for m in sorted(
+            (vs.masters or []),
+            key=lambda x: (int(x.master_id or 0), int(x.id or 0)),
+        )
+    ]
+
+
 def _active_services_summary(visit: Visit) -> str:
     active = [s for s in (visit.services or []) if not s.is_cancelled]
     payload = [
         {
             "id": int(s.id or 0),
             "service_id": int(s.service_id or 0),
+            "service_name": s.service_name or "",
             "sort_order": int(s.sort_order or 0),
             "amount_from_client": round(float(s.amount_from_client or 0), 2),
+            "client_discount_percent": int(s.client_discount_percent or 0),
+            "kanekalon_grams": round(float(s.kanekalon_grams or 0), 2),
+            "kudri_grams": round(float(s.kudri_grams or 0), 2),
+            "mix_source": _enum_audit_val(s.mix_source),
+            "mix_cost_amount": round(float(s.mix_cost_amount or 0), 2),
+            "mix_bonus_master_id": int(s.mix_bonus_master_id) if s.mix_bonus_master_id else None,
+            "mix_bonus_amount": round(float(s.mix_bonus_amount or 0), 2),
+            "materials_cost_total": round(float(s.materials_cost_total or 0), 2),
+            "addons_total": round(float(s.addons_total or 0), 2),
+            "addons_details_json": s.addons_details_json or "",
+            "amortization_amount": round(float(s.amortization_amount or 0), 2),
+            "studio_fund_amount": round(float(s.studio_fund_amount or 0), 2),
+            "cost_total": round(float(s.cost_total or 0), 2),
+            "salon_profit": round(float(s.salon_profit or 0), 2),
+            "masters_pool": round(float(s.masters_pool or 0), 2),
+            "kit_paid_separately": bool(s.kit_paid_separately),
+            "details_json": s.details_json or "",
             "comment": s.comment or "",
+            "masters": _service_masters_payload(s),
         }
         for s in sorted(active, key=lambda x: (int(x.sort_order or 0), int(x.id or 0)))
     ]
@@ -952,6 +990,55 @@ def _visit_masters_summary(visit: Visit) -> str:
         for vm in sorted((visit.masters or []), key=lambda x: (int(x.master_id or 0), int(x.id or 0)))
     ]
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _kit_usages_summary(visit: Visit) -> str:
+    payload = [
+        {
+            "kit_id": int(u.kit_id or 0),
+            "visit_service_id": int(u.visit_service_id) if u.visit_service_id else None,
+            "pieces_used": int(u.pieces_used or 0),
+            "cost_amount": round(float(u.cost_amount or 0), 2),
+            "usage_breakdown_json": u.usage_breakdown_json or "",
+        }
+        for u in sorted(
+            (visit.kit_usages or []),
+            key=lambda x: (int(x.visit_service_id or 0), int(x.kit_id or 0), int(x.id or 0)),
+        )
+    ]
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _visit_audit_snapshot(visit: Visit) -> dict[str, Any]:
+    """Снимок полей визита для аудита редактирования (все существенные изменения)."""
+    return {
+        "client_id": visit.client_id,
+        "client_type": visit.client_type,
+        "booking_id": visit.booking_id,
+        "performed_date": visit.performed_date,
+        "duration_minutes": visit.duration_minutes,
+        "masters_scope": visit.masters_scope,
+        "same_master_shares_all_services": visit.same_master_shares_all_services,
+        "amount_from_client": float(visit.amount_from_client or 0),
+        "cost_total": float(visit.cost_total or 0),
+        "materials_cost_total": float(visit.materials_cost_total or 0),
+        "profit_before_split": float(visit.profit_before_split or 0),
+        "salon_profit": float(visit.salon_profit or 0),
+        "masters_pool": float(visit.masters_pool or 0),
+        "studio_fund_amount": float(visit.studio_fund_amount or 0),
+        "amortization_amount": float(visit.amortization_amount or 0),
+        "addons_total": float(visit.addons_total or 0),
+        "addons_details_json": visit.addons_details_json or "",
+        "hourly_help_total": float(visit.hourly_help_total or 0),
+        "hourly_help_json": visit.hourly_help_json or "",
+        "comment": visit.comment or "",
+        "photo_1": visit.photo_1 or "",
+        "photo_2": visit.photo_2 or "",
+        "photo_3": visit.photo_3 or "",
+        "services_summary": _active_services_summary(visit),
+        "visit_masters_summary": _visit_masters_summary(visit),
+        "kit_usages_summary": _kit_usages_summary(visit),
+    }
 
 
 def _line0_present_in_form(form: Any) -> bool:
@@ -1574,7 +1661,13 @@ def _cancel_visit_service_line(
     ok, err = visit_service_revert_stock(db, vs.id)
     if not ok:
         raise ValueError(err or "Не удалось откатить склад по услуге.")
-    storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, vs.id, editor_user_id)
+    storno_source_accruals(
+        db,
+        PayrollFundSourceKind.VISIT_SERVICE,
+        vs.id,
+        editor_user_id,
+        reason="отмене услуги",
+    )
     vs.is_cancelled = True
     vs.cancelled_at = utcnow_naive()
     vs.cancelled_by_user_id = editor_user_id
@@ -1599,7 +1692,7 @@ def update_visit_with_services(
     visit = db.scalar(
         select(Visit)
         .options(
-            selectinload(Visit.services),
+            selectinload(Visit.services).selectinload(VisitService.masters),
             selectinload(Visit.kit_usages),
             selectinload(Visit.masters),
         )
@@ -1610,21 +1703,7 @@ def update_visit_with_services(
     if visit.is_cancelled:
         raise ValueError("Визит отменён — редактирование невозможно.")
 
-    before = {
-        "client_id": visit.client_id,
-        "client_type": visit.client_type,
-        "performed_date": visit.performed_date,
-        "duration_minutes": visit.duration_minutes,
-        "masters_scope": visit.masters_scope,
-        "same_master_shares_all_services": visit.same_master_shares_all_services,
-        "amount_from_client": float(visit.amount_from_client or 0),
-        "cost_total": float(visit.cost_total or 0),
-        "profit_before_split": float(visit.profit_before_split or 0),
-        "salon_profit": float(visit.salon_profit or 0),
-        "masters_pool": float(visit.masters_pool or 0),
-        "services_summary": _active_services_summary(visit),
-        "visit_masters_summary": _visit_masters_summary(visit),
-    }
+    before = _visit_audit_snapshot(visit)
 
     visit_master_rows, line_master_rows = _validate_lines_masters(db, inp)
     client = _resolve_client(db, inp.header, created_by_label=None)
@@ -1731,7 +1810,13 @@ def update_visit_with_services(
 
     db.flush()
     visit = db.scalar(
-        select(Visit).options(selectinload(Visit.services), selectinload(Visit.masters)).where(Visit.id == visit.id)
+        select(Visit)
+        .options(
+            selectinload(Visit.services).selectinload(VisitService.masters),
+            selectinload(Visit.masters),
+            selectinload(Visit.kit_usages),
+        )
+        .where(Visit.id == visit.id)
     )
     assert visit is not None
     recalc_visit_totals(visit)
@@ -1740,21 +1825,7 @@ def update_visit_with_services(
     persist_visit_addon_sales(visit, inp.addon_sales or _empty_addon_sales())
     _apply_visit_hourly_help(db, visit, inp)
 
-    after = {
-        "client_id": visit.client_id,
-        "client_type": visit.client_type,
-        "performed_date": visit.performed_date,
-        "duration_minutes": visit.duration_minutes,
-        "masters_scope": visit.masters_scope,
-        "same_master_shares_all_services": visit.same_master_shares_all_services,
-        "amount_from_client": float(visit.amount_from_client or 0),
-        "cost_total": float(visit.cost_total or 0),
-        "profit_before_split": float(visit.profit_before_split or 0),
-        "salon_profit": float(visit.salon_profit or 0),
-        "masters_pool": float(visit.masters_pool or 0),
-        "services_summary": _active_services_summary(visit),
-        "visit_masters_summary": _visit_masters_summary(visit),
-    }
+    after = _visit_audit_snapshot(visit)
     write_audit_rows(
         db,
         log_model=VisitAuditLog,

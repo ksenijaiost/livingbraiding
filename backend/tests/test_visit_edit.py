@@ -838,3 +838,122 @@ def test_calendar_master_payroll_includes_per_service_visit(memory_db):
         user_id=master_b.id,
     )
     assert float(pay.get(int(visit.id), 0.0)) > 0.0
+
+
+def _header_for_visit(visit: Visit, master_id: int, client_id: int) -> VisitHeaderInput:
+    return VisitHeaderInput(
+        client_mode="existing",
+        existing_client_id=client_id,
+        draft_name="",
+        draft_phone="",
+        draft_telegram="",
+        draft_vk="",
+        draft_instagram="",
+        draft_other_contact="",
+        client_type=VisitClientType.RETURNING,
+        performed_date=visit.performed_date.date(),
+        duration_minutes=visit.duration_minutes,
+        masters_scope=VisitMastersScope.VISIT,
+        same_master_shares_all_services=False,
+        visit_master_allocations=[(master_id, 100)],
+    )
+
+
+def test_replace_visit_no_double_hourly_help_storno(memory_db):
+    """Повторное сохранение визита не сторнирует почасовую помощь дважды."""
+    from app.hourly_help import HourlyHelpRow
+    from app.payroll_fund import HOURLY_HELP_LEDGER_COMMENT
+
+    db = memory_db
+    master_a, master_b, _admin, svc_ids = _seed_users_and_services(db)
+    client = db.scalar(select(Client).limit(1))
+    visit = _make_visit(db, master_a, client.id, svc_ids[0], amount=4000.0)
+    vs = db.scalar(select(VisitService).where(VisitService.visit_id == visit.id))
+    assert vs is not None
+
+    help_rows = [HourlyHelpRow(master_id=master_b.id, hours=1, minutes=0, amount=300.0)]
+    line = VisitServiceLineInput(
+        service_id=svc_ids[0],
+        amount_from_client=4000.0,
+        client_discount_percent=0,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_source=MixSource.NO_MIX,
+        mix_complexity=None,
+        mix_bonus_master_id=None,
+        amortization_level=None,
+        kit_kind="STOCK",
+        visit_service_id=vs.id,
+    )
+    inp = MultiServiceVisitInput(
+        header=_header_for_visit(visit, master_a.id, client.id),
+        lines=[line],
+        hourly_help=help_rows,
+    )
+    update_visit_with_services(db, visit.id, master_a.id, inp)
+    update_visit_with_services(db, visit.id, master_a.id, inp)
+
+    ledger = list(
+        db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == visit.id,
+                PayrollFundLedger.user_id == master_b.id,
+            )
+        ).all()
+    )
+    net = sum(float(r.amount or 0) for r in ledger)
+    assert net == pytest.approx(300.0)
+
+    help_accruals = [
+        r
+        for r in ledger
+        if r.entry_kind == PayrollFundEntryKind.ACCRUAL
+        and (r.comment or "") == HOURLY_HELP_LEDGER_COMMENT
+    ]
+    for acc in help_accruals:
+        storno_count = sum(1 for r in ledger if r.storno_of_id == acc.id)
+        assert storno_count <= 1
+
+    stornos = [r for r in ledger if r.entry_kind == PayrollFundEntryKind.STORNO]
+    assert stornos
+    assert all("Сторно при редактировании" in (r.comment or "") for r in stornos)
+
+
+def test_update_visit_audits_hourly_help(memory_db):
+    """Аудит редактирования визита фиксирует почасовую помощь."""
+    from app.hourly_help import HourlyHelpRow
+
+    db = memory_db
+    master_a, master_b, _admin, svc_ids = _seed_users_and_services(db)
+    client = db.scalar(select(Client).limit(1))
+    visit = _make_visit(db, master_a, client.id, svc_ids[0], amount=4000.0)
+    vs = db.scalar(select(VisitService).where(VisitService.visit_id == visit.id))
+    assert vs is not None
+
+    line = VisitServiceLineInput(
+        service_id=svc_ids[0],
+        amount_from_client=4000.0,
+        client_discount_percent=0,
+        kanekalon_grams=0,
+        kudri_grams=0,
+        mix_source=MixSource.NO_MIX,
+        mix_complexity=None,
+        mix_bonus_master_id=None,
+        amortization_level=None,
+        kit_kind="STOCK",
+        visit_service_id=vs.id,
+    )
+    update_visit_with_services(
+        db,
+        visit.id,
+        master_a.id,
+        MultiServiceVisitInput(
+            header=_header_for_visit(visit, master_a.id, client.id),
+            lines=[line],
+            hourly_help=[HourlyHelpRow(master_id=master_b.id, hours=1, minutes=0, amount=250.0)],
+        ),
+    )
+    rows = db.scalars(select(VisitAuditLog).where(VisitAuditLog.visit_id == visit.id)).all()
+    names = {r.field_name for r in rows}
+    assert "Почасовая помощь (сумма)" in names or "Почасовая помощь (JSON)" in names

@@ -551,9 +551,17 @@ async def admin_visit_cancel(
         changed_by_user_id=current_user.id,
         changes=diff_fields(before, visit, ("is_cancelled", "cancelled_at", "cancelled_by_user_id")),
     )
-    storno_source_accruals(db, PayrollFundSourceKind.VISIT, visit.id, current_user.id)
+    storno_source_accruals(
+        db, PayrollFundSourceKind.VISIT, visit.id, current_user.id, reason="отмене визита"
+    )
     for vs in db.scalars(select(VisitService).where(VisitService.visit_id == visit.id)).all():
-        storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, vs.id, current_user.id)
+        storno_source_accruals(
+            db,
+            PayrollFundSourceKind.VISIT_SERVICE,
+            vs.id,
+            current_user.id,
+            reason="отмене визита",
+        )
     db.commit()
     return RedirectResponse(url=f"/visits/{visit_id}?msg=cancelled", status_code=303)
 
@@ -594,7 +602,13 @@ async def admin_visit_service_cancel(
     if not ok:
         return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_conflict", status_code=303)
 
-    storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, vs.id, current_user.id)
+    storno_source_accruals(
+        db,
+        PayrollFundSourceKind.VISIT_SERVICE,
+        vs.id,
+        current_user.id,
+        reason="отмене услуги",
+    )
     vs.is_cancelled = True
     vs.cancelled_at = utcnow_naive()
     vs.cancelled_by_user_id = current_user.id
