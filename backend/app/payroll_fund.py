@@ -240,13 +240,47 @@ def _has_accruals_for_source(db: Session, source_kind: PayrollFundSourceKind, so
     )
 
 
+def _ledger_has_storno_of(db: Session, accrual_id: int) -> bool:
+    """Есть ли сторно этой проводки — в БД или ещё не сброшенное в сессии (важно против двойного сторно)."""
+    aid = int(accrual_id)
+    if (
+        db.scalar(
+            select(PayrollFundLedger.id)
+            .where(PayrollFundLedger.storno_of_id == aid)
+            .limit(1)
+        )
+        is not None
+    ):
+        return True
+    for obj in list(db.new) + list(db.dirty):
+        if isinstance(obj, PayrollFundLedger) and obj.storno_of_id is not None and int(obj.storno_of_id) == aid:
+            return True
+    return False
+
+
+def _storno_comment_for_edit(*, reason: str, original_comment: str | None) -> str:
+    base = f"Сторно при {reason.strip()}" if (reason or "").strip() else "Сторно при редактировании"
+    orig = (original_comment or "").strip()
+    if orig:
+        return f"{base}: {orig}"
+    return base
+
+
 def storno_source_accruals(
     db: Session,
     source_kind: PayrollFundSourceKind,
     source_id: int,
     created_by_user_id: int | None,
+    *,
+    reason: str = "редактировании",
+    exclude_comments: frozenset[str] | set[str] | None = None,
 ) -> None:
-    """Сторно всех исходных проводок источника (начисления и расходы), ещё не покрытых сторно."""
+    """Сторно всех исходных проводок источника (начисления и расходы), ещё не покрытых сторно.
+
+    reason — текст после «Сторно при …» (редактировании / отмене визита / …).
+    exclude_comments — не трогать начисления с этими комментариями (их сторнирует отдельный путь).
+    """
+    excl = set(exclude_comments or ())
     accruals = list(
         db.scalars(
             select(PayrollFundLedger)
@@ -259,12 +293,9 @@ def storno_source_accruals(
         ).all()
     )
     for acc in accruals:
-        exists = db.scalar(
-            select(PayrollFundLedger.id)
-            .where(PayrollFundLedger.storno_of_id == acc.id)
-            .limit(1)
-        )
-        if exists is not None:
+        if excl and (acc.comment or "") in excl:
+            continue
+        if _ledger_has_storno_of(db, int(acc.id)):
             continue
         append_ledger(
             db,
@@ -276,9 +307,10 @@ def storno_source_accruals(
             source_id=source_id,
             created_by_user_id=created_by_user_id,
             storno_of_id=acc.id,
-            comment=None,
+            comment=_storno_comment_for_edit(reason=reason, original_comment=acc.comment),
             effective_at=acc.effective_at,
         )
+    db.flush()
 
 
 def _append_visit_service_accruals(
@@ -315,7 +347,13 @@ def replace_visit_service_accruals(
     created_by_user_id: int | None,
 ) -> None:
     """Сторно проводок строки услуги и повторное начисление по актуальным суммам."""
-    storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, visit_service.id, created_by_user_id)
+    storno_source_accruals(
+        db,
+        PayrollFundSourceKind.VISIT_SERVICE,
+        visit_service.id,
+        created_by_user_id,
+        reason="редактировании",
+    )
     if visit.is_cancelled or visit_service.is_cancelled:
         return
     _append_visit_service_accruals(db, visit_service, visit, created_by_user_id)
@@ -326,9 +364,21 @@ def replace_visit_accruals(
     visit: Visit,
     created_by_user_id: int | None,
 ) -> None:
-    """Сторно проводок визита (legacy) и повторное начисление."""
-    storno_source_accruals(db, PayrollFundSourceKind.VISIT, visit.id, created_by_user_id)
+    """Сторно проводок визита (legacy) и повторное начисление.
+
+    Почасовую помощь не сторнируем через VISIT-источник — только через
+    replace_visit_hourly_help_accruals (иначе при отсутствии flush было двойное сторно).
+    """
+    storno_source_accruals(
+        db,
+        PayrollFundSourceKind.VISIT,
+        visit.id,
+        created_by_user_id,
+        reason="редактировании",
+        exclude_comments={HOURLY_HELP_LEDGER_COMMENT},
+    )
     if visit.is_cancelled:
+        storno_visit_hourly_help_accruals(db, int(visit.id), created_by_user_id, reason="отмене визита")
         return
     services = list(
         db.scalars(
@@ -585,6 +635,8 @@ def storno_visit_hourly_help_accruals(
     db: Session,
     visit_id: int,
     created_by_user_id: int | None,
+    *,
+    reason: str = "редактировании",
 ) -> None:
     accruals = list(
         db.scalars(
@@ -598,12 +650,7 @@ def storno_visit_hourly_help_accruals(
         ).all()
     )
     for acc in accruals:
-        already = db.scalar(
-            select(PayrollFundLedger.id)
-            .where(PayrollFundLedger.storno_of_id == acc.id)
-            .limit(1)
-        )
-        if already is not None:
+        if _ledger_has_storno_of(db, int(acc.id)):
             continue
         append_ledger(
             db,
@@ -615,9 +662,10 @@ def storno_visit_hourly_help_accruals(
             source_id=acc.source_id,
             created_by_user_id=created_by_user_id,
             storno_of_id=acc.id,
-            comment=HOURLY_HELP_LEDGER_COMMENT,
+            comment=_storno_comment_for_edit(reason=reason, original_comment=HOURLY_HELP_LEDGER_COMMENT),
             effective_at=acc.effective_at,
         )
+    db.flush()
 
 
 def replace_visit_hourly_help_accruals(
@@ -625,7 +673,7 @@ def replace_visit_hourly_help_accruals(
     visit: Visit,
     created_by_user_id: int | None,
 ) -> None:
-    storno_visit_hourly_help_accruals(db, int(visit.id), created_by_user_id)
+    storno_visit_hourly_help_accruals(db, int(visit.id), created_by_user_id, reason="редактировании")
     if visit.is_cancelled:
         return
     append_visit_hourly_help_ledgers(db, visit, created_by_user_id)
