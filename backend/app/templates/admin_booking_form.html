@@ -155,22 +155,22 @@
           </div>
           <div style="margin-top:12px;">
             <div style="font-weight:600;margin-bottom:6px;">Длительность консультации</div>
-            <p class="muted" style="margin:0 0 6px;font-size:12px;">По умолчанию 1 час.</p>
+            <p class="muted" style="margin:0 0 6px;font-size:12px;">Укажите часы и минуты. Галочка — взять 1 час по умолчанию.</p>
             <label style="display:flex;gap:10px;align-items:center;">
-              <input type="checkbox" name="consultation_duration_on" value="1" id="lbBookingConsultDurOn"
-                {% if fp.get('consultation_duration_on') %}checked{% endif %} />
-              <span>Выбрать время</span>
+              <input type="checkbox" name="consultation_duration_default" value="1" id="lbBookingConsultDurOn"
+                {% if fp.get('consultation_duration_default') %}checked{% endif %} />
+              <span>Время по умолчанию</span>
             </label>
-            <div class="row" id="lbBookingConsultDurInputs" style="margin-top:8px;{% if not fp.get('consultation_duration_on') %}display:none;{% endif %} align-items:flex-end;gap:12px;flex-wrap:wrap;">
+            <div class="row" id="lbBookingConsultDurInputs" style="margin-top:8px;{% if fp.get('consultation_duration_default') %}display:none;{% else %}display:flex;{% endif %} align-items:flex-end;gap:12px;flex-wrap:wrap;">
               <div>
                 <label>Часы</label>
                 <input type="number" name="consultation_duration_h" id="lbBookingConsultDurH" min="0" step="1" style="max-width:7rem;"
-                  value="{{ fp.get('consultation_duration_h','') }}" />
+                  value="{{ fp.get('consultation_duration_h') or '1' }}" />
               </div>
               <div>
                 <label>Минуты</label>
                 <input type="number" name="consultation_duration_m" id="lbBookingConsultDurM" min="0" max="59" step="1" style="max-width:7rem;"
-                  value="{{ fp.get('consultation_duration_m','') }}" />
+                  value="{{ fp.get('consultation_duration_m') or '0' }}" />
               </div>
             </div>
           </div>
@@ -273,9 +273,9 @@
             <div style="font-weight:600; margin-bottom:6px;">Время выполнения первой услуги</div>
             <label style="display:flex; gap:10px; align-items:center;">
               <input type="checkbox" id="lbBookingLine0DurOn" />
-              <span>Выбрать время</span>
+              <span>Время по умолчанию</span>
             </label>
-            <div class="row" id="lbBookingLine0DurInputs" style="margin-top:8px; display:none; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+            <div class="row" id="lbBookingLine0DurInputs" style="margin-top:8px; display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;">
               <div>
                 <label>Часы</label>
                 <input type="number" id="lbBookingLine0DurH" min="0" step="1" style="max-width:7rem;" />
@@ -1164,24 +1164,35 @@
       }
       function applyLineDurationPrefill(idx, prefill, row) {
         var dm = resolvePrefillDurationMinutes(prefill, idx);
-        if (dm <= 0) return;
         var els = lineDurationEls(idx, row);
         if (!els.on || !els.h || !els.m) return;
-        els.on.checked = true;
+        var useDefault = !!(prefill && dm <= 0);
+        els.on.checked = useDefault;
         if (idx === 0) {
           var wrap0 = document.getElementById('lbBookingLine0DurInputs');
-          if (wrap0) wrap0.style.display = '';
+          if (wrap0) wrap0.style.display = useDefault ? 'none' : 'flex';
         } else if (row) {
           var wrap = row.querySelector('[data-line-dur-wrap][data-line-idx="' + idx + '"]') || row.querySelector('[data-line-dur-wrap]');
-          if (wrap) wrap.style.display = '';
+          if (wrap) wrap.style.display = useDefault ? 'none' : '';
         }
-        els.h.value = String(Math.floor(dm / 60));
-        els.m.value = String(dm % 60);
+        if (useDefault) {
+          els.h.value = '';
+          els.m.value = '';
+          return;
+        }
+        if (dm > 0) {
+          els.h.value = String(Math.floor(dm / 60));
+          els.m.value = String(dm % 60);
+        } else {
+          fillLineDefaultDurationIfEmpty(row, idx);
+        }
       }
       function addExtraLine(prefill) {
         if (!linesWrap) return;
         var idx = state.extraLines.length + 1;
         var preDurMin = resolvePrefillDurationMinutes(prefill, idx);
+        var useDefault = !!(prefill && preDurMin <= 0);
+        var showDurMin = preDurMin > 0 ? preDurMin : 0;
         var prefillSid = toInt(prefill && prefill.service_id);
         var preMeta = servicesFlat.find(function (x) { return x.id === prefillSid; }) || null;
         var preCategoryId = preMeta ? toInt(preMeta.category_id) : 0;
@@ -1225,13 +1236,14 @@
             '<input type="time" data-line-time="1" step="60" value="' + esc((prefill && prefill.planned_time) || '') + '" />' +
           '</div>' +
           '<div style="margin-top:8px;">' +
+            '<div style="font-weight:600; margin-bottom:6px;">Время выполнения услуги</div>' +
             '<label style="display:flex; gap:8px; align-items:center;">' +
-              '<input type="checkbox" data-line-dur-on="1" data-line-idx="' + idx + '" ' + (preDurMin > 0 ? 'checked' : '') + ' />' +
-              '<span>Время выполнения услуги</span>' +
+              '<input type="checkbox" data-line-dur-on="1" data-line-idx="' + idx + '" ' + (useDefault ? 'checked' : '') + ' />' +
+              '<span>Время по умолчанию</span>' +
             '</label>' +
-            '<div class="row" data-line-dur-wrap="1" data-line-idx="' + idx + '" style="margin-top:6px; display:' + (preDurMin > 0 ? '' : 'none') + ';">' +
-              '<div><label>Часы</label><input type="number" data-line-dur-h="1" data-line-idx="' + idx + '" min="0" step="1" value="' + esc(String(Math.floor(preDurMin / 60))) + '" style="max-width:7rem;" /></div>' +
-              '<div><label>Минуты</label><input type="number" data-line-dur-m="1" data-line-idx="' + idx + '" min="0" max="59" step="1" value="' + esc(String(preDurMin % 60)) + '" style="max-width:7rem;" /></div>' +
+            '<div class="row" data-line-dur-wrap="1" data-line-idx="' + idx + '" style="margin-top:6px; display:' + (useDefault ? 'none' : '') + ';">' +
+              '<div><label>Часы</label><input type="number" data-line-dur-h="1" data-line-idx="' + idx + '" min="0" step="1" value="' + esc(String(Math.floor(showDurMin / 60))) + '" style="max-width:7rem;" /></div>' +
+              '<div><label>Минуты</label><input type="number" data-line-dur-m="1" data-line-idx="' + idx + '" min="0" max="59" step="1" value="' + esc(String(showDurMin % 60)) + '" style="max-width:7rem;" /></div>' +
             '</div>' +
           '</div>' +
           '<div style="margin-top:8px;">' +
@@ -1284,7 +1296,7 @@
         if (svcSel) svcSel.addEventListener('change', function () {
           renderLineServiceFlags(idx);
           var durOn = box.querySelector('[data-line-dur-on]');
-          if (durOn && durOn.checked) fillLineDefaultDurationIfEmpty(box, idx);
+          if (durOn && !durOn.checked) fillLineDefaultDurationIfEmpty(box, idx);
           syncBookingHiddenLines();
         });
         box.querySelector('[data-line-time]').addEventListener('change', function () {
@@ -1297,8 +1309,8 @@
         if (durOnCb) {
           durOnCb.addEventListener('change', function () {
             var wrap = box.querySelector('[data-line-dur-wrap][data-line-idx="' + idx + '"]') || box.querySelector('[data-line-dur-wrap]');
-            if (wrap) wrap.style.display = durOnCb.checked ? '' : 'none';
-            if (durOnCb.checked) fillLineDefaultDurationIfEmpty(box, idx);
+            if (wrap) wrap.style.display = durOnCb.checked ? 'none' : '';
+            if (!durOnCb.checked) fillLineDefaultDurationIfEmpty(box, idx);
             refreshAvailableMasters();
             syncBookingHiddenLines();
           });
@@ -1566,7 +1578,8 @@
         };
       }
       function readDurationMinutesFromInputs(onEl, hEl, mEl) {
-        if (!onEl || !onEl.checked) return null;
+        // Галочка «Время по умолчанию» — берём оценку из каталога (null).
+        if (onEl && onEl.checked) return null;
         var h = toInt(hEl ? hEl.value : 0);
         var m = toInt(mEl ? mEl.value : 0);
         if (m > 59) m = 59;
@@ -1657,10 +1670,9 @@
         var on = document.getElementById('lbBookingConsultDurOn');
         var h = document.getElementById('lbBookingConsultDurH');
         var m = document.getElementById('lbBookingConsultDurM');
-        if (on && on.checked) {
-          var total = readDurationMinutesFromInputs(on, h, m);
-          return total > 0 ? total : 60;
-        }
+        if (on && on.checked) return 60;
+        var total = toInt(h ? h.value : 0) * 60 + toInt(m ? m.value : 0);
+        if (total > 0) return total;
         return 60;
       }
 
@@ -1831,7 +1843,7 @@
       if (consultDurOn) {
         consultDurOn.addEventListener('change', function () {
           var wrap = document.getElementById('lbBookingConsultDurInputs');
-          if (wrap) wrap.style.display = consultDurOn.checked ? 'flex' : 'none';
+          if (wrap) wrap.style.display = consultDurOn.checked ? 'none' : 'flex';
           refreshAvailableMasters();
         });
       }
@@ -1849,8 +1861,8 @@
       if (line0DurOn) {
         line0DurOn.addEventListener('change', function () {
           var wrap = document.getElementById('lbBookingLine0DurInputs');
-          if (wrap) wrap.style.display = line0DurOn.checked ? '' : 'none';
-          if (line0DurOn.checked) updateDurationBlock();
+          if (wrap) wrap.style.display = line0DurOn.checked ? 'none' : 'flex';
+          if (!line0DurOn.checked) updateDurationBlock();
           refreshAvailableMasters();
         });
       }
@@ -2038,7 +2050,11 @@
         var dmm = defMin % 60;
 
         if (on && on.checked) {
+          hide('lbBookingLine0DurInputs');
+        } else {
           show('lbBookingLine0DurInputs');
+          var wrap = document.getElementById('lbBookingLine0DurInputs');
+          if (wrap) wrap.style.display = 'flex';
           var curH = toInt(h ? h.value : 0);
           var curM = toInt(m ? m.value : 0);
           if (curM > 59) curM = 59;
@@ -2046,8 +2062,6 @@
             if (h) h.value = String(dh);
             if (m) m.value = String(dmm);
           }
-        } else {
-          hide('lbBookingLine0DurInputs');
         }
       }
 

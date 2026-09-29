@@ -164,10 +164,13 @@ def api_calendar_day(
             svc_label = ""
             if b.kind == BookingKind.VISIT:
                 svc_label = booking_service_labels_from_booking(b, prefer_short=True)
+            from app.client_status import is_first_non_cancelled_booking
+
             booking_items.append(
                 {
                     "id": int(b.id),
                     "client": (b.client.name if b.client else "—"),
+                    "client_is_new": is_first_non_cancelled_booking(db, b),
                     "kind": kind_l,
                     "label": f"{kind_l} · {time_l}",
                     "service_label": svc_label,

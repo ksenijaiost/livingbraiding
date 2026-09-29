@@ -66,6 +66,7 @@ from app.payroll_fund import (
     replace_product_sale_studio_accrual,
     storno_source_accruals,
 )
+from app.sale_percent_options import list_sale_percents, parse_sale_percent_input, sale_percent_choices
 from app.db.session import get_db
 from app.visit_edit_policy import (
     edit_window_days,
@@ -311,18 +312,9 @@ def _g_float(form: Any, name: str, default: float = 0.0) -> float:
         return default
 
 
-def _parse_sale_percent(raw: str | None) -> int:
-    """Обязательный процент с продажи: 10 или 15."""
-    s = (raw or "").strip()
-    if not s:
-        raise ValueError("Выберите процент с продажи: 10% или 15%.")
-    try:
-        pct = int(parse_float(s, field_name="sale_percent"))
-    except ValueError as exc:
-        raise ValueError("Выберите процент с продажи: 10% или 15%.") from exc
-    if pct not in (10, 15):
-        raise ValueError("Выберите процент с продажи: 10% или 15%.")
-    return pct
+def _parse_sale_percent(raw: str | None, allowed: list[int]) -> int:
+    """Обязательный процент с продажи из списка в настройках."""
+    return parse_sale_percent_input(raw, allowed)
 
 
 def _apply_sale_studio_margin(db: Session, sale: ProductSale, *, seller_user_id: int, active_role) -> None:
@@ -933,6 +925,7 @@ def _render_new(
             material_services_meta_json=_material_services_meta_json(material_services),
             material_subcategories=material_subcategories,
             material_services_cascade_json=material_services_cascade_json,
+            sale_percent_options=list_sale_percents(db),
         ),
         status_code=400 if error else 200,
     )
@@ -1139,6 +1132,7 @@ def product_sale_edit_form(
                 material_subcategories=sub404,
                 material_services_cascade_json=cascade404,
                 sale_kit_lines_initial=sk_init_404,
+                sale_percent_options=sale_percent_choices(db),
             ),
             status_code=404,
         )
@@ -1162,6 +1156,7 @@ def product_sale_edit_form(
                 material_subcategories=sub403,
                 material_services_cascade_json=cascade403,
                 sale_kit_lines_initial=sk_init_403,
+                sale_percent_options=sale_percent_choices(db, getattr(sale, "sale_percent", None)),
             ),
             status_code=403,
         )
@@ -1227,6 +1222,7 @@ def product_sale_edit_form(
             material_services_cascade_json=material_services_cascade_json,
             sale_kit_lines_initial=sale_kit_lines_initial,
             closed_period_confirm_required=closed_period_confirm_required,
+            sale_percent_options=sale_percent_choices(db, getattr(sale, "sale_percent", None)),
         ),
     )
 
@@ -1315,7 +1311,10 @@ async def product_sale_edit_save(
     if amount_from_client < 0:
         return _render_new(request, current_user, db, error="Сумма с клиента не может быть отрицательной.", fp={})
     try:
-        sale_percent = _parse_sale_percent(_g_str(form, "sale_percent"))
+        sale_percent = _parse_sale_percent(
+            _g_str(form, "sale_percent"),
+            sale_percent_choices(db, getattr(sale, "sale_percent", None)),
+        )
     except ValueError as e:
         return _render_new(request, current_user, db, error=str(e), fp={})
 
@@ -1628,7 +1627,7 @@ async def product_sale_new_post(
         return _fail("Сумма с клиента не может быть отрицательной.")
     client_payment_kind = parse_client_payment_kind(_g_str(form, "client_payment_kind"))
     try:
-        sale_percent = _parse_sale_percent(fp.get("sale_percent"))
+        sale_percent = _parse_sale_percent(fp.get("sale_percent"), sale_percent_choices(db))
     except ValueError as e:
         return _fail(str(e))
 

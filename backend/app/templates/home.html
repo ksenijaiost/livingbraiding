@@ -283,6 +283,7 @@
                 <a href="/bookings/new"><button type="button" class="secondary">Новая бронь</button></a>
               {% endif %}
               <a href="/clients"><button type="button" class="secondary">Клиенты</button></a>
+              <a href="/clients/stats"><button type="button" class="secondary">Статистика клиентов</button></a>
               <a href="/visits"><button type="button" class="secondary">Визиты</button></a>
               <a href="/consultations"><button type="button" class="secondary">Консультации</button></a>
               <a href="/bookings"><button type="button" class="secondary">Брони</button></a>
@@ -608,7 +609,7 @@
                 var details = useServiceLabel ? (it.service_label || it.label || '—') : (it.label || it.kind || '—');
                 h += '<tr>';
                 h += '<td><code>' + esc(it.id) + '</code></td>';
-                h += '<td style=\"max-width:12rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;\">' + esc(it.client || '—') + '</td>';
+                h += '<td style=\"max-width:12rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;\">' + esc(it.client || '—') + (it.client_is_new ? ' <span style=\"color:#2563eb;font-weight:700;font-size:12px;\">новый</span>' : '') + '</td>';
                 h += '<td>' + esc(details) + '</td>';
                 if (isBookings) {
                   h += '<td>' + esc(it.status || '—') + '</td>';

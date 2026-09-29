@@ -74,13 +74,7 @@
         <div class="row" style="margin-top:10px;">
           <div>
             <label style="margin-bottom:6px;">Процент с продажи *</label>
-            {% set sp = (fp.get('sale_percent') or '')|string %}
-            <label style="display:inline-block;margin:0 14px 0 0;">
-              <input type="radio" name="sale_percent" value="10" required {% if sp == '10' %}checked{% endif %}/> 10%
-            </label>
-            <label style="display:inline-block;margin:0 14px 0 0;">
-              <input type="radio" name="sale_percent" value="15" {% if sp == '15' %}checked{% endif %}/> 15%
-            </label>
+            {% include "partials/sale_percent_radios.html" %}
             <p class="muted" style="font-size:12px;margin:6px 0 0;">В личный фонд того, кто оформляет; остаток минус себестоимость — в фонд студии.</p>
           </div>
         </div>

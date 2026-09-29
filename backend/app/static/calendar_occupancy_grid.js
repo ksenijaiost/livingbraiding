@@ -167,7 +167,7 @@
       var parts = ['Бронь #' + String(seg.booking_id || '')];
       var tr = occTimeRange(seg);
       if (tr) parts.push(tr);
-      if (seg.client_name) parts.push(String(seg.client_name));
+      if (seg.client_name) parts.push(String(seg.client_name) + (seg.client_is_new ? ' · новый' : ''));
       if (seg.service_label) parts.push(String(seg.service_label));
       return parts.join(' · ');
     }
@@ -196,7 +196,7 @@
       h += '#' + esc(seg.booking_id);
       if (timeR) h += ' <span style="font-weight:600;opacity:0.88;">' + esc(timeR) + '</span>';
       h += '</div>';
-      if (seg.client_name) h += '<div style="font-size:10px;margin-top:1px;overflow:hidden;text-overflow:ellipsis;">' + esc(seg.client_name) + '</div>';
+      if (seg.client_name) h += '<div style="font-size:10px;margin-top:1px;overflow:hidden;text-overflow:ellipsis;">' + esc(seg.client_name) + (seg.client_is_new ? ' <span style="color:#2563eb;font-weight:700;">новый</span>' : '') + '</div>';
       if (seg.service_label) {
         h += '<div style="font-size:9px;opacity:0.92;line-height:1.2;margin-top:1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;">' + esc(seg.service_label) + '</div>';
       }

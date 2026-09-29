@@ -336,6 +336,14 @@ def _master_visit_step1_template_response(
     if force_visit_multi_masters:
         form_prefill = dict(form_prefill)
         form_prefill["visit_use_multi_masters"] = "on"
+    from app.sale_percent_options import list_sale_percents
+    from app.visit_addon_sales import ensure_addon_form_prefill, seller_users
+
+    ensure_addon_form_prefill(form_prefill)
+    addon_sellers = [
+        {"id": int(u.id), "name": (u.display_name or u.username or "").strip() or f"#{u.id}"}
+        for u in seller_users(db)
+    ]
     return templates.TemplateResponse(
         "master_visit_step1.html",
         _ctx(
@@ -368,6 +376,8 @@ def _master_visit_step1_template_response(
             force_visit_multi_masters=UserRole.MASTER not in current_user.roles,
             default_date=performed,
             form_prefill=form_prefill,
+            addon_sale_percents=list_sale_percents(db),
+            addon_sellers=addon_sellers,
             selected_client=selected_client,
             error=error,
             saved=saved,
@@ -588,6 +598,7 @@ async def master_visit_new_post(
         if has_multi:
             multi = parse_multi_service_visit_form(
                 form,
+                db=db,
                 single_master_default_id=single_master_default_id,
                 booking_id=booking_id_val,
             )
@@ -599,11 +610,15 @@ async def master_visit_new_post(
             )
         else:
             inp = parse_kit_inlay_form(form, single_master_default_id=single_master_default_id)
+            from app.visit_addon_sales import parse_addon_sales_from_form
+
+            addon_sales = parse_addon_sales_from_form(form, service_count=1, db=db)
             visit = save_kit_inlay_visit(
                 db,
                 current_user.id,
                 inp,
                 created_by_label=format_created_by_label(current_user),
+                addon_sales=addon_sales,
             )
         # photos (up to 3)
         try:

@@ -339,6 +339,7 @@ class VisitMasterPayRow:
     hourly_help: float
     total: float
     service_shares: tuple[VisitMasterServiceShare, ...] = ()
+    addon_sales_paren: str = ""
 
     @property
     def breakdown_paren(self) -> str:
@@ -355,6 +356,8 @@ class VisitMasterPayRow:
             parts.append(f"корр. {money_q2(self.correction_bonus):.0f}")
         if self.hourly_help > 0:
             parts.append(f"помощь {money_q2(self.hourly_help):.0f}")
+        if self.addon_sales_paren:
+            parts.append(self.addon_sales_paren)
         return ", ".join(parts)
 
 
@@ -407,6 +410,10 @@ def visit_masters_fund_by_master(visit: Visit) -> dict[int, float]:
             add(int(visit.correction_master_id), float(getattr(visit, "correction_master_amount", 0) or 0))
     for row in hourly_help_rows_from_visit(visit):
         add(int(row.master_id), float(row.amount or 0))
+    from app.visit_addon_sales import addon_seller_commission_by_user
+
+    for mid, amt in addon_seller_commission_by_user(getattr(visit, "addons_details_json", None)).items():
+        add(int(mid), float(amt))
     return by_master
 
 
@@ -481,13 +488,35 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
     for row in hourly_help_rows_from_visit(visit):
         add_help(int(row.master_id), float(row.amount or 0))
 
-    master_ids = sorted(set(pool_by_master) | set(correction_by_master) | set(help_by_master))
+    from app.visit_addon_sales import addon_sales_from_visit_json
+
+    addon_paren_by_master: dict[int, str] = {}
+    addon_total_by_master: dict[int, float] = {}
+    sales = addon_sales_from_visit_json(getattr(visit, "addons_details_json", None))
+    if sales is not None:
+        by_seller_pct: dict[int, dict[int, float]] = {}
+        for line in sales.lines:
+            if line.seller_user_id <= 0 or line.commission <= 0:
+                continue
+            bucket = by_seller_pct.setdefault(int(line.seller_user_id), {})
+            pct = int(line.sale_percent)
+            bucket[pct] = money_q2(bucket.get(pct, 0.0) + line.commission)
+        for mid, by_pct in by_seller_pct.items():
+            names.setdefault(mid, _master_display_name(None, mid, db))
+            parts = [f"{pct}% с продаж {_format_master_pay_amount(amt)} ₽" for pct, amt in sorted(by_pct.items())]
+            addon_paren_by_master[mid] = ", ".join(parts)
+            addon_total_by_master[mid] = money_q2(sum(by_pct.values()))
+
+    master_ids = sorted(
+        set(pool_by_master) | set(correction_by_master) | set(help_by_master) | set(addon_total_by_master)
+    )
     rows: list[VisitMasterPayRow] = []
     for mid in master_ids:
         pool_share = pool_by_master.get(mid, 0.0)
         mix_bonus = 0.0
         correction_bonus = correction_by_master.get(mid, 0.0)
         hourly_help = help_by_master.get(mid, 0.0)
+        addon_total = addon_total_by_master.get(mid, 0.0)
         svc_map = service_pool_by_master.get(mid, {})
         service_shares = tuple(
             VisitMasterServiceShare(service_number=num, amount=svc_map[num])
@@ -502,8 +531,9 @@ def build_visit_master_pay_rows(visit: Visit, db: Session | None = None) -> list
                 mix_bonus=mix_bonus,
                 correction_bonus=correction_bonus,
                 hourly_help=hourly_help,
-                total=money_q2(pool_share + mix_bonus + correction_bonus + hourly_help),
+                total=money_q2(pool_share + mix_bonus + correction_bonus + hourly_help + addon_total),
                 service_shares=service_shares,
+                addon_sales_paren=addon_paren_by_master.get(mid, ""),
             )
         )
     return rows

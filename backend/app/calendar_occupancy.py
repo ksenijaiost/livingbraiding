@@ -74,6 +74,7 @@ class OccupancySegment:
     booking_id: int | None = None
     work_plan_id: int | None = None
     kind: str | None = None
+    client_is_new: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -92,6 +93,8 @@ class OccupancySegment:
             out["work_plan_id"] = self.work_plan_id
         if self.kind:
             out["kind"] = self.kind
+        if self.client_is_new:
+            out["client_is_new"] = True
         return out
 
 
@@ -212,6 +215,14 @@ def build_occupancy_for_day(
     grid_start = hour_from * 60
     grid_end = hour_to * 60
     segments: list[OccupancySegment] = []
+    from app.client_status import is_first_non_cancelled_booking
+
+    new_client_booking_ids: set[int] = set()
+    for b in bookings:
+        if b.status == BookingStatus.CANCELLED:
+            continue
+        if is_first_non_cancelled_booking(db, b):
+            new_client_booking_ids.add(int(b.id))
 
     for b in bookings:
         if b.kind not in (BookingKind.VISIT, BookingKind.CONSULTATION) or b.status == BookingStatus.CANCELLED:
@@ -225,6 +236,7 @@ def build_occupancy_for_day(
         url = f"/bookings/{int(b.id)}"
         booking_master_ids = [int(m.master_id) for m in (b.masters or []) if m.master_id]
         client_name = _booking_client_name(b)
+        client_is_new = int(b.id) in new_client_booking_ids
 
         # Длительность может быть переопределена в details_json.
         # Для VISIT: visit_custom_duration_minutes
@@ -265,6 +277,7 @@ def build_occupancy_for_day(
                         client_name=client_name,
                         service_label="Консультация",
                         kind=kind_s,
+                        client_is_new=client_is_new,
                     )
                 )
             continue
@@ -329,6 +342,7 @@ def build_occupancy_for_day(
                             client_name=client_name,
                             service_label=_segment_service_label(b, svc),
                             kind=kind_s,
+                            client_is_new=client_is_new,
                         )
                     )
             continue
@@ -357,6 +371,7 @@ def build_occupancy_for_day(
                     client_name=client_name,
                     service_label=_segment_service_label(b, svc),
                     kind=kind_s,
+                    client_is_new=client_is_new,
                 )
             )
 

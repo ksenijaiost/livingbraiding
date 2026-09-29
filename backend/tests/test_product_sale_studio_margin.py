@@ -23,6 +23,11 @@ def test_seller_commission_15() -> None:
     assert product_sale_seller_commission(sale) == 300.0  # type: ignore[arg-type]
 
 
+def test_seller_commission_custom_percent() -> None:
+    sale = SimpleNamespace(amount_from_client=1000, sale_percent=5)
+    assert product_sale_seller_commission(sale) == 50.0  # type: ignore[arg-type]
+
+
 def test_seller_commission_absent_legacy() -> None:
     sale = SimpleNamespace(amount_from_client=1000, sale_percent=None)
     assert product_sale_seller_commission(sale) == 0.0  # type: ignore[arg-type]

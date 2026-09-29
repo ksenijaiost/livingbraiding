@@ -222,7 +222,13 @@
               </details>
             {% else %}
               <a href="/">Главная</a>
-              <a href="/clients">Клиенты</a>
+              <details class="nav-dd">
+                <summary>Клиенты</summary>
+                <div class="dd">
+                  <a href="/clients">Список</a>
+                  <a href="/clients/stats">Статистика</a>
+                </div>
+              </details>
 
               <details class="nav-dd">
                 <summary>Записи</summary>
@@ -305,7 +311,7 @@
                     <a href="/admin/payroll-fund">Фонды</a>
                     <a href="/admin/payroll-periods">Периоды</a>
                     <a href="/admin/reports">Отчёты</a>
-                    <a href="/admin/statistics">Статистика</a>
+                    <a href="/admin/statistics">Статистика сотрудника</a>
                     <a href="/admin/catalog">Управление прайсом</a>
                     <a href="/admin/settings">Настройки</a>
                     <a href="/admin/super/purge" style="color:#b91c1c;">Удаление данных</a>
@@ -361,7 +367,11 @@
             <a class="md-link" href="/work-plans" onclick="window.lbToggleMobileNav(false)">План работ</a>
           </details>
         {% else %}
-          <a class="md-link" href="/clients" onclick="window.lbToggleMobileNav(false)"><strong>Клиенты</strong></a>
+          <details>
+            <summary><strong>Клиенты</strong></summary>
+            <a class="md-link" href="/clients" onclick="window.lbToggleMobileNav(false)">Список</a>
+            <a class="md-link" href="/clients/stats" onclick="window.lbToggleMobileNav(false)">Статистика</a>
+          </details>
 
           <details>
             <summary><strong>Записи</strong></summary>
@@ -431,7 +441,7 @@
               <a class="md-link" href="/admin/payroll-fund" onclick="window.lbToggleMobileNav(false)">Фонды</a>
               <a class="md-link" href="/admin/payroll-periods" onclick="window.lbToggleMobileNav(false)">Периоды</a>
               <a class="md-link" href="/admin/reports" onclick="window.lbToggleMobileNav(false)">Отчёты</a>
-              <a class="md-link" href="/admin/statistics" onclick="window.lbToggleMobileNav(false)">Статистика</a>
+              <a class="md-link" href="/admin/statistics" onclick="window.lbToggleMobileNav(false)">Статистика сотрудника</a>
               <a class="md-link" href="/admin/catalog" onclick="window.lbToggleMobileNav(false)">Управление прайсом</a>
               <a class="md-link" href="/admin/settings" onclick="window.lbToggleMobileNav(false)">Настройки</a>
               <a class="md-link" href="/admin/super/purge" style="color:#b91c1c;" onclick="window.lbToggleMobileNav(false)">Удаление данных</a>

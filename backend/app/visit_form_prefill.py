@@ -215,8 +215,8 @@ def _apply_questionnaire_to_fp(fp: dict[str, str], prefix: str, payload: VisitSe
 
 
 def _remember_visit_addon_prefill(fp: dict[str, str], vs: VisitService, *, service_no: int) -> None:
-    """Одна доп. продажа визита: галочка и номер услуги, без привязки к полям строки."""
-    if fp.get("addon_sales_amount"):
+    """Старая одна доп. продажа: галочка и номер услуги, если на визите ещё нет JSON v1."""
+    if fp.get("addon_sales_json") or fp.get("addon_sales_amount"):
         return
     details = addon_details_dict(vs.addons_details_json)
     description = str(details.get("description") or "").strip()
@@ -369,6 +369,12 @@ def visit_to_form_prefill(
         fp["visit_use_multi_masters"] = "on"
     fp["visit_master_on"] = ",".join(str(x) for x in vm_on_ids)
 
+    from app.visit_addon_sales import addon_sales_from_visit_json, legacy_addon_prefill_json
+
+    stored = addon_sales_from_visit_json(visit.addons_details_json)
+    if stored is not None:
+        fp["addon_sales_json"] = visit.addons_details_json or ""
+
     extra_lines: list[dict[str, Any]] = []
     for i, vs in enumerate(active):
         _apply_service_line_to_fp(db, visit, vs, i, fp)
@@ -388,5 +394,18 @@ def visit_to_form_prefill(
     from app.hourly_help import hourly_help_prefill_from_rows, hourly_help_rows_from_visit
 
     fp.update(hourly_help_prefill_from_rows(hourly_help_rows_from_visit(visit)))
+
+    if not fp.get("addon_sales_json") and fp.get("addon_sales_amount"):
+        try:
+            amount = float(fp.get("addon_sales_amount") or 0)
+        except ValueError:
+            amount = 0.0
+        if amount > 0:
+            fp["addon_sales_json"] = legacy_addon_prefill_json(
+                amount=amount,
+                description=str(fp.get("addon_sales_description") or ""),
+                included_in_cost=bool(fp.get("addon_included_in_cost")),
+                service_no=int(fp.get("addon_service_no") or 1),
+            )
 
     return fp, vm_on_ids, vm_pct_str, extra_lines

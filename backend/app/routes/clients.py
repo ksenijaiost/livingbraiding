@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from types import SimpleNamespace
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -38,10 +39,30 @@ from app.db.models import (
     VisitKitUsage,
 )
 from app.client_export import build_all_clients_csv_bytes
+from app.client_retention import (
+    build_retention_report,
+    default_retention_periods,
+    list_active_masters,
+    load_clients_brief,
+)
+from app.client_status import (
+    CLIENT_STATUS_FILTER_OPTIONS,
+    CLIENT_STATS_CARD_STATUSES,
+    ClientActivity,
+    aggregate_client_status_counts,
+    client_display_status,
+    display_status,
+    filter_client_ids_by_status,
+    load_client_activities,
+    parse_client_status,
+    status_hint,
+    status_label,
+)
 from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.audit import diff_fields, write_audit_rows
 from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
+from app.operational_report import list_closed_payroll_periods, resolve_report_dates
 from app.time_utils import utcnow_naive
 from app.ui_visit_display import visit_services_catalog_line
 from app.webui import templates, ctx as _ctx
@@ -122,6 +143,7 @@ def admin_clients_export_csv_legacy_redirect(request: Request):
 def admin_clients(
     request: Request,
     q: str | None = None,
+    status: str | None = None,
     created: int | None = None,
     updated: int | None = None,
     current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
@@ -129,6 +151,7 @@ def admin_clients(
 ):
     """Список клиентов (админ + мастер; создание/редактирование — только админ)."""
     q_norm = (q or "").strip()
+    status_filter = parse_client_status(status)
     where = []
     if q_norm:
         like = f"%{q_norm}%"
@@ -142,6 +165,12 @@ def admin_clients(
                 Client.other_contact.ilike(like),
             )
         )
+    if status_filter is not None:
+        matched_ids = filter_client_ids_by_status(db, status_filter)
+        if not matched_ids:
+            where.append(Client.id == -1)
+        else:
+            where.append(Client.id.in_(matched_ids))
 
     # One row per visit in the join; sum 1 only for real, non-cancelled visits
     visits_count = func.coalesce(func.sum(case((Visit.is_cancelled.is_(False), 1), else_=0)), 0)
@@ -168,6 +197,7 @@ def admin_clients(
             Client.id.label("id"),
             Client.name.label("name"),
             Client.is_confirmed.label("is_confirmed"),
+            Client.is_blacklisted.label("is_blacklisted"),
             contact_preview,
             visits_count.label("visits_count"),
             has_active_booking,
@@ -176,11 +206,20 @@ def admin_clients(
         .join(Visit, Visit.client_id == Client.id, isouter=True)
         .join(Booking, Booking.client_id == Client.id, isouter=True)
         .where(*where)
-        .group_by(Client.id, Client.name, Client.is_confirmed)
+        .group_by(Client.id, Client.name, Client.is_confirmed, Client.is_blacklisted)
         .order_by(Client.name.asc())
         .limit(500)
     )
     rows = list(db.execute(stmt).mappings().all())
+    acts = load_client_activities(db, [int(r["id"]) for r in rows])
+    enriched = []
+    for r in rows:
+        row = dict(r)
+        act = acts.get(int(row["id"]), ClientActivity(dates=()))
+        st = display_status(is_blacklisted=bool(row.get("is_blacklisted")), activity=act)
+        row["status"] = st
+        row["status_label"] = status_label(st)
+        enriched.append(row)
     created_ok = db.get(Client, created) if created is not None else None
     updated_ok = db.get(Client, updated) if updated is not None else None
     return templates.TemplateResponse(
@@ -188,10 +227,303 @@ def admin_clients(
         _ctx(
             request,
             current_user=current_user,
-            rows=rows,
+            rows=enriched,
             q=q_norm,
+            status_filter=status_filter.value if status_filter else "",
+            status_filter_options=[
+                {"value": s.value, "label": status_label(s), "hint": status_hint(s)}
+                for s in CLIENT_STATUS_FILTER_OPTIONS
+            ],
             created_ok=created_ok,
             updated_ok=updated_ok,
+        ),
+    )
+
+
+def _retention_period_params(
+    db: Session,
+    *,
+    report_mode: str | None,
+    period_id: str | None,
+    df: str | None,
+    dt: str | None,
+    default_from: date,
+    default_to: date,
+) -> tuple[date, date, int | None, str]:
+    return resolve_report_dates(
+        db,
+        report_mode=report_mode,
+        period_id_raw=period_id,
+        df_raw=df or default_from.isoformat(),
+        dt_raw=dt or default_to.isoformat(),
+        month_start=default_from,
+        today=default_to,
+    )
+
+
+def _retention_query_base(
+    *,
+    visit_mode: str,
+    visit_period_id: int | None,
+    vdf: date,
+    vdt: date,
+    return_mode: str,
+    return_period_id: int | None,
+    rdf: date,
+    rdt: date,
+    master_id: int | None,
+) -> dict[str, str]:
+    p: dict[str, str] = {
+        "visit_mode": visit_mode,
+        "vdf": vdf.isoformat(),
+        "vdt": vdt.isoformat(),
+        "return_mode": return_mode,
+        "rdf": rdf.isoformat(),
+        "rdt": rdt.isoformat(),
+    }
+    if visit_mode == "payroll_period" and visit_period_id is not None:
+        p["visit_period_id"] = str(visit_period_id)
+    if return_mode == "payroll_period" and return_period_id is not None:
+        p["return_period_id"] = str(return_period_id)
+    if master_id is not None:
+        p["master_id"] = str(master_id)
+    return p
+
+
+@router.get("/stats", response_class=HTMLResponse)
+def admin_clients_stats(
+    request: Request,
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    total = int(db.scalar(select(func.count()).select_from(Client)) or 0)
+    counts = aggregate_client_status_counts(db)
+    cards = [
+        {
+            "status": s.value,
+            "label": status_label(s),
+            "hint": status_hint(s),
+            "count": int(counts.get(s, 0)),
+            "url": f"/clients?status={s.value}",
+        }
+        for s in CLIENT_STATS_CARD_STATUSES
+    ]
+    return templates.TemplateResponse(
+        "admin_clients_stats.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            total_clients=total,
+            cards=cards,
+        ),
+    )
+
+
+@router.get("/stats/retention", response_class=HTMLResponse)
+def admin_clients_retention(
+    request: Request,
+    visit_mode: str | None = Query(None),
+    visit_period_id: str | None = Query(None),
+    vdf: str | None = Query(None),
+    vdt: str | None = Query(None),
+    return_mode: str | None = Query(None),
+    return_period_id: str | None = Query(None),
+    rdf: str | None = Query(None),
+    rdt: str | None = Query(None),
+    master_id: str | None = Query(None),
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    closed_periods = list_closed_payroll_periods(db)
+    def_vf, def_vt, def_rf, def_rt = default_retention_periods()
+    visit_d0, visit_d1, visit_sel_pid, visit_rmode = _retention_period_params(
+        db,
+        report_mode=visit_mode,
+        period_id=visit_period_id,
+        df=vdf,
+        dt=vdt,
+        default_from=def_vf,
+        default_to=def_vt,
+    )
+    ret_d0, ret_d1, ret_sel_pid, ret_rmode = _retention_period_params(
+        db,
+        report_mode=return_mode,
+        period_id=return_period_id,
+        df=rdf,
+        dt=rdt,
+        default_from=def_rf,
+        default_to=def_rt,
+    )
+
+    masters = list_active_masters(db)
+    filter_mid: int | None = None
+    if master_id and str(master_id).strip().isdigit():
+        mid = int(str(master_id).strip())
+        if any(int(m.id) == mid for m in masters):
+            filter_mid = mid
+
+    report = build_retention_report(
+        db,
+        visit_from=visit_d0,
+        visit_to=visit_d1,
+        return_from=ret_d0,
+        return_to=ret_d1,
+        filter_master_id=filter_mid,
+    )
+    q_base = _retention_query_base(
+        visit_mode=visit_rmode,
+        visit_period_id=visit_sel_pid,
+        vdf=visit_d0,
+        vdt=visit_d1,
+        return_mode=ret_rmode,
+        return_period_id=ret_sel_pid,
+        rdf=ret_d0,
+        rdt=ret_d1,
+        master_id=filter_mid,
+    )
+
+    def lost_url(*, cohort: str, row_master_id: int | None = None) -> str:
+        p = dict(q_base)
+        p["cohort"] = cohort
+        if row_master_id is not None:
+            p["master_id"] = str(row_master_id)
+        elif filter_mid is None and "master_id" in p:
+            del p["master_id"]
+        return "/clients/stats/retention/lost?" + urlencode(p)
+
+    master_rows = [
+        {
+            "master_id": row.master_id,
+            "display_name": row.display_name,
+            "slice": row.slice,
+            "lost_total_url": lost_url(cohort="total", row_master_id=row.master_id),
+            "lost_new_url": lost_url(cohort="new", row_master_id=row.master_id),
+        }
+        for row in report.by_master
+    ]
+
+    return templates.TemplateResponse(
+        "admin_clients_retention.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            closed_periods=closed_periods,
+            masters=masters,
+            visit_mode=visit_rmode,
+            visit_period_id=visit_sel_pid,
+            form_vdf=visit_d0.isoformat(),
+            form_vdt=visit_d1.isoformat(),
+            return_mode=ret_rmode,
+            return_period_id=ret_sel_pid,
+            form_rdf=ret_d0.isoformat(),
+            form_rdt=ret_d1.isoformat(),
+            filter_master_id=filter_mid,
+            company=report.company,
+            company_lost_total_url=lost_url(cohort="total", row_master_id=filter_mid),
+            company_lost_new_url=lost_url(cohort="new", row_master_id=filter_mid),
+            master_rows=master_rows,
+            visit_label=f"{visit_d0.isoformat()} — {visit_d1.isoformat()}",
+            return_label=f"{ret_d0.isoformat()} — {ret_d1.isoformat()}",
+        ),
+    )
+
+
+@router.get("/stats/retention/lost", response_class=HTMLResponse)
+def admin_clients_retention_lost(
+    request: Request,
+    cohort: str | None = Query("total"),
+    visit_mode: str | None = Query(None),
+    visit_period_id: str | None = Query(None),
+    vdf: str | None = Query(None),
+    vdt: str | None = Query(None),
+    return_mode: str | None = Query(None),
+    return_period_id: str | None = Query(None),
+    rdf: str | None = Query(None),
+    rdt: str | None = Query(None),
+    master_id: str | None = Query(None),
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    def_vf, def_vt, def_rf, def_rt = default_retention_periods()
+    visit_d0, visit_d1, visit_sel_pid, visit_rmode = _retention_period_params(
+        db,
+        report_mode=visit_mode,
+        period_id=visit_period_id,
+        df=vdf,
+        dt=vdt,
+        default_from=def_vf,
+        default_to=def_vt,
+    )
+    ret_d0, ret_d1, ret_sel_pid, ret_rmode = _retention_period_params(
+        db,
+        report_mode=return_mode,
+        period_id=return_period_id,
+        df=rdf,
+        dt=rdt,
+        default_from=def_rf,
+        default_to=def_rt,
+    )
+    masters = list_active_masters(db)
+    filter_mid: int | None = None
+    master_name: str | None = None
+    if master_id and str(master_id).strip().isdigit():
+        mid = int(str(master_id).strip())
+        for m in masters:
+            if int(m.id) == mid:
+                filter_mid = mid
+                master_name = m.display_name
+                break
+
+    report = build_retention_report(
+        db,
+        visit_from=visit_d0,
+        visit_to=visit_d1,
+        return_from=ret_d0,
+        return_to=ret_d1,
+        filter_master_id=filter_mid,
+    )
+    cohort_key = (cohort or "total").strip().lower()
+    if cohort_key not in ("total", "new"):
+        cohort_key = "total"
+    lost_ids = report.company_lost_new_ids if cohort_key == "new" else report.company_lost_total_ids
+
+    clients = load_clients_brief(db, lost_ids)
+    acts = load_client_activities(db, [int(c.id) for c in clients])
+    rows = []
+    for c in clients:
+        act = acts.get(int(c.id), ClientActivity(dates=()))
+        rows.append(
+            {
+                "id": int(c.id),
+                "name": c.name,
+                "phone": c.phone or "",
+                "last_visit": act.last.isoformat() if act.last else "",
+                "visits": act.count,
+            }
+        )
+
+    back_q = _retention_query_base(
+        visit_mode=visit_rmode,
+        visit_period_id=visit_sel_pid,
+        vdf=visit_d0,
+        vdt=visit_d1,
+        return_mode=ret_rmode,
+        return_period_id=ret_sel_pid,
+        rdf=ret_d0,
+        rdt=ret_d1,
+        master_id=filter_mid,
+    )
+    return templates.TemplateResponse(
+        "admin_clients_retention_lost.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            cohort=cohort_key,
+            master_name=master_name,
+            rows=rows,
+            visit_label=f"{visit_d0.isoformat()} — {visit_d1.isoformat()}",
+            return_label=f"{ret_d0.isoformat()} — {ret_d1.isoformat()}",
+            back_url="/clients/stats/retention?" + urlencode(back_q),
         ),
     )
 
@@ -358,6 +690,8 @@ async def admin_client_edit_post(
                 "source_other",
                 "comment",
                 "is_confirmed",
+                "is_blacklisted",
+                "blacklist_comment",
                 "birth_day",
                 "birth_month",
                 "birth_year",
@@ -367,13 +701,14 @@ async def admin_client_edit_post(
     form_raw = await request.form()
     form: dict[str, str] = {}
     for k in form_raw.keys():
-        if k == "is_confirmed":
+        if k in ("is_confirmed", "is_blacklisted"):
             continue
         v = form_raw.get(k)
         if isinstance(v, UploadFile):
             continue
         form[k] = str(v or "")
     form["is_confirmed"] = "1" if any(parse_bool(v) for v in form_raw.getlist("is_confirmed")) else "0"
+    form["is_blacklisted"] = "1" if any(parse_bool(v) for v in form_raw.getlist("is_blacklisted")) else "0"
     for photo_field in ("photo_1", "photo_2"):
         if not (form.get(photo_field) or "").strip():
             form[photo_field] = getattr(client, photo_field) or ""
@@ -387,12 +722,20 @@ async def admin_client_edit_post(
     source = str(form.get("source") or "")
     source_other = str(form.get("source_other") or "")
     comment = str(form.get("comment") or "")
+    blacklist_comment = str(form.get("blacklist_comment") or "")
+    is_blacklisted = form["is_blacklisted"] == "1"
 
     err: str | None = None
     if not name:
         err = "Укажите имя клиента."
     elif not client_has_any_contact(phone, telegram, vk, instagram, other_contact):
         err = "Нужен хотя бы один контакт: телефон или любая из соцсетей."
+    elif is_blacklisted and not blacklist_comment.strip():
+        err = "Для чёрного списка укажите комментарий с причиной."
+    elif bool(getattr(client, "is_blacklisted", False)) != is_blacklisted and not parse_bool(
+        form_raw.get("blacklist_change_ack")
+    ):
+        err = "Подтвердите изменение статуса чёрного списка."
 
     bd_raw = str(form.get("birth_day") or "")
     bm_raw = str(form.get("birth_month") or "")
@@ -435,6 +778,8 @@ async def admin_client_edit_post(
     client.source_other = strip_or_none(source_other, 200)
     client.comment = strip_or_none(comment) or None
     client.is_confirmed = is_confirmed
+    client.is_blacklisted = is_blacklisted
+    client.blacklist_comment = strip_or_none(blacklist_comment) if is_blacklisted else None
     client.birth_day = birth_day
     client.birth_month = birth_month
     client.birth_year = birth_year
@@ -491,6 +836,8 @@ async def admin_client_edit_post(
             "source_other",
             "comment",
             "is_confirmed",
+            "is_blacklisted",
+            "blacklist_comment",
             "birth_day",
             "birth_month",
             "birth_year",
@@ -641,12 +988,16 @@ def admin_client_detail(
 
     show_admin_actions = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
     display_tz = get_display_timezone(db)
+    client_status = client_display_status(db, client)
     return templates.TemplateResponse(
         "admin_client_detail.html",
         _ctx(
             request,
             current_user=current_user,
             client=client,
+            client_status=client_status,
+            client_status_label=status_label(client_status),
+            client_status_hint=status_hint(client_status),
             audit_rows=audit_rows,
             visit_rows=visit_rows,
             kit_rows=kit_rows,

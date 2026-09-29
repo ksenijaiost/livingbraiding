@@ -135,6 +135,8 @@ def test_consultation_booking_master_required(memory_db) -> None:
 def test_consultation_booking_default_duration(memory_db) -> None:
     assert _consultation_booking_duration_minutes({}) == CONSULTATION_BOOKING_DEFAULT_DURATION_MINUTES
     assert _consultation_booking_duration_minutes({"consultation_duration_on": "1", "consultation_duration_h": "2", "consultation_duration_m": "30"}) == 150
+    assert _consultation_booking_duration_minutes({"consultation_duration_default": "1", "consultation_duration_h": "3", "consultation_duration_m": "0"}) == 60
+    assert _consultation_booking_duration_minutes({"consultation_duration_h": "1", "consultation_duration_m": "15"}) == 75
 
 
 def test_consultation_booking_availability(memory_db) -> None:

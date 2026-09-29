@@ -61,7 +61,7 @@
     {% endif %}
 
     <div class="card lb-card-bg-subtle">
-      <p class="lb-my-6"><strong>Клиент</strong>: <a href="/clients/{{ booking.client.id }}">{{ booking.client.name }}</a></p>
+      <p class="lb-my-6"><strong>Клиент</strong>: <a href="/clients/{{ booking.client.id }}">{{ booking.client.name }}</a>{% if booking_client_is_new %} <span style="color:#2563eb;font-weight:700;font-size:12px;">новый</span>{% endif %}</p>
       <p class="lb-my-6"><strong>Дата и время записи</strong>: {{ format_naive_utc_datetime(booking.planned_date, display_tz) }} ({{ timezone_label(display_tz) }})</p>
       <p class="lb-my-6"><strong>Тип</strong>: {{ kind_label }}</p>
       <p class="lb-my-6"><strong>Статус</strong>: {{ status_label }}</p>
