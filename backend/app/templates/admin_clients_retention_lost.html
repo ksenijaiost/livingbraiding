@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 900px;">
+    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <h2 style="margin-top: 0;">
+        Потерянные клиенты
+        {% if cohort == 'new' %}· новые{% endif %}
+        {% if master_name %}· {{ master_name }}{% endif %}
+      </h2>
+      <a href="{{ back_url }}"><button type="button" class="secondary">К отчёту</button></a>
+    </div>
+    <p class="muted" style="margin-top:0;">
+      Были в периоде посещения ({{ visit_label }}), не вернулись в периоде возврата ({{ return_label }}).
+      {% if master_name %}Учитывается возврат к сотруднику «{{ master_name }}».{% endif %}
+    </p>
+
+    {% if not rows %}
+      <p class="muted">Список пуст.</p>
+    {% else %}
+      <p style="margin-bottom:10px;"><strong>{{ rows|length }}</strong> клиент(ов)</p>
+      <div style="overflow-x:auto;">
+        <table class="table" style="width:100%;">
+          <thead>
+            <tr>
+              <th>Клиент</th>
+              <th>Телефон</th>
+              <th>Визитов</th>
+              <th>Последний</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+              <tr>
+                <td><a href="/clients/{{ r.id }}">{{ r.name }}</a></td>
+                <td>{{ r.phone or '—' }}</td>
+                <td>{{ r.visits }}</td>
+                <td>{{ r.last_visit or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}

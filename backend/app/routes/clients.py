@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from types import SimpleNamespace
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -38,6 +39,12 @@ from app.db.models import (
     VisitKitUsage,
 )
 from app.client_export import build_all_clients_csv_bytes
+from app.client_retention import (
+    build_retention_report,
+    default_retention_periods,
+    list_active_masters,
+    load_clients_brief,
+)
 from app.client_status import (
     CLIENT_STATUS_FILTER_OPTIONS,
     CLIENT_STATS_CARD_STATUSES,
@@ -55,6 +62,7 @@ from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.audit import diff_fields, write_audit_rows
 from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
+from app.operational_report import list_closed_payroll_periods, resolve_report_dates
 from app.time_utils import utcnow_naive
 from app.ui_visit_display import visit_services_catalog_line
 from app.webui import templates, ctx as _ctx
@@ -232,6 +240,56 @@ def admin_clients(
     )
 
 
+def _retention_period_params(
+    db: Session,
+    *,
+    report_mode: str | None,
+    period_id: str | None,
+    df: str | None,
+    dt: str | None,
+    default_from: date,
+    default_to: date,
+) -> tuple[date, date, int | None, str]:
+    return resolve_report_dates(
+        db,
+        report_mode=report_mode,
+        period_id_raw=period_id,
+        df_raw=df or default_from.isoformat(),
+        dt_raw=dt or default_to.isoformat(),
+        month_start=default_from,
+        today=default_to,
+    )
+
+
+def _retention_query_base(
+    *,
+    visit_mode: str,
+    visit_period_id: int | None,
+    vdf: date,
+    vdt: date,
+    return_mode: str,
+    return_period_id: int | None,
+    rdf: date,
+    rdt: date,
+    master_id: int | None,
+) -> dict[str, str]:
+    p: dict[str, str] = {
+        "visit_mode": visit_mode,
+        "vdf": vdf.isoformat(),
+        "vdt": vdt.isoformat(),
+        "return_mode": return_mode,
+        "rdf": rdf.isoformat(),
+        "rdt": rdt.isoformat(),
+    }
+    if visit_mode == "payroll_period" and visit_period_id is not None:
+        p["visit_period_id"] = str(visit_period_id)
+    if return_mode == "payroll_period" and return_period_id is not None:
+        p["return_period_id"] = str(return_period_id)
+    if master_id is not None:
+        p["master_id"] = str(master_id)
+    return p
+
+
 @router.get("/stats", response_class=HTMLResponse)
 def admin_clients_stats(
     request: Request,
@@ -257,6 +315,215 @@ def admin_clients_stats(
             current_user=current_user,
             total_clients=total,
             cards=cards,
+        ),
+    )
+
+
+@router.get("/stats/retention", response_class=HTMLResponse)
+def admin_clients_retention(
+    request: Request,
+    visit_mode: str | None = Query(None),
+    visit_period_id: str | None = Query(None),
+    vdf: str | None = Query(None),
+    vdt: str | None = Query(None),
+    return_mode: str | None = Query(None),
+    return_period_id: str | None = Query(None),
+    rdf: str | None = Query(None),
+    rdt: str | None = Query(None),
+    master_id: str | None = Query(None),
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    closed_periods = list_closed_payroll_periods(db)
+    def_vf, def_vt, def_rf, def_rt = default_retention_periods()
+    visit_d0, visit_d1, visit_sel_pid, visit_rmode = _retention_period_params(
+        db,
+        report_mode=visit_mode,
+        period_id=visit_period_id,
+        df=vdf,
+        dt=vdt,
+        default_from=def_vf,
+        default_to=def_vt,
+    )
+    ret_d0, ret_d1, ret_sel_pid, ret_rmode = _retention_period_params(
+        db,
+        report_mode=return_mode,
+        period_id=return_period_id,
+        df=rdf,
+        dt=rdt,
+        default_from=def_rf,
+        default_to=def_rt,
+    )
+
+    masters = list_active_masters(db)
+    filter_mid: int | None = None
+    if master_id and str(master_id).strip().isdigit():
+        mid = int(str(master_id).strip())
+        if any(int(m.id) == mid for m in masters):
+            filter_mid = mid
+
+    report = build_retention_report(
+        db,
+        visit_from=visit_d0,
+        visit_to=visit_d1,
+        return_from=ret_d0,
+        return_to=ret_d1,
+        filter_master_id=filter_mid,
+    )
+    q_base = _retention_query_base(
+        visit_mode=visit_rmode,
+        visit_period_id=visit_sel_pid,
+        vdf=visit_d0,
+        vdt=visit_d1,
+        return_mode=ret_rmode,
+        return_period_id=ret_sel_pid,
+        rdf=ret_d0,
+        rdt=ret_d1,
+        master_id=filter_mid,
+    )
+
+    def lost_url(*, cohort: str, row_master_id: int | None = None) -> str:
+        p = dict(q_base)
+        p["cohort"] = cohort
+        if row_master_id is not None:
+            p["master_id"] = str(row_master_id)
+        elif filter_mid is None and "master_id" in p:
+            del p["master_id"]
+        return "/clients/stats/retention/lost?" + urlencode(p)
+
+    master_rows = [
+        {
+            "master_id": row.master_id,
+            "display_name": row.display_name,
+            "slice": row.slice,
+            "lost_total_url": lost_url(cohort="total", row_master_id=row.master_id),
+            "lost_new_url": lost_url(cohort="new", row_master_id=row.master_id),
+        }
+        for row in report.by_master
+    ]
+
+    return templates.TemplateResponse(
+        "admin_clients_retention.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            closed_periods=closed_periods,
+            masters=masters,
+            visit_mode=visit_rmode,
+            visit_period_id=visit_sel_pid,
+            form_vdf=visit_d0.isoformat(),
+            form_vdt=visit_d1.isoformat(),
+            return_mode=ret_rmode,
+            return_period_id=ret_sel_pid,
+            form_rdf=ret_d0.isoformat(),
+            form_rdt=ret_d1.isoformat(),
+            filter_master_id=filter_mid,
+            company=report.company,
+            company_lost_total_url=lost_url(cohort="total", row_master_id=filter_mid),
+            company_lost_new_url=lost_url(cohort="new", row_master_id=filter_mid),
+            master_rows=master_rows,
+            visit_label=f"{visit_d0.isoformat()} — {visit_d1.isoformat()}",
+            return_label=f"{ret_d0.isoformat()} — {ret_d1.isoformat()}",
+        ),
+    )
+
+
+@router.get("/stats/retention/lost", response_class=HTMLResponse)
+def admin_clients_retention_lost(
+    request: Request,
+    cohort: str | None = Query("total"),
+    visit_mode: str | None = Query(None),
+    visit_period_id: str | None = Query(None),
+    vdf: str | None = Query(None),
+    vdt: str | None = Query(None),
+    return_mode: str | None = Query(None),
+    return_period_id: str | None = Query(None),
+    rdf: str | None = Query(None),
+    rdt: str | None = Query(None),
+    master_id: str | None = Query(None),
+    current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    def_vf, def_vt, def_rf, def_rt = default_retention_periods()
+    visit_d0, visit_d1, visit_sel_pid, visit_rmode = _retention_period_params(
+        db,
+        report_mode=visit_mode,
+        period_id=visit_period_id,
+        df=vdf,
+        dt=vdt,
+        default_from=def_vf,
+        default_to=def_vt,
+    )
+    ret_d0, ret_d1, ret_sel_pid, ret_rmode = _retention_period_params(
+        db,
+        report_mode=return_mode,
+        period_id=return_period_id,
+        df=rdf,
+        dt=rdt,
+        default_from=def_rf,
+        default_to=def_rt,
+    )
+    masters = list_active_masters(db)
+    filter_mid: int | None = None
+    master_name: str | None = None
+    if master_id and str(master_id).strip().isdigit():
+        mid = int(str(master_id).strip())
+        for m in masters:
+            if int(m.id) == mid:
+                filter_mid = mid
+                master_name = m.display_name
+                break
+
+    report = build_retention_report(
+        db,
+        visit_from=visit_d0,
+        visit_to=visit_d1,
+        return_from=ret_d0,
+        return_to=ret_d1,
+        filter_master_id=filter_mid,
+    )
+    cohort_key = (cohort or "total").strip().lower()
+    if cohort_key not in ("total", "new"):
+        cohort_key = "total"
+    lost_ids = report.company_lost_new_ids if cohort_key == "new" else report.company_lost_total_ids
+
+    clients = load_clients_brief(db, lost_ids)
+    acts = load_client_activities(db, [int(c.id) for c in clients])
+    rows = []
+    for c in clients:
+        act = acts.get(int(c.id), ClientActivity(dates=()))
+        rows.append(
+            {
+                "id": int(c.id),
+                "name": c.name,
+                "phone": c.phone or "",
+                "last_visit": act.last.isoformat() if act.last else "",
+                "visits": act.count,
+            }
+        )
+
+    back_q = _retention_query_base(
+        visit_mode=visit_rmode,
+        visit_period_id=visit_sel_pid,
+        vdf=visit_d0,
+        vdt=visit_d1,
+        return_mode=ret_rmode,
+        return_period_id=ret_sel_pid,
+        rdf=ret_d0,
+        rdt=ret_d1,
+        master_id=filter_mid,
+    )
+    return templates.TemplateResponse(
+        "admin_clients_retention_lost.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            cohort=cohort_key,
+            master_name=master_name,
+            rows=rows,
+            visit_label=f"{visit_d0.isoformat()} — {visit_d1.isoformat()}",
+            return_label=f"{ret_d0.isoformat()} — {ret_d1.isoformat()}",
+            back_url="/clients/stats/retention?" + urlencode(back_q),
         ),
     )
 
