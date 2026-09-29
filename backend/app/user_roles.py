@@ -134,3 +134,39 @@ def select_users_with_any_role(*roles: UserRole) -> Select[tuple[User]]:
         )
         .distinct()
     )
+
+
+# Сотрудники для фондов / статистики (не техспец).
+PAYROLL_STAFF_ROLES: tuple[UserRole, ...] = (
+    UserRole.MASTER,
+    UserRole.HELPER,
+    UserRole.ADMIN,
+    UserRole.ADMIN_SENIOR,
+    UserRole.ADMIN_SUPER,
+)
+
+
+def staff_list_group(roles: list[UserRole]) -> int:
+    """Порядок в списках: 0 мастера → 1 помощники → 2 админы."""
+    s = set(roles)
+    if UserRole.MASTER in s:
+        return 0
+    if UserRole.HELPER in s:
+        return 1
+    return 2
+
+
+def list_payroll_staff_users(db: Session) -> list[User]:
+    """Активные сотрудники (мастер/помощник/админы), без техспеца; сортировка: мастера, помощники, админы, имя."""
+    users = list(
+        db.scalars(select_users_with_any_role(*PAYROLL_STAFF_ROLES).order_by(User.display_name.asc())).all()
+    )
+    roles_by_uid = {int(u.id): get_roles_for_user(db, int(u.id)) for u in users}
+    users.sort(
+        key=lambda u: (
+            staff_list_group(roles_by_uid.get(int(u.id), [])),
+            (u.display_name or "").casefold(),
+            int(u.id),
+        )
+    )
+    return users

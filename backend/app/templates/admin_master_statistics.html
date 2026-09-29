@@ -2,9 +2,9 @@
 {% block content %}
   {% set report_mode = report_mode|default('custom_dates') %}
   <div class="card" style="max-width: 1200px;">
-    <h2 style="margin-top: 0;">Статистика по мастеру</h2>
+    <h2 style="margin-top: 0;">Статистика сотрудника</h2>
     <p class="muted" style="margin-top: -6px;">
-      Выберите мастера и период. Финансовый блок — по журналу фонда ЗП (дата проводки).
+      Выберите сотрудника и период. Финансовый блок — по журналу фонда ЗП (дата проводки).
       Таблицы — по дате события (визит / работа / продажа / консультация).
     </p>
     <p class="muted" style="font-size:12px; margin-top:0;">
@@ -78,11 +78,19 @@
       <input type="hidden" name="date_sort" value="{{ date_sort|default('desc') }}" />
 
       <div style="margin-bottom: 16px;">
-        <label for="ms_master">Мастер</label>
+        <label for="ms_master">Сотрудник</label>
         <select name="master_id" id="ms_master" required style="width: 100%; max-width: 420px;">
-          <option value="">— выберите мастера —</option>
-          {% for m in masters %}
-            <option value="{{ m.id }}" {% if selected_master_id == m.id %}selected{% endif %}>{{ m.display_name }}</option>
+          <option value="">— выберите сотрудника —</option>
+          {% for g in staff_groups|default([]) %}
+            <optgroup label="{{ g.label }}">
+              {% for m in g.users %}
+                <option value="{{ m.id }}" {% if selected_master_id == m.id %}selected{% endif %}>{{ m.display_name }}</option>
+              {% endfor %}
+            </optgroup>
+          {% else %}
+            {% for m in masters %}
+              <option value="{{ m.id }}" {% if selected_master_id == m.id %}selected{% endif %}>{{ m.display_name }}</option>
+            {% endfor %}
           {% endfor %}
         </select>
       </div>
@@ -457,7 +465,7 @@
     {% elif selected_master_id %}
       <p class="muted">Не удалось загрузить статистику.</p>
     {% else %}
-      <p class="muted">Выберите мастера и нажмите «Показать».</p>
+      <p class="muted">Выберите сотрудника и нажмите «Показать».</p>
     {% endif %}
   </div>
 {% endblock %}

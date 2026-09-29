@@ -5,11 +5,10 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, require_role
-from app.db.models import User, UserRole
+from app.db.models import UserRole
 from app.db.session import get_db
 from app.master_statistics import (
     build_master_statistics,
@@ -17,7 +16,7 @@ from app.master_statistics import (
     sort_master_stats_daily_rows,
 )
 from app.operational_report import list_closed_payroll_periods, resolve_report_dates
-from app.user_roles import select_users_with_any_role
+from app.user_roles import get_roles_for_user, list_payroll_staff_users, staff_list_group
 from app.webui import templates, ctx as _ctx
 
 
@@ -48,6 +47,20 @@ def _statistics_page_url(
     return "/admin/statistics?" + urlencode(params)
 
 
+def _staff_select_groups(db: Session, users: list) -> list[dict]:
+    """Группы для select: Мастера / Помощники / Админы."""
+    buckets: list[list] = [[], [], []]
+    labels = ("Мастера", "Помощники", "Админы")
+    for u in users:
+        g = staff_list_group(get_roles_for_user(db, int(u.id)))
+        buckets[g].append(u)
+    return [
+        {"label": labels[i], "users": buckets[i]}
+        for i in range(3)
+        if buckets[i]
+    ]
+
+
 @router.get("/admin/statistics", response_class=HTMLResponse)
 def admin_master_statistics_page(
     request: Request,
@@ -76,18 +89,13 @@ def admin_master_statistics_page(
         today=today,
     )
 
-    masters = list(
-        db.scalars(
-            select_users_with_any_role(UserRole.MASTER)
-            .where(User.is_active.is_(True))
-            .order_by(User.display_name.asc())
-        ).all()
-    )
+    staff_users = list_payroll_staff_users(db)
+    staff_groups = _staff_select_groups(db, staff_users)
 
     selected_master_id: int | None = None
     if master_id and str(master_id).strip().isdigit():
         pid = int(str(master_id).strip())
-        if any(int(m.id) == pid for m in masters):
+        if any(int(u.id) == pid for u in staff_users):
             selected_master_id = pid
 
     stats = None
@@ -123,8 +131,9 @@ def admin_master_statistics_page(
         _ctx(
             request,
             current_user=current_user,
-            title="Статистика",
-            masters=masters,
+            title="Статистика сотрудника",
+            masters=staff_users,
+            staff_groups=staff_groups,
             selected_master_id=selected_master_id,
             closed_periods=closed_periods,
             report_mode=mode,
