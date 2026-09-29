@@ -341,6 +341,7 @@ def replace_visit_accruals(
         for vs in services:
             replace_visit_service_accruals(db, vs, visit, created_by_user_id)
         replace_visit_hourly_help_accruals(db, visit, created_by_user_id)
+        append_visit_addon_sale_ledgers(db, visit, created_by_user_id)
         return
     append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
     studio_amt = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
@@ -357,6 +358,7 @@ def replace_visit_accruals(
             effective_at=visit.performed_date,
         )
     replace_visit_hourly_help_accruals(db, visit, created_by_user_id)
+    append_visit_addon_sale_ledgers(db, visit, created_by_user_id)
 
 
 def post_visit_service_accruals(
@@ -460,6 +462,77 @@ def post_visit_accruals(db: Session, visit: Visit, created_by_user_id: int | Non
             append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
 
     post_visit_hourly_help_accruals(db, visit, created_by_user_id)
+    post_visit_addon_sale_accruals(db, visit, created_by_user_id)
+
+
+def append_visit_addon_sale_ledgers(db: Session, visit: Visit, created_by_user_id: int | None) -> None:
+    from app.visit_addon_sales import (
+        ADDON_SALE_SELLER_COMMENT,
+        ADDON_SALE_STUDIO_COMMENT,
+        addon_sales_from_visit_json,
+    )
+
+    sales = addon_sales_from_visit_json(getattr(visit, "addons_details_json", None))
+    if sales is None or visit.is_cancelled:
+        return
+    for line in sales.lines:
+        if line.commission > 0 and line.seller_user_id > 0:
+            append_ledger(
+                db,
+                entry_kind=PayrollFundEntryKind.ACCRUAL,
+                side=PayrollFundSide.MASTER,
+                user_id=int(line.seller_user_id),
+                amount=line.commission,
+                source_kind=PayrollFundSourceKind.VISIT,
+                source_id=visit.id,
+                created_by_user_id=created_by_user_id,
+                comment=f"{ADDON_SALE_SELLER_COMMENT} {int(line.sale_percent)}%",
+                effective_at=visit.performed_date,
+            )
+    studio = money_q2(sum(line.studio_amount for line in sales.lines))
+    if studio > 0:
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.STUDIO,
+            user_id=None,
+            amount=studio,
+            source_kind=PayrollFundSourceKind.VISIT,
+            source_id=visit.id,
+            created_by_user_id=created_by_user_id,
+            comment=ADDON_SALE_STUDIO_COMMENT,
+            effective_at=visit.performed_date,
+        )
+
+
+def _has_visit_addon_sale_accruals(db: Session, visit_id: int) -> bool:
+    from app.visit_addon_sales import ADDON_SALE_SELLER_COMMENT, ADDON_SALE_STUDIO_COMMENT
+
+    return (
+        db.scalar(
+            select(PayrollFundLedger.id)
+            .where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == visit_id,
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+                PayrollFundLedger.storno_of_id.is_(None),
+                or_(
+                    PayrollFundLedger.comment == ADDON_SALE_STUDIO_COMMENT,
+                    PayrollFundLedger.comment.like(ADDON_SALE_SELLER_COMMENT + "%"),
+                ),
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
+def post_visit_addon_sale_accruals(db: Session, visit: Visit, created_by_user_id: int | None) -> None:
+    if visit.is_cancelled:
+        return
+    if _has_visit_addon_sale_accruals(db, int(visit.id)):
+        return
+    append_visit_addon_sale_ledgers(db, visit, created_by_user_id)
 
 
 def _has_visit_hourly_help_accruals(db: Session, visit_id: int) -> bool:

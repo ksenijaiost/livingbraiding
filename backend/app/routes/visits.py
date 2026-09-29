@@ -239,6 +239,11 @@ def admin_visit_detail(
     visit_techspec_closed_override = bool(
         visit_closed_period and user_may_edit_closed_payroll_period(current_user)
     )
+    from app.visit_addon_sales import addon_card_rows, addon_price_total, addon_seller_commission_by_user
+
+    visit_addon_rows = addon_card_rows(db, visit.addons_details_json)
+    visit_addon_price_total = addon_price_total(visit.addons_details_json)
+    visit_addon_seller_total = round(sum(addon_seller_commission_by_user(visit.addons_details_json).values()), 2)
     visit_master_pay_rows = build_visit_master_pay_rows(visit, db)
     visit_cost_breakdown_rows = build_visit_cost_breakdown_rows(visit)
     visit_masters_lines = build_visit_masters_lines(visit, db)
@@ -274,6 +279,9 @@ def admin_visit_detail(
             visit_super_priv=visit_super_priv,
             visit_techspec_closed_override=visit_techspec_closed_override,
             visit_master_pay_rows=visit_master_pay_rows,
+            visit_addon_rows=visit_addon_rows,
+            visit_addon_price_total=visit_addon_price_total,
+            visit_addon_seller_total=visit_addon_seller_total,
             visit_cost_breakdown_rows=visit_cost_breakdown_rows,
             visit_masters_lines=visit_masters_lines,
             hourly_help_rows=hourly_help_rows,
@@ -438,6 +446,7 @@ async def admin_visit_edit_post(
         require_closed_period_ack(needed=closed_needed, form_ack=form.get("closed_period_ack"))
         multi = parse_multi_service_visit_form(
             form,
+            db=db,
             booking_id=visit.booking_id,
             # На редактировании «себя» подставлять нельзя: админ без роли мастера
             # обязан явно выбрать мастеров; мастер тоже сохраняет отмеченных из формы.

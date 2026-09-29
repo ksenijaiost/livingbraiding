@@ -212,6 +212,7 @@ class MultiServiceVisitInput:
     header: VisitHeaderInput
     lines: list[VisitServiceLineInput]
     hourly_help: list[HourlyHelpRow] = field(default_factory=list)
+    addon_sales: Any = None
 
 
 @dataclass
@@ -853,6 +854,9 @@ def save_visit_with_services(
     )
     assert visit is not None
     recalc_visit_totals(visit)
+    from app.visit_addon_sales import persist_visit_addon_sales
+
+    persist_visit_addon_sales(visit, inp.addon_sales or _empty_addon_sales())
     _apply_visit_hourly_help(db, visit, inp)
     post_visit_accruals(db, visit, visit.created_by_user_id)
     db.commit()
@@ -1260,6 +1264,12 @@ def addon_revenue_amount(raw: str | None) -> float:
         return 0.0
 
 
+def _empty_addon_sales() -> Any:
+    from app.visit_addon_sales import AddonSalesInput
+
+    return AddonSalesInput()
+
+
 def apply_visit_addon_sales(
     lines: list[VisitServiceLineInput],
     *,
@@ -1291,6 +1301,7 @@ def parse_multi_service_visit_form(
     *,
     single_master_default_id: int | None = None,
     booking_id: int | None = None,
+    db: Session | None = None,
 ) -> MultiServiceVisitInput:
     g = _prefix_g(form, "")
 
@@ -1353,17 +1364,12 @@ def parse_multi_service_visit_form(
     )
 
     lines = [_parse_line_from_form(form, i) for i in indices]
-    addon_raw = g("addon_sales_amount", "").strip()
-    addon_amount = parse_float(addon_raw or "0", field_name="addon_sales_amount") if addon_raw else 0.0
-    apply_visit_addon_sales(
-        lines,
-        amount=addon_amount,
-        description=g("addon_sales_description", ""),
-        included_in_cost=g_bool("addon_included_in_cost"),
-        service_no=g_int("addon_service_no", 0),
-    )
+    from app.visit_addon_sales import apply_addon_sales_to_lines, parse_addon_sales_from_form
+
+    addon_sales = parse_addon_sales_from_form(form, service_count=len(lines), db=db)
+    apply_addon_sales_to_lines(lines, addon_sales)
     hourly_help = parse_hourly_help_from_form(form)
-    return MultiServiceVisitInput(header=header, lines=lines, hourly_help=hourly_help)
+    return MultiServiceVisitInput(header=header, lines=lines, hourly_help=hourly_help, addon_sales=addon_sales)
 
 
 def _apply_visit_hourly_help(
@@ -1729,6 +1735,9 @@ def update_visit_with_services(
     )
     assert visit is not None
     recalc_visit_totals(visit)
+    from app.visit_addon_sales import persist_visit_addon_sales
+
+    persist_visit_addon_sales(visit, inp.addon_sales or _empty_addon_sales())
     _apply_visit_hourly_help(db, visit, inp)
 
     after = {

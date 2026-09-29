@@ -1312,14 +1312,20 @@ def save_kit_inlay_visit(
     inp: KitInlayFormInput,
     *,
     created_by_label: str | None = None,
+    addon_sales: Any = None,
 ) -> Visit:
     """Визит с выбранным клиентом или новым черновиком; услуга, склад STOCK, расчёт."""
+    from app.visit_addon_sales import apply_addon_sales_to_lines
     from app.visit_multi_service import kit_inlay_to_multi, save_visit_with_services
 
+    multi = kit_inlay_to_multi(inp)
+    if addon_sales is not None:
+        apply_addon_sales_to_lines(multi.lines, addon_sales)
+        multi.addon_sales = addon_sales
     return save_visit_with_services(
         db,
         master_id,
-        kit_inlay_to_multi(inp),
+        multi,
         created_by_label=created_by_label,
     )
 

@@ -448,7 +448,12 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
     for visit in visits:
         svc_lines = _master_services_on_visit(visit, master_id)
         help_pay = master_hourly_help_pay_from_visit(visit, master_id)
-        if svc_lines:
+        from app.visit_addon_sales import addon_seller_commission_by_user
+
+        addon_pay = float(
+            addon_seller_commission_by_user(getattr(visit, "addons_details_json", None)).get(master_id, 0.0)
+        )
+        if svc_lines or addon_pay > 0:
             visits_out.append(
                 MasterStatsVisitRow(
                     visit_id=int(visit.id),
@@ -463,7 +468,7 @@ def build_master_statistics(db: Session, master_id: int, d0: date, d1: date) -> 
                     cost_total=money_q2(sum(float(vs.cost_total or 0) for vs in svc_lines)),
                     masters_pay_total=_visit_masters_pay_total(visit),
                     master_payroll=money_q2(
-                        sum(_master_visit_service_pay(visit, vs, master_id) for vs in svc_lines)
+                        sum(_master_visit_service_pay(visit, vs, master_id) for vs in svc_lines) + addon_pay
                     ),
                     studio_payroll=money_q2(sum(_visit_studio_pay(vs) for vs in svc_lines)),
                 )
