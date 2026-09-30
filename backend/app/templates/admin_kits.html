@@ -54,6 +54,7 @@
       {% endif %}
     </p>
 
+    <div class="lb-table-wrap">
     <table>
       <thead>
         <tr>
@@ -188,10 +189,12 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
 
     {% if inactive_kit_rows %}
       <h3 style="margin:24px 0 10px;">Неактуальные комплекты</h3>
       <p class="muted" style="font-size:13px;margin:0 0 12px;">Снята галочка «Актуален» в карточке — в выборе «из наличия» не показываются. Здесь можно удалить карточку из базы (если нет визитов и резервов).</p>
+      <div class="lb-table-wrap">
       <table>
         <thead>
           <tr>
@@ -222,6 +225,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% endif %}
   </div>
 

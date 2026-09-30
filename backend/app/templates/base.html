@@ -4,15 +4,53 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title or "Живем Плетем" }}</title>
-    <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="/static/app.css?v=189" />
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; font-size: 14px; margin: 0; background: #f6f7fb; color: #111; }
-      header { background: #111827; color: #fff; padding: 12px 16px; display:flex; align-items:center; justify-content: space-between; }
+      /* 1.89: не даём широким таблицам/полям раздувать страницу на мобиле */
+      html { max-width: 100%; }
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        font-size: 14px;
+        margin: 0;
+        background: #f6f7fb;
+        color: #111;
+        max-width: 100%;
+      }
+      header {
+        background: #111827;
+        color: #fff;
+        padding: 12px 16px;
+        display:flex;
+        align-items:center;
+        justify-content: space-between;
+        gap: 10px;
+        max-width: 100%;
+        box-sizing: border-box;
+      }
       a { color: inherit; }
-      .container { max-width: 980px; margin: 0 auto; padding: 16px; }
-      .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; }
+      .container {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 16px;
+        width: 100%;
+        box-sizing: border-box;
+        min-width: 0;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 16px;
+        max-width: 100%;
+        box-sizing: border-box;
+        min-width: 0;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
       .row { display:flex; gap: 12px; flex-wrap: wrap; }
-      .row > * { flex: 1; min-width: 260px; }
+      .row > * { flex: 1 1 260px; min-width: 0; max-width: 100%; }
+      img, video, iframe, svg { max-width: 100%; height: auto; }
+      pre { max-width: 100%; overflow-x: auto; }
       .muted { color: #6b7280; }
       /* Шрифт как у страницы (не monospace у textarea); 14px — без «надувания» от дефолтных 16px */
       input, select, textarea {
@@ -54,7 +92,24 @@
         outline-offset: 1px;
       }
       table { width:100%; border-collapse: collapse; }
-      th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 14px; }
+      th, td {
+        border-bottom: 1px solid #e5e7eb;
+        padding: 8px;
+        text-align: left;
+        font-size: 14px;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        vertical-align: top;
+      }
+      th.lb-nowrap, td.lb-nowrap, .lb-nowrap {
+        overflow-wrap: normal;
+        word-break: normal;
+      }
+      @media (max-width: 600px) {
+        .container { padding: 12px; }
+        .row > * { flex: 1 1 100%; min-width: 0; }
+        th, td { padding: 8px 6px; font-size: 13px; }
+      }
       /* Чередование строк в таблицах списков */
       table tbody tr:nth-child(odd) { background-color: #ffffff; }
       table tbody tr:nth-child(even) { background-color: #f8fafc; }
