@@ -16,7 +16,7 @@
         flex-wrap:wrap;
         gap:10px 16px;
         align-items:center;
-        margin-top:10px;
+        margin:0;
       }
       .ms-display-mode label {
         display:flex;
@@ -24,6 +24,33 @@
         gap:6px;
         cursor:pointer;
         margin:0;
+        white-space:nowrap;
+      }
+      .ms-period-fields {
+        margin-bottom: 12px;
+        max-width: 100%;
+      }
+      .ms-period-select {
+        width: 100%;
+        max-width: 22rem;
+      }
+      .ms-date-field {
+        flex: 0 1 11rem !important;
+        max-width: 11rem;
+        min-width: 0 !important;
+      }
+      .ms-dates-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: flex-end;
+      }
+      .ms-actions-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 16px;
+        align-items: center;
+        margin-top: 4px;
       }
       .ms-day-events {
         margin:0;
@@ -35,6 +62,20 @@
       @media (max-width: 700px) {
         .ms-stats-table {
           font-size:12px;
+        }
+        .ms-period-select {
+          max-width: 100%;
+        }
+        .ms-date-field {
+          flex: 1 1 9rem !important;
+          max-width: 100%;
+        }
+        .ms-actions-row {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .ms-actions-row button {
+          width: 100%;
         }
       }
       .ms-date-sort {
@@ -107,47 +148,35 @@
         </label>
       </div>
 
-      <div id="ms_payroll_period_block" class="row" style="align-items: flex-end;">
-        <div style="flex: 1; min-width: 260px;">
-          <label for="ms_period">Закрытый период</label>
-          <select name="period_id" id="ms_period" style="width: 100%;">
-            <option value="">— не выбран —</option>
-            {% for p in closed_periods %}
-              <option value="{{ p.id }}" {% if selected_period_id == p.id %}selected{% endif %}>
-                {{ p.date_from.strftime('%Y-%m-%d') }} — {{ p.date_to.strftime('%Y-%m-%d') }}
-              </option>
-            {% endfor %}
-          </select>
-        </div>
-        <div style="flex: 0 1 auto; min-width: 280px;">
-          <div class="ms-display-mode">
-            <label><input type="radio" name="display_mode" value="categories" {% if display_mode != 'all' %}checked{% endif %} /> По категориям</label>
-            <label><input type="radio" name="display_mode" value="all" {% if display_mode == 'all' %}checked{% endif %} /> Общий список</label>
-          </div>
-        </div>
-        <div style="flex: 0;">
-          <button type="submit" id="ms_btn_period">Показать</button>
-        </div>
+      <div id="ms_payroll_period_block" class="ms-period-fields">
+        <label for="ms_period">Закрытый период</label>
+        <select name="period_id" id="ms_period" class="ms-period-select">
+          <option value="">— не выбран —</option>
+          {% for p in closed_periods %}
+            <option value="{{ p.id }}" {% if selected_period_id == p.id %}selected{% endif %}>
+              {{ p.date_from.strftime('%Y-%m-%d') }} — {{ p.date_to.strftime('%Y-%m-%d') }}
+            </option>
+          {% endfor %}
+        </select>
       </div>
 
-      <div id="ms_custom_dates_block" class="row" style="align-items: flex-end; display: none;">
-        <div style="flex: 1; min-width: 140px;">
+      <div id="ms_custom_dates_block" class="ms-dates-row ms-period-fields" style="display: none;">
+        <div class="ms-date-field">
           <label for="ms_df">С даты</label>
           <input type="date" name="df" id="ms_df" value="{{ form_df }}" />
         </div>
-        <div style="flex: 1; min-width: 140px;">
+        <div class="ms-date-field">
           <label for="ms_dt">По дату</label>
           <input type="date" name="dt" id="ms_dt" value="{{ form_dt }}" />
         </div>
-        <div style="flex: 0 1 auto; min-width: 280px;">
-          <div class="ms-display-mode">
-            <label><input type="radio" name="display_mode" value="categories" {% if display_mode != 'all' %}checked{% endif %} /> По категориям</label>
-            <label><input type="radio" name="display_mode" value="all" {% if display_mode == 'all' %}checked{% endif %} /> Общий список</label>
-          </div>
+      </div>
+
+      <div class="ms-actions-row">
+        <div class="ms-display-mode">
+          <label><input type="radio" name="display_mode" value="categories" {% if display_mode != 'all' %}checked{% endif %} /> По категориям</label>
+          <label><input type="radio" name="display_mode" value="all" {% if display_mode == 'all' %}checked{% endif %} /> Общий список</label>
         </div>
-        <div style="flex: 0;">
-          <button type="submit" id="ms_btn_dates">Показать</button>
-        </div>
+        <button type="submit" id="ms_btn_show">Показать</button>
       </div>
     </form>
 
@@ -161,8 +190,6 @@
         var sel = document.getElementById("ms_period");
         var df = document.getElementById("ms_df");
         var dt = document.getElementById("ms_dt");
-        var btnP = document.getElementById("ms_btn_period");
-        var btnD = document.getElementById("ms_btn_dates");
 
         function isPeriodMode() {
           return rPeriod && rPeriod.checked;
@@ -176,8 +203,6 @@
           if (sel) sel.disabled = !pm;
           if (df) df.disabled = pm;
           if (dt) dt.disabled = pm;
-          if (btnP) btnP.style.display = pm ? "" : "none";
-          if (btnD) btnD.style.display = pm ? "none" : "";
         }
 
         if (rPeriod) rPeriod.addEventListener("change", sync);
