@@ -210,6 +210,27 @@
 .lb-btn-wrap-center {
   white-space: normal;
   text-align: center;
+  line-height: 1.25;
+}
+
+/* Кнопки резерва в списке комплектов: узкая колонка, перенос только по словам */
+.lb-kit-reserve-btn {
+  white-space: normal;
+  text-align: center;
+  line-height: 1.25;
+  min-width: 6.75rem;
+  max-width: 7.5rem;
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+.lb-kit-actions {
+  width: 7.5rem;
+}
+.lb-kit-discount-row {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: nowrap;
 }
 
 .lb-hidden { display: none; }

@@ -62,7 +62,7 @@
             data-user-id=""
             data-client-name=""
           >
-            {% if kit.is_reserved %}Добавить резерв{% else %}Зарезервировать{% endif %}
+            {% if kit.is_reserved %}Добавить резерв{% else %}Создать резерв{% endif %}
           </button>
         {% elif kit.pieces_available > 0 and slots_full %}
           <button
@@ -71,7 +71,7 @@
             aria-disabled="true"
             title="Достигнут лимит резервов ({{ kit_max_reserves }}). Снимите резерв кнопкой «Снять» или в таблице ниже."
           >
-            {% if kit.is_reserved %}Добавить резерв (лимит){% else %}Зарезервировать (лимит){% endif %}
+            {% if kit.is_reserved %}Добавить резерв (лимит){% else %}Создать резерв (лимит){% endif %}
           </button>
         {% endif %}
         {% if kit.is_reserved and is_admin_kit %}
