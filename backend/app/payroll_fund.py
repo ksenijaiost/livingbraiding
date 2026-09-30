@@ -13,6 +13,8 @@ from app.sale_percent_options import stored_sale_percent
 from app.time_utils import utcnow_naive
 
 HOURLY_HELP_LEDGER_COMMENT = "Почасовая помощь"
+# Постоянная правка журнала после исторического двойного сторно; не трогать при обычном редактировании.
+HOURLY_HELP_CORRECTION_COMMENT = "Коррекция двойного сторно помощи"
 from app.kit_blank_stock_core import (
     apply_discount_capped,
     inventory_qty_by_key_from_kit,
@@ -368,18 +370,26 @@ def replace_visit_accruals(
 
     Почасовую помощь не сторнируем через VISIT-источник — только через
     replace_visit_hourly_help_accruals (иначе при отсутствии flush было двойное сторно).
+    Коррекции двойного сторно помощи при обычном редактировании не трогаем;
+    при отмене визита сторнируем всё.
     """
+    if visit.is_cancelled:
+        storno_source_accruals(
+            db,
+            PayrollFundSourceKind.VISIT,
+            visit.id,
+            created_by_user_id,
+            reason="отмене визита",
+        )
+        return
     storno_source_accruals(
         db,
         PayrollFundSourceKind.VISIT,
         visit.id,
         created_by_user_id,
         reason="редактировании",
-        exclude_comments={HOURLY_HELP_LEDGER_COMMENT},
+        exclude_comments={HOURLY_HELP_LEDGER_COMMENT, HOURLY_HELP_CORRECTION_COMMENT},
     )
-    if visit.is_cancelled:
-        storno_visit_hourly_help_accruals(db, int(visit.id), created_by_user_id, reason="отмене визита")
-        return
     services = list(
         db.scalars(
             select(VisitService)
@@ -677,6 +687,110 @@ def replace_visit_hourly_help_accruals(
     if visit.is_cancelled:
         return
     append_visit_hourly_help_ledgers(db, visit, created_by_user_id)
+
+
+def _ledger_net_for_accruals_and_their_stornos(
+    db: Session, accruals: list[PayrollFundLedger]
+) -> dict[int, float]:
+    nets: dict[int, float] = {}
+    accrual_ids: list[int] = []
+    for acc in accruals:
+        if acc.user_id is None:
+            continue
+        uid = int(acc.user_id)
+        nets[uid] = money_q2(nets.get(uid, 0.0) + float(acc.amount or 0))
+        accrual_ids.append(int(acc.id))
+    if not accrual_ids:
+        return nets
+    for row in db.scalars(
+        select(PayrollFundLedger).where(PayrollFundLedger.storno_of_id.in_(accrual_ids))
+    ).all():
+        if row.user_id is None:
+            continue
+        uid = int(row.user_id)
+        nets[uid] = money_q2(nets.get(uid, 0.0) + float(row.amount or 0))
+    return nets
+
+
+def visit_hourly_help_ledger_net_by_user(db: Session, visit_id: int) -> dict[int, float]:
+    """Нетто помощи по визиту: начисления «Почасовая помощь» (+ их сторно) и коррекции двойного сторно."""
+    help_accruals = list(
+        db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == int(visit_id),
+                PayrollFundLedger.comment == HOURLY_HELP_LEDGER_COMMENT,
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+                PayrollFundLedger.storno_of_id.is_(None),
+            )
+        ).all()
+    )
+    nets = _ledger_net_for_accruals_and_their_stornos(db, help_accruals)
+    corr_accruals = list(
+        db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == int(visit_id),
+                PayrollFundLedger.comment == HOURLY_HELP_CORRECTION_COMMENT,
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+                PayrollFundLedger.storno_of_id.is_(None),
+            )
+        ).all()
+    )
+    for uid, amt in _ledger_net_for_accruals_and_their_stornos(db, corr_accruals).items():
+        nets[uid] = money_q2(nets.get(uid, 0.0) + amt)
+    return nets
+
+
+def repair_visit_hourly_help_ledger_net(
+    db: Session,
+    visit: Visit,
+    created_by_user_id: int | None,
+    *,
+    dry_run: bool = False,
+) -> list[dict[str, Any]]:
+    """Выровнять нетто помощи в журнале под карточку визита (после исторического двойного сторно).
+
+    Пишет начисление с комментарием HOURLY_HELP_CORRECTION_COMMENT; при обычном
+    редактировании визита эта проводка не сторнируется.
+    """
+    from app.hourly_help import hourly_help_rows_from_visit
+
+    expected: dict[int, float] = {}
+    for row in hourly_help_rows_from_visit(visit):
+        amt = money_q2(float(row.amount or 0))
+        if amt <= 0:
+            continue
+        mid = int(row.master_id)
+        expected[mid] = money_q2(expected.get(mid, 0.0) + amt)
+    actual = visit_hourly_help_ledger_net_by_user(db, int(visit.id))
+    posted: list[dict[str, Any]] = []
+    for uid in sorted(set(expected) | set(actual)):
+        exp = money_q2(expected.get(uid, 0.0))
+        act = money_q2(actual.get(uid, 0.0))
+        delta = money_q2(exp - act)
+        if abs(delta) < 0.005:
+            continue
+        info = {"user_id": uid, "expected": exp, "actual": act, "delta": delta}
+        posted.append(info)
+        if dry_run:
+            continue
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL if delta > 0 else PayrollFundEntryKind.STORNO,
+            side=PayrollFundSide.MASTER,
+            user_id=uid,
+            amount=delta,
+            source_kind=PayrollFundSourceKind.VISIT,
+            source_id=int(visit.id),
+            created_by_user_id=created_by_user_id,
+            storno_of_id=None,
+            comment=HOURLY_HELP_CORRECTION_COMMENT,
+            effective_at=visit.performed_date,
+        )
+    if not dry_run and posted:
+        db.flush()
+    return posted
 
 
 def append_visit_master_pool_and_mix_bonus_ledgers(
