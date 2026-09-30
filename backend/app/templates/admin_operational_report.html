@@ -23,35 +23,33 @@
         </label>
       </div>
 
-      <div id="rep_payroll_period_block" class="row" style="align-items: flex-end;">
-        <div style="flex: 1; min-width: 260px;">
-          <label for="rep_period">Закрытый период</label>
-          <select name="period_id" id="rep_period" style="width: 100%;">
-            <option value="">— не выбран —</option>
-            {% for p in closed_periods %}
-              <option value="{{ p.id }}" {% if selected_period_id == p.id %}selected{% endif %}>
-                {{ p.date_from.strftime('%Y-%m-%d') }} — {{ p.date_to.strftime('%Y-%m-%d') }}
-              </option>
-            {% endfor %}
-          </select>
-        </div>
-        <div style="flex: 0;">
-          <button type="submit" id="rep_btn_period">Показать</button>
+      <div id="rep_payroll_period_block" class="ms-period-fields" style="margin-bottom:12px;">
+        <label for="rep_period">Закрытый период</label>
+        <select name="period_id" id="rep_period" style="width:100%; max-width:22rem;">
+          <option value="">— не выбран —</option>
+          {% for p in closed_periods %}
+            <option value="{{ p.id }}" {% if selected_period_id == p.id %}selected{% endif %}>
+              {{ p.date_from.strftime('%Y-%m-%d') }} — {{ p.date_to.strftime('%Y-%m-%d') }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div id="rep_custom_dates_block" style="display:none; margin-bottom:12px;">
+        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+          <div style="flex:0 1 11rem; max-width:11rem; min-width:0;">
+            <label for="rep_df">С даты</label>
+            <input type="date" name="df" id="rep_df" value="{{ form_df }}" />
+          </div>
+          <div style="flex:0 1 11rem; max-width:11rem; min-width:0;">
+            <label for="rep_dt">По дату</label>
+            <input type="date" name="dt" id="rep_dt" value="{{ form_dt }}" />
+          </div>
         </div>
       </div>
 
-      <div id="rep_custom_dates_block" class="row" style="align-items: flex-end; display: none;">
-        <div style="flex: 1; min-width: 140px;">
-          <label for="rep_df">С даты</label>
-          <input type="date" name="df" id="rep_df" value="{{ form_df }}" />
-        </div>
-        <div style="flex: 1; min-width: 140px;">
-          <label for="rep_dt">По дату</label>
-          <input type="date" name="dt" id="rep_dt" value="{{ form_dt }}" />
-        </div>
-        <div style="flex: 0;">
-          <button type="submit" id="rep_btn_dates">Показать</button>
-        </div>
+      <div style="margin-top:4px;">
+        <button type="submit" id="rep_btn_show">Показать</button>
       </div>
     </form>
 
@@ -65,8 +63,6 @@
         var sel = document.getElementById("rep_period");
         var df = document.getElementById("rep_df");
         var dt = document.getElementById("rep_dt");
-        var btnP = document.getElementById("rep_btn_period");
-        var btnD = document.getElementById("rep_btn_dates");
 
         function isPeriodMode() {
           return rPeriod && rPeriod.checked;
@@ -80,8 +76,6 @@
           if (sel) sel.disabled = !pm;
           if (df) df.disabled = pm;
           if (dt) dt.disabled = pm;
-          if (btnP) btnP.style.display = pm ? "" : "none";
-          if (btnD) btnD.style.display = pm ? "none" : "";
         }
 
         if (rPeriod) rPeriod.addEventListener("change", sync);
