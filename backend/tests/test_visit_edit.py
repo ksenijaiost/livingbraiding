@@ -957,3 +957,86 @@ def test_update_visit_audits_hourly_help(memory_db):
     rows = db.scalars(select(VisitAuditLog).where(VisitAuditLog.visit_id == visit.id)).all()
     names = {r.field_name for r in rows}
     assert "Почасовая помощь (сумма)" in names or "Почасовая помощь (JSON)" in names
+
+
+def test_repair_visit_hourly_help_after_double_storno(memory_db):
+    """Коррекция восстанавливает нетто помощи после лишнего сторно и переживает re-save."""
+    from app.hourly_help import HourlyHelpRow, apply_hourly_help_to_visit
+    from app.payroll_fund import (
+        HOURLY_HELP_CORRECTION_COMMENT,
+        HOURLY_HELP_LEDGER_COMMENT,
+        append_ledger,
+        repair_visit_hourly_help_ledger_net,
+        replace_visit_accruals,
+        visit_hourly_help_ledger_net_by_user,
+    )
+
+    db = memory_db
+    master_a, master_b, _admin, svc_ids = _seed_users_and_services(db)
+    client = db.scalar(select(Client).limit(1))
+    visit = _make_visit(db, master_a, client.id, svc_ids[0], amount=4000.0)
+    apply_hourly_help_to_visit(
+        visit, [HourlyHelpRow(master_id=master_b.id, hours=1, minutes=0, amount=300.0)]
+    )
+    db.commit()
+    db.refresh(visit)
+
+    def _help_accrual(amount: float = 300.0):
+        row = append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.ACCRUAL,
+            side=PayrollFundSide.MASTER,
+            user_id=master_b.id,
+            amount=amount,
+            source_kind=PayrollFundSourceKind.VISIT,
+            source_id=visit.id,
+            created_by_user_id=master_a.id,
+            comment=HOURLY_HELP_LEDGER_COMMENT,
+            effective_at=visit.performed_date,
+        )
+        db.flush()
+        return row
+
+    def _double_storno(acc_id: int) -> None:
+        for comment in (None, HOURLY_HELP_LEDGER_COMMENT):
+            append_ledger(
+                db,
+                entry_kind=PayrollFundEntryKind.STORNO,
+                side=PayrollFundSide.MASTER,
+                user_id=master_b.id,
+                amount=-300.0,
+                source_kind=PayrollFundSourceKind.VISIT,
+                source_id=visit.id,
+                created_by_user_id=master_a.id,
+                storno_of_id=acc_id,
+                comment=comment,
+                effective_at=visit.performed_date,
+            )
+
+    # Как у визитов 270/303: несколько циклов «двойное сторно + новое начисление».
+    acc0 = _help_accrual()
+    _double_storno(int(acc0.id))
+    acc1 = _help_accrual()
+    _double_storno(int(acc1.id))
+    _help_accrual()  # живое после последнего (уже исправленного) сохранения
+    db.commit()
+
+    assert visit_hourly_help_ledger_net_by_user(db, visit.id)[master_b.id] == pytest.approx(-300.0)
+
+    posted = repair_visit_hourly_help_ledger_net(db, visit, master_a.id)
+    db.commit()
+    assert len(posted) == 1
+    assert posted[0]["delta"] == pytest.approx(600.0)
+    assert visit_hourly_help_ledger_net_by_user(db, visit.id)[master_b.id] == pytest.approx(300.0)
+
+    replace_visit_accruals(db, visit, master_a.id)
+    db.commit()
+    assert visit_hourly_help_ledger_net_by_user(db, visit.id)[master_b.id] == pytest.approx(300.0)
+    corr = db.scalars(
+        select(PayrollFundLedger).where(
+            PayrollFundLedger.source_id == visit.id,
+            PayrollFundLedger.comment == HOURLY_HELP_CORRECTION_COMMENT,
+        )
+    ).all()
+    assert len(corr) == 1
+    assert float(corr[0].amount) == pytest.approx(600.0)

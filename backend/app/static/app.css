@@ -104,7 +104,25 @@
 
 .lb-table-13 { font-size: 13px; }
 .lb-prewrap-12rem { white-space: pre-wrap; max-width: 12rem; }
-.lb-scroll-x { overflow-x: auto; }
+.lb-scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* 1.89: списки (клиенты, комплекты и др.) — таблица скроллится внутри, не раздувает viewport */
+.lb-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 -2px;
+  padding: 0 2px;
+}
+.lb-table-wrap > table {
+  min-width: 32rem;
+}
 
 .lb-hr-audit {
   border: 0;

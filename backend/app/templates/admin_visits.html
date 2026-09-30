@@ -39,6 +39,7 @@
     {% if search_id is not none and not visits %}
       <p class="muted">Визит №{{ search_id }} не найден{% if visits_mine_only %} среди ваших{% endif %}.</p>
     {% endif %}
+    <div class="lb-table-wrap">
     <table>
       <thead>
         <tr>
@@ -83,5 +84,6 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </div>
 {% endblock %}
