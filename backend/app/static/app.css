@@ -111,7 +111,7 @@
   min-width: 0;
 }
 
-/* 1.89: списки (клиенты, комплекты и др.) — таблица скроллится внутри, не раздувает viewport */
+/* 1.89: списки — таблица скроллится внутри, колонки не сжимаются в «столбик букв» */
 .lb-table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -121,7 +121,24 @@
   padding: 0 2px;
 }
 .lb-table-wrap > table {
-  min-width: 32rem;
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+.lb-cell-service {
+  max-width: 16rem;
+  overflow-wrap: break-word;
+  word-break: normal;
+  white-space: normal;
+  line-height: 1.35;
+  font-size: 13px;
+}
+.lb-cell-name {
+  max-width: 10rem;
+  overflow-wrap: break-word;
+  word-break: normal;
+  white-space: normal;
+  line-height: 1.35;
 }
 
 .lb-hr-audit {

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title or "Живем Плетем" }}</title>
-    <link rel="stylesheet" href="/static/app.css?v=189" />
+    <link rel="stylesheet" href="/static/app.css?v=1892" />
     <style>
       /* 1.89: не даём широким таблицам/полям раздувать страницу на мобиле */
       html { max-width: 100%; }
@@ -97,13 +97,16 @@
         padding: 8px;
         text-align: left;
         font-size: 14px;
-        overflow-wrap: anywhere;
-        word-break: break-word;
         vertical-align: top;
       }
-      th.lb-nowrap, td.lb-nowrap, .lb-nowrap {
-        overflow-wrap: normal;
+      /* Мягкий перенос только там, где явно нужно (не рвём цифры/даты посредине) */
+      .lb-cell-wrap {
+        overflow-wrap: break-word;
         word-break: normal;
+        white-space: normal;
+      }
+      th.lb-nowrap, td.lb-nowrap, .lb-nowrap {
+        white-space: nowrap;
       }
       @media (max-width: 600px) {
         .container { padding: 12px; }
