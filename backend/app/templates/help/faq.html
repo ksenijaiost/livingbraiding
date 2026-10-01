@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card lb-help-faq">
+    <div class="lb-help-faq__head">
+      <h2 class="lb-help-faq__title">Справка</h2>
+      <div class="muted lb-help-faq__role">Кабинет: {{ role_label }}</div>
+    </div>
+
+    {% if help_doc %}
+      <div class="lb-help-body">
+        {{ help_doc.body_html | safe }}
+      </div>
+    {% else %}
+      <p class="muted lb-help-faq__empty">
+        Справка для кабинета «{{ role_label }}» пока не заполнена.
+      </p>
+    {% endif %}
+  </div>
+{% endblock %}

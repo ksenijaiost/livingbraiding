@@ -95,9 +95,32 @@ templates.env.globals["role_can_toggle_kit_active"] = role_can_toggle_kit_active
 templates.env.globals["role_is_admin_super"] = role_is_admin_super
 
 
+def resolve_page_help(page_id: Any, current_user: Any = None) -> Any:
+    """Jinja-helper: справка страницы по help_page_id и active_role."""
+    if not page_id or current_user is None:
+        return None
+    role = getattr(current_user, "role", None)
+    if role is None:
+        return None
+    from app.help_docs import get_page_help
+
+    return get_page_help(str(page_id).strip(), role)
+
+
+templates.env.globals["resolve_page_help"] = resolve_page_help
+
+
 def ctx(request: Request, current_user: Any = None, **kwargs):
     """Common Jinja context: always pass request + current_user + display_tz."""
     out = {"request": request, "current_user": current_user, **kwargs}
     if "display_tz" not in out:
         out["display_tz"] = resolve_request_display_timezone(request)
+    # Автозагрузка page-help, если роут передал help_page_id.
+    help_page_id = out.get("help_page_id")
+    if (
+        help_page_id
+        and current_user is not None
+        and out.get("page_help_doc") is None
+    ):
+        out["page_help_doc"] = resolve_page_help(help_page_id, current_user)
     return out

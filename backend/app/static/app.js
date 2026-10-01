@@ -33,7 +33,102 @@ document.addEventListener("DOMContentLoaded", function () {
   initLbFormGuards();
   initLbDoubleSubmitGuard();
   initImageLightbox();
+  initPageHelpModal();
 });
+
+/**
+ * Модалка справки страницы (кнопка «?» в base.html).
+ */
+function initPageHelpModal() {
+  var root = document.getElementById("lb-page-help-modal");
+  var openBtn = document.getElementById("lbPageHelpOpen");
+  if (!root || !openBtn) return;
+  if (root.dataset.lbInited === "1") return;
+  root.dataset.lbInited = "1";
+
+  var bodyEl = document.body;
+  var panel = root.querySelector(".lb-page-help-modal__panel");
+
+  function isOpen() {
+    return !root.hasAttribute("hidden");
+  }
+
+  function setExpanded(on) {
+    openBtn.setAttribute("aria-expanded", on ? "true" : "false");
+  }
+
+  function openHelp() {
+    root.removeAttribute("hidden");
+    root.setAttribute("aria-hidden", "false");
+    bodyEl.style.overflow = "hidden";
+    setExpanded(true);
+    try {
+      var closeBtn = root.querySelector(".lb-page-help-modal__close");
+      if (closeBtn) closeBtn.focus();
+    } catch (e) {}
+  }
+
+  function closeHelp() {
+    if (!isOpen()) return;
+    root.setAttribute("hidden", "");
+    root.setAttribute("aria-hidden", "true");
+    bodyEl.style.overflow = "";
+    setExpanded(false);
+    try {
+      openBtn.focus();
+    } catch (e) {}
+  }
+
+  openBtn.addEventListener("click", function (e) {
+    e.preventDefault();
+    openHelp();
+  });
+
+  root.addEventListener("click", function (e) {
+    var el = e.target;
+    if (!el || !el.getAttribute) return;
+    if (el.getAttribute("data-lb-page-help-close") != null) {
+      e.preventDefault();
+      closeHelp();
+    }
+  });
+
+  // Не закрывать по клику внутри панели (только backdrop/крестик).
+  if (panel) {
+    panel.addEventListener("click", function (e) {
+      e.stopPropagation();
+    });
+  }
+
+  document.addEventListener(
+    "keydown",
+    function (e) {
+      if (!e || !isOpen()) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeHelp();
+        return;
+      }
+      // Простой focus trap: Tab циклом внутри модалки.
+      if (e.key !== "Tab") return;
+      var focusable = root.querySelectorAll(
+        'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusable.length) return;
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    },
+    true
+  );
+}
 
 /**
  * Click any <a class="lb-lightbox" href="..."> to show image fullscreen in-page (see base.html + app.css).

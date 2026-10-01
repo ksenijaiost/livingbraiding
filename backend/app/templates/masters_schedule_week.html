@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block help_page_id %}masters_schedule_week{% endblock %}
 {% block content %}
   <script type="application/json" id="lb-msw-config">{{ {"weekStart": week_start_iso, "todayIso": today_iso, "isSuper": is_super} | tojson }}</script>
   <div class="card">
