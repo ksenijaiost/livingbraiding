@@ -37,7 +37,9 @@ from app.kit_bulk_import import (
 from app.kit_crud import (
     LEGACY_KIT_CLIENT_PRICE_EXCLUDE_KEYS,
     apply_kit_admin_form,
+    apply_kit_stock_price_recalc,
     calc_kit_stock_price_total_from_composition,
+    kit_display_price_breakdown,
     kit_edit_error_prefill,
     kit_new_error_prefill,
     kit_composition_initial_lines,
@@ -47,6 +49,8 @@ from app.kit_crud import (
     max_kit_discount_percent_allowed,
     parse_discount_percent_from_form,
     parse_kit_admin_form,
+    parse_kit_ids_csv,
+    preview_kit_stock_price_recalc,
     sync_kit_authors,
     try_fill_kit_admin_blank_types_from_composition,
     try_fill_kit_admin_cost_total_from_composition,
@@ -601,6 +605,86 @@ async def admin_kits_bulk_import_post(
     )
 
 
+@router.get("/bulk-price-update", response_class=HTMLResponse)
+def admin_kits_bulk_price_update_get(
+    request: Request,
+    current_user: AuthUser = _KITS_SUPER,
+    db: Session = Depends(get_db),
+):
+    return templates.TemplateResponse(
+        "admin_kits_bulk_price_update.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            ids_prefill="",
+            preview_rows=None,
+            applied_rows=None,
+            top_error=None,
+            can_confirm=False,
+        ),
+    )
+
+
+@router.post("/bulk-price-update", response_class=HTMLResponse)
+async def admin_kits_bulk_price_update_post(
+    request: Request,
+    current_user: AuthUser = _KITS_SUPER,
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    action = str(form.get("action") or "preview").strip().lower()
+    ids_raw = str(form.get("kit_ids") or "")
+    try:
+        kit_ids = parse_kit_ids_csv(ids_raw)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            "admin_kits_bulk_price_update.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                ids_prefill=ids_raw,
+                preview_rows=None,
+                applied_rows=None,
+                top_error=str(exc),
+                can_confirm=False,
+            ),
+            status_code=400,
+        )
+
+    if action == "confirm":
+        applied_rows = apply_kit_stock_price_recalc(
+            db, kit_ids, changed_by_user_id=current_user.id
+        )
+        db.commit()
+        return templates.TemplateResponse(
+            "admin_kits_bulk_price_update.html",
+            _ctx(
+                request,
+                current_user=current_user,
+                ids_prefill=ids_raw,
+                preview_rows=None,
+                applied_rows=applied_rows,
+                top_error=None,
+                can_confirm=False,
+            ),
+        )
+
+    preview_rows = preview_kit_stock_price_recalc(db, kit_ids)
+    can_confirm = any(bool(r.get("ok")) for r in preview_rows)
+    return templates.TemplateResponse(
+        "admin_kits_bulk_price_update.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            ids_prefill=ids_raw,
+            preview_rows=preview_rows,
+            applied_rows=None,
+            top_error=None,
+            can_confirm=can_confirm,
+        ),
+    )
+
+
 @router.get("/{kit_id}", response_class=HTMLResponse)
 def admin_kit_detail(
     request: Request,
@@ -652,6 +736,7 @@ def admin_kit_detail(
             composition_blank_stock_warning=composition_blank_stock_warning,
             computed_stock_price_total=computed_price,
             computed_stock_price_missing_keys=computed_missing,
+            price_breakdown=kit_display_price_breakdown(kit),
             audit_rows=audit_rows,
             reserve_tooltip=_kit_reservation_tooltip(kit, db),
             staff_users=_staff_users_for_reserve(db),
@@ -841,6 +926,17 @@ async def admin_kit_edit_post(
             mode=mode,
             blank_qty=read_blank_stock_qty_from_admin_form(form),
         )
+        # При изменении состава — пересчитать полную цену по прайсу (аудит ниже).
+        new_comp = getattr(kit, "composition_json", None)
+        if (new_comp or "") != (before.composition_json or ""):
+            recalc_price, recalc_missing = calc_kit_stock_price_total_from_composition(db, kit)
+            if recalc_price is not None and float(recalc_price) > 0:
+                kit.stock_price_total = float(recalc_price)
+            elif recalc_missing and (kit.stock_price_total is None or float(kit.stock_price_total) <= 0):
+                raise ValueError(
+                    "Состав изменён; автопересчёт цены невозможен — нет цен для ключей: "
+                    + ", ".join(recalc_missing)
+                )
         after_auth_ids = sorted([l.user_id for l in (kit.author_staff_links or [])])
         kit.updated_at = utcnow_naive()
         kit.updated_by_user_id = current_user.id
@@ -1184,6 +1280,22 @@ def admin_kits_bulk_import_post_legacy_redirect(
     current_user: AuthUser = _KITS_SUPER,
 ):
     return _redirect_admin_kits_to_canon(request, suffix="/bulk-import")
+
+
+@legacy_kits_admin_router.get("/bulk-price-update", response_class=HTMLResponse)
+def admin_kits_bulk_price_update_get_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _KITS_SUPER,
+):
+    return _redirect_admin_kits_to_canon(request, suffix="/bulk-price-update")
+
+
+@legacy_kits_admin_router.post("/bulk-price-update", response_class=HTMLResponse)
+def admin_kits_bulk_price_update_post_legacy_redirect(
+    request: Request,
+    current_user: AuthUser = _KITS_SUPER,
+):
+    return _redirect_admin_kits_to_canon(request, suffix="/bulk-price-update")
 
 
 @legacy_kits_admin_router.get("/{kit_id}/edit", response_class=HTMLResponse)

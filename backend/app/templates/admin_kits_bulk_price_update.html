@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <div class="lb-flex-between-center">
+      <h2 class="lb-mt-0">Массовое обновление цен</h2>
+      <a href="/kits"><button type="button" class="secondary">К списку комплектов</button></a>
+    </div>
+    <p class="muted">
+      Доступно только суперадминистратору. Пересчитывает <strong>полную</strong> цену комплекта
+      (<code>stock_price_total</code>) по текущему составу и прайсу «Заготовки поштучно».
+      Цены остатка и резерва в карточке — отображение от полной цены, отдельные поля не пишутся.
+      Изменения попадают в аудит комплекта.
+    </p>
+
+    {% if top_error %}
+      <div class="error lb-mb-12">{{ top_error }}</div>
+    {% endif %}
+
+    {% if applied_rows %}
+      <p class="lb-flash lb-flash-ok">Готово. Ниже результат записи.</p>
+      <div class="lb-table-wrap" style="margin:12px 0 20px;">
+        <table style="width:100%;max-width:960px;border-collapse:collapse;font-size:14px;">
+          <thead>
+            <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
+              <th style="padding:6px 8px;">ID</th>
+              <th style="padding:6px 8px;">Артикул</th>
+              <th style="padding:6px 8px;">Было</th>
+              <th style="padding:6px 8px;">Стало</th>
+              <th style="padding:6px 8px;">Статус</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in applied_rows %}
+              <tr style="border-bottom:1px solid #e5e7eb;">
+                <td class="lb-nowrap" style="padding:8px;">
+                  {% if r.sku %}<a href="/kits/{{ r.kit_id }}">{{ r.kit_id }}</a>{% else %}{{ r.kit_id }}{% endif %}
+                </td>
+                <td style="padding:8px;">{{ r.sku or '—' }}</td>
+                <td class="lb-nowrap" style="padding:8px;">{% if r.old_price is not none %}{{ r.old_price }} ₽{% else %}—{% endif %}</td>
+                <td class="lb-nowrap" style="padding:8px;">{% if r.new_price is not none %}{{ r.new_price }} ₽{% else %}—{% endif %}</td>
+                <td style="padding:8px;">
+                  {% if r.ok %}
+                    <span style="color:#065f46;">обновлено</span>
+                  {% else %}
+                    <span style="color:#b91c1c;">{{ r.error or 'ошибка' }}</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    <form method="post" action="/kits/bulk-price-update" style="margin-top:12px;">
+      <label for="kit_ids">ID комплектов через запятую</label>
+      <textarea
+        id="kit_ids"
+        name="kit_ids"
+        rows="3"
+        style="width:100%;max-width:640px;display:block;margin:6px 0 12px;"
+        placeholder="например: 12, 45, 108"
+      >{{ ids_prefill }}</textarea>
+      <button type="submit" name="action" value="preview">Пересчитать</button>
+    </form>
+
+    {% if preview_rows is not none %}
+      <h3 style="margin:24px 0 8px;">Превью</h3>
+      <p class="muted" style="font-size:14px;">Старая цена — текущий <code>stock_price_total</code>, новая — пересчёт по составу и прайсу.</p>
+      <div class="lb-table-wrap" style="margin:12px 0;">
+        <table style="width:100%;max-width:960px;border-collapse:collapse;font-size:14px;">
+          <thead>
+            <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
+              <th style="padding:6px 8px;">ID</th>
+              <th style="padding:6px 8px;">Артикул</th>
+              <th style="padding:6px 8px;">Старая цена</th>
+              <th style="padding:6px 8px;">Новая цена</th>
+              <th style="padding:6px 8px;">Замечание</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in preview_rows %}
+              <tr style="border-bottom:1px solid #e5e7eb;">
+                <td class="lb-nowrap" style="padding:8px;">
+                  {% if r.sku %}<a href="/kits/{{ r.kit_id }}">{{ r.kit_id }}</a>{% else %}{{ r.kit_id }}{% endif %}
+                </td>
+                <td style="padding:8px;">{{ r.sku or '—' }}</td>
+                <td class="lb-nowrap" style="padding:8px;">{% if r.old_price is not none %}{{ r.old_price }} ₽{% else %}—{% endif %}</td>
+                <td class="lb-nowrap" style="padding:8px;">{% if r.new_price is not none %}{{ r.new_price }} ₽{% else %}—{% endif %}</td>
+                <td style="padding:8px;">
+                  {% if r.ok %}
+                    <span class="muted">ок</span>
+                  {% else %}
+                    <span style="color:#b91c1c;">{{ r.error or 'ошибка' }}</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if can_confirm %}
+        <form method="post" action="/kits/bulk-price-update" style="margin-top:12px;">
+          <input type="hidden" name="kit_ids" value="{{ ids_prefill }}" />
+          <button type="submit" name="action" value="confirm">Подтвердить обновление цен</button>
+        </form>
+        <p class="muted" style="font-size:13px;margin-top:8px;">Будут обновлены только строки без ошибок в превью. Остальные пропускаются.</p>
+      {% else %}
+        <p class="muted" style="margin-top:12px;">Нет строк для записи — исправьте id или состав/прайс и пересчитайте снова.</p>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endblock %}

@@ -9,6 +9,7 @@
           <a href="/kits/new"><button type="button">Новый комплект</button></a>
           {% if current_user.role.value == 'ADMIN_SUPER' %}
             <a href="/kits/bulk-import"><button type="button" class="secondary">Массовая загрузка (JSON)</button></a>
+            <a href="/kits/bulk-price-update"><button type="button" class="secondary">Массовое обновление цен</button></a>
           {% endif %}
         </div>
       {% endif %}
