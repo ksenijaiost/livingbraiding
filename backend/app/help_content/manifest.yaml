@@ -215,7 +215,7 @@ pages:
     - admin_super
     file: master_schedule.md
   master_statistics:
-    title: Статистика мастеров
+    title: Статистика сотрудника
     roles:
     - admin_super
     file: master_statistics.md
@@ -455,3 +455,32 @@ pages:
     - admin_senior
     - admin_super
     file: work_products_new.md
+  clients_retention:
+    title: Возвращаемость клиентов
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: clients_retention.md
+  clients_retention_lost:
+    title: Потерянные клиенты
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: clients_retention_lost.md
+  clients_stats:
+    title: Статистика клиентов
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: clients_stats.md
+  kits_bulk_price_update:
+    title: Массовое обновление цен комплектов
+    roles:
+    - admin_super
+    file: kits_bulk_price_update.md

@@ -112,6 +112,11 @@ def test_step7_remaining_pages_sample() -> None:
         ("super_purge", UserRole.ADMIN_SUPER),
         ("report_visits", UserRole.ADMIN_SUPER),
         ("techspec_sql", UserRole.TECHSPEC),
+        ("clients_stats", UserRole.MASTER),
+        ("clients_retention", UserRole.ADMIN),
+        ("clients_retention_lost", UserRole.ADMIN_SENIOR),
+        ("kits_bulk_price_update", UserRole.ADMIN_SUPER),
+        ("master_statistics", UserRole.ADMIN_SUPER),
     ]
     for page_id, role in cases:
         doc = get_page_help(page_id, role)
@@ -120,6 +125,9 @@ def test_step7_remaining_pages_sample() -> None:
     assert get_page_help("catalog_admin_index", UserRole.ADMIN) is None
     assert get_page_help("techspec_data", UserRole.MASTER) is None
     assert get_page_help("staff_list", UserRole.ADMIN_SENIOR) is None
+    assert get_page_help("kits_bulk_price_update", UserRole.ADMIN) is None
+    assert get_page_help("master_statistics", UserRole.MASTER) is None
+    assert get_page_help("master_statistics", UserRole.ADMIN_SUPER).title == "Статистика сотрудника"
 
 
 def test_help_page_id_block_does_not_leak_into_body() -> None:
