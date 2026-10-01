@@ -36,14 +36,15 @@
     {% if err == "duplicate" %}
       <div class="error">Ключ поля уже занят. Выберите другой идентификатор.</div>
     {% endif %}
+    <div class="lb-table-wrap">
     <table>
       <thead>
         <tr>
-          <th>Порядок</th>
-          <th>Ключ</th>
-          <th>Тип</th>
+          <th class="lb-nowrap">Порядок</th>
+          <th class="lb-nowrap">Ключ</th>
+          <th class="lb-nowrap">Тип</th>
           <th>Подпись</th>
-          <th>Обяз.</th>
+          <th class="lb-nowrap">Обяз.</th>
           <th></th>
         </tr>
       </thead>
@@ -106,6 +107,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     {% if not fields %}
       <p class="muted" style="margin-top: 12px;">Пока нет полей — добавьте первое.</p>
     {% endif %}

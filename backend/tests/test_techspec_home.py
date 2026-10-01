@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 
 from app.media_store import media_backup_stats
-from app.techspec_home import collect_db_table_stats, collect_techspec_home_stats, execute_readonly_sql
+from app.techspec_home import (
+    collect_db_table_stats,
+    collect_techspec_home_stats,
+    execute_readonly_sql,
+    execute_techspec_sql,
+)
 
 
 def test_media_backup_stats_counts_only_stored_files(tmp_path, monkeypatch) -> None:
@@ -81,8 +86,62 @@ def test_execute_readonly_sql_allows_select(memory_db) -> None:
     result = execute_readonly_sql(memory_db, "SELECT 1 AS one")
     assert result["columns"] == ["one"]
     assert result["rows"][0]["one"] == 1
+    assert result["kind"] == "read"
 
 
 def test_execute_readonly_sql_rejects_update(memory_db) -> None:
+    with pytest.raises(ValueError, match="SELECT"):
+        execute_readonly_sql(memory_db, "UPDATE users SET username = 'x' WHERE id = 1")
+
+
+def test_execute_techspec_sql_update_requires_where(memory_db) -> None:
+    with pytest.raises(ValueError, match="WHERE"):
+        execute_techspec_sql(
+            memory_db,
+            "UPDATE users SET username = 'x'",
+            confirm_write=True,
+        )
+
+
+def test_execute_techspec_sql_update_requires_confirm(memory_db) -> None:
+    with pytest.raises(ValueError, match="подтверждение"):
+        execute_techspec_sql(
+            memory_db,
+            "UPDATE users SET username = 'x' WHERE id = 1",
+            confirm_write=False,
+        )
+
+
+def test_execute_techspec_sql_rejects_delete(memory_db) -> None:
     with pytest.raises(ValueError):
-        execute_readonly_sql(memory_db, "UPDATE users SET username = 'x'")
+        execute_techspec_sql(
+            memory_db,
+            "DELETE FROM users WHERE id = 1",
+            confirm_write=True,
+        )
+
+
+def test_execute_techspec_sql_update_applies(memory_db) -> None:
+    from app.db.models import User, UserRole
+
+    u = User(
+        username="tech_upd_1",
+        password_hash="x",
+        display_name="Tech Upd",
+        role=UserRole.TECHSPEC,
+        is_active=True,
+    )
+    memory_db.add(u)
+    memory_db.commit()
+    memory_db.refresh(u)
+
+    result = execute_techspec_sql(
+        memory_db,
+        f"UPDATE users SET display_name = 'Fixed Name' WHERE id = {int(u.id)}",
+        confirm_write=True,
+        actor_user_id=1,
+    )
+    assert result["kind"] == "update"
+    assert result["rowcount"] == 1
+    memory_db.refresh(u)
+    assert u.display_name == "Fixed Name"

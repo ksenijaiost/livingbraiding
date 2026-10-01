@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 from typing import Any
@@ -118,10 +119,9 @@ _COUNT_MODELS: tuple[tuple[str, Any], ...] = (
     ("services", Service),
 )
 
-_READONLY_SQL_RE = re.compile(r"^\s*(?:--[^\n]*\n|\s|/\*.*?\*/)*", re.S)
+_SQL_LEADING_RE = re.compile(r"^\s*(?:--[^\n]*\n|\s|/\*.*?\*/)*", re.S)
 _FORBIDDEN_SQL_TOKENS = (
     "insert",
-    "update",
     "delete",
     "alter",
     "drop",
@@ -137,6 +137,146 @@ _FORBIDDEN_SQL_TOKENS = (
     "merge",
     "replace",
 )
+_READ_SQL_FIRST = frozenset({"select", "with", "explain"})
+_WRITE_SQL_FIRST = frozenset({"update"})
+_ALLOWED_SQL_FIRST = _READ_SQL_FIRST | _WRITE_SQL_FIRST
+
+
+def _strip_sql_string_literals(sql_lower: str) -> str:
+    """Убрать содержимое строковых литералов, чтобы не ловить запрещённые слова внутри значений."""
+    return re.sub(r"'(?:''|[^'])*'", "''", sql_lower)
+
+
+def _validate_techspec_sql(query: str) -> tuple[str, str]:
+    """
+    Проверить SQL для техспеца.
+
+    Возвращает (kind, normalized_sql), где kind — ``read`` или ``update``.
+    Разрешены SELECT/WITH/EXPLAIN и UPDATE строк (с WHERE). Остальное — нет.
+    """
+    sql = (query or "").strip()
+    if not sql:
+        raise ValueError("SQL-запрос пуст.")
+
+    normalized = sql.rstrip().rstrip(";").strip()
+    if not normalized:
+        raise ValueError("SQL-запрос пуст.")
+
+    leading_stripped = _SQL_LEADING_RE.sub("", normalized).lstrip()
+    first_word = leading_stripped.split(None, 1)[0].lower() if leading_stripped else ""
+    if first_word not in _ALLOWED_SQL_FIRST:
+        raise ValueError("Разрешены только SELECT / WITH / EXPLAIN и UPDATE.")
+
+    kind = "update" if first_word in _WRITE_SQL_FIRST else "read"
+    lowered = _strip_sql_string_literals(normalized.lower())
+
+    for token in _FORBIDDEN_SQL_TOKENS:
+        if re.search(rf"\b{re.escape(token)}\b", lowered):
+            raise ValueError(f"Недопустимый SQL-оператор: {token.upper()}.")
+
+    if kind == "update":
+        # UPDATE без WHERE легко затронет всю таблицу — для фиксов требуем условие.
+        if not re.search(r"\bwhere\b", lowered):
+            raise ValueError("UPDATE без WHERE запрещён (укажите условие отбора строк).")
+        if re.search(r"\bupdate\b.+\bupdate\b", lowered, re.S):
+            raise ValueError("В одном запросе допустим только один UPDATE.")
+
+    if ";" in normalized:
+        raise ValueError("Разрешен только один SQL-запрос.")
+    return kind, normalized
+
+
+def _validate_readonly_sql(query: str) -> str:
+    """Обратная совместимость: только чтение."""
+    kind, sql = _validate_techspec_sql(query)
+    if kind != "read":
+        raise ValueError("Разрешены только SELECT / WITH / EXPLAIN.")
+    return sql
+
+
+def execute_techspec_sql(
+    db: Session,
+    query: str,
+    *,
+    row_limit: int = 200,
+    confirm_write: bool = False,
+    actor_user_id: int | None = None,
+) -> dict[str, Any]:
+    """
+    Выполнить SQL от имени техспеца: чтение или UPDATE строк.
+
+    Для UPDATE нужен ``confirm_write=True``; после успеха делается commit.
+    """
+    kind, sql = _validate_techspec_sql(query)
+    if kind == "update" and not confirm_write:
+        raise ValueError(
+            "Для UPDATE отметьте подтверждение изменения данных под полем запроса."
+        )
+    try:
+        result = db.execute(text(sql))
+        if kind == "update":
+            rowcount = int(result.rowcount or 0)
+            out: dict[str, Any] = {
+                "sql": sql,
+                "kind": "update",
+                "rowcount": rowcount,
+                "columns": [],
+                "rows": [],
+                "row_count": 0,
+                "truncated": False,
+            }
+            if result.returns_rows:
+                columns = list(result.keys())
+                fetched = result.mappings().fetchmany(row_limit + 1)
+                rows = [{k: row.get(k) for k in columns} for row in fetched[:row_limit]]
+                out.update(
+                    {
+                        "columns": columns,
+                        "rows": rows,
+                        "row_count": len(rows),
+                        "truncated": len(fetched) > row_limit,
+                    }
+                )
+            db.commit()
+            logging.getLogger("livingbraiding.techspec_sql").warning(
+                "techspec UPDATE by user_id=%s rowcount=%s sql=%s",
+                actor_user_id,
+                rowcount,
+                sql,
+            )
+            return out
+
+        if not result.returns_rows:
+            return {
+                "sql": sql,
+                "kind": "read",
+                "rowcount": None,
+                "columns": [],
+                "rows": [],
+                "row_count": 0,
+                "truncated": False,
+            }
+        columns = list(result.keys())
+        fetched = result.mappings().fetchmany(row_limit + 1)
+        rows = [{k: row.get(k) for k in columns} for row in fetched[:row_limit]]
+        return {
+            "sql": sql,
+            "kind": "read",
+            "rowcount": None,
+            "columns": columns,
+            "rows": rows,
+            "row_count": len(rows),
+            "truncated": len(fetched) > row_limit,
+        }
+    except Exception:
+        db.rollback()
+        raise
+
+
+def execute_readonly_sql(db: Session, query: str, *, row_limit: int = 200) -> dict[str, Any]:
+    """Только SELECT / WITH / EXPLAIN (без commit)."""
+    _validate_readonly_sql(query)
+    return execute_techspec_sql(db, query, row_limit=row_limit, confirm_write=False)
 
 
 def _fmt_bytes(n: int) -> str:
@@ -202,51 +342,6 @@ def collect_db_table_stats(db: Session) -> list[dict[str, Any]]:
             }
         )
     return rows
-
-
-def _validate_readonly_sql(query: str) -> str:
-    sql = (query or "").strip()
-    if not sql:
-        raise ValueError("SQL-запрос пуст.")
-
-    normalized = sql.rstrip().rstrip(";").strip()
-    if not normalized:
-        raise ValueError("SQL-запрос пуст.")
-
-    leading_stripped = _READONLY_SQL_RE.sub("", normalized).lstrip()
-    first_word = leading_stripped.split(None, 1)[0].lower() if leading_stripped else ""
-    if first_word not in {"select", "with", "explain"}:
-        raise ValueError("Разрешены только SELECT / WITH / EXPLAIN.")
-
-    lowered = re.sub(r"'(?:''|[^'])*'", "''", normalized.lower())
-    for token in _FORBIDDEN_SQL_TOKENS:
-        if re.search(rf"\b{re.escape(token)}\b", lowered):
-            raise ValueError(f"Недопустимый SQL-оператор: {token.upper()}.")
-
-    if ";" in normalized:
-        raise ValueError("Разрешен только один SQL-запрос.")
-    return normalized
-
-
-def execute_readonly_sql(db: Session, query: str, *, row_limit: int = 200) -> dict[str, Any]:
-    sql = _validate_readonly_sql(query)
-    try:
-        result = db.execute(text(sql))
-        if not result.returns_rows:
-            return {"sql": sql, "columns": [], "rows": [], "row_count": 0, "truncated": False}
-        columns = list(result.keys())
-        fetched = result.mappings().fetchmany(row_limit + 1)
-        rows = [{k: row.get(k) for k in columns} for row in fetched[:row_limit]]
-        return {
-            "sql": sql,
-            "columns": columns,
-            "rows": rows,
-            "row_count": len(rows),
-            "truncated": len(fetched) > row_limit,
-        }
-    except Exception:
-        db.rollback()
-        raise
 
 
 def collect_techspec_home_stats(db: Session) -> dict[str, Any]:

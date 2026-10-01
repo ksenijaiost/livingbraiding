@@ -26,12 +26,12 @@
       <table>
         <thead>
           <tr>
-            <th>ID</th>
-            <th>Создано</th>
-            <th>Дата</th>
+            <th class="lb-nowrap">ID</th>
+            <th class="lb-nowrap">Создано</th>
+            <th class="lb-nowrap">Дата</th>
             <th>Клиент</th>
-            <th>Тип</th>
-            <th>Сумма с клиента</th>
+            <th class="lb-nowrap">Тип</th>
+            <th class="lb-nowrap">Сумма с клиента</th>
             <th>Товар (детали)</th>
             <th></th>
           </tr>
@@ -39,19 +39,19 @@
         <tbody>
           {% for r in rows %}
             <tr>
-              <td><a href="/sales/products/{{ r.id }}">{{ r.id }}</a></td>
-              <td><a href="/sales/products/{{ r.id }}">{{ r.created_at|dt_local('%Y-%m-%d %H:%M') }}</a></td>
-              <td>{{ r.performed_date.date().isoformat() }}</td>
-              <td>{{ r.client.name }}</td>
-              <td>
+              <td class="lb-nowrap"><a href="/sales/products/{{ r.id }}">{{ r.id }}</a></td>
+              <td class="lb-nowrap"><a href="/sales/products/{{ r.id }}">{{ r.created_at|dt_local('%Y-%m-%d %H:%M') }}</a></td>
+              <td class="lb-nowrap">{{ r.performed_date.date().isoformat() }}</td>
+              <td class="lb-cell-name">{{ r.client.name }}</td>
+              <td class="lb-nowrap">
                 {% if r.kind.value == 'MATERIAL' %}Материал{% endif %}
                 {% if r.kind.value == 'KIT' %}Комплект{% endif %}
                 {% if r.kind.value == 'RUBBER' %}Хвост/резинка{% endif %}
                 {% if r.kind.value == 'OTHER' %}Другое{% endif %}
                 {% if r.is_voided %} <span class="muted">(аннулировано)</span>{% endif %}
               </td>
-              <td>{{ r.amount_from_client }} ₽</td>
-              <td>
+              <td class="lb-nowrap">{{ r.amount_from_client }} ₽</td>
+              <td class="lb-cell-service">
                 {% if r.kind.value == 'MATERIAL' %}
                   {% if r.material_service %}
                     {{ r.material_service.subcategory.name }} — {{ r.material_service.name }}
@@ -96,4 +96,3 @@
     </div>
   </div>
 {% endblock %}
-

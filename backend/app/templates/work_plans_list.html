@@ -56,7 +56,7 @@
       <p class="muted">{% if search_id is not none %}План №{{ search_id }} не найден{% if mine_only %} среди ваших{% endif %}.{% else %}Пока нет планов работ.{% endif %}</p>
     {% else %}
       <div class="lb-work-plans-table-wrap" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
-        <table class="lb-work-plans-table" style="width:100%; min-width:32rem; table-layout:fixed;">
+        <table class="lb-work-plans-table" style="width:max-content; min-width:100%; table-layout:auto;">
           <colgroup>
             <col style="width:3.5rem;" />
             <col style="width:6.5rem;" />
@@ -76,15 +76,15 @@
           <tbody>
             {% for p in rows %}
               <tr>
-                <td><a href="/work-plans/{{ p.id }}">#{{ p.id }}</a></td>
-                <td style="font-size:13px; line-height:1.35;">
+                <td class="lb-nowrap"><a href="/work-plans/{{ p.id }}">#{{ p.id }}</a></td>
+                <td class="lb-nowrap" style="font-size:13px; line-height:1.35;">
                   <a href="/work-plans/{{ p.id }}">
                     <span style="display:block;">{{ format_naive_utc_datetime(p.planned_date, display_tz, '%d.%m.%Y') }}</span>
                     <span class="muted" style="display:block;">{{ format_naive_utc_datetime(p.planned_date, display_tz, '%H:%M') }}</span>
                   </a>
                 </td>
-                <td style="word-break:break-word;">{{ work_plan_type_display(p) }}</td>
-                <td style="word-break:break-word;">{{ p.master.display_name or p.master.username }}</td>
+                <td class="lb-cell-name">{{ work_plan_type_display(p) }}</td>
+                <td class="lb-cell-name">{{ p.master.display_name or p.master.username }}</td>
                 <td class="lb-work-plans-status">
                   {% set st_label = work_plan_status_label(p.status) %}
                   <strong class="lb-work-plans-status-text">{{ st_label }}</strong>

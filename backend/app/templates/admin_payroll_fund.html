@@ -21,34 +21,36 @@
     {% endif %}
 
     <div class="row">
-      <div class="card" style="flex:1; min-width:280px;">
+      <div class="card" style="flex:1 1 280px; min-width:0; max-width:100%;">
         <h3 style="margin-top:0;">Сальдо сотрудников</h3>
         {% if master_rows_nonzero or master_rows_zero %}
+          <div class="lb-table-wrap">
           <table>
-            <thead><tr><th>Сотрудник</th><th>Сальдо, руб.</th></tr></thead>
+            <thead><tr><th>Сотрудник</th><th class="lb-nowrap">Сальдо, руб.</th></tr></thead>
             <tbody>
               {% for m in master_rows_nonzero %}
                 <tr>
-                  <td>{{ m.display_name }} <span class="muted">({{ ru_user_role(m.role) }} #{{ m.user_id }})</span></td>
-                  <td>{{ "%.2f"|format(m.balance) }}</td>
+                  <td class="lb-cell-name">{{ m.display_name }} <span class="muted">({{ ru_user_role(m.role) }} #{{ m.user_id }})</span></td>
+                  <td class="lb-nowrap">{{ "%.2f"|format(m.balance) }}</td>
                 </tr>
               {% endfor %}
               {% if master_rows_zero %}
                 <tr><td colspan="2"><hr style="margin:10px 0; border:0; border-top:1px solid #eee;" /></td></tr>
                 {% for m in master_rows_zero %}
                   <tr>
-                    <td>{{ m.display_name }} <span class="muted">({{ ru_user_role(m.role) }} #{{ m.user_id }})</span></td>
-                    <td class="muted">0.00</td>
+                    <td class="lb-cell-name">{{ m.display_name }} <span class="muted">({{ ru_user_role(m.role) }} #{{ m.user_id }})</span></td>
+                    <td class="muted lb-nowrap">0.00</td>
                   </tr>
                 {% endfor %}
               {% endif %}
             </tbody>
           </table>
+          </div>
         {% else %}
           <p class="muted">Нет начислений по фондам сотрудников.</p>
         {% endif %}
       </div>
-      <div class="card" style="flex:1; min-width:280px;">
+      <div class="card" style="flex:1 1 280px; min-width:0; max-width:100%;">
         <h3 style="margin-top:0;">Фонд студии</h3>
         <p style="font-size:1.25rem; margin:0;"><strong>{{ "%.2f"|format(studio_balance) }} руб.</strong></p>
         <p class="muted" style="margin-top:8px;">Включает долю с визитов (<code>salon_profit + studio_fund_amount</code>) и маржу с розницы.</p>
