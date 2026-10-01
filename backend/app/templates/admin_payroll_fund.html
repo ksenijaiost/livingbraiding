@@ -334,7 +334,7 @@
               </tr>
               <tr>
                 <td class="muted">Дата учёта</td>
-                <td>{{ (storno_preview.effective_at or storno_preview.created_at)|dt_local('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ (storno_preview.effective_at or storno_preview.created_at)|dt_local('%Y-%m-%d') }}</td>
               </tr>
               <tr>
                 <td class="muted">Проведено</td>
@@ -493,7 +493,7 @@
             {% for r in ledger_rows %}
               <tr>
                 <td>{{ r.id }}</td>
-                <td>{{ (r.effective_at or r.created_at)|dt_local('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ (r.effective_at or r.created_at)|dt_local('%Y-%m-%d') }}</td>
                 <td class="muted" style="font-size:12px;">{{ r.created_at|dt_local('%Y-%m-%d %H:%M') }}</td>
                 <td>
                   {% if r.entry_kind.value == 'ACCRUAL' %}Начисление
