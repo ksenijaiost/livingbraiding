@@ -342,13 +342,162 @@ def _append_visit_service_accruals(
     )
 
 
+def _ledger_net_maps_equal(
+    expected: dict[tuple[str, int | None], float],
+    actual: dict[tuple[str, int | None], float],
+) -> bool:
+    keys = set(expected) | set(actual)
+    for key in keys:
+        if money_q2(expected.get(key, 0.0)) != money_q2(actual.get(key, 0.0)):
+            return False
+    return True
+
+
+def source_ledger_nets(
+    db: Session,
+    source_kind: PayrollFundSourceKind,
+    source_id: int,
+    *,
+    exclude_comments: frozenset[str] | set[str] | None = None,
+    exclude_comment_prefixes: tuple[str, ...] = (),
+) -> dict[tuple[str, int | None], float]:
+    """Нетто ACCRUAL+STORNO по (side, user_id) для источника."""
+    excl = set(exclude_comments or ())
+    rows = list(
+        db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == source_kind,
+                PayrollFundLedger.source_id == int(source_id),
+                PayrollFundLedger.entry_kind.in_(
+                    (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.STORNO)
+                ),
+            )
+        ).all()
+    )
+    nets: dict[tuple[str, int | None], float] = {}
+    for row in rows:
+        comment = (row.comment or "").strip()
+        if comment in excl:
+            continue
+        if any(comment.startswith(p) for p in exclude_comment_prefixes):
+            continue
+        side = row.side.value if hasattr(row.side, "value") else str(row.side)
+        uid = int(row.user_id) if row.user_id is not None else None
+        key = (side, uid)
+        nets[key] = money_q2(nets.get(key, 0.0) + float(row.amount or 0))
+    return {k: v for k, v in nets.items() if abs(v) > 1e-9}
+
+
+def expected_visit_service_ledger_nets(
+    db: Session, visit_service: VisitService, visit: Visit
+) -> dict[tuple[str, int | None], float]:
+    """Ожидаемые нетто-проводки строки услуги по полям карточки."""
+    out: dict[tuple[str, int | None], float] = {}
+    studio_amt = money_q2(
+        float(visit_service.salon_profit or 0) + float(visit_service.studio_fund_amount or 0)
+    )
+    if studio_amt > 0:
+        out[("STUDIO", None)] = studio_amt
+
+    mp = float(visit_service.masters_pool or 0)
+    if visit.masters_scope == VisitMastersScope.PER_SERVICE:
+        masters = list(
+            db.scalars(
+                select(VisitServiceMaster)
+                .where(VisitServiceMaster.visit_service_id == visit_service.id)
+                .order_by(VisitServiceMaster.id.asc())
+            ).all()
+        )
+    else:
+        masters = list(
+            db.scalars(select(VisitMaster).where(VisitMaster.visit_id == visit.id).order_by(VisitMaster.id.asc())).all()
+        )
+    for vm in masters:
+        pct = float(vm.percent or 0) / 100.0
+        amt = money_q2(mp * pct)
+        if amt <= 0:
+            continue
+        key = ("MASTER", int(vm.master_id))
+        out[key] = money_q2(out.get(key, 0.0) + amt)
+
+    corr_mid = visit_service.correction_master_id
+    corr_amt = money_q2(float(visit_service.correction_master_amount or 0))
+    if corr_mid and corr_amt > 0:
+        key = ("MASTER", int(corr_mid))
+        out[key] = money_q2(out.get(key, 0.0) + corr_amt)
+    return out
+
+
+def _expected_legacy_visit_ledger_nets(db: Session, visit: Visit) -> dict[tuple[str, int | None], float]:
+    """Ожидаемые нетто по legacy VISIT (пул мастеров + студия), без помощи и доп.продаж."""
+    out: dict[tuple[str, int | None], float] = {}
+    mp = float(visit.masters_pool or 0)
+    masters = list(
+        db.scalars(select(VisitMaster).where(VisitMaster.visit_id == visit.id).order_by(VisitMaster.id.asc())).all()
+    )
+    for vm in masters:
+        pct = float(vm.percent or 0) / 100.0
+        amt = money_q2(mp * pct)
+        if amt <= 0:
+            continue
+        key = ("MASTER", int(vm.master_id))
+        out[key] = money_q2(out.get(key, 0.0) + amt)
+    studio_amt = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
+    if studio_amt > 0:
+        out[("STUDIO", None)] = studio_amt
+    return out
+
+
+def _addon_sale_comment_prefixes() -> tuple[str, ...]:
+    from app.visit_addon_sales import ADDON_SALE_SELLER_COMMENT, ADDON_SALE_STUDIO_COMMENT
+
+    return (ADDON_SALE_SELLER_COMMENT, ADDON_SALE_STUDIO_COMMENT)
+
+
+def _expected_hourly_help_nets(visit: Visit) -> dict[int, float]:
+    from app.hourly_help import hourly_help_rows_from_visit
+
+    expected: dict[int, float] = {}
+    for row in hourly_help_rows_from_visit(visit):
+        amt = money_q2(float(row.amount or 0))
+        if amt <= 0:
+            continue
+        mid = int(row.master_id)
+        expected[mid] = money_q2(expected.get(mid, 0.0) + amt)
+    return expected
+
+
+def _hourly_help_nets_equal(expected: dict[int, float], actual: dict[int, float]) -> bool:
+    keys = set(expected) | set(actual)
+    for uid in keys:
+        if money_q2(expected.get(uid, 0.0)) != money_q2(actual.get(uid, 0.0)):
+            return False
+    return True
+
+
 def replace_visit_service_accruals(
     db: Session,
     visit_service: VisitService,
     visit: Visit,
     created_by_user_id: int | None,
 ) -> None:
-    """Сторно проводок строки услуги и повторное начисление по актуальным суммам."""
+    """Сторно проводок строки услуги и повторное начисление по актуальным суммам.
+
+    Если нетто журнала уже совпадает с карточкой — ничего не пишем (1.92.1).
+    """
+    if visit.is_cancelled or visit_service.is_cancelled:
+        storno_source_accruals(
+            db,
+            PayrollFundSourceKind.VISIT_SERVICE,
+            visit_service.id,
+            created_by_user_id,
+            reason="редактировании",
+        )
+        return
+    expected = expected_visit_service_ledger_nets(db, visit_service, visit)
+    actual = source_ledger_nets(db, PayrollFundSourceKind.VISIT_SERVICE, int(visit_service.id))
+    if _ledger_net_maps_equal(expected, actual):
+        return
     storno_source_accruals(
         db,
         PayrollFundSourceKind.VISIT_SERVICE,
@@ -356,9 +505,54 @@ def replace_visit_service_accruals(
         created_by_user_id,
         reason="редактировании",
     )
-    if visit.is_cancelled or visit_service.is_cancelled:
-        return
     _append_visit_service_accruals(db, visit_service, visit, created_by_user_id)
+
+
+def _storno_orphan_legacy_visit_pool_accruals(
+    db: Session,
+    visit_id: int,
+    created_by_user_id: int | None,
+    *,
+    reason: str = "редактировании",
+) -> None:
+    """Сторно висячих legacy VISIT (пул/студия), не помощь и не доп.продажи.
+
+    Нужно, когда у визита уже есть строки VISIT_SERVICE, а в журнале остались
+    старые начисления на source=VISIT (как у визита 118).
+    """
+    prefixes = _addon_sale_comment_prefixes()
+    excl = {HOURLY_HELP_LEDGER_COMMENT, HOURLY_HELP_CORRECTION_COMMENT}
+    accruals = list(
+        db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == int(visit_id),
+                PayrollFundLedger.entry_kind.in_(_REVERSIBLE_ENTRY_KINDS),
+            )
+        ).all()
+    )
+    for acc in accruals:
+        comment = (acc.comment or "").strip()
+        if comment in excl:
+            continue
+        if any(comment.startswith(p) for p in prefixes):
+            continue
+        if _ledger_has_storno_of(db, int(acc.id)):
+            continue
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.STORNO,
+            side=acc.side,
+            user_id=acc.user_id,
+            amount=-money_q2(float(acc.amount or 0)),
+            source_kind=acc.source_kind,
+            source_id=acc.source_id,
+            created_by_user_id=created_by_user_id,
+            storno_of_id=acc.id,
+            comment=_storno_comment_for_edit(reason=reason, original_comment=acc.comment),
+            effective_at=acc.effective_at,
+        )
+    db.flush()
 
 
 def replace_visit_accruals(
@@ -372,6 +566,9 @@ def replace_visit_accruals(
     replace_visit_hourly_help_accruals (иначе при отсутствии flush было двойное сторно).
     Коррекции двойного сторно помощи при обычном редактировании не трогаем;
     при отмене визита сторнируем всё.
+
+    1.92.1: отдельные блоки (услуга / помощь / доп.продажи) переписываем только
+    если нетто журнала отличается от карточки — без пустых пар сторно+начисление.
     """
     if visit.is_cancelled:
         storno_source_accruals(
@@ -382,14 +579,6 @@ def replace_visit_accruals(
             reason="отмене визита",
         )
         return
-    storno_source_accruals(
-        db,
-        PayrollFundSourceKind.VISIT,
-        visit.id,
-        created_by_user_id,
-        reason="редактировании",
-        exclude_comments={HOURLY_HELP_LEDGER_COMMENT, HOURLY_HELP_CORRECTION_COMMENT},
-    )
     services = list(
         db.scalars(
             select(VisitService)
@@ -400,25 +589,45 @@ def replace_visit_accruals(
     if services:
         for vs in services:
             replace_visit_service_accruals(db, vs, visit, created_by_user_id)
+        _storno_orphan_legacy_visit_pool_accruals(db, int(visit.id), created_by_user_id)
         replace_visit_hourly_help_accruals(db, visit, created_by_user_id)
-        append_visit_addon_sale_ledgers(db, visit, created_by_user_id)
+        replace_visit_addon_sale_accruals(db, visit, created_by_user_id)
         return
-    append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
-    studio_amt = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
-    if studio_amt > 0:
-        append_ledger(
+    # Legacy: один визит без строк услуг — переписать VISIT только при отличии нетто.
+    expected_legacy = _expected_legacy_visit_ledger_nets(db, visit)
+    actual_legacy = source_ledger_nets(
+        db,
+        PayrollFundSourceKind.VISIT,
+        int(visit.id),
+        exclude_comments={HOURLY_HELP_LEDGER_COMMENT, HOURLY_HELP_CORRECTION_COMMENT},
+        exclude_comment_prefixes=_addon_sale_comment_prefixes(),
+    )
+    if not _ledger_net_maps_equal(expected_legacy, actual_legacy):
+        storno_source_accruals(
             db,
-            entry_kind=PayrollFundEntryKind.ACCRUAL,
-            side=PayrollFundSide.STUDIO,
-            user_id=None,
-            amount=studio_amt,
-            source_kind=PayrollFundSourceKind.VISIT,
-            source_id=visit.id,
-            created_by_user_id=created_by_user_id,
-            effective_at=visit.performed_date,
+            PayrollFundSourceKind.VISIT,
+            visit.id,
+            created_by_user_id,
+            reason="редактировании",
+            exclude_comments={HOURLY_HELP_LEDGER_COMMENT, HOURLY_HELP_CORRECTION_COMMENT},
         )
+        # Сторно VISIT (кроме помощи) снимает и доп.продажи — их вернёт replace_visit_addon_sale_accruals.
+        append_visit_master_pool_and_mix_bonus_ledgers(db, visit, created_by_user_id)
+        studio_amt = money_q2(float(visit.salon_profit or 0) + float(visit.studio_fund_amount or 0))
+        if studio_amt > 0:
+            append_ledger(
+                db,
+                entry_kind=PayrollFundEntryKind.ACCRUAL,
+                side=PayrollFundSide.STUDIO,
+                user_id=None,
+                amount=studio_amt,
+                source_kind=PayrollFundSourceKind.VISIT,
+                source_id=visit.id,
+                created_by_user_id=created_by_user_id,
+                effective_at=visit.performed_date,
+            )
     replace_visit_hourly_help_accruals(db, visit, created_by_user_id)
-    append_visit_addon_sale_ledgers(db, visit, created_by_user_id)
+    replace_visit_addon_sale_accruals(db, visit, created_by_user_id)
 
 
 def post_visit_service_accruals(
@@ -683,10 +892,115 @@ def replace_visit_hourly_help_accruals(
     visit: Visit,
     created_by_user_id: int | None,
 ) -> None:
-    storno_visit_hourly_help_accruals(db, int(visit.id), created_by_user_id, reason="редактировании")
+    """Переписать помощь только если нетто журнала ≠ карточке (1.92.1)."""
     if visit.is_cancelled:
+        storno_visit_hourly_help_accruals(db, int(visit.id), created_by_user_id, reason="отмене визита")
         return
+    expected = _expected_hourly_help_nets(visit)
+    actual = visit_hourly_help_ledger_net_by_user(db, int(visit.id))
+    if _hourly_help_nets_equal(expected, actual):
+        return
+    storno_visit_hourly_help_accruals(db, int(visit.id), created_by_user_id, reason="редактировании")
     append_visit_hourly_help_ledgers(db, visit, created_by_user_id)
+
+
+def _expected_addon_sale_nets(visit: Visit) -> dict[tuple[str, int | None], float]:
+    from app.visit_addon_sales import addon_sales_from_visit_json
+
+    out: dict[tuple[str, int | None], float] = {}
+    sales = addon_sales_from_visit_json(getattr(visit, "addons_details_json", None))
+    if sales is None or visit.is_cancelled:
+        return out
+    for line in sales.lines:
+        if line.commission > 0 and line.seller_user_id > 0:
+            key = ("MASTER", int(line.seller_user_id))
+            out[key] = money_q2(out.get(key, 0.0) + float(line.commission))
+    studio = money_q2(sum(line.studio_amount for line in sales.lines))
+    if studio > 0:
+        out[("STUDIO", None)] = studio
+    return out
+
+
+def _actual_addon_sale_nets(db: Session, visit_id: int) -> dict[tuple[str, int | None], float]:
+    prefixes = _addon_sale_comment_prefixes()
+    rows = list(
+        db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == int(visit_id),
+                PayrollFundLedger.entry_kind.in_(
+                    (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.STORNO)
+                ),
+            )
+        ).all()
+    )
+    nets: dict[tuple[str, int | None], float] = {}
+    for row in rows:
+        comment = (row.comment or "").strip()
+        if not any(comment.startswith(p) for p in prefixes):
+            continue
+        side = row.side.value if hasattr(row.side, "value") else str(row.side)
+        uid = int(row.user_id) if row.user_id is not None else None
+        key = (side, uid)
+        nets[key] = money_q2(nets.get(key, 0.0) + float(row.amount or 0))
+    return {k: v for k, v in nets.items() if abs(v) > 1e-9}
+
+
+def _storno_visit_addon_sale_accruals(
+    db: Session,
+    visit_id: int,
+    created_by_user_id: int | None,
+    *,
+    reason: str = "редактировании",
+) -> None:
+    prefixes = _addon_sale_comment_prefixes()
+    accruals = list(
+        db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == int(visit_id),
+                PayrollFundLedger.entry_kind == PayrollFundEntryKind.ACCRUAL,
+                PayrollFundLedger.storno_of_id.is_(None),
+            )
+        ).all()
+    )
+    for acc in accruals:
+        comment = (acc.comment or "").strip()
+        if not any(comment.startswith(p) for p in prefixes):
+            continue
+        if _ledger_has_storno_of(db, int(acc.id)):
+            continue
+        append_ledger(
+            db,
+            entry_kind=PayrollFundEntryKind.STORNO,
+            side=acc.side,
+            user_id=acc.user_id,
+            amount=-money_q2(float(acc.amount or 0)),
+            source_kind=acc.source_kind,
+            source_id=acc.source_id,
+            created_by_user_id=created_by_user_id,
+            storno_of_id=acc.id,
+            comment=_storno_comment_for_edit(reason=reason, original_comment=acc.comment),
+            effective_at=acc.effective_at,
+        )
+    db.flush()
+
+
+def replace_visit_addon_sale_accruals(
+    db: Session,
+    visit: Visit,
+    created_by_user_id: int | None,
+) -> None:
+    """Переписать доп.продажи только если нетто отличается от карточки (1.92.1)."""
+    if visit.is_cancelled:
+        _storno_visit_addon_sale_accruals(db, int(visit.id), created_by_user_id, reason="отмене визита")
+        return
+    expected = _expected_addon_sale_nets(visit)
+    actual = _actual_addon_sale_nets(db, int(visit.id))
+    if _ledger_net_maps_equal(expected, actual):
+        return
+    _storno_visit_addon_sale_accruals(db, int(visit.id), created_by_user_id, reason="редактировании")
+    append_visit_addon_sale_ledgers(db, visit, created_by_user_id)
 
 
 def _ledger_net_for_accruals_and_their_stornos(
