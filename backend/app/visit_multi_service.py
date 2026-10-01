@@ -858,6 +858,9 @@ def save_visit_with_services(
 
     persist_visit_addon_sales(visit, inp.addon_sales or _empty_addon_sales())
     _apply_visit_hourly_help(db, visit, inp)
+    # autoflush=False: VisitServiceMaster последней услуги иначе не видны в SELECT
+    # внутри post_visit_accruals → студия по услуге есть, ЗП мастера нет.
+    db.flush()
     post_visit_accruals(db, visit, visit.created_by_user_id)
     db.commit()
     db.refresh(visit)

@@ -70,6 +70,7 @@ def test_build_home_payroll_period_ctx_personal_with_payout(memory_db) -> None:
         source_kind=PayrollFundSourceKind.VISIT,
         source_id=1,
         created_by_user_id=master.id,
+        effective_at=datetime.combine(date(2026, 7, 15), time.min),
     )
     post_payout(
         db,
@@ -79,6 +80,7 @@ def test_build_home_payroll_period_ctx_personal_with_payout(memory_db) -> None:
         created_by_user_id=master.id,
         comment="аванс",
         payout_payment_kind=PayrollFundPayoutPaymentKind.CASH,
+        effective_at=datetime.combine(date(2026, 7, 16), time.min),
     )
     db.commit()
 
@@ -88,7 +90,50 @@ def test_build_home_payroll_period_ctx_personal_with_payout(memory_db) -> None:
     assert ctx["personal_accrued"] == 10000.0
     assert ctx["personal_paid"] == 3000.0
     assert ctx["personal_balance"] == 7000.0
+    assert ctx["personal_today"] == 0.0
     assert "studio_accrued" not in ctx
+
+
+def test_build_home_payroll_period_ctx_personal_today(memory_db) -> None:
+    db = memory_db
+    master = _seed_user(db)
+    today = date(2026, 7, 20)
+    db.add(
+        PayrollPeriod(
+            date_from=payroll_period_day_start(date(2026, 7, 1)),
+            date_to=payroll_period_day_start(date(2026, 7, 1)),
+            closed_at=None,
+        )
+    )
+    db.flush()
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.ACCRUAL,
+        side=PayrollFundSide.MASTER,
+        user_id=master.id,
+        amount=500.0,
+        source_kind=PayrollFundSourceKind.VISIT,
+        source_id=11,
+        created_by_user_id=master.id,
+        effective_at=datetime.combine(today, time.min),
+    )
+    append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.ACCRUAL,
+        side=PayrollFundSide.MASTER,
+        user_id=master.id,
+        amount=700.0,
+        source_kind=PayrollFundSourceKind.VISIT,
+        source_id=12,
+        created_by_user_id=master.id,
+        effective_at=datetime.combine(date(2026, 7, 19), time.min),
+    )
+    db.commit()
+
+    ctx = build_home_payroll_period_ctx(db, today=today, user_id=master.id, include_studio=False)
+    assert ctx is not None
+    assert ctx["personal_today"] == 500.0
+    assert ctx["personal_accrued"] == 1200.0
 
 
 def test_build_home_payroll_period_ctx_studio(memory_db) -> None:
@@ -113,6 +158,7 @@ def test_build_home_payroll_period_ctx_studio(memory_db) -> None:
         source_kind=PayrollFundSourceKind.VISIT,
         source_id=2,
         created_by_user_id=admin.id,
+        effective_at=datetime.combine(date(2026, 7, 15), time.min),
     )
     post_payout(
         db,
@@ -121,6 +167,7 @@ def test_build_home_payroll_period_ctx_studio(memory_db) -> None:
         amount=1500.0,
         created_by_user_id=admin.id,
         comment="выплата из студии",
+        effective_at=datetime.combine(date(2026, 7, 16), time.min),
     )
     db.commit()
 

@@ -1599,12 +1599,16 @@ def build_home_payroll_period_ctx(
     personal_accrued = employee_payroll_net_in_period(db, user_id, start, end_excl)
     personal_paid = employee_payouts_in_period(db, user_id, start, end_excl)
     personal_balance = money_q2(personal_accrued - personal_paid)
+    day_start = datetime.combine(today, time.min)
+    day_end_excl = datetime.combine(today + timedelta(days=1), time.min)
+    personal_today = employee_payroll_net_in_period(db, user_id, day_start, day_end_excl)
 
     period_end = end_excl - timedelta(microseconds=1)
     out: dict[str, Any] = {
         "id": int(p.id),
         "date_from": p.date_from,
         "date_to": period_end,
+        "personal_today": personal_today,
         "personal_accrued": personal_accrued,
         "personal_paid": personal_paid,
         "personal_balance": personal_balance,
@@ -1614,6 +1618,7 @@ def build_home_payroll_period_ctx(
         studio_accrued = studio_payroll_net_in_period(db, start, end_excl)
         studio_paid = studio_payouts_in_period(db, start, end_excl)
         studio_balance = studio_fund_net_in_period(db, start, end_excl)
+        studio_today = studio_payroll_net_in_period(db, day_start, day_end_excl)
         expenses_sum = (
             db.scalar(
                 select(func.coalesce(func.sum(StudioExpense.amount), 0.0)).where(
@@ -1626,6 +1631,7 @@ def build_home_payroll_period_ctx(
         )
         out.update(
             {
+                "studio_today": studio_today,
                 "studio_accrued": studio_accrued,
                 "studio_paid": studio_paid,
                 "studio_balance": studio_balance,

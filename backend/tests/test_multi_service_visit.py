@@ -5,13 +5,16 @@ from __future__ import annotations
 from datetime import date, datetime
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import selectinload, sessionmaker
 
+from app.db import models as _orm_models  # noqa: F401
+from app.db.base import Base
 from app.db.models import (
     Client,
     MixSource,
     PayrollFundLedger,
+    PayrollFundSide,
     PayrollFundSourceKind,
     Service,
     ServiceCategory,
@@ -22,7 +25,7 @@ from app.db.models import (
     Visit,
     VisitClientType,
     VisitMastersScope,
-    VisitService,
+    VisitServiceMaster,
     PayrollPeriod,
 )
 from app.visit_multi_service import (
@@ -38,12 +41,6 @@ from app.time_utils import utcnow_naive
 
 @pytest.fixture()
 def memory_db():
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from app.db import models as _orm_models  # noqa: F401
-    from app.db.base import Base
-
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)
@@ -177,6 +174,7 @@ def test_recalc_after_line_cancel(memory_db) -> None:
         ),
     )
     visit = db.scalar(select(Visit).options(selectinload(Visit.services)).where(Visit.id == visit.id))
+    assert visit is not None
     vs_cancel = visit.services[1]
     storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, vs_cancel.id, master.id)
     vs_cancel.is_cancelled = True
@@ -186,3 +184,75 @@ def test_recalc_after_line_cancel(memory_db) -> None:
     db.refresh(visit)
     assert visit.amount_from_client == pytest.approx(1000.0)
     assert not visit.is_cancelled
+
+
+def test_per_service_last_line_master_accrual_with_autoflush_off() -> None:
+    """Регресс 1.92: при autoflush=False masters последней услуги должны попасть в журнал."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, future=True)
+    with SessionLocal() as db:
+        master, svc_ids = _seed_master_and_services(db)
+        master_b = User(
+            username="m2",
+            password_hash="x",
+            display_name="Master B",
+            role=UserRole.MASTER,
+            is_active=True,
+        )
+        db.add(master_b)
+        db.flush()
+        db.add(UserRoleAssignment(user_id=master_b.id, role=UserRole.MASTER))
+        client = Client(name="Flush", phone="+79990007788", is_confirmed=True)
+        db.add(client)
+        db.commit()
+
+        header = VisitHeaderInput(
+            client_mode="existing",
+            existing_client_id=client.id,
+            draft_name="",
+            draft_phone="",
+            draft_telegram="",
+            draft_vk="",
+            draft_instagram="",
+            draft_other_contact="",
+            client_type=VisitClientType.RETURNING,
+            performed_date=date.today(),
+            duration_minutes=60,
+            masters_scope=VisitMastersScope.PER_SERVICE,
+            same_master_shares_all_services=False,
+            visit_master_allocations=[],
+        )
+        line1 = _line(svc_ids[0], 4000)
+        line1.service_master_allocations = [(master.id, 50), (master_b.id, 50)]
+        line2 = _line(svc_ids[1], 300)
+        line2.service_master_allocations = [(master.id, 100)]
+
+        visit = save_visit_with_services(
+            db,
+            master.id,
+            MultiServiceVisitInput(header=header, lines=[line1, line2]),
+        )
+        services = sorted(visit.services, key=lambda s: int(s.sort_order or 0))
+        assert len(services) == 2
+        last = services[-1]
+        masters_last = list(
+            db.scalars(
+                select(VisitServiceMaster).where(VisitServiceMaster.visit_service_id == last.id)
+            ).all()
+        )
+        assert len(masters_last) == 1
+        assert float(last.masters_pool or 0) > 0
+
+        master_rows = list(
+            db.scalars(
+                select(PayrollFundLedger).where(
+                    PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT_SERVICE,
+                    PayrollFundLedger.source_id == last.id,
+                    PayrollFundLedger.side == PayrollFundSide.MASTER,
+                    PayrollFundLedger.entry_kind == "ACCRUAL",
+                )
+            ).all()
+        )
+        assert master_rows, "начисление мастеру по последней услуге должно быть в журнале"
+        assert sum(float(r.amount or 0) for r in master_rows) == pytest.approx(float(last.masters_pool))
