@@ -219,7 +219,7 @@ def test_update_amount_triggers_storno(memory_db):
 
 
 def test_update_comment_only_still_rebuilds_ledger(memory_db):
-    """Даже без смены сумм пересохранение сторнирует и заново начисляет (чинит неполный журнал)."""
+    """Смена только комментария при совпадающем нетто не плодит сторно (1.92.1)."""
     db = memory_db
     master_a, _master_b, _admin, svc_ids = _seed_users_and_services(db)
     client = db.scalar(select(Client).limit(1))
@@ -233,6 +233,7 @@ def test_update_comment_only_still_rebuilds_ledger(memory_db):
             )
         ).all()
     )
+    before_ids = {int(r.id) for r in before}
     before_storno = sum(1 for r in before if r.entry_kind == PayrollFundEntryKind.STORNO)
 
     header = VisitHeaderInput(
@@ -278,7 +279,8 @@ def test_update_comment_only_still_rebuilds_ledger(memory_db):
         ).all()
     )
     after_storno = sum(1 for r in after if r.entry_kind == PayrollFundEntryKind.STORNO)
-    assert after_storno > before_storno
+    assert after_storno == before_storno
+    assert {int(r.id) for r in after} == before_ids
     net = sum_visit_ledger_by_visit_id(
         db, side=PayrollFundSide.MASTER, visit_ids=[visit.id]
     ).get(visit.id, 0.0) + sum_visit_ledger_by_visit_id(
@@ -860,7 +862,7 @@ def _header_for_visit(visit: Visit, master_id: int, client_id: int) -> VisitHead
 
 
 def test_replace_visit_no_double_hourly_help_storno(memory_db):
-    """Повторное сохранение визита не сторнирует почасовую помощь дважды."""
+    """Повторное сохранение с теми же суммами не плодит сторно помощи (1.92.1)."""
     from app.hourly_help import HourlyHelpRow
     from app.payroll_fund import HOURLY_HELP_LEDGER_COMMENT
 
@@ -891,6 +893,17 @@ def test_replace_visit_no_double_hourly_help_storno(memory_db):
         hourly_help=help_rows,
     )
     update_visit_with_services(db, visit.id, master_a.id, inp)
+    ledger_after_first = list(
+        db.scalars(
+            select(PayrollFundLedger).where(
+                PayrollFundLedger.source_kind == PayrollFundSourceKind.VISIT,
+                PayrollFundLedger.source_id == visit.id,
+                PayrollFundLedger.user_id == master_b.id,
+            )
+        ).all()
+    )
+    ids_after_first = {int(r.id) for r in ledger_after_first}
+
     update_visit_with_services(db, visit.id, master_a.id, inp)
 
     ledger = list(
@@ -904,6 +917,8 @@ def test_replace_visit_no_double_hourly_help_storno(memory_db):
     )
     net = sum(float(r.amount or 0) for r in ledger)
     assert net == pytest.approx(300.0)
+    # Второе сохранение без изменений — новых строк по помощи нет.
+    assert {int(r.id) for r in ledger} == ids_after_first
 
     help_accruals = [
         r
@@ -911,13 +926,11 @@ def test_replace_visit_no_double_hourly_help_storno(memory_db):
         if r.entry_kind == PayrollFundEntryKind.ACCRUAL
         and (r.comment or "") == HOURLY_HELP_LEDGER_COMMENT
     ]
+    assert len(help_accruals) == 1
     for acc in help_accruals:
         storno_count = sum(1 for r in ledger if r.storno_of_id == acc.id)
-        assert storno_count <= 1
+        assert storno_count == 0
 
-    stornos = [r for r in ledger if r.entry_kind == PayrollFundEntryKind.STORNO]
-    assert stornos
-    assert all("Сторно при редактировании" in (r.comment or "") for r in stornos)
 
 
 def test_update_visit_audits_hourly_help(memory_db):

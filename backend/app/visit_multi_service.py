@@ -858,6 +858,9 @@ def save_visit_with_services(
 
     persist_visit_addon_sales(visit, inp.addon_sales or _empty_addon_sales())
     _apply_visit_hourly_help(db, visit, inp)
+    # autoflush=False: VisitServiceMaster последней услуги иначе не видны в SELECT
+    # внутри post_visit_accruals → студия по услуге есть, ЗП мастера нет.
+    db.flush()
     post_visit_accruals(db, visit, visit.created_by_user_id)
     db.commit()
     db.refresh(visit)
@@ -1839,8 +1842,8 @@ def update_visit_with_services(
         ),
     )
 
-    # Всегда: legacy VISIT + VISIT_SERVICE + почасовая помощь — сторно и начисление по карточке.
-    # Иначе при «пересохранить без изменений» неполные проводки (как у визита 118) не чинятся.
+    # Переначисление в журнал только при отличии нетто от карточки (1.92.1);
+    # неполные проводки (как у визита 118 / 407) по-прежнему чинятся, т.к. нетто ≠ карточке.
     _ = force_replace_accruals  # совместимость вызовов
     replace_visit_accruals(db, visit, editor_user_id)
 

@@ -9,8 +9,9 @@
 
     <h2 style="margin-top: 0;">Фонды</h2>
     <p class="muted" style="margin-top:-6px;">
-      Сальдо по каждому сотруднику (фонд сотрудника) и фонду студии — сумма всех проводок (начисления положительные, сторно и выплаты отрицательные).
+      Сальдо по каждому сотруднику (фонд сотрудника) и фонду студии — сумма всех проводок (начисления и переводы из студии положительные, сторно и выплаты отрицательные).
       Начисления создаются при сохранении визита, работы с товарами и розничной продажи; сторно — при отмене визита, void работы/продажи или правке продажи (пересчёт маржи).
+      Перевод из фонда студии пополняет личный фонд (оклад, доплата вне работ); выплата — обналичивание личного фонда.
     </p>
 
     {% if msg %}
@@ -184,9 +185,79 @@
     </div>
 
     <div class="card" style="margin-top: 16px;">
-      <h3 style="margin-top:0;">Корректировка / начальный остаток</h3>
+      <h3 style="margin-top:0;">Перевод из фонда студии</h3>
       <p class="muted" style="margin-top:-6px;">
-        Для переноса балансов из «реального мира» можно внести ручную проводку (дельту) или установить баланс фонда в нужное значение (будет записана разница).
+        Пополнение личного фонда из фонда студии (оклад, доплата вне работ). Не выплата: деньги остаются на виртуальном счёте сотрудника до вывода.
+      </p>
+      {% if not payout_user_options %}
+        <p class="muted">Нет активных сотрудников с ролями мастер/админ — добавьте пользователя, чтобы записывать переводы.</p>
+      {% endif %}
+      {% if payout_techspec_closed_override %}
+        <p class="muted" style="margin-top:0;">Техспец: перевод с датой в закрытом периоде ЗП — с двойным подтверждением.</p>
+      {% endif %}
+      <form method="post" action="/admin/payroll-fund/transfer"{% if not payout_user_options %} aria-disabled="true"{% endif %}
+        {% if payout_techspec_closed_override %}class="js-closed-period-form" data-closed-action="Перевод" data-closed-date-input="pf_transfer_date" data-closed-periods-el="pf-closed-periods-data"{% endif %}>
+        {% if payout_techspec_closed_override %}
+          <input type="hidden" name="closed_period_ack" value="" />
+        {% endif %}
+        <div class="pf-transfer-grid" style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 32px; align-items:start;">
+          <div>
+            <label for="pf_transfer_user">Кому *</label>
+            <select name="user_id" id="pf_transfer_user" required {% if not payout_user_options %}disabled{% endif %} style="width:100%; max-width:100%; box-sizing:border-box;">
+              {% for row in payout_user_options %}
+                <option value="{{ row.user.id }}">{{ row.user.display_name }} ({{ row.roles_ru }})</option>
+              {% endfor %}
+            </select>
+            <p class="muted" style="margin:6px 0 0;">Сотрудник, чей личный фонд пополняется.</p>
+          </div>
+          <div>
+            <div id="pf_transfer_balance_hint" class="muted" style="margin-bottom:6px; min-height:1.35em;">Остаток фонда студии: —</div>
+            <label for="pf_transfer_amount">Сумма, руб. *</label>
+            <input type="text" name="amount" id="pf_transfer_amount" required placeholder="0.00" style="width:100%; max-width:100%; box-sizing:border-box;" />
+          </div>
+          <div>
+            <label for="pf_transfer_date">Дата учёта *</label>
+            <input type="date" name="transfer_date" id="pf_transfer_date" required value="{{ payout_default_date }}" style="width:100%; max-width:100%; box-sizing:border-box;" />
+            <p class="muted" style="margin:6px 0 0;">По ней перевод попадает в период ЗП.</p>
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <label for="pf_transfer_comment">Комментарий</label>
+            <input type="text" name="comment" id="pf_transfer_comment" placeholder="Например: оклад / доплата" style="width:100%; max-width:100%; box-sizing:border-box;" />
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <button type="submit" {% if not payout_user_options %}disabled{% endif %}>Записать перевод</button>
+          </div>
+        </div>
+      </form>
+      <style>
+        @media (max-width: 640px) {
+          .pf-transfer-grid { grid-template-columns: 1fr !important; }
+        }
+      </style>
+      <script>
+        (function () {
+          var elData = document.getElementById("pf-fund-balances-data");
+          var hint = document.getElementById("pf_transfer_balance_hint");
+          var data = { studio: 0, employees: {} };
+          try {
+            if (elData && elData.textContent) data = JSON.parse(elData.textContent);
+          } catch (e) {}
+          function fmt(n) {
+            var x = Number(n);
+            if (!isFinite(x)) x = 0;
+            return x.toFixed(2);
+          }
+          if (hint) hint.textContent = "Остаток фонда студии: " + fmt(data.studio) + " руб.";
+        })();
+      </script>
+    </div>
+
+    <details class="card" style="margin-top: 16px;">
+      <summary class="lb-summary-strong" style="margin:0;">Корректировка / начальный остаток</summary>
+      <div style="margin-top: 12px;">
+      <p class="muted" style="margin-top:0;">
+        Редко нужно: перенос балансов из «реального мира» — ручная дельта или установка баланса фонда в нужное значение.
+        Не путать с выплатой и переводом из фонда студии.
       </p>
       {% if payout_techspec_closed_override %}
         <p class="muted" style="margin-top:0;">Техспец: корректировка с датой в закрытом периоде ЗП — с двойным подтверждением.</p>
@@ -295,13 +366,15 @@
           syncHint();
         })();
       </script>
-    </div>
+      </div>
+    </details>
 
     <div class="card" style="margin-top: 16px;">
       <h3 style="margin-top:0;">Сторно ручной проводки</h3>
       <p class="muted" style="margin-top:-6px;">
-        Отмена ручной выплаты или корректировки по ID из журнала.
+        Отмена ручной выплаты, корректировки или перевода по ID из журнала.
         Сторно записывается <strong>той же учётной датой</strong>, что и исходная проводка (попадает в тот же период ЗП).
+        Для перевода отменяются обе ноги (студия и сотрудник).
       </p>
       <form method="get" action="/admin/payroll-fund" style="display:flex; flex-wrap:wrap; gap:12px; align-items:end;">
         <div>
@@ -329,12 +402,13 @@
                 <td>
                   {% if storno_preview.entry_kind.value == 'ACCRUAL' %}Корректировка (начисление)
                   {% elif storno_preview.entry_kind.value == 'PAYOUT' %}Выплата
+                  {% elif storno_preview.entry_kind.value == 'TRANSFER' %}Перевод
                   {% else %}{{ storno_preview.entry_kind.value }}{% endif %}
                 </td>
               </tr>
               <tr>
                 <td class="muted">Дата учёта</td>
-                <td>{{ (storno_preview.effective_at or storno_preview.created_at)|dt_local('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ (storno_preview.effective_at or storno_preview.created_at)|dt_local('%Y-%m-%d') }}</td>
               </tr>
               <tr>
                 <td class="muted">Проведено</td>
@@ -386,6 +460,9 @@
           <p class="muted" style="margin:10px 0 0; font-size:12px;">
             После отмены в журнал добавится сторно на сумму {{ "%.2f"|format(-storno_preview.amount) }} руб.
             с той же датой учёта.
+            {% if storno_preview.entry_kind.value == 'TRANSFER' %}
+              Вместе с этой ногой будет отменена парная проводка перевода.
+            {% endif %}
           </p>
           {% if not storno_already_id %}
             <form method="post" action="/admin/payroll-fund/storno" style="margin-top: 12px;"
@@ -493,12 +570,13 @@
             {% for r in ledger_rows %}
               <tr>
                 <td>{{ r.id }}</td>
-                <td>{{ (r.effective_at or r.created_at)|dt_local('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ (r.effective_at or r.created_at)|dt_local('%Y-%m-%d') }}</td>
                 <td class="muted" style="font-size:12px;">{{ r.created_at|dt_local('%Y-%m-%d %H:%M') }}</td>
                 <td>
                   {% if r.entry_kind.value == 'ACCRUAL' %}Начисление
                   {% elif r.entry_kind.value == 'STORNO' %}Сторно
                   {% elif r.entry_kind.value == 'PAYOUT' %}Выплата
+                  {% elif r.entry_kind.value == 'TRANSFER' %}Перевод
                   {% elif r.entry_kind.value == 'EXPENSE' %}Расход студии
                   {% else %}{{ r.entry_kind.value }}{% endif %}
                 </td>
