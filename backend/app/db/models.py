@@ -1250,6 +1250,7 @@ class PayrollFundEntryKind(str, enum.Enum):
     STORNO = "STORNO"
     PAYOUT = "PAYOUT"
     EXPENSE = "EXPENSE"
+    TRANSFER = "TRANSFER"
 
 
 class PayrollFundSide(str, enum.Enum):
@@ -1281,6 +1282,8 @@ class PayrollFundLedger(Base):
 
     Для PAYOUT: при side=MASTER user_id — сотрудник, с чьего фонда списание; при side=STUDIO —
     сотрудник-получатель (фонд студии уменьшается на сумму выплаты ему).
+    Для TRANSFER: пара проводок студия→сотрудник; user_id — получатель на обеих сторонах;
+    source_id указывает на парную проводку.
     """
 
     __tablename__ = "payroll_fund_ledger"

@@ -1,4 +1,4 @@
-"""Журнал фондов ЗП: начисления с визита / работы / розницы, сторно, выплаты."""
+"""Журнал фондов ЗП: начисления с визита / работы / розницы, сторно, выплаты, переводы."""
 
 from __future__ import annotations
 
@@ -198,11 +198,11 @@ def append_ledger(
     if side == PayrollFundSide.MASTER and user_id is None:
         raise ValueError("MASTER требует user_id")
     if side == PayrollFundSide.STUDIO:
-        if entry_kind == PayrollFundEntryKind.PAYOUT:
+        if entry_kind in (PayrollFundEntryKind.PAYOUT, PayrollFundEntryKind.TRANSFER):
             if user_id is None:
-                raise ValueError("Выплата из фонда студии: нужен user_id получателя")
+                raise ValueError("Выплата/перевод из фонда студии: нужен user_id получателя")
         elif entry_kind == PayrollFundEntryKind.STORNO:
-            # Сторно выплаты из студии сохраняет user_id получателя исходной проводки.
+            # Сторно выплаты/перевода из студии сохраняет user_id получателя исходной проводки.
             pass
         elif user_id is not None:
             raise ValueError("STUDIO: user_id должен быть NULL")
@@ -1660,11 +1660,63 @@ def post_manual_adjustment(
     )
 
 
-_MANUAL_STORNO_ENTRY_KINDS = (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.PAYOUT)
+def post_studio_to_employee_transfer(
+    db: Session,
+    *,
+    user_id: int,
+    amount: float,
+    created_by_user_id: int,
+    comment: str | None,
+    effective_at: datetime | None = None,
+) -> tuple[PayrollFundLedger, PayrollFundLedger]:
+    """Перевод из фонда студии в личный фонд сотрудника (оклад, доплата вне работ).
+
+    Пишет пару TRANSFER: −amount на STUDIO и +amount на MASTER; source_id связывают ноги.
+    Сумма только положительная; отмена — через сторно любой из ног (отменит обе).
+    """
+    pay = money_q2(amount)
+    if pay <= 0:
+        raise ValueError("Сумма перевода должна быть больше нуля")
+    note = (comment or "").strip() or None
+    studio_row = append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.TRANSFER,
+        side=PayrollFundSide.STUDIO,
+        user_id=user_id,
+        amount=-pay,
+        source_kind=PayrollFundSourceKind.MANUAL,
+        source_id=None,
+        created_by_user_id=created_by_user_id,
+        comment=note,
+        effective_at=effective_at,
+    )
+    db.flush()
+    master_row = append_ledger(
+        db,
+        entry_kind=PayrollFundEntryKind.TRANSFER,
+        side=PayrollFundSide.MASTER,
+        user_id=user_id,
+        amount=pay,
+        source_kind=PayrollFundSourceKind.MANUAL,
+        source_id=int(studio_row.id),
+        created_by_user_id=created_by_user_id,
+        comment=note,
+        effective_at=effective_at,
+    )
+    db.flush()
+    studio_row.source_id = int(master_row.id)
+    return studio_row, master_row
+
+
+_MANUAL_STORNO_ENTRY_KINDS = (
+    PayrollFundEntryKind.ACCRUAL,
+    PayrollFundEntryKind.PAYOUT,
+    PayrollFundEntryKind.TRANSFER,
+)
 
 
 def get_manual_ledger_for_storno(db: Session, entry_id: int) -> PayrollFundLedger:
-    """Загрузить ручную выплату/корректировку для превью сторно; иначе ValueError."""
+    """Загрузить ручную выплату/корректировку/перевод для превью сторно; иначе ValueError."""
     row = db.scalar(
         select(PayrollFundLedger)
         .options(
@@ -1676,10 +1728,12 @@ def get_manual_ledger_for_storno(db: Session, entry_id: int) -> PayrollFundLedge
     if row is None:
         raise ValueError("Проводка не найдена.")
     if row.source_kind != PayrollFundSourceKind.MANUAL:
-        raise ValueError("Сторно по ID доступно только для ручных проводок (выплаты и корректировки).")
+        raise ValueError(
+            "Сторно по ID доступно только для ручных проводок (выплаты, корректировки, переводы)."
+        )
     if row.entry_kind not in _MANUAL_STORNO_ENTRY_KINDS:
         raise ValueError(
-            "Можно отменить только ручную выплату или корректировку (начисление), не сторно и не расход."
+            "Можно отменить только ручную выплату, корректировку или перевод, не сторно и не расход."
         )
     if row.storno_of_id is not None:
         raise ValueError("Это уже сторно — отменять его нельзя.")
@@ -1695,16 +1749,28 @@ def existing_storno_id_for_ledger(db: Session, entry_id: int) -> int | None:
     return int(sid) if sid is not None else None
 
 
-def storno_manual_ledger_entry(
+def _transfer_pair_row(db: Session, row: PayrollFundLedger) -> PayrollFundLedger | None:
+    if row.entry_kind != PayrollFundEntryKind.TRANSFER or row.source_id is None:
+        return None
+    pair = db.get(PayrollFundLedger, int(row.source_id))
+    if pair is None:
+        return None
+    if pair.entry_kind != PayrollFundEntryKind.TRANSFER:
+        return None
+    if pair.source_kind != PayrollFundSourceKind.MANUAL:
+        return None
+    if pair.storno_of_id is not None:
+        return None
+    if int(pair.source_id or 0) != int(row.id):
+        return None
+    return pair
+
+
+def _append_manual_storno_row(
     db: Session,
-    entry_id: int,
+    acc: PayrollFundLedger,
     created_by_user_id: int | None,
 ) -> PayrollFundLedger:
-    """Сторно одной ручной выплаты/корректировки той же учётной датой, что у исходной проводки."""
-    acc = get_manual_ledger_for_storno(db, entry_id)
-    already = existing_storno_id_for_ledger(db, int(acc.id))
-    if already is not None:
-        raise ValueError(f"Проводка уже отменена (сторно #{already}).")
     return append_ledger(
         db,
         entry_kind=PayrollFundEntryKind.STORNO,
@@ -1718,6 +1784,36 @@ def storno_manual_ledger_entry(
         comment=f"Сторно проводки #{acc.id}" + (f": {acc.comment}" if acc.comment else ""),
         effective_at=acc.effective_at,
     )
+
+
+def storno_manual_ledger_entry(
+    db: Session,
+    entry_id: int,
+    created_by_user_id: int | None,
+) -> PayrollFundLedger:
+    """Сторно ручной выплаты/корректировки/перевода той же учётной датой.
+
+    Для TRANSFER отменяет обе ноги пары.
+    """
+    acc = get_manual_ledger_for_storno(db, entry_id)
+    already = existing_storno_id_for_ledger(db, int(acc.id))
+    if already is not None:
+        raise ValueError(f"Проводка уже отменена (сторно #{already}).")
+    targets = [acc]
+    pair = _transfer_pair_row(db, acc)
+    if pair is not None:
+        pair_already = existing_storno_id_for_ledger(db, int(pair.id))
+        if pair_already is not None:
+            raise ValueError(
+                f"Парная проводка перевода уже отменена (сторно #{pair_already}); "
+                f"сначала разберите ситуацию вручную."
+            )
+        targets.append(pair)
+    last: PayrollFundLedger | None = None
+    for row in targets:
+        last = _append_manual_storno_row(db, row, created_by_user_id)
+    assert last is not None
+    return last
 
 
 def current_fund_balance(db: Session, *, side: PayrollFundSide, user_id: int | None) -> float:
@@ -1825,7 +1921,7 @@ def employee_payroll_net_in_period(
     start: datetime,
     end_excl: datetime,
 ) -> float:
-    """Нетто начислений сотруднику за период (ACCRUAL + STORNO)."""
+    """Нетто начислений сотруднику за период (ACCRUAL + STORNO + TRANSFER)."""
     v = db.scalar(
         select(func.coalesce(func.sum(PayrollFundLedger.amount), 0.0)).where(
             PayrollFundLedger.side == PayrollFundSide.MASTER,
@@ -1833,7 +1929,11 @@ def employee_payroll_net_in_period(
             PayrollFundLedger.effective_at >= start,
             PayrollFundLedger.effective_at < end_excl,
             PayrollFundLedger.entry_kind.in_(
-                (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.STORNO)
+                (
+                    PayrollFundEntryKind.ACCRUAL,
+                    PayrollFundEntryKind.STORNO,
+                    PayrollFundEntryKind.TRANSFER,
+                )
             ),
         )
     )
