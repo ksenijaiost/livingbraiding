@@ -4,15 +4,54 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title or "Живем Плетем" }}</title>
-    <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="/static/app.css?v=1894" />
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; font-size: 14px; margin: 0; background: #f6f7fb; color: #111; }
-      header { background: #111827; color: #fff; padding: 12px 16px; display:flex; align-items:center; justify-content: space-between; }
+      /* 1.89: не даём широким таблицам/полям раздувать страницу на мобиле */
+      html { max-width: 100%; }
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        font-size: 14px;
+        margin: 0;
+        background: #f6f7fb;
+        color: #111;
+        max-width: 100%;
+      }
+      header {
+        background: #111827;
+        color: #fff;
+        padding: 12px 16px;
+        display:flex;
+        align-items:center;
+        justify-content: space-between;
+        gap: 10px;
+        max-width: 100%;
+        box-sizing: border-box;
+      }
       a { color: inherit; }
-      .container { max-width: 980px; margin: 0 auto; padding: 16px; position: relative; }
-      .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; }
+      .container {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 16px;
+        width: 100%;
+        box-sizing: border-box;
+        min-width: 0;
+        position: relative;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 16px;
+        max-width: 100%;
+        box-sizing: border-box;
+        min-width: 0;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
       .row { display:flex; gap: 12px; flex-wrap: wrap; }
-      .row > * { flex: 1; min-width: 260px; }
+      .row > * { flex: 1 1 260px; min-width: 0; max-width: 100%; }
+      img, video, iframe, svg { max-width: 100%; height: auto; }
+      pre { max-width: 100%; overflow-x: auto; }
       .muted { color: #6b7280; }
       /* Шрифт как у страницы (не monospace у textarea); 14px — без «надувания» от дефолтных 16px */
       input, select, textarea {
@@ -54,7 +93,27 @@
         outline-offset: 1px;
       }
       table { width:100%; border-collapse: collapse; }
-      th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 14px; }
+      th, td {
+        border-bottom: 1px solid #e5e7eb;
+        padding: 8px;
+        text-align: left;
+        font-size: 14px;
+        vertical-align: top;
+      }
+      /* Мягкий перенос только там, где явно нужно (не рвём цифры/даты посредине) */
+      .lb-cell-wrap {
+        overflow-wrap: break-word;
+        word-break: normal;
+        white-space: normal;
+      }
+      th.lb-nowrap, td.lb-nowrap, .lb-nowrap {
+        white-space: nowrap;
+      }
+      @media (max-width: 600px) {
+        .container { padding: 12px; }
+        .row > * { flex: 1 1 100%; min-width: 0; }
+        th, td { padding: 8px 6px; font-size: 13px; }
+      }
       /* Чередование строк в таблицах списков */
       table tbody tr:nth-child(odd) { background-color: #ffffff; }
       table tbody tr:nth-child(even) { background-color: #f8fafc; }
@@ -224,7 +283,13 @@
               </details>
             {% else %}
               <a href="/">Главная</a>
-              <a href="/clients">Клиенты</a>
+              <details class="nav-dd">
+                <summary>Клиенты</summary>
+                <div class="dd">
+                  <a href="/clients">Список</a>
+                  <a href="/clients/stats">Статистика</a>
+                </div>
+              </details>
 
               <details class="nav-dd">
                 <summary>Записи</summary>
@@ -307,7 +372,7 @@
                     <a href="/admin/payroll-fund">Фонды</a>
                     <a href="/admin/payroll-periods">Периоды</a>
                     <a href="/admin/reports">Отчёты</a>
-                    <a href="/admin/statistics">Статистика</a>
+                    <a href="/admin/statistics">Статистика сотрудника</a>
                     <a href="/admin/catalog">Управление прайсом</a>
                     <a href="/admin/settings">Настройки</a>
                     <a href="/admin/super/purge" style="color:#b91c1c;">Удаление данных</a>
@@ -364,7 +429,11 @@
             <a class="md-link" href="/work-plans" onclick="window.lbToggleMobileNav(false)">План работ</a>
           </details>
         {% else %}
-          <a class="md-link" href="/clients" onclick="window.lbToggleMobileNav(false)"><strong>Клиенты</strong></a>
+          <details>
+            <summary><strong>Клиенты</strong></summary>
+            <a class="md-link" href="/clients" onclick="window.lbToggleMobileNav(false)">Список</a>
+            <a class="md-link" href="/clients/stats" onclick="window.lbToggleMobileNav(false)">Статистика</a>
+          </details>
 
           <details>
             <summary><strong>Записи</strong></summary>
@@ -434,7 +503,7 @@
               <a class="md-link" href="/admin/payroll-fund" onclick="window.lbToggleMobileNav(false)">Фонды</a>
               <a class="md-link" href="/admin/payroll-periods" onclick="window.lbToggleMobileNav(false)">Периоды</a>
               <a class="md-link" href="/admin/reports" onclick="window.lbToggleMobileNav(false)">Отчёты</a>
-              <a class="md-link" href="/admin/statistics" onclick="window.lbToggleMobileNav(false)">Статистика</a>
+              <a class="md-link" href="/admin/statistics" onclick="window.lbToggleMobileNav(false)">Статистика сотрудника</a>
               <a class="md-link" href="/admin/catalog" onclick="window.lbToggleMobileNav(false)">Управление прайсом</a>
               <a class="md-link" href="/admin/settings" onclick="window.lbToggleMobileNav(false)">Настройки</a>
               <a class="md-link" href="/admin/super/purge" style="color:#b91c1c;" onclick="window.lbToggleMobileNav(false)">Удаление данных</a>
@@ -502,6 +571,22 @@
     </div>
 
     <script src="/static/app_shell.js" defer></script>
+    <script>
+      document.addEventListener('click', function (ev) {
+        var btn = ev.target && ev.target.closest ? ev.target.closest('.lb-photo-delete') : null;
+        if (!btn) return;
+        var box = btn.closest('.lb-photo-existing');
+        if (!box) return;
+        var hidden = box.querySelector('input[name^="clear_photo_"]');
+        if (hidden) hidden.value = '1';
+        var note = document.createElement('p');
+        note.className = 'muted';
+        note.style.margin = '0 0 8px';
+        note.textContent = 'Фото будет удалено при сохранении.';
+        box.replaceWith(note);
+        if (hidden) note.insertAdjacentElement('beforebegin', hidden);
+      });
+    </script>
   </body>
 </html>
 

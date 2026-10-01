@@ -67,6 +67,7 @@
     {% if not rows %}
       <p class="muted">{% if search_id is not none %}Бронь №{{ search_id }} не найдена{% if bookings_mine_only %} среди ваших{% endif %}.{% else %}Пока нет броней.{% endif %}</p>
     {% else %}
+      <div class="lb-table-wrap">
       <table>
         <thead>
           <tr>
@@ -85,18 +86,20 @@
         <tbody>
           {% for b in rows %}
             <tr>
-              <td><a href="/bookings/{{ b.id }}">#{{ b.id }}</a></td>
-              <td style="font-size:13px; line-height:1.35;">
+              <td class="lb-nowrap">
+                <a href="/bookings/{{ b.id }}">#{{ b.id }}</a>
+              </td>
+              <td class="lb-nowrap" style="font-size:13px; line-height:1.35;">
                 <a href="/bookings/{{ b.id }}" style="display:inline-block;">
                   <span style="display:block;">{{ format_naive_utc_datetime(b.planned_date, display_tz, '%d.%m.%Y') }}</span>
                   <span class="muted" style="display:block;">{{ format_naive_utc_datetime(b.planned_date, display_tz, '%H:%M') }}</span>
                 </a>
               </td>
-              <td style="max-width:9rem; word-break:break-word; line-height:1.35;">
+              <td class="lb-cell-name">
                 <a href="/clients/{{ b.client.id }}">{{ b.client.name }}</a>
               </td>
-              <td>{{ booking_kind_label(b.kind) }}</td>
-              <td style="max-width:12rem; font-size:13px; line-height:1.35; word-break:break-word;">
+              <td class="lb-nowrap">{{ booking_kind_label(b.kind) }}</td>
+              <td class="lb-cell-name" style="font-size:13px;">
                 {% set masters_label = (row_masters.get(b.id) or '') %}
                 {% if masters_label %}
                   {{ masters_label }}
@@ -104,7 +107,7 @@
                   <span class="muted">—</span>
                 {% endif %}
               </td>
-              <td style="max-width:18rem;">
+              <td class="lb-cell-service">
                 {% set parts = row_details.get(b.id) or [] %}
                 {% if parts %}
                   {% for p in parts %}
@@ -114,7 +117,7 @@
                   <span class="muted">—</span>
                 {% endif %}
               </td>
-              <td>
+              <td class="lb-nowrap">
                 <strong>{{ booking_status_display(b.status) }}</strong>
               </td>
               {% if can_manage %}
@@ -131,6 +134,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% endif %}
   </div>
 {% endblock %}

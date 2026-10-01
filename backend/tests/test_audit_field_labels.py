@@ -11,6 +11,13 @@ def test_apply_audit_field_labels_visit_fields() -> None:
     assert out[0].field_name == "Сумма от клиента"
 
 
+def test_apply_audit_field_labels_hourly_help() -> None:
+    out = apply_audit_field_labels([FieldChange("hourly_help_total", "0", "300")])
+    assert out[0].field_name == "Почасовая помощь (сумма)"
+    assert audit_field_is_json("hourly_help_json")
+    assert audit_field_is_json("kit_usages_summary")
+
+
 def test_apply_audit_field_labels_kit_fields() -> None:
     out = apply_audit_field_labels([FieldChange("discount_percent", "10", "15")])
     assert out[0].field_name == "Скидка (%)"

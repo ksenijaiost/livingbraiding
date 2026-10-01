@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 1100px;">
+    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <h2 style="margin-top: 0;">Возвращаемость</h2>
+      <a href="/clients/stats"><button type="button" class="secondary">К статистике</button></a>
+    </div>
+    <p class="muted" style="margin-top:0;">
+      Сравнение клиентов периода посещения с повторными визитами в периоде возврата.
+      Учитываются только неотменённые визиты. «Новые» — у кого первый визит пришёлся на период посещения.
+      По мастеру «вернулись» = снова были у этого мастера в периоде возврата.
+    </p>
+
+    <form method="get" action="/clients/stats/retention" id="ret_form" class="card" style="background:#f8f9fb; margin-bottom:20px;">
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+        <div class="card" style="margin:0; background:#fff; border:1px solid #e5e7eb;">
+          <h3 style="margin:0 0 10px; font-size:1rem;">Период посещения</h3>
+          <input type="hidden" name="visit_mode" id="visit_mode_hidden" value="{{ visit_mode|default('custom_dates') }}" />
+          <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+              <input type="radio" name="visit_mode_radio" value="payroll_period" id="visit_mode_period" {% if visit_mode == 'payroll_period' %}checked{% endif %} />
+              По закрытому периоду ЗП
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+              <input type="radio" name="visit_mode_radio" value="custom_dates" id="visit_mode_dates" {% if visit_mode != 'payroll_period' %}checked{% endif %} />
+              По выбранным датам
+            </label>
+          </div>
+          <div id="visit_period_block">
+            <label for="visit_period">Закрытый период</label>
+            <select name="visit_period_id" id="visit_period" style="width:100%;">
+              <option value="">— не выбран —</option>
+              {% for p in closed_periods %}
+                <option value="{{ p.id }}" {% if visit_period_id == p.id %}selected{% endif %}>
+                  {{ p.date_from.strftime('%Y-%m-%d') }} — {{ p.date_to.strftime('%Y-%m-%d') }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div id="visit_dates_block" class="row" style="align-items:flex-end; margin-top:8px;">
+            <div style="flex:1; min-width:120px;">
+              <label for="vdf">С</label>
+              <input type="date" name="vdf" id="vdf" value="{{ form_vdf }}" style="width:100%;" />
+            </div>
+            <div style="flex:1; min-width:120px;">
+              <label for="vdt">По</label>
+              <input type="date" name="vdt" id="vdt" value="{{ form_vdt }}" style="width:100%;" />
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin:0; background:#fff; border:1px solid #e5e7eb;">
+          <h3 style="margin:0 0 10px; font-size:1rem;">Период возврата</h3>
+          <input type="hidden" name="return_mode" id="return_mode_hidden" value="{{ return_mode|default('custom_dates') }}" />
+          <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+              <input type="radio" name="return_mode_radio" value="payroll_period" id="return_mode_period" {% if return_mode == 'payroll_period' %}checked{% endif %} />
+              По закрытому периоду ЗП
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+              <input type="radio" name="return_mode_radio" value="custom_dates" id="return_mode_dates" {% if return_mode != 'payroll_period' %}checked{% endif %} />
+              По выбранным датам
+            </label>
+          </div>
+          <div id="return_period_block">
+            <label for="return_period">Закрытый период</label>
+            <select name="return_period_id" id="return_period" style="width:100%;">
+              <option value="">— не выбран —</option>
+              {% for p in closed_periods %}
+                <option value="{{ p.id }}" {% if return_period_id == p.id %}selected{% endif %}>
+                  {{ p.date_from.strftime('%Y-%m-%d') }} — {{ p.date_to.strftime('%Y-%m-%d') }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div id="return_dates_block" class="row" style="align-items:flex-end; margin-top:8px;">
+            <div style="flex:1; min-width:120px;">
+              <label for="rdf">С</label>
+              <input type="date" name="rdf" id="rdf" value="{{ form_rdf }}" style="width:100%;" />
+            </div>
+            <div style="flex:1; min-width:120px;">
+              <label for="rdt">По</label>
+              <input type="date" name="rdt" id="rdt" value="{{ form_rdt }}" style="width:100%;" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="align-items:flex-end; margin-top:14px; gap:12px;">
+        <div style="flex:1; min-width:200px;">
+          <label for="master_id">Сотрудник</label>
+          <select name="master_id" id="master_id" style="width:100%;">
+            <option value="">Все</option>
+            {% for m in masters %}
+              <option value="{{ m.id }}" {% if filter_master_id == m.id %}selected{% endif %}>{{ m.display_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="flex:0;">
+          <button type="submit">Показать</button>
+        </div>
+      </div>
+    </form>
+
+    <script>
+      (function () {
+        function wire(prefix) {
+          var hidden = document.getElementById(prefix + "_mode_hidden");
+          var rPeriod = document.getElementById(prefix + "_mode_period");
+          var rDates = document.getElementById(prefix + "_mode_dates");
+          var blockP = document.getElementById(prefix + "_period_block");
+          var blockD = document.getElementById(prefix + "_dates_block");
+          var sel = document.getElementById(prefix === "visit" ? "visit_period" : "return_period");
+          var df = document.getElementById(prefix === "visit" ? "vdf" : "rdf");
+          var dt = document.getElementById(prefix === "visit" ? "vdt" : "rdt");
+          function sync() {
+            var pm = rPeriod && rPeriod.checked;
+            if (hidden) hidden.value = pm ? "payroll_period" : "custom_dates";
+            if (blockP) blockP.style.display = pm ? "" : "none";
+            if (blockD) blockD.style.display = pm ? "none" : "";
+            if (sel) sel.disabled = !pm;
+            if (df) df.disabled = pm;
+            if (dt) dt.disabled = pm;
+          }
+          if (rPeriod) rPeriod.addEventListener("change", sync);
+          if (rDates) rDates.addEventListener("change", sync);
+          sync();
+        }
+        wire("visit");
+        wire("return");
+        var form = document.getElementById("ret_form");
+        if (form) {
+          form.addEventListener("submit", function () {
+            var vh = document.getElementById("visit_mode_hidden");
+            var rh = document.getElementById("return_mode_hidden");
+            var vp = document.getElementById("visit_mode_period");
+            var rp = document.getElementById("return_mode_period");
+            if (vh) vh.value = (vp && vp.checked) ? "payroll_period" : "custom_dates";
+            if (rh) rh.value = (rp && rp.checked) ? "payroll_period" : "custom_dates";
+          });
+        }
+      })();
+    </script>
+
+    <p class="muted" style="margin-bottom:12px;">
+      <strong>Посещение:</strong> {{ visit_label }}
+      &nbsp;·&nbsp;
+      <strong>Возврат:</strong> {{ return_label }}
+    </p>
+
+    <div class="card" style="margin-bottom:20px; background:#fff; border:1px solid #e5e7eb;">
+      <h3 style="margin-top:0;">По компании{% if filter_master_id %} <span class="muted" style="font-weight:400;">(фильтр по сотруднику)</span>{% endif %}</h3>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+        <div>
+          <div class="muted" style="font-size:13px; margin-bottom:6px;">Посетили {{ visit_label }}</div>
+          <div style="font-size:1.5rem; font-weight:700;">{{ company.visited_total }}</div>
+          <div class="muted" style="margin-top:4px;">
+            Новые: <strong>{{ company.visited_new }}</strong>
+            {% if company.visited_total %} ({{ '%.0f'|format(company.visited_new_pct) }}%){% endif %}
+          </div>
+        </div>
+        <div>
+          <div class="muted" style="font-size:13px; margin-bottom:6px;">Возвращаемость {{ return_label }}</div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>
+              <div class="muted" style="font-size:12px;">Всего</div>
+              <div style="color:#2563eb; font-weight:600;">Вернулись: {{ company.returned_total }} ({{ '%.0f'|format(company.returned_total_pct) }}%)</div>
+              <div style="margin-top:4px;">
+                {% if company.lost_total %}
+                  <a href="{{ company_lost_total_url }}" style="color:#dc2626; font-weight:600;">Потерянные: {{ company.lost_total }} ({{ '%.0f'|format(company.lost_total_pct) }}%) →</a>
+                {% else %}
+                  <span style="color:#dc2626;">Потерянные: 0</span>
+                {% endif %}
+              </div>
+            </div>
+            <div>
+              <div class="muted" style="font-size:12px;">Новые</div>
+              <div style="color:#16a34a; font-weight:600;">Вернулись: {{ company.returned_new }} ({{ '%.0f'|format(company.returned_new_pct) }}%)</div>
+              <div style="margin-top:4px;">
+                {% if company.lost_new %}
+                  <a href="{{ company_lost_new_url }}" style="color:#dc2626; font-weight:600;">Потерянные: {{ company.lost_new }} ({{ '%.0f'|format(company.lost_new_pct) }}%) →</a>
+                {% else %}
+                  <span style="color:#dc2626;">Потерянные: 0</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; justify-content:center;">
+          <div style="width:88px; height:88px; border-radius:50%; border:8px solid #2563eb; border-right-color:#e5e7eb; border-bottom-color:#e5e7eb; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1.25rem; color:#2563eb;">
+            {{ '%.0f'|format(company.returned_total_pct) }}%
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="margin-bottom:10px;">По сотрудникам</h3>
+    {% if not master_rows %}
+      <p class="muted">Нет визитов с мастерами за период посещения.</p>
+    {% else %}
+      <div style="overflow-x:auto;">
+        <table class="table" style="width:100%; min-width:720px;">
+          <thead>
+            <tr>
+              <th>Сотрудник</th>
+              <th colspan="2">Клиентов за период посещения</th>
+              <th colspan="2">Вернувшиеся в периоде</th>
+              <th colspan="2">Потерянные в периоде</th>
+            </tr>
+            <tr>
+              <th></th>
+              <th>Всего</th>
+              <th>Новые</th>
+              <th>Всего</th>
+              <th>Новые</th>
+              <th>Всего</th>
+              <th>Новые</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in master_rows %}
+              <tr>
+                <td><strong>{{ row.display_name }}</strong></td>
+                <td>{{ row.slice.visited_total }}</td>
+                <td>{{ row.slice.visited_new }}{% if row.slice.visited_total %} ({{ '%.0f'|format(row.slice.visited_new_pct) }}%){% endif %}</td>
+                <td style="color:#2563eb;">{{ row.slice.returned_total }} ({{ '%.0f'|format(row.slice.returned_total_pct) }}%)</td>
+                <td style="color:#16a34a;">{{ row.slice.returned_new }} ({{ '%.0f'|format(row.slice.returned_new_pct) }}%)</td>
+                <td>
+                  {% if row.slice.lost_total %}
+                    <a href="{{ row.lost_total_url }}" style="color:#dc2626;">{{ row.slice.lost_total }} →</a>
+                  {% else %}
+                    <span style="color:#dc2626;">0</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if row.slice.lost_new %}
+                    <a href="{{ row.lost_new_url }}" style="color:#dc2626;">{{ row.slice.lost_new }} →</a>
+                  {% else %}
+                    <span style="color:#dc2626;">0</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}

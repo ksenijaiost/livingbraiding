@@ -27,6 +27,7 @@ from app.payroll_fund import (
     ledger_balances,
     post_manual_adjustment,
     post_payout,
+    post_studio_to_employee_transfer,
     search_ledger_rows,
     storno_manual_ledger_entry,
     visit_ids_for_visit_service_source_ids,
@@ -34,7 +35,13 @@ from app.payroll_fund import (
 from app.payroll_utils import payroll_period_day_end, payroll_period_day_start
 from app.ru_labels import ru_user_roles_payout_suffix
 from app.time_utils import utcnow_naive
-from app.user_roles import get_roles_for_user, select_users_with_any_role, user_has_any_role
+from app.user_roles import (
+    PAYROLL_STAFF_ROLES,
+    get_roles_for_user,
+    list_payroll_staff_users,
+    staff_list_group,
+    user_has_any_role,
+)
 from app.operational_report import list_closed_payroll_periods
 from app.visit_edit_policy import (
     ensure_event_date_in_open_payroll_period,
@@ -139,6 +146,7 @@ async def admin_payroll_periods_close(
 def _payroll_fund_msg_ru(code: str | None) -> str | None:
     return {
         "paid": "Выплата записана в журнал.",
+        "transferred": "Перевод из фонда студии записан в журнал.",
         "adjusted": "Корректировка записана в журнал.",
         "storno": "Проводка отменена (сторно записано в журнал).",
     }.get(code or "", code)
@@ -148,6 +156,7 @@ def _payroll_fund_err_ru(code: str | None) -> str | None:
     return {
         "bad_side": "Укажите корректный фонд-источник.",
         "bad_amount": "Укажите ненулевую сумму (для возврата в фонд можно ввести отрицательное число).",
+        "bad_transfer_amount": "Укажите положительную сумму перевода.",
         "bad_user": "Выберите сотрудника.",
         "bad_payment": "Укажите тип оплаты.",
         "bad_mode": "Укажите корректный режим корректировки.",
@@ -278,11 +287,7 @@ def admin_payroll_fund_page(
         if r.source_kind == PayrollFundSourceKind.VISIT_SERVICE and r.source_id is not None
     ]
     visit_id_by_service_id = visit_ids_for_visit_service_source_ids(db, vs_source_ids)
-    payout_users = list(
-        db.scalars(
-            select_users_with_any_role(UserRole.MASTER, UserRole.HELPER, UserRole.ADMIN, UserRole.ADMIN_SUPER).order_by(User.display_name.asc())
-        ).all()
-    )
+    payout_users = list_payroll_staff_users(db)
     all_user_rows: list[dict[str, Any]] = []
     for u in payout_users:
         all_user_rows.append(
@@ -293,8 +298,25 @@ def admin_payroll_fund_page(
                 "balance": float(bal_by_uid.get(int(u.id), 0.0)),
             }
         )
-    master_rows_nonzero = [r for r in all_user_rows if abs(float(r["balance"])) > 0.0001]
-    master_rows_zero = [r for r in all_user_rows if abs(float(r["balance"])) <= 0.0001]
+    # Ненулевые сверху; внутри групп — как в list_payroll_staff_users (уже отсортирован)
+    roles_by_uid = {int(u.id): get_roles_for_user(db, int(u.id)) for u in payout_users}
+
+    def _row_sort(r: dict[str, Any]) -> tuple:
+        uid = int(r["user_id"])
+        return (
+            staff_list_group(roles_by_uid.get(uid, [])),
+            (r["display_name"] or "").casefold(),
+            uid,
+        )
+
+    master_rows_nonzero = sorted(
+        [r for r in all_user_rows if abs(float(r["balance"])) > 0.0001],
+        key=_row_sort,
+    )
+    master_rows_zero = sorted(
+        [r for r in all_user_rows if abs(float(r["balance"])) <= 0.0001],
+        key=_row_sort,
+    )
     payout_user_options: list[dict[str, Any]] = []
     for u in payout_users:
         payout_user_options.append({"user": u, "roles_ru": ru_user_roles_payout_suffix(get_roles_for_user(db, u.id))})
@@ -311,6 +333,7 @@ def admin_payroll_fund_page(
         {"value": PayrollFundEntryKind.ACCRUAL.value, "label": "Начисление"},
         {"value": PayrollFundEntryKind.STORNO.value, "label": "Сторно"},
         {"value": PayrollFundEntryKind.PAYOUT.value, "label": "Выплата"},
+        {"value": PayrollFundEntryKind.TRANSFER.value, "label": "Перевод"},
         {"value": PayrollFundEntryKind.EXPENSE.value, "label": "Расход студии"},
     ]
     fund_side_options = [
@@ -411,7 +434,7 @@ async def admin_payroll_fund_payout(
         return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
     if db.get(User, user_id) is None:
         return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
-    if not user_has_any_role(db, user_id, UserRole.MASTER, UserRole.HELPER, UserRole.ADMIN, UserRole.ADMIN_SUPER):
+    if not user_has_any_role(db, user_id, *PAYROLL_STAFF_ROLES):
         return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
     pay_raw = (str(form.get("payment_kind") or "")).strip().upper()
     try:
@@ -451,6 +474,59 @@ async def admin_payroll_fund_payout(
         return RedirectResponse(url="/admin/payroll-fund?err=bad_amount", status_code=303)
     db.commit()
     return RedirectResponse(url="/admin/payroll-fund?msg=paid", status_code=303)
+
+
+@router.post("/admin/payroll-fund/transfer")
+async def admin_payroll_fund_transfer(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        amount = parse_float(form.get("amount"), field_name="amount")
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_transfer_amount", status_code=303)
+    comment = str(form.get("comment") or "").strip()
+    try:
+        user_id = parse_int(form.get("user_id"), min=1, field_name="user_id")
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
+    if db.get(User, user_id) is None:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
+    if not user_has_any_role(db, user_id, *PAYROLL_STAFF_ROLES):
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_user", status_code=303)
+    date_raw = (str(form.get("transfer_date") or "")).strip()
+    try:
+        transfer_day = parse_date_iso(date_raw, field_name="transfer_date")
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_date", status_code=303)
+    effective_at = datetime.combine(transfer_day, datetime.min.time())
+    closed = is_in_closed_payroll_period(db, effective_at)
+    allow_closed = bool(closed and user_may_edit_closed_payroll_period(current_user))
+    if closed and not allow_closed:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_period", status_code=303)
+    try:
+        require_closed_period_ack(needed=allow_closed, form_ack=form.get("closed_period_ack"))
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_period_ack", status_code=303)
+    try:
+        ensure_event_date_in_open_payroll_period(db, effective_at, allow_closed=allow_closed)
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_period", status_code=303)
+    try:
+        post_studio_to_employee_transfer(
+            db,
+            user_id=user_id,
+            amount=amount,
+            created_by_user_id=current_user.id,
+            comment=comment,
+            effective_at=effective_at,
+        )
+    except ValueError:
+        return RedirectResponse(url="/admin/payroll-fund?err=bad_transfer_amount", status_code=303)
+    db.commit()
+    return RedirectResponse(url="/admin/payroll-fund?msg=transferred", status_code=303)
 
 
 @router.post("/admin/payroll-fund/adjust")

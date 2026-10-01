@@ -10,6 +10,7 @@
           <a href="/kits/new"><button type="button">Новый комплект</button></a>
           {% if current_user.role.value == 'ADMIN_SUPER' %}
             <a href="/kits/bulk-import"><button type="button" class="secondary">Массовая загрузка (JSON)</button></a>
+            <a href="/kits/bulk-price-update"><button type="button" class="secondary">Массовое обновление цен</button></a>
           {% endif %}
         </div>
       {% endif %}
@@ -55,6 +56,7 @@
       {% endif %}
     </p>
 
+    <div class="lb-table-wrap">
     <table>
       <thead>
         <tr>
@@ -75,10 +77,10 @@
               Название{% if sort == 'title' %} {% if sort_dir == 'asc' %}↑{% else %}↓{% endif %}{% endif %}
             </a>
           </th>
-          <th>Цена, ₽</th>
-          <th>Скидка, %</th>
-          <th>Остаток</th>
-          <th>Резерв</th>
+          <th class="lb-nowrap">Цена, ₽</th>
+          <th class="lb-nowrap">Скидка, %</th>
+          <th class="lb-nowrap">Остаток</th>
+          <th class="lb-nowrap">Резерв</th>
           <th></th>
         </tr>
       </thead>
@@ -115,7 +117,7 @@
             </td>
             <td class="lb-nowrap">
               {% if is_admin_kit %}
-                <form method="post" action="/kits/{{ k.id }}/discount" class="lb-inline-flex-wrap-gap-6">
+                <form method="post" action="/kits/{{ k.id }}/discount" class="lb-kit-discount-row">
                   <input type="hidden" name="redirect_to" value="list" />
                   <input name="discount_percent" type="text" inputmode="numeric" pattern="[0-9]*" value="{{ k.discount_percent }}" class="lb-w-4rem" />
                   <button type="submit" class="secondary lb-btn-compact-2x8">Ок</button>
@@ -124,8 +126,8 @@
                 {{ k.discount_percent }}%
               {% endif %}
             </td>
-            <td>{{ k.pieces_available }} / {{ k.pieces_total }}</td>
-            <td class="lb-font-13">
+            <td class="lb-nowrap">{{ k.pieces_available }} / {{ k.pieces_total }}</td>
+            <td class="lb-font-13 lb-nowrap">
               {% if k.is_reserved %}
                 <span
                   class="lb-reserve-chip"
@@ -135,12 +137,12 @@
                 <span class="muted">—</span>
               {% endif %}
             </td>
-            <td style="vertical-align:top;">
+            <td class="lb-kit-actions" style="vertical-align:top;">
               <div class="lb-actions-col">
               {% if can_open_reserve %}
                 <button
                   type="button"
-                  class="js-reserve-open{% if k.is_reserved %} secondary{% endif %} lb-btn-wrap-center"
+                  class="js-reserve-open{% if k.is_reserved %} secondary{% endif %} lb-kit-reserve-btn"
                   data-kit-id="{{ k.id }}"
                   data-action-url="/kits/{{ k.id }}/reserve"
                   data-sku="{{ k.sku|e }}"
@@ -151,21 +153,21 @@
                   data-user-id=""
                   data-client-name=""
                 >
-                  {% if k.is_reserved %}Добавить резерв{% else %}Зарезервировать{% endif %}
+                  {% if k.is_reserved %}Добавить<br />резерв{% else %}Создать<br />резерв{% endif %}
                 </button>
               {% elif k.pieces_available > 0 and slots_full %}
                 <button
                   type="button"
-                  class="secondary kit-btn-disabled js-reserve-limit-full lb-btn-wrap-center"
+                  class="secondary kit-btn-disabled js-reserve-limit-full lb-kit-reserve-btn"
                   aria-disabled="true"
                   title="Достигнут лимит резервов ({{ kit_max_reserves }}). Снимите резерв кнопкой «Снять»."
                 >
-                  {% if k.is_reserved %}Добавить резерв (лимит){% else %}Зарезервировать (лимит){% endif %}
+                  {% if k.is_reserved %}Добавить<br />резерв{% else %}Создать<br />резерв{% endif %}
                 </button>
               {% endif %}
               {% if k.is_reserved and is_admin_kit %}
                 <script type="application/json" id="clear-reserves-payload-{{ k.id }}" class="lb-hidden">{{ row.clear_modal_items_json|safe }}</script>
-                <button type="button" class="secondary js-clear-reserves-open lb-btn-wrap-center" data-kit-id="{{ k.id }}" data-action-url="/kits/{{ k.id }}/reserve" data-sku="{{ k.sku|e }}" data-after="list">Снять</button>
+                <button type="button" class="secondary js-clear-reserves-open lb-kit-reserve-btn" data-kit-id="{{ k.id }}" data-action-url="/kits/{{ k.id }}/reserve" data-sku="{{ k.sku|e }}" data-after="list">Снять</button>
               {% endif %}
               {% if k.is_reserved and not is_admin_kit %}
                 {% for r in k.reserves %}
@@ -174,7 +176,7 @@
                       <input type="hidden" name="action" value="clear" />
                       <input type="hidden" name="reserve_id" value="{{ r.id }}" />
                       <input type="hidden" name="after_reserve" value="list" />
-                      <button type="submit" class="secondary lb-btn-wrap-center" style="width:100%;">Снять {{ r.pieces_reserved }} шт.</button>
+                      <button type="submit" class="secondary lb-kit-reserve-btn" style="width:100%;">Снять {{ r.pieces_reserved }} шт.</button>
                     </form>
                   {% endif %}
                 {% endfor %}
@@ -189,10 +191,12 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
 
     {% if inactive_kit_rows %}
       <h3 style="margin:24px 0 10px;">Неактуальные комплекты</h3>
       <p class="muted" style="font-size:13px;margin:0 0 12px;">Снята галочка «Актуален» в карточке — в выборе «из наличия» не показываются. Здесь можно удалить карточку из базы (если нет визитов и резервов).</p>
+      <div class="lb-table-wrap">
       <table>
         <thead>
           <tr>
@@ -223,6 +227,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% endif %}
   </div>
 

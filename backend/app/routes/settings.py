@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -25,6 +26,13 @@ from app.db.session import get_db
 from app.display_time import ALLOWED_TIMEZONES, ALLOWED_TIMEZONE_IDS, get_display_timezone
 from app.forms_parse import parse_bool, parse_float, parse_int
 from app.mix_rates import mix_rates_for_admin_form
+from app.sale_percent_options import (
+    apply_sale_percent_delete,
+    apply_sale_percent_save,
+    list_sale_percents,
+    parse_settings_percent,
+    store_sale_percents,
+)
 from app.audit import diff_fields, write_audit_rows
 from app.ru_labels import RU_MASTER_LEVEL_DEFAULTS, invalidate_master_level_labels_cache
 from app.time_utils import utcnow_naive
@@ -77,6 +85,8 @@ def _master_level_labels_for_settings(db: Session) -> dict[str, str]:
 def admin_settings_page(
     request: Request,
     saved: int | None = None,
+    sale_percents_saved: int | None = None,
+    sale_percents_err: str | None = None,
     current_user=Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -156,10 +166,13 @@ def admin_settings_page(
             timezone_choices=ALLOWED_TIMEZONES,
             saved=bool(saved),
             work_rates=work_rates,
-            work_rates_open=False,
+            work_rates_open=bool(sale_percents_saved or (sale_percents_err or "").strip()),
             work_rates_saved=False,
             work_rates_error=None,
             payroll_open=False,
+            sale_percents=list_sale_percents(db),
+            sale_percents_saved=bool(sale_percents_saved),
+            sale_percents_error=(sale_percents_err or "").strip() or None,
         ),
     )
 
@@ -500,6 +513,9 @@ async def admin_settings_work_rates_save(
                 work_rates_saved=False,
                 work_rates_error=str(exc),
                 payroll_open=False,
+                sale_percents=list_sale_percents(db),
+                sale_percents_saved=False,
+                sale_percents_error=None,
             ),
             status_code=400,
         )
@@ -534,4 +550,32 @@ async def admin_settings_work_rates_save(
         )
     db.commit()
     return RedirectResponse(url="/admin/settings?saved=1", status_code=303)
+
+
+@router.post("/admin/settings/sale-percents")
+async def admin_settings_sale_percents_save(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    action = str(form.get("action") or "save").strip().lower()
+    current = list_sale_percents(db)
+    try:
+        if action == "delete":
+            original = parse_settings_percent(form.get("original"))
+            updated = apply_sale_percent_delete(current, original)
+        else:
+            new_value = parse_settings_percent(form.get("percent"))
+            original_raw = str(form.get("original") or "").strip()
+            original = parse_settings_percent(original_raw) if original_raw else None
+            updated = apply_sale_percent_save(current, original=original, new_value=new_value)
+    except ValueError as exc:
+        return RedirectResponse(
+            url="/admin/settings?sale_percents_err=" + quote(str(exc)),
+            status_code=303,
+        )
+    store_sale_percents(db, updated, user_id=current_user.id)
+    db.commit()
+    return RedirectResponse(url="/admin/settings?sale_percents_saved=1", status_code=303)
 

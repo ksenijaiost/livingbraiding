@@ -113,7 +113,7 @@
           {% endif %}
         </div>
       {% endfor %}
-      <p style="margin-top:8px;">Итого с клиента: <strong>{{ active_services_amount_total|round(0) }} ₽</strong></p>
+      <p style="margin-top:8px;">Итого с клиента: <strong>{{ visit.amount_from_client|round(0) }} ₽</strong></p>
     {% else %}
       <p class="muted">—</p>
     {% endif %}
@@ -169,9 +169,24 @@
       <p class="muted" style="margin: 4px 0;">отсутствует</p>
     {% endif %}
 
+    {% if visit_addon_rows %}
+      <h3>Доп. продажи</h3>
+      {% for row in visit_addon_rows %}
+        <p style="margin: 4px 0;">
+          {{ "%.0f"|format(row.price) }} ₽
+          {% if row.description %} — {{ row.description }}{% endif %}
+          — {{ row.seller_name }}, {{ row.sale_percent }}% ({{ "%.0f"|format(row.commission) }} ₽)
+          {% if row.included_in_cost %}<span class="muted"> · в стоимости услуги {{ row.service_no }}</span>{% endif %}
+        </p>
+      {% endfor %}
+    {% endif %}
+
     <h3>Деньги</h3>
     <table>
       <tr><td>Выручка (с клиента)</td><td>{{ "%.0f"|format(visit.amount_from_client) }} ₽</td></tr>
+      {% if visit_addon_price_total and visit_addon_price_total > 0 %}
+        <tr><td>Доп. продажи</td><td>{{ "%.0f"|format(visit_addon_price_total) }} ₽</td></tr>
+      {% endif %}
       <tr><td>Скидка от прайса (история)</td><td>{% if visit.client_discount_percent and visit.client_discount_percent > 0 %}{{ visit.client_discount_percent }}%{% else %}—{% endif %}</td></tr>
       <tr><td>Себестоимость (суммарно)</td><td>{{ "%.0f"|format(visit.cost_total) }} ₽</td></tr>
       {% if visit_cost_breakdown_rows %}
@@ -186,7 +201,7 @@
       <tr><td>Амортизация</td><td>{{ "%.0f"|format(visit.amortization_amount or 0) }} ₽</td></tr>
       <tr><td>Доля салона</td><td>{{ visit.salon_cut_pct_at_time }}</td></tr>
       <tr><td>Заработок студии</td><td>{{ "%.0f"|format(visit.salon_profit) }} ₽</td></tr>
-      <tr><td>ЗП мастеров (суммарно)</td><td>{{ "%.0f"|format((visit.masters_pool or 0) + (visit.hourly_help_total or 0)) }} ₽</td></tr>
+      <tr><td>ЗП мастеров (суммарно)</td><td>{{ "%.0f"|format((visit.masters_pool or 0) + (visit.hourly_help_total or 0) + (visit_addon_seller_total or 0)) }} ₽</td></tr>
       {% if visit_master_pay_rows %}
         {% for row in visit_master_pay_rows %}
           <tr>

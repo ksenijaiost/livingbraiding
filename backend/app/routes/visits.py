@@ -59,7 +59,7 @@ from app.audit_field_labels import audit_field_label
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
 )
-from app.media_store import get_nonempty_upload, save_upload_image
+from app.media_store import replace_or_clear_photo
 from app.routes.master_visit import _master_visit_step1_template_response, _visit_master_state_from_prefill
 from app.thermo_visit import collect_thermo_prefill_from_form
 from app.webui import templates, ctx as _ctx
@@ -239,6 +239,11 @@ def admin_visit_detail(
     visit_techspec_closed_override = bool(
         visit_closed_period and user_may_edit_closed_payroll_period(current_user)
     )
+    from app.visit_addon_sales import addon_card_rows, addon_price_total, addon_seller_commission_by_user
+
+    visit_addon_rows = addon_card_rows(db, visit.addons_details_json)
+    visit_addon_price_total = addon_price_total(visit.addons_details_json)
+    visit_addon_seller_total = round(sum(addon_seller_commission_by_user(visit.addons_details_json).values()), 2)
     visit_master_pay_rows = build_visit_master_pay_rows(visit, db)
     visit_cost_breakdown_rows = build_visit_cost_breakdown_rows(visit)
     visit_masters_lines = build_visit_masters_lines(visit, db)
@@ -274,6 +279,9 @@ def admin_visit_detail(
             visit_super_priv=visit_super_priv,
             visit_techspec_closed_override=visit_techspec_closed_override,
             visit_master_pay_rows=visit_master_pay_rows,
+            visit_addon_rows=visit_addon_rows,
+            visit_addon_price_total=visit_addon_price_total,
+            visit_addon_seller_total=visit_addon_seller_total,
             visit_cost_breakdown_rows=visit_cost_breakdown_rows,
             visit_masters_lines=visit_masters_lines,
             hourly_help_rows=hourly_help_rows,
@@ -390,6 +398,9 @@ def _visit_edit_form_error_response(
     closed_period_confirm_required = False
     if visit:
         photos = [p for p in (visit.photo_1, visit.photo_2, visit.photo_3) if p]
+        for photo_field in ("photo_1", "photo_2", "photo_3"):
+            if photo_field not in fp:
+                fp[photo_field] = getattr(visit, photo_field) or ""
         closed_period_confirm_required = bool(
             is_in_closed_payroll_period(db, visit.performed_date)
             and user_may_edit_closed_payroll_period(current_user)
@@ -435,6 +446,7 @@ async def admin_visit_edit_post(
         require_closed_period_ack(needed=closed_needed, form_ack=form.get("closed_period_ack"))
         multi = parse_multi_service_visit_form(
             form,
+            db=db,
             booking_id=visit.booking_id,
             # На редактировании «себя» подставлять нельзя: админ без роли мастера
             # обязан явно выбрать мастеров; мастер тоже сохраняет отмеченных из формы.
@@ -451,16 +463,13 @@ async def admin_visit_edit_post(
         visit = db.get(Visit, visit_id)
         assert visit is not None
         try:
-            p1 = get_nonempty_upload(form, "photo_1")
-            p2 = get_nonempty_upload(form, "photo_2")
-            p3 = get_nonempty_upload(form, "photo_3")
-            if p1 is not None:
-                visit.photo_1 = await save_upload_image(p1)
-            if p2 is not None:
-                visit.photo_2 = await save_upload_image(p2)
-            if p3 is not None:
-                visit.photo_3 = await save_upload_image(p3)
-            if p1 or p2 or p3:
+            photo_changed = False
+            for photo_field in ("photo_1", "photo_2", "photo_3"):
+                new_url, did = await replace_or_clear_photo(form, getattr(visit, photo_field), photo_field)
+                if did:
+                    setattr(visit, photo_field, new_url)
+                    photo_changed = True
+            if photo_changed:
                 db.commit()
         except ValueError as exc:
             db.rollback()
@@ -542,9 +551,17 @@ async def admin_visit_cancel(
         changed_by_user_id=current_user.id,
         changes=diff_fields(before, visit, ("is_cancelled", "cancelled_at", "cancelled_by_user_id")),
     )
-    storno_source_accruals(db, PayrollFundSourceKind.VISIT, visit.id, current_user.id)
+    storno_source_accruals(
+        db, PayrollFundSourceKind.VISIT, visit.id, current_user.id, reason="отмене визита"
+    )
     for vs in db.scalars(select(VisitService).where(VisitService.visit_id == visit.id)).all():
-        storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, vs.id, current_user.id)
+        storno_source_accruals(
+            db,
+            PayrollFundSourceKind.VISIT_SERVICE,
+            vs.id,
+            current_user.id,
+            reason="отмене визита",
+        )
     db.commit()
     return RedirectResponse(url=f"/visits/{visit_id}?msg=cancelled", status_code=303)
 
@@ -585,7 +602,13 @@ async def admin_visit_service_cancel(
     if not ok:
         return RedirectResponse(url=f"/visits/{visit_id}?msg=cancel_conflict", status_code=303)
 
-    storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, vs.id, current_user.id)
+    storno_source_accruals(
+        db,
+        PayrollFundSourceKind.VISIT_SERVICE,
+        vs.id,
+        current_user.id,
+        reason="отмене услуги",
+    )
     vs.is_cancelled = True
     vs.cancelled_at = utcnow_naive()
     vs.cancelled_by_user_id = current_user.id

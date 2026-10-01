@@ -786,18 +786,23 @@ def catalog_unit_weight_for_kit_key(
     from app.kit_composition_lines import (
         composition_has_v2_lines,
         lines_from_json,
-        unit_client_price_for_key,
+        split_composition_stock_key,
+        unit_client_price_for_stock_key,
     )
 
     kk = str(kit_key or "").strip()
-    if not kk or kit_key_excluded_from_client_price(meta_by_key.get(kk) or {}, kk):
+    if not kk:
         return None
-    base_k, _cond = _split_stock_key_condition(kk)
+    base_k, _cond = split_composition_stock_key(kk)
     lookup = base_k or kk
+    if kit_key_excluded_from_client_price(meta_by_key.get(kk) or {}, kk):
+        return None
+    if lookup != kk and kit_key_excluded_from_client_price(meta_by_key.get(lookup) or {}, lookup):
+        return None
     if composition_has_v2_lines(getattr(kit, "composition_json", None)):
         lines = lines_from_json(str(kit.composition_json or ""))
-        unit = unit_client_price_for_key(
-            db, lines, lookup, price_map=price_map, meta_by_key=meta_by_key
+        unit = unit_client_price_for_stock_key(
+            db, lines, kk, price_map=price_map, meta_by_key=meta_by_key
         )
         if unit is not None:
             return float(unit)

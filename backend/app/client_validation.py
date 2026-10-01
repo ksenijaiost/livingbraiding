@@ -62,6 +62,8 @@ def client_db_to_form_dict(client: Client) -> dict[str, str]:
         "birth_month": str(client.birth_month) if client.birth_month is not None else "",
         "birth_year": str(client.birth_year) if client.birth_year is not None else "",
         "is_confirmed": "1" if client.is_confirmed else "0",
+        "is_blacklisted": "1" if getattr(client, "is_blacklisted", False) else "0",
+        "blacklist_comment": getattr(client, "blacklist_comment", None) or "",
     }
 
 

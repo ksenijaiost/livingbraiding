@@ -19,6 +19,7 @@ from app.db.models import (
     VisitServiceMaster,
 )
 from app.questionnaire.schemas import VisitServiceDetailsPayload, parse_visit_service_details
+from app.visit_multi_service import addon_details_dict, addon_revenue_amount
 
 
 def _set(fp: dict[str, str], key: str, val: Any) -> None:
@@ -213,6 +214,28 @@ def _apply_questionnaire_to_fp(fp: dict[str, str], prefix: str, payload: VisitSe
             fp[key] = str(v) if v is not None else ""
 
 
+def _remember_visit_addon_prefill(fp: dict[str, str], vs: VisitService, *, service_no: int) -> None:
+    """Старая одна доп. продажа: галочка и номер услуги, если на визите ещё нет JSON v1."""
+    if fp.get("addon_sales_json") or fp.get("addon_sales_amount"):
+        return
+    details = addon_details_dict(vs.addons_details_json)
+    description = str(details.get("description") or "").strip()
+    revenue = addon_revenue_amount(vs.addons_details_json)
+    cost = float(vs.addons_total or 0)
+    if revenue > 0:
+        _set(fp, "addon_sales_amount", int(round(revenue)) if revenue == int(revenue) else revenue)
+        _set(fp, "addon_service_no", service_no)
+        if description:
+            _set(fp, "addon_sales_description", description)
+        return
+    if cost > 0:
+        _set(fp, "addon_sales_amount", int(round(cost)) if cost == int(cost) else cost)
+        _set(fp, "addon_service_no", service_no)
+        fp["addon_included_in_cost"] = "on"
+        if description:
+            _set(fp, "addon_sales_description", description)
+
+
 def _apply_service_line_to_fp(
     db: Session,
     visit: Visit,
@@ -229,7 +252,9 @@ def _apply_service_line_to_fp(
     else:
         _set(fp, f"{p}service_id", vs.service_id)
 
-    _set(fp, f"{p}amount_from_client", int(vs.amount_from_client or 0))
+    revenue_addon = addon_revenue_amount(vs.addons_details_json)
+    service_client_amount = max(0.0, float(vs.amount_from_client or 0) - revenue_addon)
+    _set(fp, f"{p}amount_from_client", int(round(service_client_amount)))
     if vs.client_payment_kind:
         _set(fp, f"{p}client_payment_kind", vs.client_payment_kind.value)
     _set(fp, f"{p}client_discount_percent", vs.client_discount_percent or 0)
@@ -255,7 +280,7 @@ def _apply_service_line_to_fp(
         _set(fp, f"{p}started_time", vs.started_at.strftime("%H:%M"))
 
     if idx == 0:
-        _set(fp, "amount_from_client", int(vs.amount_from_client or 0))
+        _set(fp, "amount_from_client", int(round(service_client_amount)))
         if vs.client_payment_kind:
             _set(fp, "client_payment_kind", vs.client_payment_kind.value)
         _set(fp, "client_discount_percent", vs.client_discount_percent or 0)
@@ -272,15 +297,7 @@ def _apply_service_line_to_fp(
         if vs.amortization_level:
             _set(fp, "amortization_level", vs.amortization_level.value)
 
-    if vs.addons_total and float(vs.addons_total) > 0:
-        _set(fp, f"{p}addon_sales_amount", vs.addons_total)
-        if vs.addons_details_json:
-            try:
-                ad = json.loads(vs.addons_details_json)
-                if isinstance(ad, dict) and ad.get("description"):
-                    _set(fp, f"{p}addon_sales_description", ad["description"])
-            except Exception:
-                pass
+    _remember_visit_addon_prefill(fp, vs, service_no=idx + 1)
 
     try:
         raw = json.loads(vs.details_json or "{}")
@@ -336,6 +353,9 @@ def visit_to_form_prefill(
         fp["same_master_shares_all_services"] = "on"
     if visit.booking_id:
         _set(fp, "booking_id", visit.booking_id)
+    _set(fp, "photo_1", visit.photo_1 or "")
+    _set(fp, "photo_2", visit.photo_2 or "")
+    _set(fp, "photo_3", visit.photo_3 or "")
 
     vm_on_ids: list[int] = []
     vm_pct_str: dict[int, str] = {}
@@ -348,6 +368,12 @@ def visit_to_form_prefill(
     if len(vm_on_ids) > 1:
         fp["visit_use_multi_masters"] = "on"
     fp["visit_master_on"] = ",".join(str(x) for x in vm_on_ids)
+
+    from app.visit_addon_sales import addon_sales_from_visit_json, legacy_addon_prefill_json
+
+    stored = addon_sales_from_visit_json(visit.addons_details_json)
+    if stored is not None:
+        fp["addon_sales_json"] = visit.addons_details_json or ""
 
     extra_lines: list[dict[str, Any]] = []
     for i, vs in enumerate(active):
@@ -368,5 +394,18 @@ def visit_to_form_prefill(
     from app.hourly_help import hourly_help_prefill_from_rows, hourly_help_rows_from_visit
 
     fp.update(hourly_help_prefill_from_rows(hourly_help_rows_from_visit(visit)))
+
+    if not fp.get("addon_sales_json") and fp.get("addon_sales_amount"):
+        try:
+            amount = float(fp.get("addon_sales_amount") or 0)
+        except ValueError:
+            amount = 0.0
+        if amount > 0:
+            fp["addon_sales_json"] = legacy_addon_prefill_json(
+                amount=amount,
+                description=str(fp.get("addon_sales_description") or ""),
+                included_in_cost=bool(fp.get("addon_included_in_cost")),
+                service_no=int(fp.get("addon_service_no") or 1),
+            )
 
     return fp, vm_on_ids, vm_pct_str, extra_lines

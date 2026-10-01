@@ -12,13 +12,14 @@
     {% else %}
       {% if draft_rows %}
       <h4 style="margin:12px 0 6px;font-size:0.95rem;">Визиты</h4>
+      <div class="lb-table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Дата визита</th>
+            <th class="lb-nowrap">Дата визита</th>
             <th>Клиент</th>
             <th>Услуги</th>
-            <th>С клиента</th>
+            <th class="lb-nowrap">С клиента</th>
             <th></th>
           </tr>
         </thead>
@@ -26,25 +27,27 @@
           {% for row in draft_rows %}
             {% set d = row.draft %}
             <tr>
-              <td>{{ format_naive_utc_datetime(d.performed_date, display_tz) }}</td>
-              <td>{% if d.client %}<a href="/clients/{{ d.client.id }}">{{ d.client.name }}</a>{% else %}—{% endif %}</td>
-              <td>{{ row.services_label }}</td>
-              <td>{% if row.amount_total is not none %}{{ "%.0f"|format(row.amount_total) }} ₽{% else %}—{% endif %}</td>
-              <td><a href="/master/visit/draft/{{ d.id }}"><button type="button" class="secondary">Открыть</button></a></td>
+              <td class="lb-nowrap">{{ format_naive_utc_datetime(d.performed_date, display_tz) }}</td>
+              <td class="lb-cell-name">{% if d.client %}<a href="/clients/{{ d.client.id }}">{{ d.client.name }}</a>{% else %}—{% endif %}</td>
+              <td class="lb-cell-service">{{ row.services_label }}</td>
+              <td class="lb-nowrap">{% if row.amount_total is not none %}{{ "%.0f"|format(row.amount_total) }} ₽{% else %}—{% endif %}</td>
+              <td class="lb-nowrap"><a href="/master/visit/draft/{{ d.id }}"><button type="button" class="secondary">Открыть</button></a></td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
+      </div>
       {% endif %}
       {% if work_draft_rows %}
       <h4 style="margin:16px 0 6px;font-size:0.95rem;">Работа с товарами</h4>
+      <div class="lb-table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Дата</th>
+            <th class="lb-nowrap">Дата</th>
             <th>Клиент</th>
             <th>Вид</th>
-            <th>С клиента</th>
+            <th class="lb-nowrap">С клиента</th>
             <th></th>
           </tr>
         </thead>
@@ -52,15 +55,16 @@
           {% for row in work_draft_rows %}
             {% set d = row.draft %}
             <tr>
-              <td>{{ format_naive_utc_datetime(d.performed_date, display_tz) }}</td>
-              <td>{% if d.client %}<a href="/clients/{{ d.client.id }}">{{ d.client.name }}</a>{% else %}—{% endif %}</td>
-              <td>{{ row.kind_label }}</td>
-              <td>{% if row.amount_total is not none %}{{ "%.0f"|format(row.amount_total) }} ₽{% else %}—{% endif %}</td>
-              <td><a href="/sales/work/draft/{{ d.id }}"><button type="button" class="secondary">Открыть</button></a></td>
+              <td class="lb-nowrap">{{ format_naive_utc_datetime(d.performed_date, display_tz) }}</td>
+              <td class="lb-cell-name">{% if d.client %}<a href="/clients/{{ d.client.id }}">{{ d.client.name }}</a>{% else %}—{% endif %}</td>
+              <td class="lb-cell-name">{{ row.kind_label }}</td>
+              <td class="lb-nowrap">{% if row.amount_total is not none %}{{ "%.0f"|format(row.amount_total) }} ₽{% else %}—{% endif %}</td>
+              <td class="lb-nowrap"><a href="/sales/work/draft/{{ d.id }}"><button type="button" class="secondary">Открыть</button></a></td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
+      </div>
       {% endif %}
     {% endif %}
 
@@ -71,11 +75,12 @@
     {% if not rows %}
       <p class="muted">Активных записей нет.</p>
     {% else %}
+      <div class="lb-table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Бронь</th>
-            <th>Дата</th>
+            <th class="lb-nowrap">Бронь</th>
+            <th class="lb-nowrap">Дата</th>
             <th>Клиент</th>
             <th>Услуга/заказ</th>
             <th></th>
@@ -85,17 +90,18 @@
           {% for row in rows %}
             {% set b = row.booking %}
             <tr>
-              <td><a href="/bookings/{{ b.id }}">#{{ b.id }}</a></td>
-              <td>{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</td>
-              <td><a href="/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
-              <td>{{ row.label }}</td>
-              <td style="white-space:nowrap;">
+              <td class="lb-nowrap"><a href="/bookings/{{ b.id }}">#{{ b.id }}</a></td>
+              <td class="lb-nowrap">{{ format_naive_utc_datetime(b.planned_date, display_tz) }}</td>
+              <td class="lb-cell-name"><a href="/clients/{{ b.client.id }}">{{ b.client.name }}</a></td>
+              <td class="lb-cell-service">{{ row.label }}</td>
+              <td class="lb-nowrap">
                 <a href="/bookings/{{ b.id }}"><button type="button" class="secondary">Открыть</button></a>
               </td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% endif %}
     {% else %}
     <p class="muted" style="margin-top:0;">Почасовая работа и визиты/работы, где вы указаны в почасовой помощи — в архиве ниже.</p>
@@ -117,7 +123,7 @@
     </p>
 
     <form method="get" action="/master/mywork" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin:12px 0 16px;">
-      <div>
+      <div style="flex:1 1 12rem; min-width:0; max-width:16rem;">
         <label for="archive_kind">Вид работы</label>
         <select id="archive_kind" name="kind">
           {% for value, label in archive_kind_options %}
@@ -125,38 +131,39 @@
           {% endfor %}
         </select>
       </div>
-      <div>
+      <div style="flex:0 1 11rem; max-width:11rem; min-width:0;">
         <label for="archive_date_from">С даты</label>
         <input type="date" id="archive_date_from" name="date_from" value="{{ archive_date_from }}" />
       </div>
-      <div>
+      <div style="flex:0 1 11rem; max-width:11rem; min-width:0;">
         <label for="archive_date_to">По дату</label>
         <input type="date" id="archive_date_to" name="date_to" value="{{ archive_date_to }}" />
       </div>
-      <div>
+      <div style="display:flex; flex-wrap:wrap; gap:8px;">
         <button type="submit">Показать</button>
-        <a href="/master/mywork" style="margin-left:8px;"><button type="button" class="secondary">Сбросить</button></a>
+        <a href="/master/mywork"><button type="button" class="secondary">Сбросить</button></a>
       </div>
     </form>
 
     {% if not archive_rows %}
       <p class="muted">За выбранный период записей нет.</p>
     {% else %}
+      <div class="lb-table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Дата</th>
-            <th>Тип</th>
+            <th class="lb-nowrap">Дата</th>
+            <th class="lb-nowrap">Тип</th>
             <th>Суть</th>
             <th>Клиент</th>
-            <th>Ваша ЗП</th>
+            <th class="lb-nowrap">Ваша ЗП</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {% for row in archive_rows %}
             <tr>
-              <td class="muted">
+              <td class="muted lb-nowrap">
                 {% if row.kind == 'visit' %}
                   {{ format_naive_utc_datetime(row.visit.performed_date, display_tz) }}
                 {% elif row.kind == 'work' %}
@@ -169,9 +176,9 @@
                   {{ format_naive_utc_datetime(row.consultation.consultation_date, display_tz) }}
                 {% endif %}
               </td>
-              <td>{{ row.kind_label }}</td>
-              <td>{{ row.label }}</td>
-              <td>
+              <td class="lb-nowrap">{{ row.kind_label }}</td>
+              <td class="lb-cell-service">{{ row.label }}</td>
+              <td class="lb-cell-name">
                 {% if row.client %}
                   {% if is_helper %}
                     {{ row.client.name }}
@@ -182,8 +189,8 @@
                   <span class="muted">—</span>
                 {% endif %}
               </td>
-              <td>{{ "%.0f"|format(row.master_pay or 0) }} ₽</td>
-              <td style="white-space:nowrap;">
+              <td class="lb-nowrap">{{ "%.0f"|format(row.master_pay or 0) }} ₽</td>
+              <td class="lb-nowrap">
                 {% if row.kind == 'visit' %}
                   <a href="/visits/{{ row.visit.id }}"><button type="button" class="secondary">Открыть</button></a>
                 {% elif row.kind == 'work' %}
@@ -200,6 +207,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% endif %}
   </div>
 {% endblock %}

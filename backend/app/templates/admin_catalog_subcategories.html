@@ -15,12 +15,13 @@
     {% elif err == "duplicate" %}
       <div class="error">Подкатегория с таким именем уже есть в этой категории.</div>
     {% endif %}
+    <div class="lb-table-wrap">
     <table>
       <thead>
         <tr>
           <th>Название</th>
-          <th>Активна</th>
-          <th>Услуг</th>
+          <th class="lb-nowrap">Активна</th>
+          <th class="lb-nowrap">Услуг</th>
           <th></th>
         </tr>
       </thead>
@@ -28,10 +29,10 @@
         {% for row in sub_rows %}
           {% set s = row.sub %}
           <tr>
-            <td><strong>{{ s.name }}</strong></td>
-            <td>{% if s.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
-            <td>{{ row.service_count }}</td>
-            <td style="white-space: nowrap;">
+            <td class="lb-cell-name"><strong>{{ s.name }}</strong></td>
+            <td class="lb-nowrap">{% if s.is_active %}да{% else %}<span class="muted">нет</span>{% endif %}</td>
+            <td class="lb-nowrap">{{ row.service_count }}</td>
+            <td class="lb-nowrap">
               <a href="/admin/catalog/subcategories/{{ s.id }}/services"><button type="button" class="secondary">Услуги</button></a>
               <a href="/admin/catalog/subcategories/{{ s.id }}/fields"><button type="button" class="secondary">Анкета</button></a>
               <a href="/admin/catalog/subcategories/{{ s.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
@@ -40,6 +41,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     {% if not sub_rows %}
       <p class="muted" style="margin-top: 12px;">Подкатегорий нет.</p>
     {% endif %}

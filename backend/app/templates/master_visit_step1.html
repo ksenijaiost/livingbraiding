@@ -146,31 +146,12 @@
       </div>
 
       <h3>Фото (до 3)</h3>
-      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.{% if is_edit %} Загрузите новый файл, чтобы заменить существующее.{% endif %}</p>
-      {% if is_edit and visit_photos %}
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
-          {% for p in visit_photos %}
-            {% if p %}
-              <a href="{{ p }}" class="lb-lightbox" title="Текущее фото">
-                <img src="{{ p }}" alt="Фото" style="max-width:120px; max-height:120px; border-radius:8px; border:1px solid #e5e7eb;" />
-              </a>
-            {% endif %}
-          {% endfor %}
-        </div>
-      {% endif %}
+      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.{% if is_edit %} Новый файл заменяет текущее. «Удалить» убирает фото при сохранении.{% endif %}</p>
+      {% from "partials/photo_slot.html" import photo_slot %}
       <div class="row">
-        <div>
-          <label>Фото 1</label>
-          <input type="file" name="photo_1" accept="image/*,.heic,.heif" />
-        </div>
-        <div>
-          <label>Фото 2</label>
-          <input type="file" name="photo_2" accept="image/*,.heic,.heif" />
-        </div>
-        <div>
-          <label>Фото 3</label>
-          <input type="file" name="photo_3" accept="image/*,.heic,.heif" />
-        </div>
+        {{ photo_slot('photo_1', 'Фото 1', fp.get('photo_1', ''), fp.get('clear_photo_1', '')) }}
+        {{ photo_slot('photo_2', 'Фото 2', fp.get('photo_2', ''), fp.get('clear_photo_2', '')) }}
+        {{ photo_slot('photo_3', 'Фото 3', fp.get('photo_3', ''), fp.get('clear_photo_3', '')) }}
       </div>
       <div class="card" style="margin-top: 12px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Режим мастеров</div>
@@ -387,18 +368,18 @@
       </p>
 
       <h3>Доп. продажи</h3>
-      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">Необязательно. Сумма учитывается как расход при расчёте выручки визита.</p>
-      <div class="card" style="margin-bottom: 14px; background: #fafafa;">
-        <div class="row">
-          <div>
-            <label>Сумма, ₽</label>
-            <input type="number" name="addon_sales_amount" min="0" step="1" value="{{ fp.get('addon_sales_amount', '') }}" placeholder="0" />
-          </div>
-          <div style="flex: 1;">
-            <label>Описание</label>
-            <input type="text" name="addon_sales_description" maxlength="500" value="{{ fp.get('addon_sales_description', '') }}" placeholder="Что было продано" style="width:100%;" />
-          </div>
+      <div id="addon-sales-block" class="card" style="margin-bottom: 14px; background: #fafafa;">
+        <p class="muted" style="font-size: 12px; margin: 0 0 10px;">Необязательно. Заполненная строка открывает следующую. Процент продавца считается от цены строки, остаток (цена минус этот процент) идёт в фонд студии.</p>
+        <div style="margin-bottom: 10px;">
+          {% set addon_mode = 'each' if (fp.get('addon_sales_mode') == 'each') else 'all' %}
+          <label style="margin-right: 14px;"><input type="radio" name="addon_sales_mode" value="all" {% if addon_mode != 'each' %}checked{% endif %} /> На все продажи</label>
+          <label><input type="radio" name="addon_sales_mode" value="each" {% if addon_mode == 'each' %}checked{% endif %} /> На каждую отдельно</label>
         </div>
+        <div id="addon-shared"></div>
+        <div id="addon-lines" style="display:flex; flex-direction:column; gap:10px;"></div>
+        <script type="application/json" id="addon-sales-prefill">{{ fp.get('addon_sales_json', '')|tojson }}</script>
+        <script type="application/json" id="addon-sale-percents">{{ addon_sale_percents|tojson }}</script>
+        <script type="application/json" id="addon-sellers">{{ addon_sellers|tojson }}</script>
       </div>
 
       <div id="kit-section-wrap">
@@ -1237,8 +1218,11 @@
       _disc.addEventListener('input', function () { updateRecommendedPriceHint(); });
       _disc.addEventListener('change', function () { updateRecommendedPriceHint(); });
     }
-    document.querySelectorAll('input[name="addon_sales_amount"], input[name="mix_source"], input[name="mix_complexity"], input[name="amortization_level"], input[name="own_corr_trim_qty"], input[name="own_corr_hourly_hours"], input[name="own_corr_wash"], input[name="own_corr_steam"], input[name="own_corr_circle"], input[name="own_correction"]').forEach(function (el) {
-      el.addEventListener('change', syncVisitPreview);
+    document.querySelectorAll('input[name="mix_source"], input[name="mix_complexity"], input[name="amortization_level"], input[name="own_corr_trim_qty"], input[name="own_corr_hourly_hours"], input[name="own_corr_wash"], input[name="own_corr_steam"], input[name="own_corr_circle"], input[name="own_correction"]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        if (el.name === 'addon_service_no') el.setAttribute('data-selected', el.value);
+        syncVisitPreview();
+      });
       el.addEventListener('input', syncVisitPreview);
     });
     document.querySelectorAll('input[name="visit_master_on"]').forEach(function (el) {
@@ -2091,6 +2075,40 @@
       }
     }
 
+    function addonSalesMode() {
+      return ((document.querySelector('input[name="addon_sales_mode"]:checked') || {}).value) || 'all';
+    }
+
+    function addonPreviewState() {
+      if (typeof window.lbSyncAddonServiceChoices === 'function') window.lbSyncAddonServiceChoices();
+      const mode = addonSalesMode();
+      const idxs = visitLineIndicesForPreview();
+      const costByIdx = {};
+      let revenue = 0;
+      let costSum = 0;
+      document.querySelectorAll('#addon-lines .addon-line').forEach(function (row) {
+        const price = parseFloat(String((row.querySelector('.addon-price') || {}).value || '').replace(',', '.')) || 0;
+        if (price <= 0) return;
+        let included = false;
+        let serviceNo = 1;
+        if (mode === 'each') {
+          included = !!(row.querySelector('.addon-included') || {}).checked;
+          serviceNo = parseInt((row.querySelector('.addon-service-value') || {}).value || '1', 10) || 1;
+        } else {
+          included = !!(document.querySelector('#addon-shared .addon-included') || {}).checked;
+          serviceNo = parseInt((document.querySelector('#addon-shared .addon-service-value') || {}).value || '1', 10) || 1;
+        }
+        if (included) {
+          const lineIdx = idxs[serviceNo - 1];
+          if (lineIdx != null) costByIdx[lineIdx] = (costByIdx[lineIdx] || 0) + price;
+          costSum += price;
+        } else {
+          revenue += price;
+        }
+      });
+      return { costByIdx: costByIdx, revenue: revenue, costSum: costSum };
+    }
+
     function syncVisitPreview() {
       const payEl = document.getElementById('visit_preview_master_lines');
       const costEl = document.getElementById('visit_preview_cost_line');
@@ -2099,13 +2117,14 @@
       if (!payEl || !costEl) return;
       syncHourlyHelpRowStates();
 
-      const addons = Math.max(0, numVal('input[name="addon_sales_amount"]'));
+      const addon = addonPreviewState();
+      const addons = addon.included ? addon.amount : 0;
       let amountTotal = 0;
       let matTotal = 0;
       let amortTotal = 0;
       let kitTotal = 0;
       let corrExtraTotal = 0;
-      let costTotal = addons;
+      let costTotal = 0;
       let mixBonusTotal = 0;
       let fpExpenseTotal = 0;
       let stockKitParts = '';
@@ -2136,8 +2155,15 @@
         if (kit.warn) warn = kit.warn;
       });
 
+      if (addon.costSum > 0) costTotal += addon.costSum;
+      if (addon.revenue > 0) amountTotal += addon.revenue;
+
       if (clientTotalEl) {
-        clientTotalEl.textContent = 'С клиента (итого): ' + money2(amountTotal) + ' ₽';
+        let clientText = 'С клиента (итого): ' + money2(amountTotal) + ' ₽';
+        if (addon.revenue > 0) {
+          clientText += ' (в том числе доп. продажа ' + money2(addon.revenue) + ' ₽)';
+        }
+        clientTotalEl.textContent = clientText;
       }
 
       const scope = (document.querySelector('input[name="masters_scope"]:checked') || {}).value || 'VISIT';
@@ -2151,9 +2177,7 @@
         totalsByMaster[mid].bonus += bonus;
       }
 
-      // Доп. продажи — на уровне визита; в cost_total сервера входят в себестоимость строки.
-      // В предрасчёте учитываем один раз (на первой услуге), иначе ЗП завысится на половину доп. продаж.
-      function linePreviewMastersPool(idx, includeVisitAddons) {
+      function linePreviewMastersPool(idx) {
         const fpPool = lineFixedMastersPool(idx);
         if (fpPool != null) return fpPool;
         let lineAmount = effectiveAmountFromClient(idx);
@@ -2163,21 +2187,18 @@
         const meta = visitLineServiceMeta(idx);
         const kit = lineKitCostParts(idx, meta);
         lineCost += kit.kitCost;
-        if (includeVisitAddons) {
-          lineCost += Math.max(0, numVal('input[name="addon_sales_amount"]'));
-        }
+        if (addon.costByIdx[idx]) lineCost += addon.costByIdx[idx];
         lineAmount += kit.kitClient || 0;
         const profitBefore = lineAmount - lineCost;
         return profitBefore - profitBefore * salonRate;
       }
 
       const previewLineIdxs = visitLineIndicesForPreview();
-      const addonLineIdx = previewLineIdxs.length ? previewLineIdxs[0] : null;
 
       if (scope === 'PER_SERVICE') {
         previewLineIdxs.forEach(function (idx) {
           const mix = lineMixCostAndBonus(idx);
-          const mastersPool = linePreviewMastersPool(idx, idx === addonLineIdx);
+          const mastersPool = linePreviewMastersPool(idx);
           const alloc = readLineAllocationsForPreview(idx);
           if (!alloc) return;
           for (const r of alloc) {
@@ -2189,7 +2210,7 @@
       } else {
         const alloc = readAllocationsForPreview();
         previewLineIdxs.forEach(function (idx) {
-          const mastersPool = linePreviewMastersPool(idx, idx === addonLineIdx);
+          const mastersPool = linePreviewMastersPool(idx);
           if (alloc) {
             for (const r of alloc) {
               addMasterPay(r.mid, mastersPool * (r.pct / 100.0), 0);
@@ -2247,9 +2268,11 @@
           'Комплект: ' + money2(kitTotal) + ' ₽' + (stockKitParts || extraKitParts
             ? ' (' + [stockKitParts ? ('из наличия: ' + stockKitParts) : '', extraKitParts ? ('доп.: ' + extraKitParts) : ''].filter(Boolean).join('; ') + ')'
             : ''),
-          'Доп. продажи: ' + money2(addons) + ' ₽',
           'Амортизация: ' + money2(amortTotal) + ' ₽',
         ];
+        if (addon.costSum > 0) {
+          parts.splice(2, 0, 'Доп. продажи: ' + money2(addon.costSum) + ' ₽');
+        }
         if (fpExpenseTotal > 0) parts.push('Фикс. расход: ' + money2(fpExpenseTotal) + ' ₽');
         if (corrExtraTotal > 0) parts.push('Коррекция (доп.): ' + money2(corrExtraTotal) + ' ₽');
         if (warn) parts.push(warn);
@@ -3516,6 +3539,8 @@
       syncExtraLinesVisibility();
       syncMastersScopeUi();
       syncPerServiceMasterPctInputs();
+      if (typeof window.lbSyncAddonServiceChoices === 'function') window.lbSyncAddonServiceChoices();
+      syncVisitPreview();
     }
 
     function nextExtraLineIndex() {
@@ -3687,6 +3712,272 @@
         });
       }
     })();
+    function initAddonSales() {
+      const root = document.getElementById('addon-sales-block');
+      if (!root || root.getAttribute('data-ready') === '1') return;
+      root.setAttribute('data-ready', '1');
+      const linesEl = document.getElementById('addon-lines');
+      const sharedEl = document.getElementById('addon-shared');
+      if (!linesEl || !sharedEl) return;
+      function readJson(id, fallback) {
+        try { return JSON.parse((document.getElementById(id) || {}).textContent || ''); }
+        catch (e) { return fallback; }
+      }
+      const percents = readJson('addon-sale-percents', [10, 15]);
+      const sellers = readJson('addon-sellers', []);
+      let prefill = readJson('addon-sales-prefill', {}) || {};
+      if (typeof prefill === 'string') {
+        try { prefill = JSON.parse(prefill); } catch (e) { prefill = {}; }
+      }
+      if (!prefill || typeof prefill !== 'object') prefill = {};
+      const hint = 'Если галочка включена, цена входит в себестоимость выбранной услуги и вычитается из суммы с клиента до процента салона и зарплаты. Если выключена, цена прибавляется к итого с клиента и в зарплату по услуге не входит.';
+
+      function fieldBox(labelText, control) {
+        const wrap = document.createElement('div');
+        wrap.style.marginTop = '8px';
+        const lab = document.createElement('div');
+        lab.className = 'muted';
+        lab.style.fontSize = '12px';
+        lab.textContent = labelText;
+        wrap.appendChild(lab);
+        wrap.appendChild(control);
+        return wrap;
+      }
+
+      function percentBox(name, selected) {
+        const box = document.createElement('div');
+        (percents || []).forEach(function (p, i) {
+          const lab = document.createElement('label');
+          lab.style.marginRight = '12px';
+          const inp = document.createElement('input');
+          inp.type = 'radio';
+          inp.name = name;
+          inp.value = String(p);
+          if (String(selected || '') === String(p) || (!selected && i === 0 && selected !== 0)) {
+            if (selected != null && String(selected) !== '' && String(selected) === String(p)) inp.checked = true;
+            else if (selected == null || selected === '') inp.checked = i === 0;
+          }
+          lab.appendChild(inp);
+          lab.appendChild(document.createTextNode(' ' + p + '%'));
+          box.appendChild(lab);
+        });
+        return box;
+      }
+
+      function sellerBox(name, selected) {
+        const sel = document.createElement('select');
+        sel.name = name;
+        sel.className = 'addon-seller';
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = 'Выберите';
+        sel.appendChild(empty);
+        (sellers || []).forEach(function (u) {
+          const opt = document.createElement('option');
+          opt.value = String(u.id);
+          opt.textContent = u.name;
+          if (String(selected || '') === String(u.id)) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        return sel;
+      }
+
+      function serviceBox(name, selected) {
+        const wrap = document.createElement('div');
+        wrap.className = 'addon-service-wrap';
+        const hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.className = 'addon-service-value';
+        hidden.name = name;
+        hidden.value = selected ? String(selected) : '1';
+        wrap.appendChild(hidden);
+        const box = document.createElement('div');
+        box.className = 'addon-service-box';
+        wrap.appendChild(box);
+        return wrap;
+      }
+
+      function includedBox(name, checked) {
+        const lab = document.createElement('label');
+        lab.style.display = 'block';
+        lab.style.marginTop = '8px';
+        const inp = document.createElement('input');
+        inp.type = 'checkbox';
+        inp.name = name;
+        inp.value = 'on';
+        inp.className = 'addon-included';
+        if (checked) inp.checked = true;
+        lab.appendChild(inp);
+        lab.appendChild(document.createTextNode(' Включено в стоимость услуги'));
+        const note = document.createElement('div');
+        note.className = 'muted';
+        note.style.fontSize = '12px';
+        note.style.marginTop = '4px';
+        note.textContent = hint;
+        const wrap = document.createElement('div');
+        wrap.appendChild(lab);
+        wrap.appendChild(note);
+        return wrap;
+      }
+
+      function metaBlock(prefix, data) {
+        const box = document.createElement('div');
+        box.className = 'addon-meta';
+        box.appendChild(includedBox(prefix + 'included', !!(data && data.included_in_cost)));
+        box.appendChild(fieldBox('Услуга', serviceBox(prefix + 'service_no', data && data.service_no)));
+        box.appendChild(fieldBox('Процент с продажи', percentBox(prefix + 'percent', data && data.sale_percent)));
+        box.appendChild(fieldBox('Сотрудник-продавец', sellerBox(prefix + 'seller', data && data.seller_user_id)));
+        return box;
+      }
+
+      const sharedData = prefill.shared || {};
+      sharedEl.appendChild(metaBlock('addon_shared_', {
+        included_in_cost: sharedData.included_in_cost,
+        service_no: sharedData.service_no,
+        sale_percent: sharedData.sale_percent,
+        seller_user_id: sharedData.seller_user_id
+      }));
+
+      let seq = 0;
+      function addRow(data, isEmpty) {
+        const idx = seq++;
+        const row = document.createElement('div');
+        row.className = 'addon-line card';
+        row.style.background = '#fff';
+        row.setAttribute('data-empty', isEmpty ? '1' : '0');
+        const title = document.createElement('div');
+        title.style.fontWeight = '600';
+        title.style.marginBottom = '6px';
+        title.textContent = 'Доп. продажа';
+        row.appendChild(title);
+        const priceLab = document.createElement('label');
+        priceLab.textContent = 'Цена, ₽';
+        const price = document.createElement('input');
+        price.type = 'number';
+        price.min = '0';
+        price.step = '1';
+        price.name = 'addon_' + idx + '_price';
+        price.className = 'addon-price';
+        price.value = data && data.price != null && data.price !== '' ? String(data.price) : '';
+        const descLab = document.createElement('label');
+        descLab.textContent = 'Описание';
+        const desc = document.createElement('input');
+        desc.type = 'text';
+        desc.maxLength = 500;
+        desc.name = 'addon_' + idx + '_description';
+        desc.className = 'addon-description';
+        desc.style.width = '100%';
+        desc.value = data && data.description ? String(data.description) : '';
+        row.appendChild(priceLab);
+        row.appendChild(price);
+        row.appendChild(descLab);
+        row.appendChild(desc);
+        row.appendChild(metaBlock('addon_' + idx + '_', data || {}));
+        linesEl.appendChild(row);
+        price.addEventListener('input', onRowEdit);
+        desc.addEventListener('input', onRowEdit);
+        return row;
+      }
+
+      function lastRowEmpty() {
+        const rows = linesEl.querySelectorAll('.addon-line');
+        const last = rows[rows.length - 1];
+        if (!last) return false;
+        const price = String((last.querySelector('.addon-price') || {}).value || '').trim();
+        const desc = String((last.querySelector('.addon-description') || {}).value || '').trim();
+        return !price && !desc;
+      }
+
+      function onRowEdit() {
+        if (!lastRowEmpty()) addRow(null, true);
+        paintServices();
+        applyMode();
+        if (typeof syncVisitPreview === 'function') syncVisitPreview();
+      }
+
+      function paintServices() {
+        const n = Math.max(visitLineIndicesForPreview().length, 1);
+        root.querySelectorAll('.addon-service-wrap').forEach(function (wrap) {
+          const hidden = wrap.querySelector('.addon-service-value');
+          const box = wrap.querySelector('.addon-service-box');
+          if (!hidden || !box) return;
+          const selected = hidden.value || '1';
+          box.innerHTML = '';
+          if (n <= 1) {
+            hidden.name = hidden.getAttribute('data-name') || hidden.name;
+            hidden.setAttribute('data-name', hidden.name);
+            hidden.value = '1';
+            const muted = document.createElement('span');
+            muted.className = 'muted';
+            muted.textContent = 'Услуга 1';
+            box.appendChild(muted);
+            return;
+          }
+          if (!hidden.getAttribute('data-name')) hidden.setAttribute('data-name', hidden.name);
+          const radioName = hidden.getAttribute('data-name');
+          hidden.removeAttribute('name');
+          for (let i = 1; i <= n; i++) {
+            const lab = document.createElement('label');
+            lab.style.marginRight = '12px';
+            const inp = document.createElement('input');
+            inp.type = 'radio';
+            inp.name = radioName;
+            inp.value = String(i);
+            if (String(selected) === String(i)) inp.checked = true;
+            inp.addEventListener('change', function () {
+              hidden.value = inp.value;
+              if (typeof syncVisitPreview === 'function') syncVisitPreview();
+            });
+            lab.appendChild(inp);
+            lab.appendChild(document.createTextNode(' ' + i));
+            box.appendChild(lab);
+          }
+          if (!box.querySelector('input:checked') && box.querySelector('input')) {
+            box.querySelector('input').checked = true;
+            hidden.value = '1';
+          }
+        });
+      }
+
+      function applyMode() {
+        paintServices();
+        const each = addonSalesMode() === 'each';
+        sharedEl.style.display = each ? 'none' : 'block';
+        linesEl.querySelectorAll('.addon-meta').forEach(function (el) {
+          el.style.display = each ? 'block' : 'none';
+          el.querySelectorAll('input, select').forEach(function (inp) { inp.disabled = !each; });
+        });
+        sharedEl.querySelectorAll('input, select').forEach(function (inp) { inp.disabled = each; });
+      }
+
+      window.lbSyncAddonServiceChoices = function () {
+        paintServices();
+        applyMode();
+      };
+
+      const preset = (prefill.lines || []).filter(function (line) {
+        return line && (String(line.price || '').trim() || String(line.description || '').trim());
+      });
+      if (!preset.length) addRow(null, true);
+      else {
+        preset.forEach(function (line) { addRow(line, false); });
+        addRow(null, true);
+      }
+      root.querySelectorAll('input[name="addon_sales_mode"]').forEach(function (el) {
+        el.addEventListener('change', function () {
+          applyMode();
+          if (typeof syncVisitPreview === 'function') syncVisitPreview();
+        });
+      });
+      sharedEl.addEventListener('change', function () {
+        if (typeof syncVisitPreview === 'function') syncVisitPreview();
+      });
+      sharedEl.addEventListener('input', function () {
+        if (typeof syncVisitPreview === 'function') syncVisitPreview();
+      });
+      applyMode();
+    }
+    initAddonSales();
     syncVisitPreview();
   </script>
   <script src="/static/correction_custom_amount.js"></script>

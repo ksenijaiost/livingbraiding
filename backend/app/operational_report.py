@@ -754,9 +754,14 @@ def build_operational_report(db: Session, d0: date, d1: date) -> OperationalRepo
             }
         by_uid[uid][key] = money_q2(by_uid[uid][key] + amt)
 
+    from app.visit_addon_sales import addon_studio_amount
+
     for v in visits:
         visit_studio = money_q2(
-            visit_studio + float(v.salon_profit or 0) + float(v.studio_fund_amount or 0)
+            visit_studio
+            + float(v.salon_profit or 0)
+            + float(v.studio_fund_amount or 0)
+            + addon_studio_amount(getattr(v, "addons_details_json", None))
         )
         for mid, a in visit_masters_fund_by_master(v).items():
             visit_masters = money_q2(visit_masters + a)

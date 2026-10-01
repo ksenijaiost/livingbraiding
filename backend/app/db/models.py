@@ -201,6 +201,8 @@ class Client(Base):
     source_other: Mapped[str | None] = mapped_column(String(200), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_blacklisted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    blacklist_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Optional birthday: all null = unknown; day+month without year = "only DM"
     birth_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
     birth_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -1088,7 +1090,7 @@ class ProductSale(Base):
 
     # Маржа в фонд студии (снимок для розницы; проводки ЗП по этому полю).
     studio_margin_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    # Процент с продажи от суммы с клиента (10 или 15) → начисление в фонд студии (ЗП).
+    # Процент с продажи от суммы с клиента (снимок выбранного варианта) → личный фонд оформившего.
     # NULL у старых записей: маржа считается по прежней формуле (сумма − себестоимость).
     sale_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -1248,6 +1250,7 @@ class PayrollFundEntryKind(str, enum.Enum):
     STORNO = "STORNO"
     PAYOUT = "PAYOUT"
     EXPENSE = "EXPENSE"
+    TRANSFER = "TRANSFER"
 
 
 class PayrollFundSide(str, enum.Enum):
@@ -1279,6 +1282,8 @@ class PayrollFundLedger(Base):
 
     Для PAYOUT: при side=MASTER user_id — сотрудник, с чьего фонда списание; при side=STUDIO —
     сотрудник-получатель (фонд студии уменьшается на сумму выплаты ему).
+    Для TRANSFER: пара проводок студия→сотрудник; user_id — получатель на обеих сторонах;
+    source_id указывает на парную проводку.
     """
 
     __tablename__ = "payroll_fund_ledger"

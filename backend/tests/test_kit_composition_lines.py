@@ -190,3 +190,37 @@ def test_lines_to_json_roundtrip():
     assert raw is not None
     assert "by_staff" in raw
     assert "NEW" in raw
+
+
+def test_unit_price_for_stock_key_separates_new_and_used(memory_db) -> None:
+    from app.kit_composition_lines import (
+        keyed_client_price_selected_v2,
+        unit_client_price_for_stock_key,
+    )
+    from app.kit_blank_stock_core import load_catalog_kit_maps
+
+    _seed_catalog(memory_db, price=100.0)
+    lines = [
+        CompositionLine(key="SE_BRAID_LONG", condition=BlankCondition.NEW, by_staff={1: 10}),
+        CompositionLine(
+            key="SE_BRAID_LONG",
+            condition=BlankCondition.USED,
+            used_price_pct=60,
+            by_staff={1: 20},
+        ),
+    ]
+    price_map, meta, _ = load_catalog_kit_maps(memory_db)
+    assert unit_client_price_for_stock_key(
+        memory_db, lines, "SE_BRAID_LONG", price_map=price_map, meta_by_key=meta
+    ) == pytest.approx(100.0)
+    assert unit_client_price_for_stock_key(
+        memory_db, lines, "SE_BRAID_LONG__USED__", price_map=price_map, meta_by_key=meta
+    ) == pytest.approx(60.0)
+    raw = lines_to_json(lines)
+    assert keyed_client_price_selected_v2(
+        memory_db,
+        raw,
+        {"SE_BRAID_LONG": 2, "SE_BRAID_LONG__USED__": 5},
+        price_map=price_map,
+        meta_by_key=meta,
+    ) == pytest.approx(2 * 100.0 + 5 * 60.0)

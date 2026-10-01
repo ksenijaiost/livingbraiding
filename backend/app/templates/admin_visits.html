@@ -40,49 +40,51 @@
     {% if search_id is not none and not visits %}
       <p class="muted">Визит №{{ search_id }} не найден{% if visits_mine_only %} среди ваших{% endif %}.</p>
     {% endif %}
+    <div class="lb-table-wrap">
     <table>
       <thead>
         <tr>
-          <th>ID</th>
-          <th>Дата</th>
+          <th class="lb-nowrap">ID</th>
+          <th class="lb-nowrap">Дата</th>
           <th>Клиент</th>
           <th>Услуга</th>
-          <th>Выручка</th>
-          <th>Себестоимость</th>
-          <th>Студия</th>
+          <th class="lb-nowrap">Выручка</th>
+          <th class="lb-nowrap">Себестоимость</th>
+          <th class="lb-nowrap">Студия</th>
           <th>Мастера</th>
-          <th>ЗП мастеров</th>
+          <th class="lb-nowrap">ЗП мастеров</th>
         </tr>
       </thead>
       <tbody>
         {% for v in visits %}
           <tr{% if v.is_cancelled %} class="lb-visit-row-cancelled"{% endif %}>
-            <td>
+            <td class="lb-nowrap">
               <a href="/visits/{{ v.id }}">{{ v.id }}</a>
               {% if v.is_cancelled %}
                 <span title="Визит аннулирован"> ❌ аннулирован</span>
               {% endif %}
             </td>
-            <td>
+            <td class="lb-nowrap">
               <a href="/visits/{{ v.id }}">{{ v.performed_date.strftime("%d.%m.%Y") }}</a>
             </td>
-            <td style="max-width:9rem; word-break:break-word; line-height:1.35;">{{ v.client.name }}</td>
-            <td>
+            <td class="lb-cell-name">{{ v.client.name }}</td>
+            <td class="lb-cell-service">
               {% if v.services %}
                 {{ v.services_line }}
               {% else %}—{% endif %}
             </td>
-            <td>{{ "%.0f"|format(v.amount_from_client) }}</td>
-            <td>{{ "%.0f"|format(v.cost_total) }}</td>
-            <td>{{ "%.0f"|format(v.salon_profit) }}</td>
-            <td style="max-width:12rem; font-size:13px; line-height:1.35; word-break:break-word;">
+            <td class="lb-nowrap">{{ "%.0f"|format(v.amount_from_client) }}</td>
+            <td class="lb-nowrap">{{ "%.0f"|format(v.cost_total) }}</td>
+            <td class="lb-nowrap">{{ "%.0f"|format(v.salon_profit) }}</td>
+            <td class="lb-cell-name" style="font-size:13px;">
               {% set masters_label = (row_masters.get(v.id) or '') %}
               {% if masters_label %}{{ masters_label }}{% else %}<span class="muted">—</span>{% endif %}
             </td>
-            <td>{{ "%.0f"|format((v.masters_pool or 0) + (v.hourly_help_total or 0)) }}</td>
+            <td class="lb-nowrap">{{ "%.0f"|format((v.masters_pool or 0) + (v.hourly_help_total or 0)) }}</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </div>
 {% endblock %}

@@ -104,7 +104,49 @@
 
 .lb-table-13 { font-size: 13px; }
 .lb-prewrap-12rem { white-space: pre-wrap; max-width: 12rem; }
-.lb-scroll-x { overflow-x: auto; }
+.lb-scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* 1.89: списки — таблица скроллится внутри, колонки не сжимаются в «столбик букв» */
+.lb-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 -2px;
+  padding: 0 2px;
+}
+.lb-table-wrap > table {
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+.lb-cell-service {
+  max-width: 16rem;
+  overflow-wrap: break-word;
+  word-break: normal;
+  white-space: normal;
+  line-height: 1.35;
+  font-size: 13px;
+}
+.lb-cell-name {
+  max-width: 10rem;
+  overflow-wrap: break-word;
+  word-break: normal;
+  white-space: normal;
+  line-height: 1.35;
+}
+/* Карточки в .row на узком экране не должны расползаться из‑за min-width */
+@media (max-width: 700px) {
+  .row > .card {
+    flex: 1 1 100% !important;
+    min-width: 0 !important;
+  }
+}
 
 .lb-hr-audit {
   border: 0;
@@ -175,6 +217,27 @@
 .lb-btn-wrap-center {
   white-space: normal;
   text-align: center;
+  line-height: 1.25;
+}
+
+/* Кнопки резерва в списке комплектов: узкая колонка, перенос только по словам */
+.lb-kit-reserve-btn {
+  white-space: normal;
+  text-align: center;
+  line-height: 1.25;
+  min-width: 6.75rem;
+  max-width: 7.5rem;
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+.lb-kit-actions {
+  width: 7.5rem;
+}
+.lb-kit-discount-row {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: nowrap;
 }
 
 .lb-hidden { display: none; }

@@ -1,0 +1,19 @@
+{% macro photo_slot(name, label, url='', cleared='') %}
+{% set gone = cleared in ('1', 'on', 'true', 'yes') %}
+<div>
+  <label>{{ label }}</label>
+  {% if url and not gone %}
+    <div class="lb-photo-existing">
+      <a href="{{ url }}" class="lb-lightbox" title="{{ label }}">
+        <img src="{{ url }}" alt="{{ label }}" style="max-width: 180px; max-height: 180px; border-radius: 10px; border: 1px solid #e5e7eb; display:block; margin-bottom:8px; object-fit: cover;" />
+      </a>
+      <button type="button" class="secondary lb-photo-delete" style="margin-bottom:8px;">Удалить</button>
+      <input type="hidden" name="clear_{{ name }}" value="" />
+    </div>
+  {% elif gone %}
+    <input type="hidden" name="clear_{{ name }}" value="1" />
+    <p class="muted" style="margin: 0 0 8px;">Фото будет удалено при сохранении.</p>
+  {% endif %}
+  <input type="file" name="{{ name }}" accept="image/*,.heic,.heif" />
+</div>
+{% endmacro %}

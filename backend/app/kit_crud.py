@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -302,6 +303,173 @@ def calc_kit_stock_price_total_from_composition(
     except Exception:
         return None, ["<composition_json invalid>"]
     return None, ["<composition_json invalid>"]
+
+
+def kit_reserved_pieces_total(kit: Kit) -> int:
+    """Сумма шт. во всех активных резервах комплекта."""
+    return sum(int(r.pieces_reserved or 0) for r in (getattr(kit, "reserves", None) or []))
+
+
+def apply_kit_discount(amount: float | None, discount_percent: int) -> float | None:
+    """Цена с учётом общей скидки комплекта; None если скидки нет или суммы нет."""
+    if amount is None:
+        return None
+    dp = int(discount_percent or 0)
+    if dp <= 0:
+        return None
+    return round(float(amount) * (100 - dp) / 100.0, 2)
+
+
+def kit_display_price_breakdown(kit: Kit) -> dict[str, Any]:
+    """
+    Цены для карточки: полная (= stock_price_total), свободный остаток и резерв —
+    пропорция от полной цены по шт. (отдельных полей в БД нет).
+    """
+    full_raw = getattr(kit, "stock_price_total", None)
+    full = float(full_raw) if full_raw is not None else None
+    pieces_total = int(getattr(kit, "pieces_total", None) or 0)
+    pieces_available = int(getattr(kit, "pieces_available", None) or 0)
+    pieces_reserved = kit_reserved_pieces_total(kit)
+    dp = int(getattr(kit, "discount_percent", None) or 0)
+
+    remainder: float | None = None
+    reserved_price: float | None = None
+    if full is not None and pieces_total > 0:
+        unit = float(full) / float(pieces_total)
+        remainder = round(unit * float(pieces_available), 2)
+        reserved_price = round(unit * float(pieces_reserved), 2)
+
+    return {
+        "full": full,
+        "remainder": remainder,
+        "reserved": reserved_price,
+        "full_discounted": apply_kit_discount(full, dp),
+        "remainder_discounted": apply_kit_discount(remainder, dp),
+        "reserved_discounted": apply_kit_discount(reserved_price, dp),
+        "pieces_total": pieces_total,
+        "pieces_available": pieces_available,
+        "pieces_reserved": pieces_reserved,
+        "discount_percent": dp,
+        "has_discount": dp > 0,
+    }
+
+
+def parse_kit_ids_csv(raw: str) -> list[int]:
+    """Разобрать id комплектов через запятую (допускаются пробелы)."""
+    text = (raw or "").strip()
+    if not text:
+        raise ValueError("Укажите id комплектов через запятую")
+    ids: list[int] = []
+    seen: set[int] = set()
+    for part in text.replace(";", ",").split(","):
+        token = part.strip()
+        if not token:
+            continue
+        if not token.isdigit():
+            raise ValueError(f"Некорректный id: «{token}» (нужны целые числа через запятую)")
+        kid = int(token)
+        if kid <= 0:
+            raise ValueError(f"Некорректный id: {kid}")
+        if kid in seen:
+            continue
+        seen.add(kid)
+        ids.append(kid)
+    if not ids:
+        raise ValueError("Укажите id комплектов через запятую")
+    return ids
+
+
+def preview_kit_stock_price_recalc(db: Session, kit_ids: list[int]) -> list[dict[str, Any]]:
+    """Строки превью массового пересчёта stock_price_total по составу/прайсу."""
+    out: list[dict[str, Any]] = []
+    for kid in kit_ids:
+        kit = db.get(Kit, int(kid))
+        if kit is None:
+            out.append(
+                {
+                    "kit_id": int(kid),
+                    "sku": None,
+                    "old_price": None,
+                    "new_price": None,
+                    "ok": False,
+                    "error": "Комплект не найден",
+                }
+            )
+            continue
+        new_price, missing = calc_kit_stock_price_total_from_composition(db, kit)
+        old = getattr(kit, "stock_price_total", None)
+        if missing:
+            out.append(
+                {
+                    "kit_id": int(kit.id),
+                    "sku": kit.sku,
+                    "old_price": float(old) if old is not None else None,
+                    "new_price": None,
+                    "ok": False,
+                    "error": "Нет цен для ключей: " + ", ".join(missing),
+                }
+            )
+            continue
+        if new_price is None or float(new_price) <= 0:
+            out.append(
+                {
+                    "kit_id": int(kit.id),
+                    "sku": kit.sku,
+                    "old_price": float(old) if old is not None else None,
+                    "new_price": None,
+                    "ok": False,
+                    "error": "Не удалось пересчитать цену по составу (пустой состав или нулевая сумма)",
+                }
+            )
+            continue
+        out.append(
+            {
+                "kit_id": int(kit.id),
+                "sku": kit.sku,
+                "old_price": float(old) if old is not None else None,
+                "new_price": float(new_price),
+                "ok": True,
+                "error": None,
+            }
+        )
+    return out
+
+
+def apply_kit_stock_price_recalc(
+    db: Session,
+    kit_ids: list[int],
+    *,
+    changed_by_user_id: int,
+) -> list[dict[str, Any]]:
+    """Записать пересчитанные полные цены в stock_price_total + аудит."""
+    from app.audit import diff_fields, write_audit_rows
+    from app.db.models import KitAuditLog
+    from app.time_utils import utcnow_naive
+
+    preview = preview_kit_stock_price_recalc(db, kit_ids)
+    results: list[dict[str, Any]] = []
+    for row in preview:
+        if not row.get("ok"):
+            results.append(row)
+            continue
+        kit = db.get(Kit, int(row["kit_id"]))
+        if kit is None:
+            results.append({**row, "ok": False, "error": "Комплект не найден"})
+            continue
+        before = SimpleNamespace(stock_price_total=kit.stock_price_total)
+        kit.stock_price_total = float(row["new_price"])
+        kit.updated_at = utcnow_naive()
+        kit.updated_by_user_id = int(changed_by_user_id)
+        write_audit_rows(
+            db,
+            log_model=KitAuditLog,
+            entity_field="kit_id",
+            entity_id=kit.id,
+            changed_by_user_id=int(changed_by_user_id),
+            changes=diff_fields(before, kit, ("stock_price_total",)),
+        )
+        results.append({**row, "applied": True})
+    return results
 
 
 def try_fill_kit_admin_stock_price_total_from_composition(

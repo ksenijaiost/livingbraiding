@@ -5,6 +5,7 @@
     <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
       <h2 style="margin-top: 0;">Клиенты</h2>
       <div style="display:flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+        <a href="/clients/stats"><button type="button" class="secondary">Статистика</button></a>
         {% if UserRole.ADMIN_SUPER in current_user.roles %}
           <a href="/clients/export"><button type="button" class="secondary">Выгрузить в Excel (CSV)</button></a>
           <span class="muted" style="font-size: 12px; max-width: 14rem;">Все клиенты в базе, не только результаты поиска ниже.</span>
@@ -31,45 +32,62 @@
         <label>Поиск</label>
         <input name="q" value="{{ q or '' }}" placeholder="имя или контакт" />
       </div>
+      <div>
+        <label>Статус</label>
+        <select name="status">
+          <option value="">Все</option>
+          {% for opt in status_filter_options %}
+            <option value="{{ opt.value }}" {% if status_filter == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
       <div style="align-self:end;">
         <button type="submit">Найти</button>
       </div>
     </form>
 
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Имя</th>
-          <th>Контакт</th>
-          <th>Посещений</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in rows %}
+    <div class="lb-table-wrap">
+      <table>
+        <thead>
           <tr>
-            <td><a href="/clients/{{ row.id }}">{{ row.id }}</a></td>
-            <td>
-              <a href="/clients/{{ row.id }}">{{ row.name }}</a>
-              {% if row.has_active_booking %}
-                <span title="Есть активная бронь">📝</span>
-              {% endif %}
-              {% if not row.is_confirmed %}
-                <span class="muted" title="Ждёт подтверждения администратора">· черновик</span>
-              {% endif %}
-            </td>
-            <td>{{ row.contact_preview or "—" }}</td>
-            <td>{{ row.visits_count }}</td>
-            <td style="white-space:nowrap;">
-              {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
-                <a href="/bookings/new?client_id={{ row.id }}"><button type="button" class="secondary">Бронь</button></a>
-              {% endif %}
-            </td>
+            <th class="lb-nowrap">ID</th>
+            <th>Имя</th>
+            <th class="lb-nowrap">Статус</th>
+            <th>Контакт</th>
+            <th class="lb-nowrap">Посещений</th>
+            <th></th>
           </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td class="lb-nowrap"><a href="/clients/{{ row.id }}">{{ row.id }}</a></td>
+              <td class="lb-cell-name">
+                <a href="/clients/{{ row.id }}">{{ row.name }}</a>
+                {% if row.has_active_booking %}
+                  <span title="Есть активная бронь">📝</span>
+                {% endif %}
+                {% if not row.is_confirmed %}
+                  <span class="muted" title="Ждёт подтверждения администратора">· черновик</span>
+                {% endif %}
+              </td>
+              <td class="lb-nowrap">
+                <span style="font-size:12px; font-weight:600;
+                  color:{% if row.status.value == 'REGULAR' %}#16a34a{% elif row.status.value == 'SLEEPING' %}#ea580c{% elif row.status.value in ['LOST','BLOCKED'] %}#dc2626{% else %}#6b7280{% endif %};">
+                  {{ row.status_label }}
+                </span>
+              </td>
+              <td class="lb-cell-name">{{ row.contact_preview or "—" }}</td>
+              <td class="lb-nowrap">{{ row.visits_count }}</td>
+              <td class="lb-nowrap">
+                {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
+                  <a href="/bookings/new?client_id={{ row.id }}"><button type="button" class="secondary">Бронь</button></a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 {% endblock %}
-

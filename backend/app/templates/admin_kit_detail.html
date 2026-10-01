@@ -63,7 +63,7 @@
             data-user-id=""
             data-client-name=""
           >
-            {% if kit.is_reserved %}Добавить резерв{% else %}Зарезервировать{% endif %}
+            {% if kit.is_reserved %}Добавить резерв{% else %}Создать резерв{% endif %}
           </button>
         {% elif kit.pieces_available > 0 and slots_full %}
           <button
@@ -72,7 +72,7 @@
             aria-disabled="true"
             title="Достигнут лимит резервов ({{ kit_max_reserves }}). Снимите резерв кнопкой «Снять» или в таблице ниже."
           >
-            {% if kit.is_reserved %}Добавить резерв (лимит){% else %}Зарезервировать (лимит){% endif %}
+            {% if kit.is_reserved %}Добавить резерв (лимит){% else %}Создать резерв (лимит){% endif %}
           </button>
         {% endif %}
         {% if kit.is_reserved and is_admin_kit %}
@@ -198,7 +198,7 @@
                   <th style="padding:6px 8px;">Ключ</th>
                   <th style="padding:6px 8px;">Кол-во</th>
                   <th style="padding:6px 8px;">Сост.</th>
-                  <th style="padding:6px 8px;">% б/у</th>
+                  <th style="padding:6px 8px;">% состояния</th>
                 </tr>
               </thead>
               <tbody>
@@ -215,7 +215,7 @@
             </table>
           </div>
           <div class="muted" style="font-size:12px;margin-top:6px;">
-            «% б/у» влияет на расчёт цены комплекта по составу. «Скидка (всего), %» ниже — отдельная скидка при продаже всего комплекта со склада.
+            «% состояния» влияет на расчёт цены комплекта по составу. «Скидка (всего), %» ниже — отдельная скидка при продаже всего комплекта со склада.
           </div>
         </dd>
       {% endif %}
@@ -226,9 +226,13 @@
       <dt class="muted">Примечание</dt>
       <dd style="margin:0; white-space:pre-wrap;">{{ kit.notes or '—' }}</dd>
 
-      <dt class="muted">Цена на складе (всего)</dt>
+      {% set prices = price_breakdown %}
+      <dt class="muted">Цена: полный комплект</dt>
       <dd style="margin:0;">
-        {% if kit.stock_price_total is not none %}{{ kit.stock_price_total }} ₽{% else %}—{% endif %}
+        {% if prices.full is not none %}{{ prices.full }} ₽{% else %}—{% endif %}
+        {% if prices.has_discount and prices.full_discounted is not none %}
+          <div style="margin-top:4px;">со скидкой {{ prices.discount_percent }}%: <strong>{{ prices.full_discounted }} ₽</strong></div>
+        {% endif %}
         {% if kit.stock_price_snapshot_text %}
           <details style="margin-top:6px;">
             <summary class="muted" style="cursor:pointer;">Рассчитано по составу</summary>
@@ -236,12 +240,41 @@
           </details>
         {% elif computed_stock_price_total is not none %}
           <div class="muted" style="font-size:12px;margin-top:4px;">
-            Рассчитано по составу: <strong>{{ computed_stock_price_total|round(2) }} ₽</strong>
+            По текущему прайсу состава: <strong>{{ computed_stock_price_total|round(2) }} ₽</strong>
+            {% if prices.full is not none and (computed_stock_price_total|round(2)) != (prices.full|round(2)) %}
+              (отличается от сохранённой — суперадмин может обновить массово)
+            {% endif %}
           </div>
         {% elif computed_stock_price_missing_keys %}
           <div class="muted" style="font-size:12px;margin-top:4px;">
             Нет цен для ключей: <strong>{{ computed_stock_price_missing_keys|join(', ') }}</strong>
           </div>
+        {% endif %}
+      </dd>
+
+      <dt class="muted">Цена: свободный остаток</dt>
+      <dd style="margin:0;">
+        {% if prices.remainder is not none %}
+          {{ prices.remainder }} ₽
+          <span class="muted">({{ prices.pieces_available }} шт.)</span>
+          {% if prices.has_discount and prices.remainder_discounted is not none %}
+            <div style="margin-top:4px;">со скидкой {{ prices.discount_percent }}%: <strong>{{ prices.remainder_discounted }} ₽</strong></div>
+          {% endif %}
+        {% else %}
+          —
+        {% endif %}
+      </dd>
+
+      <dt class="muted">Цена: в резерве</dt>
+      <dd style="margin:0;">
+        {% if prices.reserved is not none %}
+          {{ prices.reserved }} ₽
+          <span class="muted">({{ prices.pieces_reserved }} шт.)</span>
+          {% if prices.has_discount and prices.reserved_discounted is not none %}
+            <div style="margin-top:4px;">со скидкой {{ prices.discount_percent }}%: <strong>{{ prices.reserved_discounted }} ₽</strong></div>
+          {% endif %}
+        {% else %}
+          —
         {% endif %}
       </dd>
 
@@ -255,7 +288,7 @@
           </form>
           {% if kit.stock_price_total is not none and kit.cost_total is not none and kit.stock_price_total > 0 and kit.cost_total > 0 %}
             {% set mx_pct = (((kit.stock_price_total - kit.cost_total) / kit.stock_price_total * 100)|int) %}
-            <span class="muted" style="font-size:12px; display:block; margin-top:6px;">Максимум по марже (цена − себестоимость с ЗП): <strong>{{ mx_pct }}%</strong>. Сумма скидки в ₽ считается от цены на складе автоматически.</span>
+            <span class="muted" style="font-size:12px; display:block; margin-top:6px;">Максимум по марже (цена − себестоимость с ЗП): <strong>{{ mx_pct }}%</strong>. Сумма скидки в ₽ считается от полной цены на складе автоматически.</span>
           {% else %}
             <span class="muted" style="font-size:12px; display:block; margin-top:6px;">Чтобы показать лимит %, задайте цену и себестоимость. Скидка уменьшает фонд студии при списании.</span>
           {% endif %}
@@ -263,12 +296,6 @@
           {{ kit.discount_percent }}%
         {% endif %}
       </dd>
-      {% set dp = (kit.discount_percent or 0)|int %}
-      {% if kit.stock_price_total is not none and dp > 0 %}
-        {% set net = (kit.stock_price_total * (100 - dp) / 100)|round(2) %}
-        <dt class="muted">Цена с учётом скидки</dt>
-        <dd style="margin:0;">{{ net }} ₽</dd>
-      {% endif %}
 
       <dt class="muted">Себестоимость (всего)</dt>
       <dd style="margin:0;">

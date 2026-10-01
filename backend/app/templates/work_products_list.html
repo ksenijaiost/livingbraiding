@@ -47,7 +47,7 @@
     {% endwith %}
 
     {% if rows %}
-      <div style="overflow-x:auto;">
+      <div class="lb-table-wrap">
         <table>
           <thead>
             <tr>
@@ -64,16 +64,16 @@
           <tbody>
             {% for w in rows %}
               <tr{% if w.is_voided %} style="opacity:0.6;text-decoration:line-through;"{% endif %}>
-                <td><a href="/sales/work/{{ w.id }}">{{ w.id }}</a></td>
-                <td>
+                <td class="lb-nowrap"><a href="/sales/work/{{ w.id }}">{{ w.id }}</a></td>
+                <td class="lb-nowrap">
                   {% if w.created_at %}
                     <a href="/sales/work/{{ w.id }}">{{ w.created_at|dt_local('%Y-%m-%d %H:%M') }}</a>
                   {% else %}
                     <span class="muted">—</span>
                   {% endif %}
                 </td>
-                <td>{{ "В наличие" if w.scope.value == "IN_STOCK" else "На заказ" }}</td>
-                <td>
+                <td class="lb-nowrap">{{ "В наличие" if w.scope.value == "IN_STOCK" else "На заказ" }}</td>
+                <td class="lb-cell-name">
                   {% if w.kind.value == "KIT" %}Комплект/Заготовки
                   {% elif w.kind.value == "MIX" %}Смешка
                   {% elif w.kind.value == "RUBBER" %}Хвосты/резинки
@@ -82,25 +82,25 @@
                   {% else %}{{ w.kind.value }}
                   {% endif %}
                 </td>
-                <td>
+                <td class="lb-cell-name">
                   {% if w.client %}
                     {{ w.client.name }}
                   {% else %}
                     <span class="muted">—</span>
                   {% endif %}
                 </td>
-                <td>
+                <td class="lb-nowrap">
                   {% if w.amount_from_client is not none %}
                     {{ w.amount_from_client }} ₽
                   {% else %}
                     <span class="muted">—</span>
                   {% endif %}
                 </td>
-                <td style="max-width:12rem; font-size:13px; line-height:1.35; word-break:break-word;">
+                <td class="lb-cell-name" style="font-size:13px;">
                   {% set masters_label = (row_masters.get(w.id) or '') %}
                   {% if masters_label %}{{ masters_label }}{% else %}<span class="muted">—</span>{% endif %}
                 </td>
-                <td>
+                <td class="lb-nowrap">
                   {{ w.kanekalon_grams }} / {{ w.kudri_grams }}
                 </td>
               </tr>

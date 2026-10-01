@@ -4,13 +4,19 @@
   <div class="card">
     <h2 style="margin-top:0;">SQL</h2>
     <p class="muted" style="margin-top:0;">
-      Read-only запросы к БД: <code>SELECT</code>, <code>WITH</code>, <code>EXPLAIN</code>. Показаны первые 200 строк.
+      Запросы к БД: <code>SELECT</code> / <code>WITH</code> / <code>EXPLAIN</code> (чтение, первые 200 строк)
+      и <code>UPDATE</code> строк с обязательным <code>WHERE</code> (для точечных фиксов без скриптов).
+      INSERT / DELETE / DDL по-прежнему запрещены.
       <a href="/techspec/data">← Технические данные</a>
     </p>
 
     <form method="post" action="/techspec/sql">
       <label for="sql_query">Запрос</label>
       <textarea id="sql_query" name="sql_query" rows="10" style="font-family: ui-monospace, SFMono-Regular, Consolas, monospace;">{{ sql_query or "SELECT * FROM users LIMIT 20" }}</textarea>
+      <label style="display:flex; align-items:flex-start; gap:8px; margin-top:10px; max-width:40rem;">
+        <input type="checkbox" name="confirm_write" value="1" style="margin-top:3px;"{% if confirm_write %} checked{% endif %} />
+        <span>Подтверждаю <strong>UPDATE</strong> (изменение данных в БД). Для SELECT не нужно.</span>
+      </label>
       <div style="margin-top:10px;">
         <button type="submit">Выполнить</button>
       </div>
@@ -22,11 +28,17 @@
 
     {% if sql_result %}
       <div style="margin-top:14px;">
-        <div class="muted" style="font-size:12px;">Выполнен запрос</div>
+        <div class="muted" style="font-size:12px;">Выполнен запрос{% if sql_result.kind == 'update' %} (UPDATE){% endif %}</div>
         <div style="margin-top:4px;"><code>{{ sql_result.sql }}</code></div>
-        <div class="muted" style="margin-top:8px; font-size:12px;">
-          Строк: <strong>{{ sql_result.row_count }}</strong>{% if sql_result.truncated %} (показаны первые 200){% endif %}
-        </div>
+        {% if sql_result.kind == 'update' %}
+          <div class="muted" style="margin-top:8px; font-size:12px;">
+            Затронуто строк: <strong>{{ sql_result.rowcount }}</strong>
+          </div>
+        {% else %}
+          <div class="muted" style="margin-top:8px; font-size:12px;">
+            Строк: <strong>{{ sql_result.row_count }}</strong>{% if sql_result.truncated %} (показаны первые 200){% endif %}
+          </div>
+        {% endif %}
 
         {% if sql_result.columns %}
           <div style="overflow-x:auto; margin-top:10px;">
@@ -49,6 +61,8 @@
               </tbody>
             </table>
           </div>
+        {% elif sql_result.kind == 'update' %}
+          <div class="muted" style="margin-top:10px;">UPDATE выполнен. При необходимости проверьте результат отдельным SELECT.</div>
         {% else %}
           <div class="muted" style="margin-top:10px;">Запрос выполнен без табличного результата.</div>
         {% endif %}

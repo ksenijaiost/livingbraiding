@@ -529,6 +529,21 @@ def composition_has_v2_lines(raw: str | None) -> bool:
     return False
 
 
+_USED_STOCK_SUFFIX = "__USED__"
+
+
+def split_composition_stock_key(stock_key: str) -> tuple[str, BlankCondition]:
+    """Ключ склада → (базовый kit_key, NEW|USED)."""
+    raw = str(stock_key or "").strip()
+    if not raw:
+        return "", BlankCondition.NEW
+    if raw.endswith(_USED_STOCK_SUFFIX):
+        return raw[: -len(_USED_STOCK_SUFFIX)], BlankCondition.USED
+    if raw.endswith("_USED"):
+        return raw[: -len("_USED")], BlankCondition.USED
+    return raw, BlankCondition.NEW
+
+
 def unit_client_price_for_key(
     db: Session,
     lines: list[CompositionLine],
@@ -537,6 +552,7 @@ def unit_client_price_for_key(
     price_map: dict[str, float],
     meta_by_key: dict[str, dict[str, Any]],
 ) -> float | None:
+    """Средняя прайсовая цена по всем строкам состава с этим ключом (NEW и USED вместе)."""
     matching = [ln for ln in filter_nonempty(lines) if ln.key == key]
     if not matching:
         p = price_map.get(key)
@@ -553,6 +569,53 @@ def unit_client_price_for_key(
     return acc / float(total_q) if total_q > 0 else None
 
 
+def unit_client_price_for_stock_key(
+    db: Session,
+    lines: list[CompositionLine],
+    stock_key: str,
+    *,
+    price_map: dict[str, float],
+    meta_by_key: dict[str, dict[str, Any]],
+) -> float | None:
+    """Прайсовая цена 1 шт. для ключа склада (NEW / …__USED__) с учётом % б/у только своей группы."""
+    base, cond = split_composition_stock_key(stock_key)
+    if not base:
+        return None
+    if kit_key_excluded_from_client_price(meta_by_key.get(stock_key) or {}, stock_key):
+        return None
+    if kit_key_excluded_from_client_price(meta_by_key.get(base) or {}, base):
+        return None
+
+    matching = [
+        ln
+        for ln in filter_nonempty(lines)
+        if ln.key == base and ln.condition == cond
+    ]
+    if matching:
+        total_q = sum(ln.total_qty() for ln in matching)
+        if total_q <= 0:
+            return None
+        acc = 0.0
+        weighed = 0
+        for ln in matching:
+            unit = _price_for_line_unit(db, ln, price_map=price_map, meta_by_key=meta_by_key)
+            if unit is None:
+                continue
+            acc += float(unit) * float(ln.total_qty())
+            weighed += int(ln.total_qty())
+        return acc / float(weighed) if weighed > 0 else None
+
+    # Нет строк нужного состояния — полный прайс базового ключа (без % б/у).
+    p = price_map.get(base)
+    if p is None:
+        p = price_map.get(stock_key)
+    if p is None:
+        z = zakaz_blank_def_by_key().get(base)
+        if z and not z.ignore_in_client_calc:
+            p = float(z.price)
+    return float(p) if p is not None else None
+
+
 def keyed_client_price_selected_v2(
     db: Session,
     kit_raw_json: str | None,
@@ -567,10 +630,13 @@ def keyed_client_price_selected_v2(
         ni = int(n)
         if ni <= 0:
             continue
-        if kit_key_excluded_from_client_price(meta_by_key.get(k) or {}, k):
+        base, _cond = split_composition_stock_key(str(k))
+        if kit_key_excluded_from_client_price(meta_by_key.get(k) or {}, str(k)):
             continue
-        unit = unit_client_price_for_key(
-            db, lines, k, price_map=price_map, meta_by_key=meta_by_key
+        if base and kit_key_excluded_from_client_price(meta_by_key.get(base) or {}, base):
+            continue
+        unit = unit_client_price_for_stock_key(
+            db, lines, str(k), price_map=price_map, meta_by_key=meta_by_key
         )
         if unit is None:
             raise ValueError(f"Нет цены в каталоге для ключа «{k}» (заготовки поштучно).")
