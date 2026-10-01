@@ -47,7 +47,6 @@ function initPageHelpModal() {
   root.dataset.lbInited = "1";
 
   var bodyEl = document.body;
-  var panel = root.querySelector(".lb-page-help-modal__panel");
 
   function isOpen() {
     return !root.hasAttribute("hidden");
@@ -84,21 +83,16 @@ function initPageHelpModal() {
     openHelp();
   });
 
+  // Закрытие только по backdrop / крестику (data-lb-page-help-close).
+  // Нельзя stopPropagation на панели — иначе клик по крестику не доходит сюда.
   root.addEventListener("click", function (e) {
-    var el = e.target;
-    if (!el || !el.getAttribute) return;
-    if (el.getAttribute("data-lb-page-help-close") != null) {
-      e.preventDefault();
-      closeHelp();
-    }
+    var t = e.target;
+    if (!t) return;
+    var closer = t.closest ? t.closest("[data-lb-page-help-close]") : null;
+    if (!closer) return;
+    e.preventDefault();
+    closeHelp();
   });
-
-  // Не закрывать по клику внутри панели (только backdrop/крестик).
-  if (panel) {
-    panel.addEventListener("click", function (e) {
-      e.stopPropagation();
-    });
-  }
 
   document.addEventListener(
     "keydown",
