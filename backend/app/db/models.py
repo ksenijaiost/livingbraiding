@@ -209,6 +209,7 @@ class NotificationChannel(str, enum.Enum):
 
 class NotificationOutboxStatus(str, enum.Enum):
     PENDING = "pending"
+    SENDING = "sending"
     SENT = "sent"
     FAILED = "failed"
 
@@ -243,6 +244,8 @@ class NotificationOutbox(Base):
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Захват воркером (status=sending); просроченный locked_at можно перехватить снова.
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship(foreign_keys=[user_id])
     booking: Mapped["Booking | None"] = relationship(foreign_keys=[booking_id])

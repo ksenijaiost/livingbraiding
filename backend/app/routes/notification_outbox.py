@@ -23,6 +23,7 @@ def _status_ru(status: NotificationOutboxStatus | str) -> str:
     raw = status.value if isinstance(status, NotificationOutboxStatus) else str(status)
     return {
         "pending": "ожидает",
+        "sending": "отправка",
         "sent": "отправлено",
         "failed": "ошибка",
     }.get(raw, raw)

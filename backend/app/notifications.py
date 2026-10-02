@@ -9,6 +9,7 @@ import random
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import timedelta
 from typing import Any, Iterable, Sequence
 
 from sqlalchemy import and_, or_, select
@@ -42,6 +43,7 @@ _EVENT_LABEL_RU = {
 
 DEFAULT_OUTBOX_LIMIT = 50
 DEFAULT_MAX_ATTEMPTS = 5
+DEFAULT_SENDING_TIMEOUT_SEC = 120
 TELEGRAM_HTTP_TIMEOUT_SEC = 5
 VK_HTTP_TIMEOUT_SEC = 5
 
@@ -366,6 +368,98 @@ def _send_outbox_row(row: NotificationOutbox) -> None:
         raise RuntimeError(f"Неизвестный канал: {row.channel}")
 
 
+def _eligible_outbox_clause(
+    *,
+    max_attempts: int,
+    stale_before,
+    only_ids: Sequence[int] | None,
+    force: bool,
+):
+    max_att = max(1, int(max_attempts))
+    pending_or_failed = or_(
+        NotificationOutbox.status == NotificationOutboxStatus.PENDING,
+        and_(
+            NotificationOutbox.status == NotificationOutboxStatus.FAILED,
+            NotificationOutbox.attempt_count < max_att,
+        ),
+    )
+    if force:
+        pending_or_failed = NotificationOutbox.status.in_(
+            (
+                NotificationOutboxStatus.PENDING,
+                NotificationOutboxStatus.FAILED,
+                NotificationOutboxStatus.SENDING,
+            )
+        )
+    stale_sending = and_(
+        NotificationOutbox.status == NotificationOutboxStatus.SENDING,
+        or_(
+            NotificationOutbox.locked_at.is_(None),
+            NotificationOutbox.locked_at < stale_before,
+        ),
+    )
+    clause = or_(pending_or_failed, stale_sending)
+    if only_ids is not None:
+        clause = and_(clause, NotificationOutbox.id.in_([int(x) for x in only_ids]))
+    return clause
+
+
+def _claim_outbox_rows(
+    db: Session,
+    *,
+    limit: int,
+    max_attempts: int,
+    only_ids: Sequence[int] | None,
+    force: bool,
+    sending_timeout_sec: int,
+) -> list[int]:
+    """Захватить строки (status=sending). Postgres: FOR UPDATE SKIP LOCKED."""
+    now = utcnow_naive()
+    stale_before = now - timedelta(seconds=max(30, int(sending_timeout_sec)))
+    lim = max(1, int(limit))
+    clause = _eligible_outbox_clause(
+        max_attempts=max_attempts,
+        stale_before=stale_before,
+        only_ids=only_ids,
+        force=force,
+    )
+    stmt = (
+        select(NotificationOutbox)
+        .where(clause)
+        .order_by(NotificationOutbox.id.asc())
+        .limit(lim)
+    )
+    bind = db.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        stmt = stmt.with_for_update(skip_locked=True)
+
+    rows = list(db.scalars(stmt).all())
+    claimed_ids: list[int] = []
+    for row in rows:
+        if row.status == NotificationOutboxStatus.SENT:
+            continue
+        if (
+            not force
+            and row.status == NotificationOutboxStatus.FAILED
+            and int(row.attempt_count or 0) >= max(1, int(max_attempts))
+        ):
+            continue
+        if (
+            row.status == NotificationOutboxStatus.SENDING
+            and row.locked_at is not None
+            and row.locked_at >= stale_before
+            and not force
+        ):
+            continue
+        row.status = NotificationOutboxStatus.SENDING
+        row.locked_at = now
+        claimed_ids.append(int(row.id))
+    if claimed_ids:
+        db.flush()
+        db.commit()
+    return claimed_ids
+
+
 def process_outbox(
     db: Session,
     *,
@@ -373,49 +467,32 @@ def process_outbox(
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     only_ids: Sequence[int] | None = None,
     force: bool = False,
+    sending_timeout_sec: int = DEFAULT_SENDING_TIMEOUT_SEC,
 ) -> dict[str, int]:
-    """Обработать pending и failed (с лимитом попыток). Возвращает счётчики.
+    """Обработать pending/failed (и просроченный sending). Возвращает счётчики.
+
+    Захват через status=sending + locked_at (на Postgres — FOR UPDATE SKIP LOCKED),
+    чтобы несколько процессов не отправили одну запись дважды.
 
     force=True + only_ids: обработать указанные id даже если attempt_count уже на лимите
     (ручной «Повторить» в админке).
     """
-    lim = max(1, int(limit))
-    max_att = max(1, int(max_attempts))
-    if only_ids is not None:
-        ids = [int(x) for x in only_ids]
-        if not ids:
-            return {"processed": 0, "sent": 0, "failed": 0}
-        if force:
-            stmt = select(NotificationOutbox).where(
-                NotificationOutbox.id.in_(ids),
-                NotificationOutbox.status.in_(
-                    (NotificationOutboxStatus.PENDING, NotificationOutboxStatus.FAILED)
-                ),
-            )
-        else:
-            stmt = select(NotificationOutbox).where(
-                NotificationOutbox.id.in_(ids),
-                or_(
-                    NotificationOutbox.status == NotificationOutboxStatus.PENDING,
-                    and_(
-                        NotificationOutbox.status == NotificationOutboxStatus.FAILED,
-                        NotificationOutbox.attempt_count < max_att,
-                    ),
-                ),
-            )
-    else:
-        stmt = select(NotificationOutbox).where(
-            or_(
-                NotificationOutbox.status == NotificationOutboxStatus.PENDING,
-                and_(
-                    NotificationOutbox.status == NotificationOutboxStatus.FAILED,
-                    NotificationOutbox.attempt_count < max_att,
-                ),
-            )
-        )
-    rows = list(db.scalars(stmt.order_by(NotificationOutbox.id.asc()).limit(lim)).all())
+    if only_ids is not None and not list(only_ids):
+        return {"processed": 0, "sent": 0, "failed": 0}
+
+    claimed_ids = _claim_outbox_rows(
+        db,
+        limit=limit,
+        max_attempts=max_attempts,
+        only_ids=only_ids,
+        force=force,
+        sending_timeout_sec=sending_timeout_sec,
+    )
     stats = {"processed": 0, "sent": 0, "failed": 0}
-    for row in rows:
+    for cid in claimed_ids:
+        row = db.get(NotificationOutbox, cid)
+        if row is None or row.status != NotificationOutboxStatus.SENDING:
+            continue
         stats["processed"] += 1
         row.attempt_count = int(row.attempt_count or 0) + 1
         try:
@@ -423,14 +500,17 @@ def process_outbox(
         except Exception as e:
             row.status = NotificationOutboxStatus.FAILED
             row.error = str(e)[:2000]
+            row.locked_at = None
             stats["failed"] += 1
             logger.warning("notification_outbox #%s failed: %s", row.id, e)
+            db.commit()
             continue
         row.status = NotificationOutboxStatus.SENT
         row.sent_at = utcnow_naive()
         row.error = None
+        row.locked_at = None
         stats["sent"] += 1
-    db.flush()
+        db.commit()
     return stats
 
 
@@ -450,15 +530,20 @@ def list_recent_notification_outbox(db: Session, *, limit: int = 50) -> list[Not
 
 
 def retry_notification_outbox_entry(db: Session, entry_id: int) -> NotificationOutbox:
-    """Принудительно повторить failed/pending запись (для кнопки в админке)."""
+    """Принудительно повторить failed/pending/sending запись (для кнопки в админке)."""
     row = db.get(NotificationOutbox, int(entry_id))
     if row is None:
         raise ValueError("Запись outbox не найдена.")
     if row.status == NotificationOutboxStatus.SENT:
         raise ValueError("Уже отправлено — повтор не нужен.")
-    if row.status not in (NotificationOutboxStatus.PENDING, NotificationOutboxStatus.FAILED):
+    if row.status not in (
+        NotificationOutboxStatus.PENDING,
+        NotificationOutboxStatus.FAILED,
+        NotificationOutboxStatus.SENDING,
+    ):
         raise ValueError(f"Нельзя повторить статус {row.status}.")
     row.status = NotificationOutboxStatus.PENDING
+    row.locked_at = None
     db.flush()
     process_outbox(db, limit=1, only_ids=[int(row.id)], force=True)
     db.refresh(row)
