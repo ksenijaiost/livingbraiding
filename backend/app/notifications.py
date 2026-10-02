@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -311,17 +312,19 @@ def send_telegram(chat_id: int, text: str) -> None:
 
 
 def send_vk(user_id: int, text: str) -> None:
-    """Отправка во VK. Без токена — «VK не настроен»; с токеном — messages.send."""
-    token = (get_settings().vk_group_token or "").strip()
+    """Отправка во VK (messages.send). Без токена — «VK не настроен»; таймаут 5 с."""
+    settings = get_settings()
+    token = (settings.vk_group_token or "").strip()
     if not token:
         raise RuntimeError("VK не настроен")
     params = {
-        "user_id": str(user_id),
+        "user_id": str(int(user_id)),
         "message": text,
         "random_id": str(random.randint(1, 2_147_483_647)),
         "access_token": token,
-        "v": "5.199",
+        "v": settings.vk_api_version or "5.199",
     }
+    # Не логируем URL с access_token.
     url = "https://api.vk.com/method/messages.send?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, method="GET")
     try:
@@ -329,19 +332,67 @@ def send_vk(user_id: int, text: str) -> None:
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace") if e.fp else str(e)
-        raise RuntimeError(f"VK HTTP {e.code}: {detail}") from e
+        detail = _redact_secrets(detail)
+        raise RuntimeError(f"VK HTTP {e.code}: {detail[:500]}") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"VK сеть: {e.reason}") from e
 
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"VK: некорректный JSON ответа: {raw[:200]}") from e
+        raise RuntimeError(f"VK: некорректный JSON ответа: {_redact_secrets(raw)[:200]}") from e
     if "error" in data:
-        err = data["error"]
-        msg = err.get("error_msg") if isinstance(err, dict) else str(err)
-        raise RuntimeError(f"VK API: {msg}")
+        raise RuntimeError(format_vk_api_error(data["error"]))
 
+
+def _redact_secrets(text: str) -> str:
+    """Убрать возможные токены из текста ошибок перед логом/исключением."""
+    return re.sub(r"(access_token=)[^&\s]+", r"\1***", text or "", flags=re.I)
+
+
+def format_vk_api_error(err: Any) -> str:
+    """Человекочитаемая ошибка VK API (без токена)."""
+    if not isinstance(err, dict):
+        return f"VK API: {_redact_secrets(str(err))[:300]}"
+    code = err.get("error_code")
+    msg = str(err.get("error_msg") or "").strip() or "ошибка"
+    msg = _redact_secrets(msg)
+    hint = VK_ERROR_HINTS.get(int(code)) if code is not None else None
+    if code is not None and hint:
+        return f"VK API {code}: {msg} — {hint}"
+    if code is not None:
+        return f"VK API {code}: {msg}"
+    return f"VK API: {msg}"
+
+
+def explain_outbox_error(error: str | None, *, channel: str | None = None) -> str:
+    """Краткая расшифровка для админ-журнала outbox."""
+    raw = (error or "").strip()
+    if not raw:
+        return ""
+    ch = (channel or "").lower()
+    if ch == "vk" or "VK API" in raw or raw.startswith("VK "):
+        m = re.search(r"VK API\s+(\d+)", raw)
+        if m:
+            code = int(m.group(1))
+            hint = VK_ERROR_HINTS.get(code)
+            if hint and hint not in raw:
+                return f"{raw} ({hint})"
+        if "901" in raw and "разрешен" not in raw.lower():
+            return f"{raw} ({VK_ERROR_HINTS[901]})"
+        if "902" in raw and "приватн" not in raw.lower():
+            return f"{raw} ({VK_ERROR_HINTS[902]})"
+    return raw
+
+
+VK_ERROR_HINTS: dict[int, str] = {
+    901: "нельзя писать пользователю без разрешения (нужно «Разрешить сообщения»)",
+    902: "пользователь ограничил сообщения из‑за настроек приватности",
+    7: "нет прав у ключа сообщества",
+    15: "доступ запрещён",
+    100: "неверный запрос (проверьте user_id / токен)",
+    900: "нельзя отправить сообщение этому пользователю",
+}
 
 def _parse_payload(row: NotificationOutbox) -> dict[str, Any]:
     try:

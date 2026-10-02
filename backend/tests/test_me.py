@@ -166,10 +166,12 @@ def test_me_telegram_connect_disconnect_test(memory_db, monkeypatch) -> None:
         assert r.status_code == 303
         loc = r.headers.get("location") or ""
         assert "/me?msg=tg_connect" in loc
-        assert "tg_start=" in loc
+        assert "tg_start=" not in loc
+        assert "lb_notify_link_flash" in (r.headers.get("set-cookie") or "")
         tok = memory_db.scalar(select(TelegramLinkToken).where(TelegramLinkToken.user_id == u.id))
         assert tok is not None
         assert tok.used_at is None
+        assert tok.channel == "telegram"
 
         # Симулируем привязку chat_id (как после вебхука).
         u.telegram_chat_id = 4242

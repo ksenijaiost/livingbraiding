@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from typing import Any
-from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request
@@ -28,7 +27,8 @@ from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.forms_parse import parse_bool
 from app.master_schedule import build_master_schedule_banner
-from app.notifications import send_telegram
+from app.notifications import send_telegram, send_vk
+from app.notify_link_flash import pop_notify_link_flash, set_notify_link_flash
 from app.payroll_fund import (
     build_home_payroll_period_ctx,
     employee_fund_balance,
@@ -38,7 +38,16 @@ from app.payroll_fund import (
 from app.ru_labels import ru_user_role
 from app.security import hash_password, verify_password
 from app.settings import get_settings
-from app.telegram_link import create_telegram_link_token, telegram_deep_link, unlink_telegram_chat
+from app.telegram_link import (
+    CHANNEL_TELEGRAM,
+    CHANNEL_VK,
+    create_telegram_link_token,
+    create_vk_link_token,
+    telegram_deep_link,
+    unlink_telegram_chat,
+    unlink_vk_user,
+    vk_deep_link,
+)
 from app.time_utils import utcnow_naive
 from app.user_roles import get_roles_for_user
 from app.webui import ctx as _ctx, templates
@@ -144,12 +153,12 @@ def list_upcoming_bookings_for_user(
 
 def _me_page_response(
     request: Request,
+    response: RedirectResponse | None = None,
     *,
     current_user: AuthUser,
     db: Session,
     error: str | None = None,
     info: str | None = None,
-    telegram_deep_link_url: str | None = None,
 ):
     u = _load_self_user(db, current_user.id)
     display_tz = get_display_timezone(db)
@@ -187,6 +196,16 @@ def _me_page_response(
     settings = get_settings()
     notify_channels = [
         {
+            "id": "vk",
+            "label": "VK",
+            "connected": u.vk_user_id is not None,
+            "status_label": "подключён" if u.vk_user_id is not None else "не подключён",
+            "connect_url": "/me/vk/connect",
+            "disconnect_url": "/me/vk/disconnect",
+            "test_url": "/me/vk/test",
+            "settings": {"bookings": bool(u.notify_enabled)},
+        },
+        {
             "id": "telegram",
             "label": "Telegram",
             "connected": u.telegram_chat_id is not None,
@@ -194,12 +213,39 @@ def _me_page_response(
             "connect_url": "/me/telegram/connect",
             "disconnect_url": "/me/telegram/disconnect",
             "test_url": "/me/telegram/test",
-            "settings": {
-                "bookings": bool(u.notify_enabled),
-            },
+            "settings": {"bookings": bool(u.notify_enabled)},
         },
     ]
-    return templates.TemplateResponse(
+
+    # Сначала читаем flash из cookie (сброс cookie повесим на ответ шаблона).
+    from starlette.responses import Response as StarletteResponse
+
+    cookie_sink = StarletteResponse()
+    flash = pop_notify_link_flash(request, cookie_sink)
+    link_flash = None
+    if flash:
+        ch = flash["channel"]
+        code = flash["code"]
+        if ch == CHANNEL_VK:
+            deep = vk_deep_link(code)
+            link_flash = {
+                "channel": "vk",
+                "label": "VK",
+                "deep_link": deep,
+                "code": code,
+                "hint": f"если ссылка не сработала, напишите сообществу: привязка {code}",
+            }
+        elif ch == CHANNEL_TELEGRAM:
+            deep = telegram_deep_link(code)
+            link_flash = {
+                "channel": "telegram",
+                "label": "Telegram",
+                "deep_link": deep,
+                "code": code,
+                "hint": "Откройте ссылку в Telegram (или перешлите сотруднику).",
+            }
+
+    tmpl = templates.TemplateResponse(
         "me.html",
         _ctx(
             request,
@@ -214,11 +260,16 @@ def _me_page_response(
             notify_channels=notify_channels,
             has_connected_notify_channel=any(ch["connected"] for ch in notify_channels),
             telegram_bot_username=settings.telegram_bot_username,
-            telegram_deep_link=telegram_deep_link_url,
+            vk_group_domain=settings.vk_group_domain,
+            link_flash=link_flash,
             error=error,
             info=info,
         ),
     )
+    for key, val in cookie_sink.headers.items():
+        if key.lower() == "set-cookie":
+            tmpl.headers.append(key, val)
+    return tmpl
 
 
 @router.get("/me", response_class=HTMLResponse)
@@ -226,36 +277,41 @@ def me_page(
     request: Request,
     msg: str | None = None,
     err: str | None = None,
-    tg_start: str | None = None,
     current_user: AuthUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     error = None
     info = None
-    deep = None
     if err == "tg_bot_username":
         error = "Задайте TELEGRAM_BOT_USERNAME в настройках окружения, затем создайте ссылку снова."
+    elif err == "vk_group_domain":
+        error = "Задайте VK_GROUP_DOMAIN в окружении, затем создайте ссылку снова."
     elif err == "tg_not_linked":
         error = "Сначала подключите Telegram."
+    elif err == "vk_not_linked":
+        error = "Сначала подключите VK."
     elif err == "tg_test_fail":
-        error = "Не удалось отправить тестовое сообщение. Проверьте токен бота и привязку."
+        error = "Не удалось отправить тестовое сообщение в Telegram."
+    elif err == "vk_test_fail":
+        error = "Не удалось отправить тестовое сообщение во VK."
     elif err == "pwd_current":
         error = "Неверный текущий пароль."
     elif err == "pwd_mismatch":
         error = "Новый пароль и подтверждение не совпадают."
     elif err == "pwd_short":
         error = "Новый пароль должен быть не короче 6 символов."
-    elif err == "notify_fail":
-        error = "Не удалось сохранить настройку уведомлений."
-    elif msg == "tg_connect" and (tg_start or "").strip():
-        deep = telegram_deep_link(tg_start.strip())
-        info = "Ссылка для привязки Telegram создана (действует 24 часа). Откройте её в Telegram."
-        if deep is None:
-            error = "Код создан, но TELEGRAM_BOT_USERNAME не задан — ссылку t.me собрать нельзя."
+    elif msg == "tg_connect":
+        info = "Ссылка для привязки Telegram создана (действует 24 часа)."
+    elif msg == "vk_connect":
+        info = "Ссылка для привязки VK создана (действует 24 часа)."
     elif msg == "tg_disconnected":
         info = "Telegram отключён."
+    elif msg == "vk_disconnected":
+        info = "VK отключён."
     elif msg == "tg_test_ok":
-        info = "Тестовое сообщение отправлено."
+        info = "Тестовое сообщение в Telegram отправлено."
+    elif msg == "vk_test_ok":
+        info = "Тестовое сообщение во VK отправлено."
     elif msg == "notify_saved":
         info = "Настройка уведомлений сохранена."
     elif msg == "pwd_ok":
@@ -266,7 +322,6 @@ def me_page(
         db=db,
         error=error,
         info=info,
-        telegram_deep_link_url=deep,
     )
 
 
@@ -288,10 +343,9 @@ def me_telegram_connect(
         changes=[FieldChange("telegram_link", None, "код создан (моя карточка)")],
     )
     db.commit()
-    return RedirectResponse(
-        url=f"/me?msg=tg_connect&tg_start={quote(plain, safe='')}",
-        status_code=303,
-    )
+    resp = RedirectResponse(url="/me?msg=tg_connect", status_code=303)
+    set_notify_link_flash(resp, channel=CHANNEL_TELEGRAM, plain_code=plain)
+    return resp
 
 
 @router.post("/me/telegram/disconnect")
@@ -314,17 +368,64 @@ def me_telegram_disconnect(
     return RedirectResponse(url="/me?msg=tg_disconnected", status_code=303)
 
 
+@router.post("/me/vk/connect")
+def me_vk_connect(
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    u = _load_self_user(db, current_user.id)
+    if not get_settings().vk_group_domain:
+        return RedirectResponse(url="/me?err=vk_group_domain", status_code=303)
+    plain, _deep = create_vk_link_token(db, u.id)
+    write_audit_rows(
+        db,
+        log_model=UserAuditLog,
+        entity_field="user_id",
+        entity_id=u.id,
+        changed_by_user_id=current_user.id,
+        changes=[FieldChange("vk_link", None, "код создан (моя карточка)")],
+    )
+    db.commit()
+    resp = RedirectResponse(url="/me?msg=vk_connect", status_code=303)
+    set_notify_link_flash(resp, channel=CHANNEL_VK, plain_code=plain)
+    return resp
+
+
+@router.post("/me/vk/disconnect")
+def me_vk_disconnect(
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    u = _load_self_user(db, current_user.id)
+    old = str(u.vk_user_id) if u.vk_user_id is not None else None
+    unlink_vk_user(db, u)
+    write_audit_rows(
+        db,
+        log_model=UserAuditLog,
+        entity_field="user_id",
+        entity_id=u.id,
+        changed_by_user_id=current_user.id,
+        changes=[FieldChange("vk_user_id", old, None)],
+    )
+    db.commit()
+    return RedirectResponse(url="/me?msg=vk_disconnected", status_code=303)
+
+
 @router.post("/me/telegram/notify")
-async def me_telegram_notify(
+@router.post("/me/notify")
+async def me_notify_settings(
     request: Request,
     current_user: AuthUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     u = _load_self_user(db, current_user.id)
     form = await request.form()
-    # Настройки канала Telegram: пока один вид — брони (users.notify_enabled).
-    # Игнорируем подложенный user_id — только сессия.
-    new_notify = parse_bool(form.get("telegram_bookings")) or parse_bool(form.get("notify_enabled"))
+    # Общий notify_enabled; галочки каналов — одно и то же значение.
+    new_notify = (
+        parse_bool(form.get("telegram_bookings"))
+        or parse_bool(form.get("vk_bookings"))
+        or parse_bool(form.get("notify_enabled"))
+    )
     old = bool(u.notify_enabled)
     u.notify_enabled = new_notify
     if old != new_notify:
@@ -356,6 +457,24 @@ def me_telegram_test(
     except Exception:
         return RedirectResponse(url="/me?err=tg_test_fail", status_code=303)
     return RedirectResponse(url="/me?msg=tg_test_ok", status_code=303)
+
+
+@router.post("/me/vk/test")
+def me_vk_test(
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    u = _load_self_user(db, current_user.id)
+    if u.vk_user_id is None:
+        return RedirectResponse(url="/me?err=vk_not_linked", status_code=303)
+    try:
+        send_vk(
+            int(u.vk_user_id),
+            f"Тест LivingBraiding: уведомления VK для {u.display_name} работают.",
+        )
+    except Exception:
+        return RedirectResponse(url="/me?err=vk_test_fail", status_code=303)
+    return RedirectResponse(url="/me?msg=vk_test_ok", status_code=303)
 
 
 @router.post("/me/password")
