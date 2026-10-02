@@ -188,3 +188,92 @@ def test_process_outbox_sent_and_failed(memory_db, monkeypatch) -> None:
     assert by_ch[NotificationChannel.VK].status == NotificationOutboxStatus.FAILED
     assert "VK не настроен" in (by_ch[NotificationChannel.VK].error or "")
     assert by_ch[NotificationChannel.VK].attempt_count == 1
+
+
+def test_process_outbox_retry_delivers_failed(memory_db, monkeypatch) -> None:
+    """Ретрай успешно доставляет ранее failed запись."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok")
+    get_settings.cache_clear()
+    _, _, b = _seed(memory_db, tg=555, vk=None)
+    rows = enqueue_master_booking_notifications(memory_db, b, EVENT_BOOKING_CREATED)
+    memory_db.commit()
+    assert len(rows) == 1
+    row_id = int(rows[0].id)
+
+    with patch("app.notifications.send_telegram", side_effect=RuntimeError("сеть")):
+        stats1 = process_outbox(memory_db, limit=10, max_attempts=5)
+        memory_db.commit()
+    assert stats1["failed"] == 1
+    row = memory_db.get(NotificationOutbox, row_id)
+    assert row is not None
+    assert row.status == NotificationOutboxStatus.FAILED
+    assert row.attempt_count == 1
+
+    with patch("app.notifications.send_telegram", return_value=None):
+        stats2 = process_outbox(memory_db, limit=10, max_attempts=5)
+        memory_db.commit()
+    assert stats2["processed"] == 1
+    assert stats2["sent"] == 1
+    row = memory_db.get(NotificationOutbox, row_id)
+    assert row is not None
+    assert row.status == NotificationOutboxStatus.SENT
+    assert row.attempt_count == 2
+    assert row.error is None
+    assert row.sent_at is not None
+
+
+def test_process_outbox_stops_after_max_attempts(memory_db, monkeypatch) -> None:
+    """После лимита попыток failed больше не берётся в обработку."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok")
+    get_settings.cache_clear()
+    _, _, b = _seed(memory_db, tg=555, vk=None)
+    rows = enqueue_master_booking_notifications(memory_db, b, EVENT_BOOKING_CREATED)
+    memory_db.commit()
+    row_id = int(rows[0].id)
+    max_att = 3
+
+    with patch("app.notifications.send_telegram", side_effect=RuntimeError("down")):
+        for _ in range(max_att):
+            process_outbox(memory_db, limit=10, max_attempts=max_att)
+            memory_db.commit()
+
+    row = memory_db.get(NotificationOutbox, row_id)
+    assert row is not None
+    assert row.status == NotificationOutboxStatus.FAILED
+    assert row.attempt_count == max_att
+
+    with patch("app.notifications.send_telegram", return_value=None) as mock_tg:
+        stats = process_outbox(memory_db, limit=10, max_attempts=max_att)
+        memory_db.commit()
+    assert stats == {"processed": 0, "sent": 0, "failed": 0}
+    mock_tg.assert_not_called()
+    row = memory_db.get(NotificationOutbox, row_id)
+    assert row is not None
+    assert row.attempt_count == max_att
+    assert row.status == NotificationOutboxStatus.FAILED
+
+
+def test_process_outbox_does_not_resend_sent(memory_db, monkeypatch) -> None:
+    """Повторный запуск не дублирует уже sent."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok")
+    get_settings.cache_clear()
+    _, _, b = _seed(memory_db, tg=555, vk=None)
+    rows = enqueue_master_booking_notifications(memory_db, b, EVENT_BOOKING_CREATED)
+    memory_db.commit()
+    row_id = int(rows[0].id)
+
+    with patch("app.notifications.send_telegram", return_value=None) as mock_tg:
+        stats1 = process_outbox(memory_db, limit=10, max_attempts=5)
+        memory_db.commit()
+        assert stats1["sent"] == 1
+        assert mock_tg.call_count == 1
+
+        stats2 = process_outbox(memory_db, limit=10, max_attempts=5)
+        memory_db.commit()
+        assert stats2 == {"processed": 0, "sent": 0, "failed": 0}
+        assert mock_tg.call_count == 1
+
+    row = memory_db.get(NotificationOutbox, row_id)
+    assert row is not None
+    assert row.status == NotificationOutboxStatus.SENT
+    assert row.attempt_count == 1

@@ -187,4 +187,28 @@ $env:LB_TECHSPEC_DISPLAY_NAME="Техспец"
 https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<ДОМЕН>/webhooks/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>
 ```
 
-Отправка из CRM в чат идёт через outbox (`process_outbox`); хуки на создание брони — отдельно.
+Отправка из CRM в чат идёт через outbox (`process_outbox`); хуки на создание/изменение/отмену брони ставят записи в очередь.
+
+#### Повторная отправка outbox (cron)
+
+Записи со статусом `pending` и `failed` (пока `attempt_count` &lt; 5) нужно периодически догонять отдельной командой — веб-процесс сам это не делает.
+
+Из каталога `backend/` (тот же venv и `.env`, что у uvicorn):
+
+```bash
+python -m app.process_notification_outbox
+# опционально:
+python -m app.process_notification_outbox --limit 100 --max-attempts 5
+```
+
+Тот же вызов: `bash scripts/process_notification_outbox.sh` (обёртка вокруг модуля).
+
+**На проде** запускайте раз в **1–2 минуты**:
+
+- **cron** (Linux VPS), пример каждые 2 минуты:
+  ```cron
+  */2 * * * * cd /path/to/livingbraiding/backend && /path/to/venv/bin/python -m app.process_notification_outbox >> /var/log/lb-notify-outbox.log 2>&1
+  ```
+- **Планировщик платформы** (Timeweb Cloud Apps, DigitalOcean App Platform, systemd timer и т.п.): отдельный Job/Worker с той же командой и тем же `DATABASE_URL` / `TELEGRAM_BOT_TOKEN`. Интервал 1–2 мин.
+
+После лимита попыток статус остаётся `failed` и cron больше не трогает запись. Ручной повтор — кнопка «Повторить» на `/admin/notification-outbox` (суперадмин / техспец).

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="max-width: 1100px;">
+    <p class="lb-top-links" style="margin-top:0;">
+      <a href="/admin/settings">← Настройки</a>
+      {% if current_user.role.value == 'TECHSPEC' %}
+        <span class="lb-top-sep">·</span>
+        <a href="/techspec/data">Техданные</a>
+      {% endif %}
+    </p>
+    <h2 style="margin-top:0;">Очередь уведомлений</h2>
+    <p class="muted" style="margin-top:-6px;">
+      Последние 50 записей outbox (Telegram). Автоповтор: <code>python -m app.process_notification_outbox</code> по cron.
+    </p>
+
+    {% if msg %}
+      <div class="ok" style="margin-bottom:12px;">{{ msg }}</div>
+    {% endif %}
+    {% if err %}
+      <div class="error" style="margin-bottom:12px;">{{ err }}</div>
+    {% endif %}
+
+    {% if rows %}
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Создано</th>
+              <th>Мастер</th>
+              <th>Канал</th>
+              <th>Событие</th>
+              <th>Статус</th>
+              <th>Попытки</th>
+              <th>Бронь</th>
+              <th>Ошибка</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+              <tr>
+                <td>{{ r.id }}</td>
+                <td class="muted" style="font-size:12px; white-space:nowrap;">{{ r.created_at }}</td>
+                <td>{{ r.master }}</td>
+                <td>{{ r.channel }}</td>
+                <td>{{ r.event }}</td>
+                <td>{{ r.status }}</td>
+                <td>{{ r.attempts }}</td>
+                <td>
+                  {% if r.booking_id %}
+                    <a href="/bookings/{{ r.booking_id }}">#{{ r.booking_id }}</a>
+                  {% else %}—{% endif %}
+                </td>
+                <td class="muted" style="font-size:12px; max-width:220px; word-break:break-word;">{{ r.error or '—' }}</td>
+                <td>
+                  {% if r.status_raw == 'failed' %}
+                    <form method="post" action="/admin/notification-outbox/{{ r.id }}/retry" style="margin:0;">
+                      <button type="submit" class="secondary">Повторить</button>
+                    </form>
+                  {% else %}—{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Записей пока нет.</p>
+    {% endif %}
+  </div>
+{% endblock %}

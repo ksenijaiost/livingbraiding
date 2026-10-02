@@ -89,6 +89,8 @@ from app.routes.staff import router as staff_router  # noqa: E402
 app.include_router(staff_router)
 from app.routes.telegram_webhook import router as telegram_webhook_router  # noqa: E402
 app.include_router(telegram_webhook_router)
+from app.routes.notification_outbox import router as notification_outbox_router  # noqa: E402
+app.include_router(notification_outbox_router)
 from app.routes.master_visit import router as master_visit_router  # noqa: E402
 app.include_router(master_visit_router)
 from app.routes.master_clients import router as master_clients_router  # noqa: E402

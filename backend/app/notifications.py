@@ -372,24 +372,47 @@ def process_outbox(
     limit: int = DEFAULT_OUTBOX_LIMIT,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     only_ids: Sequence[int] | None = None,
+    force: bool = False,
 ) -> dict[str, int]:
-    """Обработать pending и failed (с лимитом попыток). Возвращает счётчики."""
+    """Обработать pending и failed (с лимитом попыток). Возвращает счётчики.
+
+    force=True + only_ids: обработать указанные id даже если attempt_count уже на лимите
+    (ручной «Повторить» в админке).
+    """
     lim = max(1, int(limit))
     max_att = max(1, int(max_attempts))
-    stmt = select(NotificationOutbox).where(
-        or_(
-            NotificationOutbox.status == NotificationOutboxStatus.PENDING,
-            and_(
-                NotificationOutbox.status == NotificationOutboxStatus.FAILED,
-                NotificationOutbox.attempt_count < max_att,
-            ),
-        )
-    )
     if only_ids is not None:
         ids = [int(x) for x in only_ids]
         if not ids:
             return {"processed": 0, "sent": 0, "failed": 0}
-        stmt = stmt.where(NotificationOutbox.id.in_(ids))
+        if force:
+            stmt = select(NotificationOutbox).where(
+                NotificationOutbox.id.in_(ids),
+                NotificationOutbox.status.in_(
+                    (NotificationOutboxStatus.PENDING, NotificationOutboxStatus.FAILED)
+                ),
+            )
+        else:
+            stmt = select(NotificationOutbox).where(
+                NotificationOutbox.id.in_(ids),
+                or_(
+                    NotificationOutbox.status == NotificationOutboxStatus.PENDING,
+                    and_(
+                        NotificationOutbox.status == NotificationOutboxStatus.FAILED,
+                        NotificationOutbox.attempt_count < max_att,
+                    ),
+                ),
+            )
+    else:
+        stmt = select(NotificationOutbox).where(
+            or_(
+                NotificationOutbox.status == NotificationOutboxStatus.PENDING,
+                and_(
+                    NotificationOutbox.status == NotificationOutboxStatus.FAILED,
+                    NotificationOutbox.attempt_count < max_att,
+                ),
+            )
+        )
     rows = list(db.scalars(stmt.order_by(NotificationOutbox.id.asc()).limit(lim)).all())
     stats = {"processed": 0, "sent": 0, "failed": 0}
     for row in rows:
@@ -409,3 +432,34 @@ def process_outbox(
         stats["sent"] += 1
     db.flush()
     return stats
+
+
+def list_recent_notification_outbox(db: Session, *, limit: int = 50) -> list[NotificationOutbox]:
+    lim = max(1, min(int(limit), 200))
+    return list(
+        db.scalars(
+            select(NotificationOutbox)
+            .options(
+                selectinload(NotificationOutbox.user),
+                selectinload(NotificationOutbox.booking),
+            )
+            .order_by(NotificationOutbox.id.desc())
+            .limit(lim)
+        ).all()
+    )
+
+
+def retry_notification_outbox_entry(db: Session, entry_id: int) -> NotificationOutbox:
+    """Принудительно повторить failed/pending запись (для кнопки в админке)."""
+    row = db.get(NotificationOutbox, int(entry_id))
+    if row is None:
+        raise ValueError("Запись outbox не найдена.")
+    if row.status == NotificationOutboxStatus.SENT:
+        raise ValueError("Уже отправлено — повтор не нужен.")
+    if row.status not in (NotificationOutboxStatus.PENDING, NotificationOutboxStatus.FAILED):
+        raise ValueError(f"Нельзя повторить статус {row.status}.")
+    row.status = NotificationOutboxStatus.PENDING
+    db.flush()
+    process_outbox(db, limit=1, only_ids=[int(row.id)], force=True)
+    db.refresh(row)
+    return row
