@@ -21,17 +21,25 @@
 
     <div class="card" style="background:#fafafa; margin-bottom:16px;">
       <h3 style="margin-top:0; font-size:1.05rem;">Уведомления</h3>
-      {% if not telegram_bot_username %}
-        <p class="muted" style="font-size:12px;">Задайте <code>TELEGRAM_BOT_USERNAME</code> в окружении, чтобы создавать ссылки привязки Telegram.</p>
+      {% if not vk_group_domain %}
+        <p class="muted" style="font-size:12px;">Задайте <code>VK_GROUP_DOMAIN</code> в окружении для ссылок привязки VK.</p>
       {% endif %}
-      {% if telegram_deep_link %}
-        <p style="margin:8px 0;">
-          Ссылка Telegram (24 часа):
-          <a href="{{ telegram_deep_link }}" target="_blank" rel="noopener">{{ telegram_deep_link }}</a>
-        </p>
+      {% if not telegram_bot_username %}
+        <p class="muted" style="font-size:12px;">Задайте <code>TELEGRAM_BOT_USERNAME</code> для ссылок Telegram.</p>
+      {% endif %}
+      {% if link_flash %}
+        <div class="ok" style="margin:8px 0 12px; padding:10px;">
+          <div><strong>{{ link_flash.label }}</strong> — ссылка (24 часа):</div>
+          {% if link_flash.deep_link %}
+            <p style="margin:6px 0; word-break:break-all;">
+              <a href="{{ link_flash.deep_link }}" target="_blank" rel="noopener">{{ link_flash.deep_link }}</a>
+            </p>
+          {% endif %}
+          <p class="muted" style="margin:0; font-size:12px;">{{ link_flash.hint }}</p>
+        </div>
       {% endif %}
 
-      <form method="post" action="/me/telegram/notify" style="margin:0;">
+      <form method="post" action="/me/notify" style="margin:0;">
         <div style="overflow-x:auto;">
           <table>
             <thead>
@@ -85,8 +93,8 @@
         {% endif %}
       </form>
       <p class="muted" style="font-size:12px; margin:10px 0 0;">
-        Подключите канал, откройте ссылку в приложении и подтвердите бота.
-        Галочки видов уведомлений сохраняются отдельно по каналу (сейчас доступны брони в Telegram).
+        Основной канал на проде — VK. Подключите канал, откройте ссылку и подтвердите диалог.
+        Галочка «Брони» общая для всех каналов (notify_enabled).
       </p>
     </div>
 

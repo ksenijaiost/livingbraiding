@@ -187,7 +187,7 @@ class UserAuditLog(Base):
 
 
 class TelegramLinkToken(Base):
-    """Одноразовый код привязки Telegram (в deep link /start=<token>); в БД хранится хеш."""
+    """Одноразовый код привязки Telegram/VK; в БД хранится хеш. channel: telegram|vk."""
 
     __tablename__ = "telegram_link_tokens"
     __table_args__ = (UniqueConstraint("token_hash", name="uq_telegram_link_tokens_hash"),)
@@ -195,6 +195,8 @@ class TelegramLinkToken(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    # telegram | vk — один механизм, разные deep link / вебхуки
+    channel: Mapped[str] = mapped_column(String(16), nullable=False, default="telegram", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

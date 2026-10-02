@@ -193,13 +193,46 @@
       </form>
 
       <div class="card lb-mt-16" style="background:#fafafa;">
-        <h3 class="lb-mt-0" style="font-size:1.05rem;">Telegram</h3>
+        <h3 class="lb-mt-0" style="font-size:1.05rem;">Уведомления (VK / Telegram)</h3>
+        {% if link_flash %}
+          <div class="ok" style="margin:0 0 12px; padding:10px;">
+            <div><strong>{{ link_flash.label }}</strong> — ссылка (24 часа):</div>
+            {% if link_flash.deep_link %}
+              <p style="margin:6px 0; word-break:break-all;">
+                <a href="{{ link_flash.deep_link }}" target="_blank" rel="noopener">{{ link_flash.deep_link }}</a>
+              </p>
+            {% endif %}
+            <p class="muted lb-font-12" style="margin:0;">{{ link_flash.hint }}</p>
+          </div>
+        {% endif %}
         <p class="lb-mt-0">
-          {% if user.telegram_chat_id %}
-            <strong>Подключён</strong>
-            <span class="muted">(chat id {{ user.telegram_chat_id }})</span>
+          <strong>VK:</strong>
+          {% if user.vk_user_id %}
+            подключён <span class="muted">(id {{ user.vk_user_id }})</span>
           {% else %}
-            <strong>Не подключён</strong>
+            не подключён
+          {% endif %}
+        </p>
+        {% if not vk_group_domain %}
+          <p class="muted lb-font-12">Задайте <code>VK_GROUP_DOMAIN</code> в окружении для ссылок vk.me.</p>
+        {% endif %}
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px;">
+          <form method="post" action="/admin/settings/staff/{{ user.id }}/vk/connect" style="margin:0;">
+            <button type="submit">Подключить VK</button>
+          </form>
+          {% if user.vk_user_id %}
+            <form method="post" action="/admin/settings/staff/{{ user.id }}/vk/disconnect" style="margin:0;"
+              onsubmit="return confirm('Отключить VK у этого сотрудника?');">
+              <button type="submit" class="secondary">Отключить VK</button>
+            </form>
+          {% endif %}
+        </div>
+        <p class="lb-mt-0">
+          <strong>Telegram:</strong>
+          {% if user.telegram_chat_id %}
+            подключён <span class="muted">(chat id {{ user.telegram_chat_id }})</span>
+          {% else %}
+            не подключён
           {% endif %}
         </p>
         {% if not telegram_bot_username %}
@@ -212,7 +245,7 @@
           {% if user.telegram_chat_id %}
             <form method="post" action="/admin/settings/staff/{{ user.id }}/telegram/disconnect" style="margin:0;"
               onsubmit="return confirm('Отключить Telegram у этого сотрудника?');">
-              <button type="submit" class="secondary">Отключить</button>
+              <button type="submit" class="secondary">Отключить Telegram</button>
             </form>
           {% endif %}
         </div>

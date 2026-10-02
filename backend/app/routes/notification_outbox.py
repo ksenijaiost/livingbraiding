@@ -11,7 +11,11 @@ from app.db.models import NotificationOutboxStatus, UserRole
 from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.forms_parse import parse_int
-from app.notifications import list_recent_notification_outbox, retry_notification_outbox_entry
+from app.notifications import (
+    explain_outbox_error,
+    list_recent_notification_outbox,
+    retry_notification_outbox_entry,
+)
 from app.webui import ctx as _ctx, templates
 
 router = APIRouter()
@@ -60,7 +64,10 @@ def admin_notification_outbox_page(
                 "status": _status_ru(r.status),
                 "status_raw": r.status.value if r.status else "",
                 "attempts": int(r.attempt_count or 0),
-                "error": (r.error or "")[:300],
+                "error": explain_outbox_error(
+                    r.error,
+                    channel=r.channel.value if r.channel else None,
+                )[:400],
                 "booking_id": r.booking_id,
             }
         )

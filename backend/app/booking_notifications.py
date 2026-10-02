@@ -24,7 +24,7 @@ from app.time_utils import utcnow_naive
 
 logger = logging.getLogger(__name__)
 
-_TG_ONLY = (NotificationChannel.TELEGRAM,)
+_CHANNELS = (NotificationChannel.TELEGRAM, NotificationChannel.VK)
 
 
 def booking_is_notifiable_for_masters(booking: Booking, *, for_cancel: bool = False) -> bool:
@@ -67,7 +67,7 @@ def _safe_enqueue_and_send(
             master_user_ids=master_user_ids,
             text_override=text_override,
             version_override=version_override,
-            channels=_TG_ONLY,
+            channels=_CHANNELS,
             unassigned=unassigned,
         )
         db.commit()

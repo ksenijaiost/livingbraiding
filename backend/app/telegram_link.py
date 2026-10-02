@@ -1,15 +1,16 @@
-"""Привязка Telegram к сотруднику: одноразовые коды и deep link."""
+"""Одноразовые коды привязки каналов уведомлений (Telegram / VK)."""
 
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from datetime import timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.db.models import TelegramLinkToken, User
+from app.db.models import NotificationChannel, TelegramLinkToken, User
 from app.settings import get_settings
 from app.time_utils import utcnow_naive
 
@@ -17,9 +18,18 @@ LINK_TOKEN_TTL = timedelta(hours=24)
 MSG_LINKED_OK = "Готово, уведомления подключены"
 MSG_LINK_INVALID = "Ссылка устарела, запросите новую в CRM"
 
+CHANNEL_TELEGRAM = NotificationChannel.TELEGRAM.value
+CHANNEL_VK = NotificationChannel.VK.value
 
-def hash_telegram_link_token(plain: str) -> str:
+_VK_PRIVYAZKA_RE = re.compile(r"(?i)^\s*привязка\s+(\S+)\s*$")
+
+
+def hash_link_token(plain: str) -> str:
     return hashlib.sha256(plain.encode("utf-8")).hexdigest()
+
+
+# Обратная совместимость
+hash_telegram_link_token = hash_link_token
 
 
 def telegram_deep_link(plain_token: str) -> str | None:
@@ -30,16 +40,33 @@ def telegram_deep_link(plain_token: str) -> str | None:
     return f"https://t.me/{username}?start={plain_token}"
 
 
-def create_telegram_link_token(db: Session, user_id: int) -> tuple[str, str | None]:
-    """Создать одноразовый код. Возвращает (plain_token, deep_link|None).
+def vk_deep_link(plain_token: str) -> str | None:
+    """https://vk.me/<VK_GROUP_DOMAIN>?ref=<token> или None."""
+    domain = (get_settings().vk_group_domain or "").strip().lstrip("@").strip("/")
+    if not domain:
+        return None
+    return f"https://vk.me/{domain}?ref={plain_token}"
 
-    Старые неиспользованные коды этого пользователя помечаются использованными.
+
+def create_link_token(
+    db: Session,
+    user_id: int,
+    *,
+    channel: str,
+) -> tuple[str, str | None]:
+    """Создать одноразовый код для канала. Возвращает (plain_token, deep_link|None).
+
+    Старые неиспользованные коды этого пользователя в том же канале помечаются использованными.
     """
+    ch = (channel or "").strip().lower()
+    if ch not in (CHANNEL_TELEGRAM, CHANNEL_VK):
+        raise ValueError(f"Неизвестный канал привязки: {channel}")
     now = utcnow_naive()
     db.execute(
         update(TelegramLinkToken)
         .where(
             TelegramLinkToken.user_id == int(user_id),
+            TelegramLinkToken.channel == ch,
             TelegramLinkToken.used_at.is_(None),
         )
         .values(used_at=now)
@@ -47,28 +74,44 @@ def create_telegram_link_token(db: Session, user_id: int) -> tuple[str, str | No
     plain = secrets.token_urlsafe(24)
     row = TelegramLinkToken(
         user_id=int(user_id),
-        token_hash=hash_telegram_link_token(plain),
+        token_hash=hash_link_token(plain),
+        channel=ch,
         created_at=now,
         expires_at=now + LINK_TOKEN_TTL,
         used_at=None,
     )
     db.add(row)
     db.flush()
-    return plain, telegram_deep_link(plain)
+    deep = telegram_deep_link(plain) if ch == CHANNEL_TELEGRAM else vk_deep_link(plain)
+    return plain, deep
 
 
-def consume_telegram_link_token(db: Session, plain_token: str) -> User | None:
+def create_telegram_link_token(db: Session, user_id: int) -> tuple[str, str | None]:
+    return create_link_token(db, user_id, channel=CHANNEL_TELEGRAM)
+
+
+def create_vk_link_token(db: Session, user_id: int) -> tuple[str, str | None]:
+    return create_link_token(db, user_id, channel=CHANNEL_VK)
+
+
+def consume_link_token(
+    db: Session,
+    plain_token: str,
+    *,
+    channel: str | None = None,
+) -> User | None:
     """Найти валидный код, пометить использованным, вернуть User; иначе None."""
     plain = (plain_token or "").strip()
     if not plain:
         return None
     now = utcnow_naive()
-    row = db.scalar(
-        select(TelegramLinkToken).where(
-            TelegramLinkToken.token_hash == hash_telegram_link_token(plain),
-            TelegramLinkToken.used_at.is_(None),
-        )
+    stmt = select(TelegramLinkToken).where(
+        TelegramLinkToken.token_hash == hash_link_token(plain),
+        TelegramLinkToken.used_at.is_(None),
     )
+    if channel:
+        stmt = stmt.where(TelegramLinkToken.channel == channel.strip().lower())
+    row = db.scalar(stmt)
     if row is None:
         return None
     if row.expires_at < now:
@@ -83,6 +126,14 @@ def consume_telegram_link_token(db: Session, plain_token: str) -> User | None:
     row.used_at = now
     db.flush()
     return user
+
+
+def consume_telegram_link_token(db: Session, plain_token: str) -> User | None:
+    return consume_link_token(db, plain_token, channel=CHANNEL_TELEGRAM)
+
+
+def consume_vk_link_token(db: Session, plain_token: str) -> User | None:
+    return consume_link_token(db, plain_token, channel=CHANNEL_VK)
 
 
 def bind_telegram_chat(db: Session, user: User, chat_id: int) -> None:
@@ -102,6 +153,22 @@ def unlink_telegram_chat(db: Session, user: User) -> None:
     db.flush()
 
 
+def bind_vk_user(db: Session, user: User, vk_user_id: int) -> None:
+    vid = int(vk_user_id)
+    others = list(
+        db.scalars(select(User).where(User.vk_user_id == vid, User.id != int(user.id))).all()
+    )
+    for o in others:
+        o.vk_user_id = None
+    user.vk_user_id = vid
+    db.flush()
+
+
+def unlink_vk_user(db: Session, user: User) -> None:
+    user.vk_user_id = None
+    db.flush()
+
+
 def parse_telegram_start_code(text: str | None) -> str | None:
     """Извлечь код из «/start <код>» или «/start@bot <код>». Bare /start → None."""
     t = (text or "").strip()
@@ -112,3 +179,26 @@ def parse_telegram_start_code(text: str | None) -> str | None:
         return None
     code = parts[1].strip().split()[0].strip()
     return code or None
+
+
+def parse_vk_link_code(
+    text: str | None = None,
+    *,
+    ref: str | None = None,
+    payload: str | None = None,
+) -> str | None:
+    """Код из ref/payload или текста «привязка <код>» / голый код."""
+    for raw in (ref, payload):
+        s = (raw or "").strip()
+        if s:
+            return s.split()[0].strip() or None
+    t = (text or "").strip()
+    if not t:
+        return None
+    m = _VK_PRIVYAZKA_RE.match(t)
+    if m:
+        return m.group(1).strip() or None
+    # Голый код без пробелов (как token_urlsafe)
+    if " " not in t and "\n" not in t and len(t) >= 16:
+        return t
+    return None

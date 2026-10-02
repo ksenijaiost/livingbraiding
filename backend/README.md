@@ -171,23 +171,43 @@ $env:LB_TECHSPEC_DISPLAY_NAME="Техспец"
 
 **Рекомендация для прода:** смонтировать постоянный том на `LB_MEDIA_ROOT`, чтобы не качать бэкап перед каждым деплоем. Object storage (S3/Spaces) — отдельная задача на будущее.
 
-### Уведомления мастерам (Telegram)
+### Уведомления мастерам (VK + Telegram)
 
-Привязка аккаунта: в карточке сотрудника (суперадмин) → «Подключить Telegram» → ссылка `https://t.me/<BOT_USERNAME>?start=<код>`. Вебхук `POST /webhooks/telegram` принимает `/start <код>` и сохраняет `chat.id`.
+Основной канал на хостинге без доступа к Telegram — **VK** (Callback API сообщества). Telegram остаётся опциональным.
 
-Переменные окружения (см. `.env.example`):
+#### VK (Callback API)
 
-- `TELEGRAM_BOT_TOKEN` — токен бота (отправка и API)
-- `TELEGRAM_BOT_USERNAME` — username бота без `@` (для deep link)
-- `TELEGRAM_WEBHOOK_SECRET` — секрет `secret_token` вебхука (заголовок `X-Telegram-Bot-Api-Secret-Token`)
+1. Создайте сообщество VK и ключ доступа с правом **messages**.
+2. В настройках сообщества → Работа с API → Callback API:
+   - URL: `https://<ДОМЕН>/webhooks/vk`
+   - Версия API: как в `VK_API_VERSION` (по умолчанию `5.199`)
+   - Строка подтверждения → `VK_CONFIRMATION_CODE`
+   - Секретный ключ → `VK_SECRET_KEY`
+   - События: минимум `message_new` (и при необходимости `message_allow`)
+3. Переменные окружения (см. `.env.example`):
 
-Выставить вебхук (подставьте токен, домен и секрет):
+| Переменная | Назначение |
+|---|---|
+| `VK_GROUP_TOKEN` | ключ сообщества (messages.send) |
+| `VK_GROUP_ID` | id сообщества |
+| `VK_CONFIRMATION_CODE` | ответ на `type=confirmation` |
+| `VK_SECRET_KEY` | проверка `secret` в теле Callback |
+| `VK_API_VERSION` | версия API, по умолчанию `5.199` |
+| `VK_GROUP_DOMAIN` | короткое имя для `https://vk.me/<domain>?ref=<код>` |
+
+Привязка: «Подключить VK» в `/me` или карточке сотрудника → ссылка `vk.me/…?ref=<код>` или сообщение сообществу `привязка <код>`. Код одноразовый, 24 часа (тот же механизм, что Telegram, поле `channel` в токенах).
+
+#### Telegram (опционально)
+
+Привязка: ссылка `https://t.me/<BOT_USERNAME>?start=<код>`. Вебхук `POST /webhooks/telegram`.
+
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET`
 
 ```text
 https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<ДОМЕН>/webhooks/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>
 ```
 
-Отправка из CRM в чат идёт через outbox (`process_outbox`); хуки на создание/изменение/отмену брони ставят записи в очередь.
+Отправка броней идёт через outbox: для мастера с `vk_user_id` и/или `telegram_chat_id` создаются отдельные записи канала (без дублей внутри канала). Сбой VK не блокирует Telegram и не ломает сохранение брони.
 
 #### Фоновый воркер outbox (вместо cron)
 

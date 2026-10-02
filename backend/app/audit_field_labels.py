@@ -58,6 +58,8 @@ AUDIT_FIELD_LABELS: dict[str, str] = {
     "notify_enabled": "Уведомления включены",
     "telegram_chat_id": "Telegram chat id",
     "telegram_link": "Ссылка Telegram",
+    "vk_user_id": "VK user id",
+    "vk_link": "Ссылка VK",
     "roles_summary": "Роли",
     "master_level": "Уровень мастера",
     "salon_cut_pct_override": "Доля салона (переопределение)",
