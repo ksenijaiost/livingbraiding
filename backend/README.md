@@ -170,3 +170,21 @@ $env:LB_TECHSPEC_DISPLAY_NAME="Техспец"
 Форма «Восстановить на сервер» — по одному zip-файлу за раз. Лимиты (env): `LB_MEDIA_RESTORE_MAX_ZIP_BYTES` (по умолчанию 1 ГБ), `LB_MEDIA_RESTORE_MAX_BYTES` (1.2 ГБ после распаковки).
 
 **Рекомендация для прода:** смонтировать постоянный том на `LB_MEDIA_ROOT`, чтобы не качать бэкап перед каждым деплоем. Object storage (S3/Spaces) — отдельная задача на будущее.
+
+### Уведомления мастерам (Telegram)
+
+Привязка аккаунта: в карточке сотрудника (суперадмин) → «Подключить Telegram» → ссылка `https://t.me/<BOT_USERNAME>?start=<код>`. Вебхук `POST /webhooks/telegram` принимает `/start <код>` и сохраняет `chat.id`.
+
+Переменные окружения (см. `.env.example`):
+
+- `TELEGRAM_BOT_TOKEN` — токен бота (отправка и API)
+- `TELEGRAM_BOT_USERNAME` — username бота без `@` (для deep link)
+- `TELEGRAM_WEBHOOK_SECRET` — секрет `secret_token` вебхука (заголовок `X-Telegram-Bot-Api-Secret-Token`)
+
+Выставить вебхук (подставьте токен, домен и секрет):
+
+```text
+https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<ДОМЕН>/webhooks/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>
+```
+
+Отправка из CRM в чат идёт через outbox (`process_outbox`); хуки на создание брони — отдельно.

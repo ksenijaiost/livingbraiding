@@ -186,6 +186,22 @@ class UserAuditLog(Base):
     changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
 
 
+class TelegramLinkToken(Base):
+    """Одноразовый код привязки Telegram (в deep link /start=<token>); в БД хранится хеш."""
+
+    __tablename__ = "telegram_link_tokens"
+    __table_args__ = (UniqueConstraint("token_hash", name="uq_telegram_link_tokens_hash"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+
+
 class NotificationChannel(str, enum.Enum):
     TELEGRAM = "telegram"
     VK = "vk"
