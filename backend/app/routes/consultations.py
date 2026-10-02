@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.audit import diff_fields, write_audit_rows
 from app.auth import AuthUser, require_role
 from app.client_validation import strip_or_none
+from app.forms_parse import parse_int
 from app.consultation_booking import (
     OPEN_BOOKING_STATUSES,
     booking_for_consultation,
