@@ -1,6 +1,8 @@
 ## Backend overview
 
-This folder contains the FastAPI app and its SQLite/Postgres database schema.
+FastAPI-приложение и схема БД (SQLite локально / PostgreSQL на проде).
+
+Краткое описание продукта, роли и функциональность — в корневом [`README.md`](../README.md).
 
 Файл **`data/livingbraiding.db`** (SQLite) — это **одна база**: все таблицы живут внутри этого файла, отдельных файлов на каждую таблицу не будет.
 
@@ -8,29 +10,39 @@ This folder contains the FastAPI app and its SQLite/Postgres database schema.
 
 ### Key folders
 
-- `app/`: application code
-  - `main.py`: routes + template rendering (server-side HTML)
-  - `auth.py`: cookie session auth + role checks
-  - `db/`: SQLAlchemy models + session
+- `app/`: код приложения
+  - `main.py`: entrypoint (middleware, подключение роутеров, startup / seed)
+  - `routes/`: HTTP-роуты по доменам (клиенты, записи/визиты, склад, ЗП, отчёты, techspec, …)
+  - `webui.py`: Jinja2-окружение, фильтры и глобалы шаблонов
+  - `auth.py`, `user_roles.py`, `role_access.py`: сессии/куки, мультироли («Кабинет»), проверки доступа
+  - `db/`: SQLAlchemy models + session (~65 таблиц)
+  - `payroll_fund.py`: журнал фондов ЗП (начисления / сторно / выплаты / переводы)
   - `questionnaire/`: JSON-каталоги/формы анкеты + Pydantic-схемы для `visit_services.details_json`
-  - `seed.py`: creates dev users and default settings on startup
-  - `templates/`: Jinja templates (minimal UI)
-- `alembic/`: database migrations
+  - `help_content/`: FAQ по ролям и подсказки «?» (markdown)
+  - `media_store.py`: файлы загрузок; бэкап/restore — `routes/techspec_media.py`
+  - `seed.py`: dev/prod seed при старте
+  - `templates/`, `static/`: серверный HTML + статика
+- `alembic/`: миграции (`versions/0001_init.py` … далее по цепочке)
+- `scripts/`: прод-запуск (`start_uvicorn.sh` — сначала миграции, потом uvicorn)
 
 ### Migrations
 
-Пока проект только у тебя локально и данных нет, **можно не копить цепочку миграций**: правим `alembic/versions/0001_init.py` под актуальную схему, удаляем файл БД `data/livingbraiding.db` (если был) и снова `alembic upgrade head`.
+Изменения схемы — **новым** файлом в `alembic/versions/`, затем `alembic upgrade head` (без потери данных на проде).
 
-Когда появится продакшен с реальными данными, миграции нужны, чтобы менять схему **без потери** существующих строк — тогда каждое изменение оформляется новым файлом в `versions/`.
+Переписывать `0001_init.py` «под актуальную схему» и удалять локальный `data/livingbraiding.db` допустимо только на пустой личной БД без продакшена. В рабочем проекте так делать нельзя — нужна обычная цепочка миграций.
+
+Локально по умолчанию SQLite (`DATABASE_URL` в `.env` / `.env.example`). На проде — PostgreSQL.
 
 ### Design rules (important)
 
-- **No historical recalculation**: prices/settings can change, but old visits must not change.
-  - We store *snapshots* inside `visits` (e.g. `*_price_per_gram_at_time`, `salon_cut_pct_at_time`).
-  - Reports must use snapshot fields, not “current settings”.
-- **Money model** (current MVP):
-  - `profit_before_split` should already reflect all deductions, including addons (addons reduce profit).
-  - salon and master payouts are derived from snapshot profit and snapshot salon cut.
+- **No historical recalculation**: цены и настройки могут меняться, но уже зафиксированные визиты/продажи — нет.
+  - На сущностях хранятся *snapshots* (цены материала, доля салона, суммы на момент события и т.п.).
+  - Отчёты опираются на snapshot-поля и журнал фондов, а не на «текущие» настройки.
+- **Money / payroll fund**:
+  - Учёт ЗП и долей — журнал `payroll_fund_ledger` (стороны: личный фонд мастера / студийный).
+  - Источники начислений: визиты и услуги, консультации, работы на склад, продажи, почасовая работа/помощь и др.
+  - Правки задним числом — через сторно + новое начисление; выплаты и переводы — отдельные виды проводок.
+  - Закрытый расчётный период блокирует изменения в своём диапазоне.
 
 ### Dev commands (PowerShell)
 
