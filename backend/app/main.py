@@ -8,6 +8,7 @@ HTTP-роуты — в `app/routes/`.
 """
 
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +23,7 @@ from app.auth import SessionRememberRenewMiddleware
 from app.bootstrap import ensure_initial_techspec_user
 from app.db.session import get_db
 from app.display_time import DisplayTimezoneMiddleware
+from app.notification_worker import start_notification_worker, stop_notification_worker
 from app.payroll_fund import backfill_all_visit_master_accruals_if_missing
 from app.seed import ensure_dev_seed_data, ensure_prod_seed_data
 
@@ -31,7 +33,41 @@ from app import work_products as work_products_routes
 
 from app.tech_error import SwallowClientDisconnectMiddleware, register_tech_error_handlers  # noqa: E402
 
-app = FastAPI(title="livingbraiding")
+
+def _run_startup_seed() -> None:
+    """Access-лог (время, user) + optional dev seed + audit retention."""
+    configure_request_access_logging()
+    db = next(get_db())
+    try:
+        try:
+            db.execute(text("SELECT 1 FROM settings LIMIT 1"))
+        except (OperationalError, ProgrammingError):
+            return
+        enable_dev_seed = os.environ.get("ENABLE_DEV_SEED", "").strip().lower() in ("1", "true", "yes")
+        enable_prod_seed = os.environ.get("ENABLE_PROD_SEED", "").strip().lower() in ("1", "true", "yes")
+        if enable_dev_seed:
+            ensure_dev_seed_data(db)
+        elif enable_prod_seed:
+            ensure_prod_seed_data(db)
+        ensure_initial_techspec_user(db)
+        purge_expired_audit_logs_startup_safe(db)
+        backfill_all_visit_master_accruals_if_missing(db)
+        db.commit()
+    finally:
+        db.close()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _run_startup_seed()
+    worker = start_notification_worker()
+    try:
+        yield
+    finally:
+        await stop_notification_worker(worker)
+
+
+app = FastAPI(title="livingbraiding", lifespan=lifespan)
 register_tech_error_handlers(app)
 app.add_middleware(AccessLogWithUserMiddleware)
 app.add_middleware(DisplayTimezoneMiddleware)
@@ -125,27 +161,3 @@ app.include_router(auth_routes_router)
 def health() -> dict[str, bool]:
     """Проверка живости для балансировщика / App Platform (без БД и авторизации)."""
     return {"ok": True}
-
-
-@app.on_event("startup")
-def _startup():
-    """Access-лог (время, user) + optional dev seed + audit retention."""
-    configure_request_access_logging()
-    db = next(get_db())
-    try:
-        try:
-            db.execute(text("SELECT 1 FROM settings LIMIT 1"))
-        except (OperationalError, ProgrammingError):
-            return
-        enable_dev_seed = os.environ.get("ENABLE_DEV_SEED", "").strip().lower() in ("1", "true", "yes")
-        enable_prod_seed = os.environ.get("ENABLE_PROD_SEED", "").strip().lower() in ("1", "true", "yes")
-        if enable_dev_seed:
-            ensure_dev_seed_data(db)
-        elif enable_prod_seed:
-            ensure_prod_seed_data(db)
-        ensure_initial_techspec_user(db)
-        purge_expired_audit_logs_startup_safe(db)
-        backfill_all_visit_master_accruals_if_missing(db)
-        db.commit()
-    finally:
-        db.close()

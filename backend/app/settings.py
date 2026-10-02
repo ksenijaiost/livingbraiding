@@ -8,6 +8,13 @@ import os
 from dotenv import load_dotenv
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
 class Settings:
     def __init__(self) -> None:
         load_dotenv()
@@ -22,9 +29,18 @@ class Settings:
         self.vk_group_token = (os.getenv("VK_GROUP_TOKEN") or "").strip()
         self.telegram_webhook_secret = (os.getenv("TELEGRAM_WEBHOOK_SECRET") or "").strip()
         self.telegram_bot_username = (os.getenv("TELEGRAM_BOT_USERNAME") or "").strip().lstrip("@")
+        # Фоновый воркер outbox: на проде по умолчанию вкл., локально/в тестах — выкл.
+        self.notification_worker_enabled = _env_bool(
+            "NOTIFICATION_WORKER_ENABLED",
+            default=(self.app_env == "prod"),
+        )
+        try:
+            interval = int(os.getenv("NOTIFICATION_WORKER_INTERVAL_SECONDS") or "45")
+        except ValueError:
+            interval = 45
+        self.notification_worker_interval_seconds = max(5, min(interval, 3600))
 
 
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
-

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Повторная отправка notification_outbox (pending / failed с лимитом попыток).
-# Запускать из backend/ или с ROOT, указывая путь. Пример cron — в backend/README.md.
+# Запасной ручной прогон notification_outbox (фоновый воркер в приложении — основной путь).
+# Запускать из backend/ или с ROOT, указывая путь. См. backend/README.md.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"

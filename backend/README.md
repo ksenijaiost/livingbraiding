@@ -189,11 +189,18 @@ https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<ДОМЕН>/webhooks
 
 Отправка из CRM в чат идёт через outbox (`process_outbox`); хуки на создание/изменение/отмену брони ставят записи в очередь.
 
-#### Повторная отправка outbox (cron)
+#### Фоновый воркер outbox (вместо cron)
 
-Записи со статусом `pending` и `failed` (пока `attempt_count` &lt; 5) нужно периодически догонять отдельной командой — веб-процесс сам это не делает.
+На Timeweb Apps и аналогичных платформах **отдельный cron не нужен**: при старте FastAPI поднимается asyncio-задача, которая раз в ~45 секунд вызывает `process_outbox` в пуле потоков (`asyncio.to_thread`), чтобы не блокировать HTTP.
 
-Из каталога `backend/` (тот же venv и `.env`, что у uvicorn):
+Переменные (см. `.env.example`):
+
+- `NOTIFICATION_WORKER_ENABLED` — по умолчанию `true` при `APP_ENV=prod`, иначе `false` (в тестах/локально обычно выкл.)
+- `NOTIFICATION_WORKER_INTERVAL_SECONDS` — интервал тика, по умолчанию `45` (разумный диапазон 30–60)
+
+Записи `pending` и `failed` (пока `attempt_count` &lt; 5) обрабатываются воркером. Перед отправкой строка помечается `sending` + `locked_at` (на Postgres — `FOR UPDATE SKIP LOCKED`), чтобы несколько процессов uvicorn не отправили одно сообщение дважды. Просроченный `sending` перехватывается снова.
+
+**Запасной ручной запуск** (из `backend/`, тот же venv/`.env`):
 
 ```bash
 python -m app.process_notification_outbox
@@ -201,14 +208,6 @@ python -m app.process_notification_outbox
 python -m app.process_notification_outbox --limit 100 --max-attempts 5
 ```
 
-Тот же вызов: `bash scripts/process_notification_outbox.sh` (обёртка вокруг модуля).
+Тот же вызов: `bash scripts/process_notification_outbox.sh`.
 
-**На проде** запускайте раз в **1–2 минуты**:
-
-- **cron** (Linux VPS), пример каждые 2 минуты:
-  ```cron
-  */2 * * * * cd /path/to/livingbraiding/backend && /path/to/venv/bin/python -m app.process_notification_outbox >> /var/log/lb-notify-outbox.log 2>&1
-  ```
-- **Планировщик платформы** (Timeweb Cloud Apps, DigitalOcean App Platform, systemd timer и т.п.): отдельный Job/Worker с той же командой и тем же `DATABASE_URL` / `TELEGRAM_BOT_TOKEN`. Интервал 1–2 мин.
-
-После лимита попыток статус остаётся `failed` и cron больше не трогает запись. Ручной повтор — кнопка «Повторить» на `/admin/notification-outbox` (суперадмин / техспец).
+После лимита попыток статус остаётся `failed`, воркер больше не трогает запись. Ручной повтор — кнопка «Повторить» на `/admin/notification-outbox` (суперадмин / техспец).
