@@ -1,0 +1,19 @@
+{# Общий блок «График работы» для главной и /me. Ожидает master_schedule_banner. #}
+{% if master_schedule_banner is defined and master_schedule_banner is not none %}
+  <div class="card" style="margin-bottom: 16px; background: #f8fafc;" data-lb-schedule-banner="1">
+    <h3 style="margin-top:0;">График работы</h3>
+    <div class="muted" style="font-size:12px; margin-top:4px;">
+      {% if master_schedule_banner.filled_until %}
+        Заполнен до <strong>{{ master_schedule_banner.filled_until.strftime("%d.%m.%Y") }}</strong>
+      {% else %}
+        График не заполнен
+      {% endif %}
+    </div>
+    <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
+      <a href="{{ master_schedule_banner.show_all_url or '/masters-schedule' }}"><button type="button" class="secondary">График всех мастеров</button></a>
+      {% if master_schedule_banner.edit_url %}
+        <a href="{{ master_schedule_banner.edit_url }}"><button type="button" class="secondary">Редактировать график</button></a>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}

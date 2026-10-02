@@ -87,6 +87,8 @@ from app.routes.payroll import router as payroll_router  # noqa: E402
 app.include_router(payroll_router)
 from app.routes.staff import router as staff_router  # noqa: E402
 app.include_router(staff_router)
+from app.routes.me import router as me_router  # noqa: E402
+app.include_router(me_router)
 from app.routes.telegram_webhook import router as telegram_webhook_router  # noqa: E402
 app.include_router(telegram_webhook_router)
 from app.routes.notification_outbox import router as notification_outbox_router  # noqa: E402

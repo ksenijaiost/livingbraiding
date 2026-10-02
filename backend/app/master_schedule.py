@@ -98,6 +98,34 @@ def schedule_filled_until(db: Session, *, master_id: int) -> date | None:
     return v
 
 
+def build_master_schedule_banner(
+    db: Session,
+    *,
+    user_id: int,
+    is_master_active: bool,
+    is_schedule_admin: bool = False,
+) -> dict | None:
+    """Контекст карточки «График работы» для главной и /me.
+
+    Для активной роли MASTER — всегда (даже если график пуст).
+    Для остальных — только если есть записи графика у этого user_id.
+    """
+    filled = schedule_filled_until(db, master_id=int(user_id))
+    if not is_master_active and filled is None:
+        return None
+    if is_master_active:
+        edit_url = "/master/schedule"
+    elif is_schedule_admin:
+        edit_url = "/admin/master-schedule"
+    else:
+        edit_url = "/masters-schedule"
+    return {
+        "filled_until": filled,
+        "edit_url": edit_url,
+        "show_all_url": "/masters-schedule",
+    }
+
+
 def master_unavailable_for_day(
     db: Session,
     *,

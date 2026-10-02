@@ -272,6 +272,12 @@
               <a href="/techspec/data">Технические данные</a>
               <a href="/techspec/sql">SQL</a>
               <a href="/admin/notification-outbox">Очередь уведомлений</a>
+              <details class="nav-dd">
+                <summary>Студия</summary>
+                <div class="dd">
+                  <a href="/me">Моя карточка</a>
+                </div>
+              </details>
             {% elif current_user.role.value == "HELPER" %}
               <a href="/">Главная</a>
               <details class="nav-dd">
@@ -280,6 +286,12 @@
                   <a href="/master/mywork">Моя работа</a>
                   <a href="/hourly-work">Почасовая работа</a>
                   <a href="/work-plans">План работ</a>
+                </div>
+              </details>
+              <details class="nav-dd">
+                <summary>Студия</summary>
+                <div class="dd">
+                  <a href="/me">Моя карточка</a>
                 </div>
               </details>
             {% else %}
@@ -352,6 +364,7 @@
               <details class="nav-dd">
                 <summary>Студия</summary>
                 <div class="dd">
+                  <a href="/me">Моя карточка</a>
                   <a href="/masters-schedule">График всех мастеров</a>
                   {% if current_user.role.value == "MASTER" %}
                     <a href="/master/schedule">Управление графиком</a>
@@ -424,12 +437,20 @@
           <a class="md-link" href="/techspec/data" onclick="window.lbToggleMobileNav(false)"><strong>Технические данные</strong></a>
           <a class="md-link" href="/techspec/sql" onclick="window.lbToggleMobileNav(false)"><strong>SQL</strong></a>
           <a class="md-link" href="/admin/notification-outbox" onclick="window.lbToggleMobileNav(false)"><strong>Очередь уведомлений</strong></a>
+          <details>
+            <summary><strong>Студия</strong></summary>
+            <a class="md-link" href="/me" onclick="window.lbToggleMobileNav(false)">Моя карточка</a>
+          </details>
         {% elif current_user.role.value == "HELPER" %}
           <details>
             <summary><strong>Работа</strong></summary>
             <a class="md-link" href="/master/mywork" onclick="window.lbToggleMobileNav(false)">Моя работа</a>
             <a class="md-link" href="/hourly-work" onclick="window.lbToggleMobileNav(false)">Почасовая работа</a>
             <a class="md-link" href="/work-plans" onclick="window.lbToggleMobileNav(false)">План работ</a>
+          </details>
+          <details>
+            <summary><strong>Студия</strong></summary>
+            <a class="md-link" href="/me" onclick="window.lbToggleMobileNav(false)">Моя карточка</a>
           </details>
         {% else %}
           <details>
@@ -487,6 +508,7 @@
 
           <details>
             <summary><strong>Студия</strong></summary>
+            <a class="md-link" href="/me" onclick="window.lbToggleMobileNav(false)">Моя карточка</a>
             <a class="md-link" href="/masters-schedule" onclick="window.lbToggleMobileNav(false)">График всех мастеров</a>
             {% if current_user.role.value == "MASTER" %}
               <a class="md-link" href="/master/schedule" onclick="window.lbToggleMobileNav(false)">Управление графиком</a>

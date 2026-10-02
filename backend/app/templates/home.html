@@ -61,91 +61,11 @@
     {% endif %}
 
     {% if sections_ctx and sections_ctx.is_master %}
-      <div class="card" style="margin-bottom: 16px; background: #f8fafc;">
-        <h3 style="margin-top:0;">График работы</h3>
-        <div class="muted" style="font-size:12px; margin-top:4px;">
-          {% if master_schedule_banner and master_schedule_banner.filled_until %}
-            Заполнен до <strong>{{ master_schedule_banner.filled_until.strftime("%d.%m.%Y") }}</strong>
-          {% else %}
-            График не заполнен
-          {% endif %}
-        </div>
-        <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
-          <a href="/masters-schedule"><button type="button" class="secondary">График всех мастеров</button></a>
-          <a href="/master/schedule"><button type="button" class="secondary">Редактировать график</button></a>
-        </div>
-      </div>
+      {% include "_master_schedule_banner.html" %}
     {% endif %}
 
-    {% if payroll_home %}
-      {% set _pb = (payroll_home.personal_balance or 0)|float %}
-      {% set _show_studio = payroll_home.show_studio %}
-      {% set _sb = (payroll_home.studio_balance or 0)|float %}
-      {% set _period = payroll_home.period %}
-      {% set _p_today = ((_period.personal_today if _period else 0) or 0)|float %}
-      {% set _p_acc = ((_period.personal_accrued if _period else 0) or 0)|float %}
-      {% set _s_today = ((_period.studio_today if _period else 0) or 0)|float %}
-      {% set _s_acc = ((_period.studio_accrued if _period else 0) or 0)|float %}
-      {% set _period_exp = ((_period.expenses_sum if _period else 0) or 0)|float %}
-
-      {% set _personal_show = _period and True %}
-      {% set _studio_show = _show_studio and _period %}
-      {% set _period_exp_show = _show_studio and _period and (_period_exp|abs > 0.001) %}
-      {% set _summary_show = _personal_show or _studio_show %}
-
-      {% if _summary_show %}
-        <div class="card" style="margin-bottom: 16px; background: #f8fafc;">
-          <h3 style="margin-top: 0;">Сводка</h3>
-          <div style="display:flex; flex-direction:column; gap:14px;">
-            {% if _personal_show %}
-              <div>
-                <div class="muted" style="font-size:12px;">ЗП за сегодня</div>
-                <div style="font-size: 1.35rem;"><strong>{{ "%.2f"|format(_p_today) }} ₽</strong></div>
-                <div class="muted" style="font-size:12px; margin-top:10px;">
-                  ЗП за период
-                  {% if _period.date_from %}
-                    с {{ _period.date_from.strftime("%d.%m.%Y") }}
-                  {% endif %}
-                  <span title="Начисления за период (без вычета выплат). После выплаты зарплаты цифра не обнуляется.">(заработано)</span>
-                </div>
-                <div style="font-size: 1.2rem; margin-top:2px;"><strong>{{ "%.2f"|format(_p_acc) }} ₽</strong></div>
-                {% if _pb|abs > 0.001 %}
-                  <div class="muted" style="font-size:12px; margin-top:8px;">
-                    Остаток личного фонда: {{ "%.2f"|format(_pb) }} ₽
-                  </div>
-                {% endif %}
-              </div>
-            {% endif %}
-            {% if _studio_show %}
-              <div>
-                <div class="muted" style="font-size:12px;">Студия: начисления за сегодня</div>
-                <div style="font-size: 1.15rem;"><strong>{{ "%.2f"|format(_s_today) }} ₽</strong></div>
-                <div class="muted" style="font-size:12px; margin-top:8px;">Студия: начисления за период</div>
-                <div style="font-size:13px; margin-top:2px;"><strong>{{ "%.2f"|format(_s_acc) }} ₽</strong></div>
-                {% if _sb|abs > 0.001 %}
-                  <div class="muted" style="font-size:12px; margin-top:6px;">
-                    Остаток фонда студии: {{ "%.2f"|format(_sb) }} ₽
-                  </div>
-                {% endif %}
-              </div>
-            {% endif %}
-            {% if _period_exp_show %}
-              <div>
-                <div class="muted" style="font-size:12px;">
-                  Расходы за текущий период ({{ _period.date_from.strftime("%d.%m.%Y") }}–{{ _period.date_to.strftime("%d.%m.%Y") }})
-                </div>
-                <div><strong>{{ "%.2f"|format(_period_exp) }} ₽</strong></div>
-              </div>
-            {% endif %}
-          </div>
-          {% if payroll_home.display_tz %}
-            <p class="muted" style="margin: 10px 0 0; font-size: 12px;">
-              Календарь и группировка по дням — в часовом поясе: <strong>{{ payroll_home.display_tz }}</strong>.
-            </p>
-          {% endif %}
-        </div>
-      {% endif %}
-    {% endif %}
+    {% set show_mywork_link = false %}
+    {% include "_payroll_home_summary.html" %}
 
     {% if calendar_ctx %}
       <div class="card" style="margin-bottom: 16px;">
