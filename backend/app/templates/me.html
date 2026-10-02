@@ -20,51 +20,73 @@
     </div>
 
     <div class="card" style="background:#fafafa; margin-bottom:16px;">
-      <h3 style="margin-top:0; font-size:1.05rem;">Уведомления в Telegram</h3>
-      <p style="margin-top:0;">
-        {% if user.telegram_chat_id %}
-          <strong>Подключён</strong>
-          <span class="muted">(chat id {{ user.telegram_chat_id }})</span>
-        {% else %}
-          <strong>Не подключён</strong>
-        {% endif %}
-      </p>
+      <h3 style="margin-top:0; font-size:1.05rem;">Уведомления</h3>
       {% if not telegram_bot_username %}
-        <p class="muted" style="font-size:12px;">Задайте <code>TELEGRAM_BOT_USERNAME</code> в окружении, чтобы создавать ссылки привязки.</p>
+        <p class="muted" style="font-size:12px;">Задайте <code>TELEGRAM_BOT_USERNAME</code> в окружении, чтобы создавать ссылки привязки Telegram.</p>
       {% endif %}
       {% if telegram_deep_link %}
         <p style="margin:8px 0;">
-          Ссылка (24 часа):
+          Ссылка Telegram (24 часа):
           <a href="{{ telegram_deep_link }}" target="_blank" rel="noopener">{{ telegram_deep_link }}</a>
         </p>
       {% endif %}
-      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px;">
-        <form method="post" action="/me/telegram/connect" style="margin:0;">
-          <button type="submit">Подключить</button>
-        </form>
-        {% if user.telegram_chat_id %}
-          <form method="post" action="/me/telegram/disconnect" style="margin:0;"
-            onsubmit="return confirm('Отключить Telegram от вашей учётной записи?');">
-            <button type="submit" class="secondary">Отключить</button>
-          </form>
-          <form method="post" action="/me/telegram/test" style="margin:0;">
-            <button type="submit" class="secondary">Отправить тестовое сообщение</button>
-          </form>
-        {% endif %}
-      </div>
-      <form method="post" action="/me/telegram/notify" style="margin:0 0 10px;">
-        <label style="display:inline-flex; align-items:center; gap:8px;">
-          <input type="checkbox" name="notify_enabled" value="1" {% if user.notify_enabled %}checked{% endif %} />
-          <span>Получать уведомления о бронях</span>
-        </label>
-        <div style="margin-top:8px;">
-          <button type="submit" class="secondary">Сохранить</button>
+
+      <form method="post" action="/me/telegram/notify" style="margin:0;">
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Канал</th>
+                <th>Статус</th>
+                <th>Брони</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for ch in notify_channels %}
+                <tr>
+                  <td><strong>{{ ch.label }}</strong></td>
+                  <td>{{ ch.status_label }}</td>
+                  <td>
+                    {% if ch.connected %}
+                      <input
+                        type="checkbox"
+                        name="{{ ch.id }}_bookings"
+                        value="1"
+                        {% if ch.settings.bookings %}checked{% endif %}
+                        title="Уведомления о бронях"
+                      />
+                    {% else %}
+                      <span class="muted">—</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+                      {% if not ch.connected %}
+                        <button type="submit" formaction="{{ ch.connect_url }}" formmethod="post">Подключить</button>
+                      {% else %}
+                        <button type="submit" class="secondary" formaction="{{ ch.disconnect_url }}" formmethod="post"
+                          onclick="return confirm('Отключить {{ ch.label }} от вашей учётной записи?');">Отключить</button>
+                        {% if ch.test_url %}
+                          <button type="submit" class="secondary" formaction="{{ ch.test_url }}" formmethod="post">Тест</button>
+                        {% endif %}
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
+        {% if has_connected_notify_channel %}
+          <div style="margin-top:10px;">
+            <button type="submit" class="secondary">Сохранить настройки</button>
+          </div>
+        {% endif %}
       </form>
-      <p class="muted" style="font-size:12px; margin:0;">
-        Нажмите «Подключить», откройте ссылку в Telegram и подтвердите бота командой /start.
-        Сообщения приходят только если Telegram подключён и галочка уведомлений включена.
-        Тестовое сообщение проверяет доставку без создания брони.
+      <p class="muted" style="font-size:12px; margin:10px 0 0;">
+        Подключите канал, откройте ссылку в приложении и подтвердите бота.
+        Галочки видов уведомлений сохраняются отдельно по каналу (сейчас доступны брони в Telegram).
       </p>
     </div>
 
@@ -84,39 +106,41 @@
     {% set show_mywork_link = true %}
     {% include "_payroll_home_summary.html" %}
 
-    {% include "_master_schedule_banner.html" %}
+    {% if is_master %}
+      {% include "_master_schedule_banner.html" %}
 
-    <div class="card" style="margin-bottom:16px;">
-      <h3 style="margin-top:0;">Ближайшие брони и визиты (7 дней)</h3>
-      {% if upcoming %}
-        <table>
-          <thead>
-            <tr>
-              <th>Когда</th>
-              <th>Клиент</th>
-              <th>Что</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in upcoming %}
+      <div class="card" style="margin-bottom:16px;">
+        <h3 style="margin-top:0;">Ближайшие брони и визиты (7 дней)</h3>
+        {% if upcoming %}
+          <table>
+            <thead>
               <tr>
-                <td class="muted" style="white-space:nowrap; font-size:12px;">{{ row.when }}</td>
-                <td>{{ row.client }}</td>
-                <td>{{ row.label }}</td>
-                <td><a href="/bookings/{{ row.id }}">#{{ row.id }}</a></td>
+                <th>Когда</th>
+                <th>Клиент</th>
+                <th>Что</th>
+                <th></th>
               </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p class="muted" style="margin:0;">На ближайшие 7 дней записей нет.</p>
-      {% endif %}
-    </div>
+            </thead>
+            <tbody>
+              {% for row in upcoming %}
+                <tr>
+                  <td class="muted" style="white-space:nowrap; font-size:12px;">{{ row.when }}</td>
+                  <td>{{ row.client }}</td>
+                  <td>{{ row.label }}</td>
+                  <td><a href="/bookings/{{ row.id }}">#{{ row.id }}</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="muted" style="margin:0;">На ближайшие 7 дней записей нет.</p>
+        {% endif %}
+      </div>
+    {% endif %}
 
-    <div class="card" style="background:#fafafa;">
-      <h3 style="margin-top:0; font-size:1.05rem;">Смена пароля</h3>
-      <form method="post" action="/me/password" style="max-width:360px;">
+    <details class="card" style="background:#fafafa; margin-bottom:0;">
+      <summary style="cursor:pointer; font-weight:600; list-style-position:outside;">Смена пароля</summary>
+      <form method="post" action="/me/password" style="max-width:360px; margin-top:12px;">
         <div style="margin-bottom:10px;">
           <label>Текущий пароль</label>
           <input type="password" name="current_password" required autocomplete="current-password" />
@@ -131,6 +155,6 @@
         </div>
         <button type="submit">Сменить пароль</button>
       </form>
-    </div>
+    </details>
   </div>
 {% endblock %}

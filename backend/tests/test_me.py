@@ -142,7 +142,7 @@ def test_me_cannot_change_other_user_notify(memory_db) -> None:
         # Подложенный user_id в форме игнорируется — меняется только сессионный пользователь.
         r = client.post(
             "/me/telegram/notify",
-            data={"notify_enabled": "", "user_id": str(b.id)},
+            data={"telegram_bookings": "", "user_id": str(b.id)},
             follow_redirects=False,
         )
         assert r.status_code == 303
@@ -216,11 +216,38 @@ def test_me_and_home_show_schedule_banner_for_master(memory_db) -> None:
         assert 'data-lb-schedule-banner="1"' in me.text
         assert "График работы" in me.text
         assert "10.10.2026" in me.text
+        assert "Ближайшие брони и визиты" in me.text
+        assert "Уведомления" in me.text
+        assert "Уведомления в Telegram" not in me.text
+        assert "<summary" in me.text and "Смена пароля" in me.text
 
         home = client.get("/", follow_redirects=False)
         assert home.status_code == 200
         assert 'data-lb-schedule-banner="1"' in home.text
         assert "График работы" in home.text
+    finally:
+        _clear_overrides()
+
+
+def test_me_hides_schedule_and_upcoming_for_non_master(memory_db) -> None:
+    u = _seed_user(memory_db, username="adm_sch", role=UserRole.ADMIN_SUPER)
+    memory_db.add(
+        MasterScheduleDay(
+            master_id=u.id,
+            work_date=date(2026, 10, 10),
+            status=MasterScheduleStatus.WORKING,
+            time_from=None,
+            time_to=None,
+        )
+    )
+    memory_db.commit()
+    client = _client_for(memory_db, u)
+    try:
+        me = client.get("/me", follow_redirects=False)
+        assert me.status_code == 200
+        assert 'data-lb-schedule-banner="1"' not in me.text
+        assert "Ближайшие брони и визиты" not in me.text
+        assert "Уведомления" in me.text
     finally:
         _clear_overrides()
 

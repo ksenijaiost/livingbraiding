@@ -35,7 +35,6 @@ from app.payroll_fund import (
     employee_payout_total_net,
     studio_fund_balance,
 )
-from app.role_access import role_is_master_schedule_admin
 from app.ru_labels import ru_user_role
 from app.security import hash_password, verify_password
 from app.settings import get_settings
@@ -164,24 +163,42 @@ def _me_page_response(
 
     payroll_home = _build_payroll_home(db, current_user, today=now_local.date(), display_tz=display_tz)
 
-    # На /me: мастер — всегда; иначе — только при наличии данных графика.
-    schedule_banner = build_master_schedule_banner(
-        db,
-        user_id=current_user.id,
-        is_master_active=current_user.role == UserRole.MASTER,
-        is_schedule_admin=role_is_master_schedule_admin(current_user.role),
-    )
-
-    upcoming_raw = list_upcoming_bookings_for_user(db, current_user.id, now_utc=now_utc, until_utc=until_utc)
-    upcoming = [
-        {
-            **row,
-            "when": format_naive_utc_datetime(row["planned_date"], display_tz) or "—",
-        }
-        for row in upcoming_raw
-    ]
+    is_master = current_user.role == UserRole.MASTER
+    schedule_banner = None
+    upcoming: list[dict[str, Any]] = []
+    if is_master:
+        schedule_banner = build_master_schedule_banner(
+            db,
+            user_id=current_user.id,
+            is_master_active=True,
+            is_schedule_admin=False,
+        )
+        upcoming_raw = list_upcoming_bookings_for_user(
+            db, current_user.id, now_utc=now_utc, until_utc=until_utc
+        )
+        upcoming = [
+            {
+                **row,
+                "when": format_naive_utc_datetime(row["planned_date"], display_tz) or "—",
+            }
+            for row in upcoming_raw
+        ]
 
     settings = get_settings()
+    notify_channels = [
+        {
+            "id": "telegram",
+            "label": "Telegram",
+            "connected": u.telegram_chat_id is not None,
+            "status_label": "подключён" if u.telegram_chat_id is not None else "не подключён",
+            "connect_url": "/me/telegram/connect",
+            "disconnect_url": "/me/telegram/disconnect",
+            "test_url": "/me/telegram/test",
+            "settings": {
+                "bookings": bool(u.notify_enabled),
+            },
+        },
+    ]
     return templates.TemplateResponse(
         "me.html",
         _ctx(
@@ -193,6 +210,9 @@ def _me_page_response(
             payroll_home=payroll_home,
             master_schedule_banner=schedule_banner,
             upcoming=upcoming,
+            is_master=is_master,
+            notify_channels=notify_channels,
+            has_connected_notify_channel=any(ch["connected"] for ch in notify_channels),
             telegram_bot_username=settings.telegram_bot_username,
             telegram_deep_link=telegram_deep_link_url,
             error=error,
@@ -302,8 +322,9 @@ async def me_telegram_notify(
 ):
     u = _load_self_user(db, current_user.id)
     form = await request.form()
-    # Игнорируем любой подложенный user_id — только сессия.
-    new_notify = parse_bool(form.get("notify_enabled"))
+    # Настройки канала Telegram: пока один вид — брони (users.notify_enabled).
+    # Игнорируем подложенный user_id — только сессия.
+    new_notify = parse_bool(form.get("telegram_bookings")) or parse_bool(form.get("notify_enabled"))
     old = bool(u.notify_enabled)
     u.notify_enabled = new_notify
     if old != new_notify:
