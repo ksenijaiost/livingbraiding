@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block help_page_id %}kit_detail{% endblock %}
 {% block content %}
   {% set is_admin_kit = role_is_admin_staff(current_user.role) %}
   {% set slots_full = kit_reserve_slots_used >= kit_max_reserves %}
