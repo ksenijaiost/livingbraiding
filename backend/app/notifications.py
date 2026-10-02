@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import random
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, Iterable, Sequence
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -41,6 +42,8 @@ _EVENT_LABEL_RU = {
 
 DEFAULT_OUTBOX_LIMIT = 50
 DEFAULT_MAX_ATTEMPTS = 5
+TELEGRAM_HTTP_TIMEOUT_SEC = 5
+VK_HTTP_TIMEOUT_SEC = 5
 
 
 def _booking_kind_label(kind: BookingKind | str | None) -> str:
@@ -86,14 +89,37 @@ def booking_planned_master_user_ids(booking: Booking) -> list[int]:
     return sorted(ids)
 
 
+def booking_content_version(booking: Booking) -> str:
+    """Хеш значимых полей брони — для dedupe без ложных дублей при повторном сохранении."""
+    svc_bits: list[str] = []
+    for ps in sorted(booking.planned_services or [], key=lambda x: (int(x.sort_order or 0), int(x.id or 0))):
+        mids = sorted(int(m.master_id) for m in (ps.masters or []) if m.master_id is not None)
+        svc_bits.append(
+            f"{int(ps.service_id)}:{ps.planned_start_time}:{ps.duration_minutes}:{','.join(map(str, mids))}"
+        )
+    raw = "|".join(
+        [
+            str(booking.planned_date),
+            str(booking.status.value if booking.status else ""),
+            str(booking.kind.value if booking.kind else ""),
+            str(booking.planned_service_id or ""),
+            str(booking.planned_product_kind or ""),
+            ",".join(map(str, booking_planned_master_user_ids(booking))),
+            ";".join(svc_bits),
+            (booking.comment or "").strip(),
+        ]
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
 def build_booking_master_message(
     booking: Booking,
     event_type: str,
     *,
     tz_name: str = DEFAULT_DISPLAY_TIMEZONE,
+    unassigned: bool = False,
 ) -> str:
     """Простой текст уведомления мастеру о брони (без HTML)."""
-    event_ru = _EVENT_LABEL_RU.get(event_type, event_type)
     when = format_naive_utc_datetime(booking.planned_date, tz_name, "%d.%m.%Y %H:%M") or "—"
     client_name = "—"
     if booking.client is not None:
@@ -102,8 +128,14 @@ def build_booking_master_message(
     service = _service_label(booking)
     comment = (booking.comment or "").strip()
 
+    if unassigned:
+        headline = f"Бронь #{booking.id} снята с вас"
+    else:
+        event_ru = _EVENT_LABEL_RU.get(event_type, event_type)
+        headline = f"Бронь #{booking.id} {event_ru}"
+
     lines = [
-        f"Бронь #{booking.id} {event_ru}",
+        headline,
         f"Дата/время: {when}",
         f"Клиент: {client_name}",
         f"Тип: {kind_ru}",
@@ -125,14 +157,16 @@ def _dedupe_key(
     return f"{event_type}:{booking_id}:{user_id}:{channel.value}:{version}"
 
 
-def _event_version(booking: Booking, event_type: str) -> str:
-    if event_type == EVENT_BOOKING_UPDATED:
-        stamp = booking.updated_at or booking.created_at or utcnow_naive()
-        return stamp.isoformat(timespec="seconds")
+def _event_version(booking: Booking, event_type: str, *, version_override: str | None = None) -> str:
+    if version_override:
+        return version_override
+    content = booking_content_version(booking)
     if event_type == EVENT_BOOKING_CANCELLED:
         stamp = booking.cancelled_at or booking.updated_at or utcnow_naive()
-        return stamp.isoformat(timespec="seconds")
-    return "v1"
+        return f"cancel:{stamp.isoformat(timespec='seconds')}:{content}"
+    if event_type == EVENT_BOOKING_CREATED:
+        return f"create:{content}"
+    return f"upd:{content}"
 
 
 def _ensure_booking_loaded(db: Session, booking: Booking) -> Booking:
@@ -156,20 +190,33 @@ def enqueue_master_booking_notifications(
     db: Session,
     booking: Booking,
     event_type: str,
+    *,
+    master_user_ids: Sequence[int] | None = None,
+    text_override: str | None = None,
+    version_override: str | None = None,
+    channels: Iterable[NotificationChannel] | None = None,
+    unassigned: bool = False,
 ) -> list[NotificationOutbox]:
-    """Поставить в outbox уведомления назначенным мастерам (TG/VK), с dedupe.
+    """Поставить в outbox уведомления назначенным мастерам, с dedupe.
 
-    В схеме нет одного planned_master_user_id — берём всех из booking_masters
-    и мастеров плановых услуг. Если никого нет — выход.
+    По умолчанию — все мастера брони и каналы TG+VK (у кого есть id).
     """
     booking = _ensure_booking_loaded(db, booking)
-    master_ids = booking_planned_master_user_ids(booking)
+    if master_user_ids is None:
+        master_ids = booking_planned_master_user_ids(booking)
+    else:
+        master_ids = sorted({int(x) for x in master_user_ids if int(x) > 0})
     if not master_ids:
         return []
 
+    allowed_channels = (
+        set(channels) if channels is not None else {NotificationChannel.TELEGRAM, NotificationChannel.VK}
+    )
     tz_name = get_display_timezone(db)
-    text = build_booking_master_message(booking, event_type, tz_name=tz_name)
-    version = _event_version(booking, event_type)
+    text = text_override or build_booking_master_message(
+        booking, event_type, tz_name=tz_name, unassigned=unassigned
+    )
+    version = _event_version(booking, event_type, version_override=version_override)
     created: list[NotificationOutbox] = []
 
     for uid in master_ids:
@@ -179,15 +226,15 @@ def enqueue_master_booking_notifications(
         if not bool(user.notify_enabled):
             continue
 
-        channels: list[tuple[NotificationChannel, int]] = []
-        if user.telegram_chat_id is not None:
-            channels.append((NotificationChannel.TELEGRAM, int(user.telegram_chat_id)))
-        if user.vk_user_id is not None:
-            channels.append((NotificationChannel.VK, int(user.vk_user_id)))
-        if not channels:
+        channel_targets: list[tuple[NotificationChannel, int]] = []
+        if NotificationChannel.TELEGRAM in allowed_channels and user.telegram_chat_id is not None:
+            channel_targets.append((NotificationChannel.TELEGRAM, int(user.telegram_chat_id)))
+        if NotificationChannel.VK in allowed_channels and user.vk_user_id is not None:
+            channel_targets.append((NotificationChannel.VK, int(user.vk_user_id)))
+        if not channel_targets:
             continue
 
-        for channel, target_id in channels:
+        for channel, target_id in channel_targets:
             key = _dedupe_key(
                 event_type=event_type,
                 booking_id=int(booking.id),
@@ -245,7 +292,7 @@ def send_telegram(chat_id: int, text: str) -> None:
     ).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=TELEGRAM_HTTP_TIMEOUT_SEC) as resp:
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace") if e.fp else str(e)
@@ -276,7 +323,7 @@ def send_vk(user_id: int, text: str) -> None:
     url = "https://api.vk.com/method/messages.send?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=VK_HTTP_TIMEOUT_SEC) as resp:
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace") if e.fp else str(e)
@@ -324,26 +371,26 @@ def process_outbox(
     *,
     limit: int = DEFAULT_OUTBOX_LIMIT,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    only_ids: Sequence[int] | None = None,
 ) -> dict[str, int]:
     """Обработать pending и failed (с лимитом попыток). Возвращает счётчики."""
     lim = max(1, int(limit))
     max_att = max(1, int(max_attempts))
-    rows = list(
-        db.scalars(
-            select(NotificationOutbox)
-            .where(
-                or_(
-                    NotificationOutbox.status == NotificationOutboxStatus.PENDING,
-                    and_(
-                        NotificationOutbox.status == NotificationOutboxStatus.FAILED,
-                        NotificationOutbox.attempt_count < max_att,
-                    ),
-                )
-            )
-            .order_by(NotificationOutbox.id.asc())
-            .limit(lim)
-        ).all()
+    stmt = select(NotificationOutbox).where(
+        or_(
+            NotificationOutbox.status == NotificationOutboxStatus.PENDING,
+            and_(
+                NotificationOutbox.status == NotificationOutboxStatus.FAILED,
+                NotificationOutbox.attempt_count < max_att,
+            ),
+        )
     )
+    if only_ids is not None:
+        ids = [int(x) for x in only_ids]
+        if not ids:
+            return {"processed": 0, "sent": 0, "failed": 0}
+        stmt = stmt.where(NotificationOutbox.id.in_(ids))
+    rows = list(db.scalars(stmt.order_by(NotificationOutbox.id.asc()).limit(lim)).all())
     stats = {"processed": 0, "sent": 0, "failed": 0}
     for row in rows:
         stats["processed"] += 1
