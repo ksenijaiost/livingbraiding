@@ -13,6 +13,7 @@ import enum
 from datetime import datetime, date, time
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -141,6 +142,10 @@ class User(Base):
     salon_cut_pct_override: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Нормализованный номер (только цифры, ≥10), для входа вместо логина; уникален среди непустых.
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # Каналы уведомлений мастера (Telegram / VK); заполняются при привязке, отправка — отдельно.
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    vk_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    notify_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -179,6 +184,68 @@ class UserAuditLog(Base):
 
     user: Mapped["User"] = relationship(foreign_keys=[user_id])
     changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
+class TelegramLinkToken(Base):
+    """Одноразовый код привязки Telegram (в deep link /start=<token>); в БД хранится хеш."""
+
+    __tablename__ = "telegram_link_tokens"
+    __table_args__ = (UniqueConstraint("token_hash", name="uq_telegram_link_tokens_hash"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+
+
+class NotificationChannel(str, enum.Enum):
+    TELEGRAM = "telegram"
+    VK = "vk"
+
+
+class NotificationOutboxStatus(str, enum.Enum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+
+
+class NotificationOutbox(Base):
+    """Очередь исходящих уведомлений мастерам (Telegram / VK). Отправка — отдельным воркером."""
+
+    __tablename__ = "notification_outbox"
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_notification_outbox_dedupe_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True, index=True)
+    channel: Mapped[NotificationChannel] = mapped_column(
+        Enum(NotificationChannel, native_enum=False, length=16),
+        nullable=False,
+    )
+    # booking_created | booking_updated | booking_cancelled (и др. позже)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[NotificationOutboxStatus] = mapped_column(
+        Enum(NotificationOutboxStatus, native_enum=False, length=16),
+        nullable=False,
+        default=NotificationOutboxStatus.PENDING,
+        index=True,
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Уникальный ключ: event_type + booking_id + channel + версия события — без повторной отправки.
+    dedupe_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+    booking: Mapped["Booking | None"] = relationship(foreign_keys=[booking_id])
 
 
 class Client(Base):

@@ -25,7 +25,13 @@ from app.booking_audit_labels import (
 
 _logger = logging.getLogger("livingbraiding.bookings")
 from app.auth import AuthUser, require_role
+from app.booking_notifications import (
+    notify_booking_cancelled,
+    notify_booking_created,
+    notify_booking_updated_with_master_diff,
+)
 from app.client_status import is_first_non_cancelled_booking
+from app.notifications import booking_planned_master_user_ids
 from app.client_validation import format_created_by_label, strip_or_none
 from app.consultation_booking import (
     booking_is_open,
@@ -2876,6 +2882,7 @@ async def admin_booking_new_post(  # noqa: C901
     _refresh_sale_order_master_ids_in_fp(db, booking_id=booking.id, fp=fp)
     booking.details_json = json.dumps(_booking_details_from_form(db, fp), ensure_ascii=False)
     db.commit()
+    notify_booking_created(db, int(booking.id))
     return RedirectResponse(url=f"/bookings/{booking.id}?msg=created", status_code=303)
 
 
@@ -3330,6 +3337,7 @@ async def admin_booking_edit_post(
     if UserRole.ADMIN_SUPER in current_user.roles and new_booking_status is not None:
         _apply_super_admin_booking_status_change(db, b, new_booking_status, current_user.id)
     before_visit_master_ids = [int(bm.master_id) for bm in (b.masters or [])]
+    before_all_master_ids = booking_planned_master_user_ids(b)
     before_visit_masters = _audit_user_names(db, before_visit_master_ids)
     before_sale_staff = _audit_sale_order_masters_label(db, b.id)
     before_planned_services = _planned_services_audit_label(db, b.id)
@@ -3549,6 +3557,7 @@ async def admin_booking_edit_post(
         b.id,
         after_planned_services,
     )
+    notify_booking_updated_with_master_diff(db, int(b.id), old_master_ids=before_all_master_ids)
     return RedirectResponse(url=f"/bookings/{b.id}", status_code=303)
 
 
@@ -3704,6 +3713,7 @@ def admin_booking_cancel(
         changes=diff_fields(before, b, ("status", "cancelled_at", "cancelled_by_user_id", "cancelled_reason")),
     )
     db.commit()
+    notify_booking_cancelled(db, int(booking_id))
     return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
 
 
@@ -3762,7 +3772,13 @@ def admin_booking_confirm(
             )
         ],
     )
+    master_ids_snapshot = booking_planned_master_user_ids(b)
     db.commit()
+    notify_booking_updated_with_master_diff(
+        db,
+        int(booking_id),
+        old_master_ids=master_ids_snapshot,
+    )
     return RedirectResponse(url=f"/bookings/{booking_id}?msg=confirmed", status_code=303)
 
 

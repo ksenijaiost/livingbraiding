@@ -53,7 +53,7 @@ from app.payroll_fund import (
     visit_ids_visible_to_master_clause,
 )
 from app.price_ordering import price_sort_key, service_sort_price
-from app.master_schedule import schedule_filled_until
+from app.master_schedule import build_master_schedule_banner
 from app.techspec_home import collect_techspec_home_stats
 from app.webui import templates, ctx as _ctx
 
@@ -437,13 +437,12 @@ def home(
         }
 
         if current_user.role == UserRole.MASTER:
-            filled = schedule_filled_until(db, master_id=current_user.id)
-            if filled:
-                master_schedule_banner = {
-                    "filled_until": filled,
-                }
-            else:
-                master_schedule_banner = None
+            master_schedule_banner = build_master_schedule_banner(
+                db,
+                user_id=current_user.id,
+                is_master_active=True,
+                is_schedule_admin=False,
+            )
 
         sections_ctx = {
             "is_master": current_user.role == UserRole.MASTER,

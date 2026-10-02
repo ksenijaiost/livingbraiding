@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -21,6 +22,8 @@ from app.db.models import (
 from app.db.session import get_db
 from app.forms_parse import parse_bool, parse_float
 from app.security import hash_password
+from app.settings import get_settings
+from app.telegram_link import create_telegram_link_token, telegram_deep_link, unlink_telegram_chat
 from app.user_roles import (
     get_roles_for_user,
     max_user_role,
@@ -226,18 +229,8 @@ async def admin_settings_staff_new_post(
     return RedirectResponse(url="/admin/settings/staff?msg=created", status_code=303)
 
 
-@router.get("/admin/settings/staff/{user_id}/edit", response_class=HTMLResponse)
-def admin_settings_staff_edit_get(
-    user_id: int,
-    request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
-    db: Session = Depends(get_db),
-):
-    u = db.scalar(select(User).options(selectinload(User.role_assignments)).where(User.id == user_id))
-    if not u:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    roles = get_roles_for_user(db, u.id)
-    audit_rows = list(
+def _staff_edit_audit_rows(db: Session, user_id: int) -> list[UserAuditLog]:
+    return list(
         db.scalars(
             select(UserAuditLog)
             .options(selectinload(UserAuditLog.changed_by_user))
@@ -246,9 +239,127 @@ def admin_settings_staff_edit_get(
             .limit(100)
         ).all()
     )
+
+
+def _staff_edit_ctx(
+    request: Request,
+    *,
+    current_user: AuthUser,
+    user: User,
+    db: Session,
+    error: str | None = None,
+    info: str | None = None,
+    telegram_deep_link: str | None = None,
+    telegram_bot_username: str | None = None,
+) -> dict:
+    return _ctx(
+        request,
+        current_user=current_user,
+        is_new=False,
+        user=user,
+        roles=get_roles_for_user(db, user.id),
+        error=error,
+        info=info,
+        audit_rows=_staff_edit_audit_rows(db, user.id),
+        telegram_deep_link=telegram_deep_link,
+        telegram_bot_username=telegram_bot_username
+        if telegram_bot_username is not None
+        else get_settings().telegram_bot_username,
+    )
+
+
+@router.get("/admin/settings/staff/{user_id}/edit", response_class=HTMLResponse)
+def admin_settings_staff_edit_get(
+    user_id: int,
+    request: Request,
+    msg: str | None = None,
+    err: str | None = None,
+    tg_start: str | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    u = db.scalar(select(User).options(selectinload(User.role_assignments)).where(User.id == user_id))
+    if not u:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    error = None
+    info = None
+    deep = None
+    if err == "tg_bot_username":
+        error = "Задайте TELEGRAM_BOT_USERNAME в настройках окружения, затем создайте ссылку снова."
+    elif msg == "tg_connect" and (tg_start or "").strip():
+        deep = telegram_deep_link(tg_start.strip())
+        info = "Ссылка для привязки Telegram создана (действует 24 часа). Откройте её в Telegram или отправьте сотруднику."
+        if deep is None:
+            error = "Код создан, но TELEGRAM_BOT_USERNAME не задан — ссылку t.me собрать нельзя."
+    elif msg == "tg_disconnected":
+        info = "Telegram отключён."
     return templates.TemplateResponse(
         "admin_settings_staff_form.html",
-        _ctx(request, current_user=current_user, is_new=False, user=u, roles=roles, error=None, audit_rows=audit_rows),
+        _staff_edit_ctx(
+            request,
+            current_user=current_user,
+            user=u,
+            db=db,
+            error=error,
+            info=info,
+            telegram_deep_link=deep,
+        ),
+    )
+
+
+@router.post("/admin/settings/staff/{user_id}/telegram/connect")
+async def admin_settings_staff_telegram_connect(
+    user_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    u = db.get(User, user_id)
+    if not u:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if not get_settings().telegram_bot_username:
+        return RedirectResponse(
+            url=f"/admin/settings/staff/{user_id}/edit?err=tg_bot_username",
+            status_code=303,
+        )
+    plain, _deep = create_telegram_link_token(db, u.id)
+    write_audit_rows(
+        db,
+        log_model=UserAuditLog,
+        entity_field="user_id",
+        entity_id=u.id,
+        changed_by_user_id=current_user.id,
+        changes=[FieldChange("telegram_link", None, "код создан")],
+    )
+    db.commit()
+    return RedirectResponse(
+        url=f"/admin/settings/staff/{user_id}/edit?msg=tg_connect&tg_start={quote(plain, safe='')}",
+        status_code=303,
+    )
+
+
+@router.post("/admin/settings/staff/{user_id}/telegram/disconnect")
+async def admin_settings_staff_telegram_disconnect(
+    user_id: int,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    u = db.get(User, user_id)
+    if not u:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    old = str(u.telegram_chat_id) if u.telegram_chat_id is not None else None
+    unlink_telegram_chat(db, u)
+    write_audit_rows(
+        db,
+        log_model=UserAuditLog,
+        entity_field="user_id",
+        entity_id=u.id,
+        changed_by_user_id=current_user.id,
+        changes=[FieldChange("telegram_chat_id", old, None)],
+    )
+    db.commit()
+    return RedirectResponse(
+        url=f"/admin/settings/staff/{user_id}/edit?msg=tg_disconnected",
+        status_code=303,
     )
 
 
@@ -271,28 +382,12 @@ async def admin_settings_staff_edit_post(
         new_active = True
     else:
         new_active = parse_bool(form.get("is_active"))
+    new_notify = parse_bool(form.get("notify_enabled"))
 
     def _form_err(msg: str):
-        audit_rows = list(
-            db.scalars(
-                select(UserAuditLog)
-                .options(selectinload(UserAuditLog.changed_by_user))
-                .where(UserAuditLog.user_id == user_id)
-                .order_by(UserAuditLog.changed_at.desc(), UserAuditLog.id.desc())
-                .limit(100)
-            ).all()
-        )
         return templates.TemplateResponse(
             "admin_settings_staff_form.html",
-            _ctx(
-                request,
-                current_user=current_user,
-                is_new=False,
-                user=u,
-                roles=get_roles_for_user(db, u.id),
-                error=msg,
-                audit_rows=audit_rows,
-            ),
+            _staff_edit_ctx(request, current_user=current_user, user=u, db=db, error=msg),
             status_code=400,
         )
 
@@ -328,6 +423,7 @@ async def admin_settings_staff_edit_post(
         display_name=u.display_name,
         phone=u.phone,
         is_active=u.is_active,
+        notify_enabled=u.notify_enabled,
         master_level=u.master_level,
         salon_cut_pct_override=u.salon_cut_pct_override,
         roles_summary=_roles_audit_summary(db, u.id),
@@ -335,6 +431,7 @@ async def admin_settings_staff_edit_post(
     u.display_name = display_name
     u.phone = phone_canon
     u.is_active = new_active
+    u.notify_enabled = new_notify
     u.master_level = ml
     u.salon_cut_pct_override = salon_cut_override
     pwd_changed = bool(new_password)
@@ -346,11 +443,16 @@ async def admin_settings_staff_edit_post(
         display_name=u.display_name,
         phone=u.phone,
         is_active=u.is_active,
+        notify_enabled=u.notify_enabled,
         master_level=u.master_level,
         salon_cut_pct_override=u.salon_cut_pct_override,
         roles_summary=_roles_audit_summary(db, u.id),
     )
-    raw_changes = diff_fields(before, after, ("display_name", "phone", "is_active", "master_level", "salon_cut_pct_override", "roles_summary"))
+    raw_changes = diff_fields(
+        before,
+        after,
+        ("display_name", "phone", "is_active", "notify_enabled", "master_level", "salon_cut_pct_override", "roles_summary"),
+    )
     changes = [FieldChange("roles" if c.field_name == "roles_summary" else c.field_name, c.old_value, c.new_value) for c in raw_changes]
     if pwd_changed:
         changes.append(FieldChange("password", None, "изменён"))

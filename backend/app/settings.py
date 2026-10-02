@@ -18,6 +18,10 @@ class Settings:
         # Разовый backfill: сдвигать effective_at проводок даже в закрытые периоды ЗП.
         raw = (os.getenv("PAYROLL_LEDGER_BACKFILL_CLOSED") or "false").strip().lower()
         self.payroll_ledger_backfill_closed = raw in ("1", "true", "yes", "on")
+        self.telegram_bot_token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+        self.vk_group_token = (os.getenv("VK_GROUP_TOKEN") or "").strip()
+        self.telegram_webhook_secret = (os.getenv("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+        self.telegram_bot_username = (os.getenv("TELEGRAM_BOT_USERNAME") or "").strip().lstrip("@")
 
 
 @functools.lru_cache(maxsize=1)
