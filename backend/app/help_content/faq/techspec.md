@@ -22,7 +22,7 @@ roles: [techspec]
 - [Моя карточка](/me)
 - [Технические данные](/techspec/data)
 - [SQL](/techspec/sql)
-- [Очередь уведомлений](/admin/notification-outbox) — диагностика доставки VK/Telegram
+- [Очередь уведомлений](/admin/notification-outbox) — диагностика доставки VK/Telegram (брони и назначения)
 
 ## Частые сценарии
 
