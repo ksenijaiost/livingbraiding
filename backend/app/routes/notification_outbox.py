@@ -38,6 +38,7 @@ def _event_ru(event_type: str) -> str:
         "booking_created": "бронь создана",
         "booking_updated": "бронь изменена",
         "booking_cancelled": "бронь отменена",
+        "booking_reminder": "напоминание о записи",
     }.get(event_type, event_type)
 
 

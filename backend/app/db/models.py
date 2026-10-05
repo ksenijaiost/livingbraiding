@@ -146,6 +146,8 @@ class User(Base):
     telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     vk_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     notify_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # False = ещё не настраивал: эффективны дефолты 24ч и 2ч; True = брать строки user_reminder_settings.
+    reminders_configured: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -154,6 +156,27 @@ class User(Base):
         cascade="all, delete-orphan",
         order_by="UserRoleAssignment.id",
     )
+    reminder_settings: Mapped[list["UserReminderSetting"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="UserReminderSetting.position",
+    )
+
+
+class UserReminderSetting(Base):
+    """Напоминание мастеру о предстоящей записи (за N минут до planned_date)."""
+
+    __tablename__ = "user_reminder_settings"
+    __table_args__ = (
+        UniqueConstraint("user_id", "minutes_before", name="uq_user_reminder_settings_user_minutes"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    minutes_before: Mapped[int] = mapped_column(Integer, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="reminder_settings")
 
 
 class UserRoleAssignment(Base):

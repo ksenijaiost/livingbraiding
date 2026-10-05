@@ -96,6 +96,53 @@
         Основной канал на проде — VK. Подключите канал, откройте ссылку и подтвердите диалог.
         Галочка «Брони» общая для всех каналов (notify_enabled).
       </p>
+
+      <div style="margin-top:18px; padding-top:14px; border-top:1px solid #e5e7eb;">
+        <h4 style="margin:0 0 8px; font-size:0.95rem;">Напоминания о записи</h4>
+        <p class="muted" style="font-size:12px; margin:0 0 10px;">
+          До {{ reminder_max }} напоминаний на запись (от 0.5 до 72 часов).
+          {% if not reminders_configured %}
+            Сейчас действуют значения по умолчанию: за 24 ч и за 2 ч.
+          {% endif %}
+        </p>
+        {% if reminder_items %}
+          <ul style="margin:0 0 12px; padding-left:1.2em; font-size:14px;">
+            {% for item in reminder_items %}
+              <li style="margin-bottom:6px;">
+                за {{ item.hours_label }} ч до записи
+                <form method="post" action="/me/reminders/delete" style="display:inline; margin-left:8px;"
+                      onsubmit="this.querySelector('button').disabled=true;">
+                  <input type="hidden" name="minutes_before" value="{{ item.minutes_before }}" />
+                  <button type="submit" class="secondary" style="padding:2px 8px; font-size:12px;">Удалить</button>
+                </form>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted" style="margin:0 0 10px;">Список пуст — напоминания не будут отправляться.</p>
+        {% endif %}
+
+        {% if reminder_items|length < reminder_max %}
+          <form method="post" action="/me/reminders/add" style="margin:0 0 10px;"
+                onsubmit="this.querySelectorAll('button').forEach(function(b){b.disabled=true;});">
+            <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+              <label style="margin:0;">Добавить за</label>
+              <input type="number" name="hours" min="0.5" max="72" step="0.5" placeholder="часы"
+                     style="width:6rem;" />
+              <span class="muted">ч</span>
+              <button type="submit">Добавить</button>
+              {% for h in reminder_quick_hours %}
+                <button type="submit" class="secondary" name="hours" value="{{ h }}" formnovalidate>{{ h }} ч</button>
+              {% endfor %}
+            </div>
+          </form>
+        {% endif %}
+
+        <form method="post" action="/me/reminders/clear" style="margin:0;"
+              onsubmit="if(!confirm('Очистить все напоминания?')) return false; this.querySelector('button').disabled=true;">
+          <button type="submit" class="secondary">Очистить список</button>
+        </form>
+      </div>
     </div>
 
     <div style="margin-bottom:16px;">

@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from app.db.session import SessionLocal
+from app.booking_reminders import enqueue_due_booking_reminders
 from app.notifications import DEFAULT_MAX_ATTEMPTS, DEFAULT_OUTBOX_LIMIT, process_outbox
 from app.settings import get_settings
 
@@ -25,14 +26,26 @@ def run_outbox_tick(
     limit: int = DEFAULT_OUTBOX_LIMIT,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
 ) -> dict[str, int]:
-    """Один проход process_outbox в своей сессии БД (синхронно)."""
+    """Один проход: due-напоминания → outbox, затем process_outbox."""
     with SessionLocal() as db:
+        reminder_stats: dict[str, int] = {"checked": 0, "enqueued": 0, "users": 0}
+        try:
+            reminder_stats = enqueue_due_booking_reminders(db)
+            db.commit()
+        except Exception:
+            logger.exception("notification worker: enqueue reminders failed")
+            try:
+                db.rollback()
+            except Exception:
+                pass
         stats = process_outbox(db, limit=limit, max_attempts=max_attempts)
-        # process_outbox сам коммитит по строкам; финальный commit на всякий случай.
         try:
             db.commit()
         except Exception:
             db.rollback()
+        stats = dict(stats)
+        stats["reminders_checked"] = int(reminder_stats.get("checked") or 0)
+        stats["reminders_enqueued"] = int(reminder_stats.get("enqueued") or 0)
         return stats
 
 
@@ -55,12 +68,13 @@ async def notification_worker_loop(
     while not stop.is_set():
         try:
             stats = await asyncio.to_thread(run_outbox_tick)
-            if stats.get("processed"):
+            if stats.get("processed") or stats.get("reminders_enqueued"):
                 logger.info(
-                    "notification worker tick: processed=%s sent=%s failed=%s",
+                    "notification worker tick: processed=%s sent=%s failed=%s reminders_enqueued=%s",
                     stats.get("processed"),
                     stats.get("sent"),
                     stats.get("failed"),
+                    stats.get("reminders_enqueued"),
                 )
         except Exception:
             logger.exception("notification worker tick failed")
