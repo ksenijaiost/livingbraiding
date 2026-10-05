@@ -1731,6 +1731,9 @@ async def product_sale_new_post(
     post_product_sale_studio_accrual(db, row, current_user.id)
     bid_for_auto_complete = row.booking_id
     db.commit()
+    from app.staff_assignment_notifications import notify_product_sale_staff_assigned_on_create
+
+    notify_product_sale_staff_assigned_on_create(db, int(row.id))
     if bid_for_auto_complete:
         from app.routes.bookings import try_auto_complete_booking
 

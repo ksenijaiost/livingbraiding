@@ -279,6 +279,10 @@ async def work_plan_new_post(
             db.add(plan)
             created.append(plan)
         db.commit()
+        from app.staff_assignment_notifications import notify_work_plan_staff_assigned_on_create
+
+        for plan in created:
+            notify_work_plan_staff_assigned_on_create(db, int(plan.id))
         if len(created) == 1:
             return RedirectResponse(url=f"/work-plans/{created[0].id}?msg=created", status_code=303)
         return RedirectResponse(
