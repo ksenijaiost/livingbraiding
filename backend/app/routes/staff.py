@@ -36,6 +36,7 @@ from app.telegram_link import (
 from app.user_roles import (
     get_roles_for_user,
     max_user_role,
+    roles_from_loaded_user,
     set_user_roles,
     user_has_role,
 )
@@ -43,6 +44,45 @@ from app.webui import templates, ctx as _ctx
 
 
 router = APIRouter()
+
+
+def _staff_notify_cell(u: User) -> dict[str, object]:
+    """Статус уведомлений для списка сотрудников (без доп. запросов)."""
+    channels: list[str] = []
+    if u.vk_user_id is not None:
+        channels.append("VK")
+    if u.telegram_chat_id is not None:
+        channels.append("Telegram")
+    connected = bool(channels)
+    enabled = bool(u.notify_enabled)
+    ok = connected and enabled
+    bits: list[str] = []
+    if channels:
+        bits.append("подключено: " + ", ".join(channels))
+    else:
+        bits.append("каналы не подключены")
+    if not enabled:
+        bits.append("уведомления выключены переключателем")
+    elif connected:
+        bits.append("уведомления включены")
+    return {
+        "ok": ok,
+        "title": "; ".join(bits),
+        "label": "Уведомления включены" if ok else "Уведомления выключены или канал не подключён",
+    }
+
+
+def _staff_extra_title(u: User) -> str:
+    parts: list[str] = []
+    if u.phone:
+        parts.append(f"Телефон: {u.phone}")
+    if u.master_level is not None:
+        from app.ru_labels import ru_master_level
+
+        parts.append(f"Уровень: {ru_master_level(u.master_level)}")
+    if u.salon_cut_pct_override is not None:
+        parts.append(f"Инд. % салона: {u.salon_cut_pct_override}")
+    return " · ".join(parts) if parts else ""
 
 
 _ROLE_FORM_KEYS = (
@@ -132,10 +172,27 @@ def admin_settings_staff_list(
     db: Session = Depends(get_db),
 ):
     users = list(
-        db.scalars(select(User).options(selectinload(User.role_assignments)).order_by(User.is_active.desc(), User.username.asc())).all()
+        db.scalars(
+            select(User)
+            .options(selectinload(User.role_assignments))
+            .order_by(User.is_active.desc(), User.username.asc())
+        ).all()
     )
-    rows = [{"user": u, "roles": get_roles_for_user(db, u.id)} for u in users]
-    return templates.TemplateResponse("admin_settings_staff.html", _ctx(request, current_user=current_user, rows=rows, msg=msg, err=err))
+    rows = []
+    for u in users:
+        rows.append(
+            {
+                "user": u,
+                "roles": roles_from_loaded_user(u),
+                "active_ok": bool(u.is_active),
+                "notify": _staff_notify_cell(u),
+                "extra_title": _staff_extra_title(u),
+            }
+        )
+    return templates.TemplateResponse(
+        "admin_settings_staff.html",
+        _ctx(request, current_user=current_user, rows=rows, msg=msg, err=err),
+    )
 
 
 @router.get("/admin/settings/staff/new", response_class=HTMLResponse)

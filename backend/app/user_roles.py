@@ -57,6 +57,14 @@ def get_roles_for_user(db: Session, user_id: int) -> list[UserRole]:
     return sorted(set(rows), key=lambda r: _ROLE_SORT_ORDER.get(r, 99))
 
 
+def roles_from_loaded_user(user: User) -> list[UserRole]:
+    """Роли из уже загруженного relationship role_assignments (без доп. запроса)."""
+    rows = [a.role for a in (user.role_assignments or []) if a.role is not None]
+    if not rows and user.role is not None:
+        rows = [user.role]
+    return sorted(set(rows), key=lambda r: _ROLE_SORT_ORDER.get(r, 99))
+
+
 def resolve_active_role(roles: list[UserRole], cookie_value: str | None) -> UserRole:
     if cookie_value:
         try:
