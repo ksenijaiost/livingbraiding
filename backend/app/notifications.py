@@ -10,7 +10,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Iterable, Sequence
 
 from sqlalchemy import and_, or_, select
@@ -60,7 +60,7 @@ def _booking_kind_label(kind: BookingKind | str | None) -> str:
     return raw or "—"
 
 
-def _service_label(booking: Booking) -> str:
+def _service_name_list(booking: Booking) -> list[str]:
     parts: list[str] = []
     if booking.planned_service is not None:
         name = (booking.planned_service.name or "").strip()
@@ -73,10 +73,25 @@ def _service_label(booking: Booking) -> str:
         if name and name not in parts:
             parts.append(name)
     if parts:
-        return ", ".join(parts)
+        return parts
     if booking.planned_product_kind:
-        return f"товар: {booking.planned_product_kind}"
-    return "—"
+        return [f"товар: {booking.planned_product_kind}"]
+    return []
+
+
+def _service_label(booking: Booking) -> str:
+    parts = _service_name_list(booking)
+    return ", ".join(parts) if parts else "—"
+
+
+def _service_line_bits(booking: Booking) -> list[str]:
+    bits: list[str] = []
+    for ps in sorted(booking.planned_services or [], key=lambda x: (int(x.sort_order or 0), int(x.id or 0))):
+        mids = sorted(int(m.master_id) for m in (ps.masters or []) if m.master_id is not None)
+        bits.append(
+            f"{int(ps.service_id)}:{ps.planned_start_time}:{ps.duration_minutes}:{','.join(map(str, mids))}"
+        )
+    return bits
 
 
 def booking_planned_master_user_ids(booking: Booking) -> list[int]:
@@ -92,27 +107,152 @@ def booking_planned_master_user_ids(booking: Booking) -> list[int]:
     return sorted(ids)
 
 
-def booking_content_version(booking: Booking) -> str:
-    """Хеш значимых полей брони — для dedupe без ложных дублей при повторном сохранении."""
-    svc_bits: list[str] = []
-    for ps in sorted(booking.planned_services or [], key=lambda x: (int(x.sort_order or 0), int(x.id or 0))):
-        mids = sorted(int(m.master_id) for m in (ps.masters or []) if m.master_id is not None)
-        svc_bits.append(
-            f"{int(ps.service_id)}:{ps.planned_start_time}:{ps.duration_minutes}:{','.join(map(str, mids))}"
-        )
+def _clip_notify_text(value: str, limit: int = 100) -> str:
+    text = " ".join((value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)] + "…"
+
+
+def _master_display_name(user: User | None, user_id: int) -> str:
+    if user is None:
+        return str(user_id)
+    return (user.display_name or user.username or str(user_id)).strip() or str(user_id)
+
+
+def capture_booking_notify_snapshot(db: Session, booking: Booking) -> dict[str, Any]:
+    """Снимок значимых для уведомления полей (тот же набор, что в dedupe content-hash)."""
+    booking = _ensure_booking_loaded(db, booking)
+    master_ids = booking_planned_master_user_ids(booking)
+    names: dict[str, str] = {}
+    if master_ids:
+        for u in db.scalars(select(User).where(User.id.in_(master_ids))).all():
+            names[str(int(u.id))] = _master_display_name(u, int(u.id))
+    client_name = "—"
+    if booking.client is not None:
+        client_name = (booking.client.name or "").strip() or "—"
+    return {
+        "planned_date": booking.planned_date.isoformat(timespec="seconds") if booking.planned_date else "",
+        "client_id": int(booking.client_id) if booking.client_id is not None else 0,
+        "client_name": client_name,
+        "kind": booking.kind.value if booking.kind else "",
+        "planned_service_id": int(booking.planned_service_id) if booking.planned_service_id else 0,
+        "planned_product_kind": (booking.planned_product_kind or "").strip(),
+        "comment": (booking.comment or "").strip(),
+        "master_ids": master_ids,
+        "master_names": names,
+        "service_names": _service_name_list(booking),
+        "service_lines": _service_line_bits(booking),
+    }
+
+
+def booking_content_version_from_snapshot(snapshot: dict[str, Any]) -> str:
+    """Хеш снимка значимых полей — версия для dedupe_key."""
     raw = "|".join(
         [
-            str(booking.planned_date),
-            str(booking.status.value if booking.status else ""),
-            str(booking.kind.value if booking.kind else ""),
-            str(booking.planned_service_id or ""),
-            str(booking.planned_product_kind or ""),
-            ",".join(map(str, booking_planned_master_user_ids(booking))),
-            ";".join(svc_bits),
-            (booking.comment or "").strip(),
+            str(snapshot.get("planned_date") or ""),
+            str(snapshot.get("client_id") or ""),
+            str(snapshot.get("kind") or ""),
+            str(snapshot.get("planned_service_id") or ""),
+            str(snapshot.get("planned_product_kind") or ""),
+            ",".join(str(x) for x in (snapshot.get("master_ids") or [])),
+            ";".join(str(x) for x in (snapshot.get("service_lines") or [])),
+            str(snapshot.get("comment") or "").strip(),
         ]
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def booking_content_version(booking: Booking) -> str:
+    """Хеш значимых полей брони — для dedupe без ложных дублей при повторном сохранении."""
+    return booking_content_version_from_snapshot(
+        {
+            "planned_date": booking.planned_date.isoformat(timespec="seconds") if booking.planned_date else "",
+            "client_id": int(booking.client_id) if booking.client_id is not None else 0,
+            "kind": booking.kind.value if booking.kind else "",
+            "planned_service_id": int(booking.planned_service_id) if booking.planned_service_id else 0,
+            "planned_product_kind": (booking.planned_product_kind or "").strip(),
+            "comment": (booking.comment or "").strip(),
+            "master_ids": booking_planned_master_user_ids(booking),
+            "service_lines": _service_line_bits(booking),
+        }
+    )
+
+
+def _format_snapshot_when(snapshot: dict[str, Any], tz_name: str) -> str:
+    raw = str(snapshot.get("planned_date") or "").strip()
+    if not raw:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return raw
+    return format_naive_utc_datetime(dt, tz_name, "%d.%m.%Y %H:%M") or "—"
+
+
+def diff_booking_notify_snapshots(
+    old: dict[str, Any],
+    new: dict[str, Any],
+    *,
+    tz_name: str = DEFAULT_DISPLAY_TIMEZONE,
+) -> list[str]:
+    """Строки блока «Что изменилось» (без заголовка). Пусто — значимых изменений нет."""
+    lines: list[str] = []
+
+    old_when = _format_snapshot_when(old, tz_name)
+    new_when = _format_snapshot_when(new, tz_name)
+    if old_when != new_when:
+        lines.append(f"Дата/время: {old_when} → {new_when}")
+
+    old_client = str(old.get("client_name") or "—")
+    new_client = str(new.get("client_name") or "—")
+    if int(old.get("client_id") or 0) != int(new.get("client_id") or 0) or old_client != new_client:
+        lines.append(f"Клиент: {old_client} → {new_client}")
+
+    old_kind = _booking_kind_label(str(old.get("kind") or ""))
+    new_kind = _booking_kind_label(str(new.get("kind") or ""))
+    if str(old.get("kind") or "") != str(new.get("kind") or ""):
+        lines.append(f"Тип: {old_kind} → {new_kind}")
+
+    old_services = [str(x) for x in (old.get("service_names") or [])]
+    new_services = [str(x) for x in (new.get("service_names") or [])]
+    old_set = set(old_services)
+    new_set = set(new_services)
+    removed_svc = sorted(old_set - new_set)
+    added_svc = sorted(new_set - old_set)
+    if removed_svc or added_svc:
+        for name in removed_svc:
+            lines.append(f"− Услуга {name}")
+        for name in added_svc:
+            lines.append(f"+ Услуга {name}")
+    elif list(old.get("service_lines") or []) != list(new.get("service_lines") or []):
+        lines.append("Услуга: изменено время или длительность")
+
+    old_comment = str(old.get("comment") or "").strip()
+    new_comment = str(new.get("comment") or "").strip()
+    if old_comment != new_comment:
+        lines.append(
+            "Комментарий: изменён "
+            f"({_clip_notify_text(old_comment) or '—'} → {_clip_notify_text(new_comment) or '—'})"
+        )
+
+    old_mids = [int(x) for x in (old.get("master_ids") or [])]
+    new_mids = [int(x) for x in (new.get("master_ids") or [])]
+    old_mset = set(old_mids)
+    new_mset = set(new_mids)
+    added_m = sorted(new_mset - old_mset)
+    removed_m = sorted(old_mset - new_mset)
+    if added_m or removed_m:
+        old_names = {int(k): str(v) for k, v in (old.get("master_names") or {}).items()}
+        new_names = {int(k): str(v) for k, v in (new.get("master_names") or {}).items()}
+        bits: list[str] = []
+        for mid in added_m:
+            bits.append(f"добавлена {new_names.get(mid) or mid}")
+        for mid in removed_m:
+            bits.append(f"снята {old_names.get(mid) or mid}")
+        lines.append("Мастера: " + " / ".join(bits))
+
+    return lines
 
 
 def build_booking_master_message(
@@ -121,6 +261,7 @@ def build_booking_master_message(
     *,
     tz_name: str = DEFAULT_DISPLAY_TIMEZONE,
     unassigned: bool = False,
+    change_lines: Sequence[str] | None = None,
 ) -> str:
     """Простой текст уведомления мастеру о брони (без HTML)."""
     when = format_naive_utc_datetime(booking.planned_date, tz_name, "%d.%m.%Y %H:%M") or "—"
@@ -137,13 +278,19 @@ def build_booking_master_message(
         event_ru = _EVENT_LABEL_RU.get(event_type, event_type)
         headline = f"Бронь #{booking.id} {event_ru}"
 
-    lines = [
-        headline,
-        f"Дата/время: {when}",
-        f"Клиент: {client_name}",
-        f"Тип: {kind_ru}",
-        f"Услуга: {service}",
-    ]
+    lines = [headline]
+    if change_lines:
+        lines.append("Что изменилось:")
+        for item in change_lines:
+            lines.append(f"• {item}")
+    lines.extend(
+        [
+            f"Дата/время: {when}",
+            f"Клиент: {client_name}",
+            f"Тип: {kind_ru}",
+            f"Услуга: {service}",
+        ]
+    )
     if comment:
         lines.append(f"Комментарий: {comment}")
     return "\n".join(lines)
@@ -199,6 +346,7 @@ def enqueue_master_booking_notifications(
     version_override: str | None = None,
     channels: Iterable[NotificationChannel] | None = None,
     unassigned: bool = False,
+    change_lines: Sequence[str] | None = None,
 ) -> list[NotificationOutbox]:
     """Поставить в outbox уведомления назначенным мастерам, с dedupe.
 
@@ -217,7 +365,11 @@ def enqueue_master_booking_notifications(
     )
     tz_name = get_display_timezone(db)
     text = text_override or build_booking_master_message(
-        booking, event_type, tz_name=tz_name, unassigned=unassigned
+        booking,
+        event_type,
+        tz_name=tz_name,
+        unassigned=unassigned,
+        change_lines=change_lines,
     )
     version = _event_version(booking, event_type, version_override=version_override)
     created: list[NotificationOutbox] = []

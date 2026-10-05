@@ -31,7 +31,7 @@ from app.booking_notifications import (
     notify_booking_updated_with_master_diff,
 )
 from app.client_status import is_first_non_cancelled_booking
-from app.notifications import booking_planned_master_user_ids
+from app.notifications import booking_planned_master_user_ids, capture_booking_notify_snapshot
 from app.client_validation import format_created_by_label, strip_or_none
 from app.consultation_booking import (
     booking_is_open,
@@ -3338,6 +3338,7 @@ async def admin_booking_edit_post(
         _apply_super_admin_booking_status_change(db, b, new_booking_status, current_user.id)
     before_visit_master_ids = [int(bm.master_id) for bm in (b.masters or [])]
     before_all_master_ids = booking_planned_master_user_ids(b)
+    before_notify_snapshot = capture_booking_notify_snapshot(db, b)
     before_visit_masters = _audit_user_names(db, before_visit_master_ids)
     before_sale_staff = _audit_sale_order_masters_label(db, b.id)
     before_planned_services = _planned_services_audit_label(db, b.id)
@@ -3557,7 +3558,12 @@ async def admin_booking_edit_post(
         b.id,
         after_planned_services,
     )
-    notify_booking_updated_with_master_diff(db, int(b.id), old_master_ids=before_all_master_ids)
+    notify_booking_updated_with_master_diff(
+        db,
+        int(b.id),
+        old_master_ids=before_all_master_ids,
+        old_snapshot=before_notify_snapshot,
+    )
     return RedirectResponse(url=f"/bookings/{b.id}", status_code=303)
 
 
@@ -3757,6 +3763,8 @@ def admin_booking_confirm(
     if b.status != BookingStatus.PENDING_CONFIRMATION:
         return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
     old_status = b.status
+    master_ids_snapshot = booking_planned_master_user_ids(b)
+    before_notify_snapshot = capture_booking_notify_snapshot(db, b)
     b.status = BookingStatus.ACTIVE
     b.updated_at = utcnow_naive()
     b.updated_by_user_id = current_user.id
@@ -3772,12 +3780,12 @@ def admin_booking_confirm(
             )
         ],
     )
-    master_ids_snapshot = booking_planned_master_user_ids(b)
     db.commit()
     notify_booking_updated_with_master_diff(
         db,
         int(booking_id),
         old_master_ids=master_ids_snapshot,
+        old_snapshot=before_notify_snapshot,
     )
     return RedirectResponse(url=f"/bookings/{booking_id}?msg=confirmed", status_code=303)
 
