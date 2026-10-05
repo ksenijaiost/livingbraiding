@@ -328,6 +328,9 @@ async def consultation_new_post(
     sync_consultation_services(db, c.id, service_ids)
     db.commit()
     db.refresh(c)
+    from app.staff_assignment_notifications import notify_consultation_staff_assigned_on_create
+
+    notify_consultation_staff_assigned_on_create(db, int(c.id))
     if source_booking_id:
         from app.routes.bookings import try_auto_complete_booking
 

@@ -165,6 +165,9 @@ def create_hourly_work_entry(
         complete_work_plan_from_hourly_work(db, int(entry.work_plan_id), int(entry.id))
     db.commit()
     db.refresh(entry)
+    from app.staff_assignment_notifications import notify_hourly_work_staff_assigned_on_create
+
+    notify_hourly_work_staff_assigned_on_create(db, int(entry.id))
     return entry
 
 

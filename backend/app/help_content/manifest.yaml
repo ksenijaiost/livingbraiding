@@ -484,3 +484,19 @@ pages:
     roles:
     - admin_super
     file: kits_bulk_price_update.md
+  me:
+    title: Моя карточка
+    roles:
+    - master
+    - helper
+    - admin
+    - admin_senior
+    - admin_super
+    - techspec
+    file: me.md
+  notification_outbox:
+    title: Очередь уведомлений
+    roles:
+    - admin_super
+    - techspec
+    file: notification_outbox.md

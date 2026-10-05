@@ -864,6 +864,9 @@ def save_visit_with_services(
     post_visit_accruals(db, visit, visit.created_by_user_id)
     db.commit()
     db.refresh(visit)
+    from app.staff_assignment_notifications import notify_visit_staff_assigned_on_create
+
+    notify_visit_staff_assigned_on_create(db, int(visit.id))
     return visit
 
 

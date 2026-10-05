@@ -39,6 +39,7 @@ def _event_ru(event_type: str) -> str:
         "booking_updated": "бронь изменена",
         "booking_cancelled": "бронь отменена",
         "booking_reminder": "напоминание о записи",
+        "staff_assignment_created": "назначение на событие",
     }.get(event_type, event_type)
 
 
@@ -88,6 +89,7 @@ def admin_notification_outbox_page(
             rows=rows,
             msg=msg_ru,
             err=err_ru,
+            help_page_id="notification_outbox",
         ),
     )
 

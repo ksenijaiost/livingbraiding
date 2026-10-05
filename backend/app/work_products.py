@@ -2145,6 +2145,9 @@ async def work_new_post(
 
             link_finalized_work(db, int(draft_id_val), int(work.id), current_user.id)
         db.commit()
+        from app.staff_assignment_notifications import notify_work_staff_assigned_on_create
+
+        notify_work_staff_assigned_on_create(db, int(work.id))
         if bid_for_auto_complete is not None:
             from app.routes.bookings import try_auto_complete_booking
 
