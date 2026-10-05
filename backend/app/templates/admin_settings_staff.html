@@ -4,7 +4,7 @@
   <div class="card lb-card-max-920">
     <p><a href="/admin/settings">← Настройки</a></p>
     <h2 class="lb-mt-0">Сотрудники</h2>
-    <p class="muted">Роли, телефон для входа (вместо логина), отключение учётки. Суперадмин не может остаться один без замены.</p>
+    <p class="muted lb-font-13">Роли, телефон для входа, уведомления. Суперадмин не может остаться один без замены.</p>
 
     {% if msg == "created" %}
       <div class="card lb-card-ok lb-mb-12">Сотрудник создан.</div>
@@ -19,41 +19,48 @@
       <a href="/admin/settings/staff/new"><button type="button">Новый сотрудник</button></a>
     </p>
 
-    <div class="lb-table-wrap">
-      <table>
+    <div class="lb-staff-table-wrap">
+      <table class="lb-staff-table">
         <thead>
           <tr>
-            <th>Логин</th>
-            <th>Телефон</th>
-            <th>Имя</th>
+            <th>Сотрудник</th>
             <th>Роли</th>
-            <th>Уровень мастера</th>
-            <th>Инд. % салона</th>
-            <th>Статус</th>
-            <th></th>
+            <th class="lb-staff-col-icon">Активен</th>
+            <th class="lb-staff-col-icon">Увед.</th>
+            <th class="lb-staff-col-actions"></th>
           </tr>
         </thead>
         <tbody>
           {% for row in rows %}
             {% set u = row.user %}
-            <tr{% if not u.is_active %} style="opacity:0.65;"{% endif %}>
-              <td><code>{{ u.username }}</code></td>
-              <td class="muted">{% if u.phone %}{{ u.phone }}{% else %}—{% endif %}</td>
-              <td>{{ u.display_name }}</td>
-              <td>
+            <tr class="lb-staff-row{% if not row.active_ok %} lb-staff-row--off{% endif %}">
+              <td class="lb-staff-cell-person" {% if row.extra_title %}title="{{ row.extra_title }}"{% endif %}>
+                <div class="lb-staff-name">{{ u.display_name }}</div>
+                <div class="lb-staff-login"><code>{{ u.username }}</code></div>
+              </td>
+              <td class="lb-staff-cell-roles">
                 {% for r in row.roles %}
-                  <span class="lb-role-chip">{{ ru_user_role(r) }}</span>
+                  <div class="lb-staff-role">{{ ru_user_role(r) }}</div>
+                {% else %}
+                  <span class="muted">—</span>
                 {% endfor %}
               </td>
-              <td class="muted">
-                {% if u.master_level %}{{ ru_master_level(u.master_level) }}{% else %}—{% endif %}
+              <td class="lb-staff-col-icon">
+                {% if row.active_ok %}
+                  <span title="Активен" aria-label="Активен">✅</span>
+                {% else %}
+                  <span title="Не активен" aria-label="Не активен">❌</span>
+                {% endif %}
               </td>
-              <td class="muted">
-                {% if u.salon_cut_pct_override is not none %}{{ u.salon_cut_pct_override }}{% else %}—{% endif %}
+              <td class="lb-staff-col-icon">
+                {% if row.notify.ok %}
+                  <span title="{{ row.notify.title }}" aria-label="{{ row.notify.label }}">✅</span>
+                {% else %}
+                  <span title="{{ row.notify.title }}" aria-label="{{ row.notify.label }}">❌</span>
+                {% endif %}
               </td>
-              <td>{% if u.is_active %}<span class="muted">активен</span>{% else %}<strong>отключён</strong>{% endif %}</td>
-              <td class="lb-nowrap">
-                <a href="/admin/settings/staff/{{ u.id }}/edit"><button type="button" class="secondary">Изменить</button></a>
+              <td class="lb-staff-col-actions">
+                <a class="lb-staff-action" href="/admin/settings/staff/{{ u.id }}/edit" title="Изменить">✎</a>
               </td>
             </tr>
           {% endfor %}

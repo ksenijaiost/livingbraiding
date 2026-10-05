@@ -13,6 +13,16 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.audit import FieldChange, write_audit_rows
 from app.auth import AuthUser, get_current_user
+from app.booking_reminders import (
+    MAX_REMINDERS_PER_USER,
+    add_user_reminder_hours,
+    clear_user_reminders,
+    hours_to_minutes,
+    list_reminder_settings_for_ui,
+    parse_reminder_hours,
+    remove_user_reminder_minutes,
+    replace_user_reminder_minutes,
+)
 from app.db.models import (
     Booking,
     BookingKind,
@@ -259,6 +269,10 @@ def _me_page_response(
             is_master=is_master,
             notify_channels=notify_channels,
             has_connected_notify_channel=any(ch["connected"] for ch in notify_channels),
+            reminder_items=list_reminder_settings_for_ui(db, u),
+            reminders_configured=bool(u.reminders_configured),
+            reminder_max=MAX_REMINDERS_PER_USER,
+            reminder_quick_hours=(1, 2, 6, 24),
             telegram_bot_username=settings.telegram_bot_username,
             vk_group_domain=settings.vk_group_domain,
             link_flash=link_flash,
@@ -300,6 +314,14 @@ def me_page(
         error = "Новый пароль и подтверждение не совпадают."
     elif err == "pwd_short":
         error = "Новый пароль должен быть не короче 6 символов."
+    elif err == "reminder_invalid":
+        error = "Некорректное значение напоминания (от 0.5 до 72 часов, без повторов, не больше 5)."
+    elif err == "reminder_limit":
+        error = f"Не больше {MAX_REMINDERS_PER_USER} напоминаний."
+    elif err == "reminder_dup":
+        error = "Такое напоминание уже есть."
+    elif err == "reminder_missing":
+        error = "Напоминание не найдено."
     elif msg == "tg_connect":
         info = "Ссылка для привязки Telegram создана (действует 24 часа)."
     elif msg == "vk_connect":
@@ -314,6 +336,14 @@ def me_page(
         info = "Тестовое сообщение во VK отправлено."
     elif msg == "notify_saved":
         info = "Настройка уведомлений сохранена."
+    elif msg == "reminders_saved":
+        info = "Напоминания сохранены."
+    elif msg == "reminder_added":
+        info = "Напоминание добавлено."
+    elif msg == "reminder_removed":
+        info = "Напоминание удалено."
+    elif msg == "reminders_cleared":
+        info = "Список напоминаний очищен."
     elif msg == "pwd_ok":
         info = "Пароль изменён."
     return _me_page_response(
@@ -439,6 +469,98 @@ async def me_notify_settings(
         )
     db.commit()
     return RedirectResponse(url="/me?msg=notify_saved", status_code=303)
+
+
+def _reminder_err_redirect(exc: ValueError) -> RedirectResponse:
+    msg = str(exc or "")
+    if "уже есть" in msg:
+        code = "reminder_dup"
+    elif "Не больше" in msg:
+        code = "reminder_limit"
+    elif "не найдено" in msg.lower() or "Не найдено" in msg:
+        code = "reminder_missing"
+    else:
+        code = "reminder_invalid"
+    return RedirectResponse(url=f"/me?err={code}", status_code=303)
+
+
+@router.post("/me/reminders/add")
+async def me_reminders_add(
+    request: Request,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    u = _load_self_user(db, current_user.id)
+    form = await request.form()
+    raw_hours = None
+    if hasattr(form, "getlist"):
+        vals = [v for v in form.getlist("hours") if v is not None and str(v).strip() != ""]
+        raw_hours = vals[-1] if vals else None
+    if raw_hours is None:
+        raw_hours = form.get("hours")
+    try:
+        add_user_reminder_hours(db, u, raw_hours)
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return _reminder_err_redirect(e)
+    return RedirectResponse(url="/me?msg=reminder_added", status_code=303)
+
+
+@router.post("/me/reminders/delete")
+async def me_reminders_delete(
+    request: Request,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    u = _load_self_user(db, current_user.id)
+    form = await request.form()
+    try:
+        minutes = int(str(form.get("minutes_before") or "0"))
+        remove_user_reminder_minutes(db, u, minutes)
+        db.commit()
+    except (ValueError, TypeError) as e:
+        db.rollback()
+        if isinstance(e, ValueError) and str(e):
+            return _reminder_err_redirect(e)
+        return RedirectResponse(url="/me?err=reminder_invalid", status_code=303)
+    return RedirectResponse(url="/me?msg=reminder_removed", status_code=303)
+
+
+@router.post("/me/reminders/clear")
+def me_reminders_clear(
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    u = _load_self_user(db, current_user.id)
+    clear_user_reminders(db, u)
+    db.commit()
+    return RedirectResponse(url="/me?msg=reminders_cleared", status_code=303)
+
+
+@router.post("/me/reminders/save")
+async def me_reminders_save(
+    request: Request,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Сохранить полный список (hours из формы, можно несколько полей hours)."""
+    u = _load_self_user(db, current_user.id)
+    form = await request.form()
+    raw_list = form.getlist("hours") if hasattr(form, "getlist") else [form.get("hours")]
+    try:
+        minutes_list: list[int] = []
+        for raw in raw_list:
+            if raw is None or str(raw).strip() == "":
+                continue
+            hours = parse_reminder_hours(raw)
+            minutes_list.append(hours_to_minutes(hours))
+        replace_user_reminder_minutes(db, u, minutes_list)
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return _reminder_err_redirect(e)
+    return RedirectResponse(url="/me?msg=reminders_saved", status_code=303)
 
 
 @router.post("/me/telegram/test")
