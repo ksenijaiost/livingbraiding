@@ -88,6 +88,7 @@ def admin_notification_outbox_page(
             rows=rows,
             msg=msg_ru,
             err=err_ru,
+            help_page_id="notification_outbox",
         ),
     )
 
