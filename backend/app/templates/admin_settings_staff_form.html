@@ -11,13 +11,6 @@
     {% if info %}
       <div class="ok lb-mb-12">{{ info }}</div>
     {% endif %}
-    {% if telegram_deep_link %}
-      <div class="card lb-mb-12" style="background:#f8f9fb;">
-        <p class="lb-m-0"><strong>Ссылка Telegram:</strong></p>
-        <p class="lb-mt-6" style="word-break:break-all;"><a href="{{ telegram_deep_link }}" target="_blank" rel="noopener">{{ telegram_deep_link }}</a></p>
-        <p class="muted lb-font-12 lb-mb-0">Одноразовая, действует 24 часа. После открытия в Telegram привязка завершится автоматически.</p>
-      </div>
-    {% endif %}
 
     {% if is_new %}
       <form method="post" action="/admin/settings/staff/new" data-lb-staff-form>
@@ -181,74 +174,31 @@
             </label>
           {% endif %}
         </div>
-        <div class="lb-mb-16">
-          <label class="lb-inline-center-gap">
-            <input type="checkbox" name="notify_enabled" value="1" {% if user.notify_enabled %}checked{% endif %} />
-            <span>Уведомления включены (Telegram)</span>
-          </label>
-          <p class="muted lb-font-12" style="margin:4px 0 0;">Если выключено — сообщения в outbox для этого сотрудника не ставятся.</p>
-        </div>
         <button type="submit">Сохранить</button>
         <a href="/admin/settings/staff" class="lb-ml-8"><button type="button" class="secondary">Отмена</button></a>
       </form>
 
       <div class="card lb-mt-16" style="background:#fafafa;">
-        <h3 class="lb-mt-0" style="font-size:1.05rem;">Уведомления (VK / Telegram)</h3>
-        {% if link_flash %}
-          <div class="ok" style="margin:0 0 12px; padding:10px;">
-            <div><strong>{{ link_flash.label }}</strong> — ссылка (24 часа):</div>
-            {% if link_flash.deep_link %}
-              <p style="margin:6px 0; word-break:break-all;">
-                <a href="{{ link_flash.deep_link }}" target="_blank" rel="noopener">{{ link_flash.deep_link }}</a>
-              </p>
-            {% endif %}
-            <p class="muted lb-font-12" style="margin:0;">{{ link_flash.hint }}</p>
-          </div>
-        {% endif %}
+        <h3 class="lb-mt-0" style="font-size:1.05rem;">Уведомления</h3>
         <p class="lb-mt-0">
           <strong>VK:</strong>
-          {% if user.vk_user_id %}
-            подключён <span class="muted">(id {{ user.vk_user_id }})</span>
-          {% else %}
-            не подключён
-          {% endif %}
+          {% if user.vk_user_id %}подключён{% else %}не подключён{% endif %}
         </p>
-        {% if not vk_group_domain %}
-          <p class="muted lb-font-12">Задайте <code>VK_GROUP_DOMAIN</code> в окружении для ссылок vk.me.</p>
-        {% endif %}
-        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px;">
-          <form method="post" action="/admin/settings/staff/{{ user.id }}/vk/connect" style="margin:0;">
-            <button type="submit">Подключить VK</button>
-          </form>
-          {% if user.vk_user_id %}
-            <form method="post" action="/admin/settings/staff/{{ user.id }}/vk/disconnect" style="margin:0;"
-              onsubmit="return confirm('Отключить VK у этого сотрудника?');">
-              <button type="submit" class="secondary">Отключить VK</button>
-            </form>
-          {% endif %}
-        </div>
         <p class="lb-mt-0">
           <strong>Telegram:</strong>
-          {% if user.telegram_chat_id %}
-            подключён <span class="muted">(chat id {{ user.telegram_chat_id }})</span>
-          {% else %}
-            не подключён
-          {% endif %}
+          {% if user.telegram_chat_id %}подключён{% else %}не подключён{% endif %}
         </p>
-        {% if not telegram_bot_username %}
-          <p class="muted lb-font-12">Задайте <code>TELEGRAM_BOT_USERNAME</code> в окружении, чтобы создавать ссылки привязки.</p>
-        {% endif %}
-        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-          <form method="post" action="/admin/settings/staff/{{ user.id }}/telegram/connect" style="margin:0;">
-            <button type="submit">Подключить Telegram</button>
-          </form>
-          {% if user.telegram_chat_id %}
-            <form method="post" action="/admin/settings/staff/{{ user.id }}/telegram/disconnect" style="margin:0;"
-              onsubmit="return confirm('Отключить Telegram у этого сотрудника?');">
-              <button type="submit" class="secondary">Отключить Telegram</button>
-            </form>
-          {% endif %}
-        </div>
+        <p class="lb-mt-0">
+          <strong>Уведомления:</strong>
+          {% if user.notify_enabled %}включены{% else %}выключены{% endif %}
+        </p>
+        <p class="lb-mt-0">
+          <strong>Напоминания о записях:</strong>
+          {{ notify_reminders_summary }}
+        </p>
+        <p class="muted lb-font-12 lb-mb-0">
+          Каналы и типы уведомлений настраивает сама сотрудница в «Моя карточка».
+        </p>
       </div>
 
       {% if audit_rows %}

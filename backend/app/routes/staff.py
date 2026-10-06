@@ -19,20 +19,9 @@ from app.db.models import (
     UserRoleAssignment,
 )
 from app.db.session import get_db
+from app.booking_reminders import get_effective_reminder_minutes, minutes_to_hours_label
 from app.forms_parse import parse_bool, parse_float
-from app.notify_link_flash import pop_notify_link_flash, set_notify_link_flash
 from app.security import hash_password
-from app.settings import get_settings
-from app.telegram_link import (
-    CHANNEL_TELEGRAM,
-    CHANNEL_VK,
-    create_telegram_link_token,
-    create_vk_link_token,
-    telegram_deep_link,
-    unlink_telegram_chat,
-    unlink_vk_user,
-    vk_deep_link,
-)
 from app.user_roles import (
     get_roles_for_user,
     max_user_role,
@@ -307,6 +296,16 @@ def _staff_edit_audit_rows(db: Session, user_id: int) -> list[UserAuditLog]:
     )
 
 
+def _staff_reminders_summary(db: Session, user: User) -> str:
+    """Краткий текст про напоминания для карточки сотрудника в админке."""
+    if not bool(user.reminders_configured):
+        return "по умолчанию 24ч+2ч"
+    minutes = get_effective_reminder_minutes(db, user)
+    if not minutes:
+        return "очищены"
+    return ", ".join(f"{minutes_to_hours_label(m)}ч" for m in minutes)
+
+
 def _staff_edit_ctx(
     request: Request,
     *,
@@ -315,9 +314,7 @@ def _staff_edit_ctx(
     db: Session,
     error: str | None = None,
     info: str | None = None,
-    link_flash: dict | None = None,
 ) -> dict:
-    settings = get_settings()
     return _ctx(
         request,
         current_user=current_user,
@@ -327,9 +324,7 @@ def _staff_edit_ctx(
         error=error,
         info=info,
         audit_rows=_staff_edit_audit_rows(db, user.id),
-        link_flash=link_flash,
-        telegram_bot_username=settings.telegram_bot_username,
-        vk_group_domain=settings.vk_group_domain,
+        notify_reminders_summary=_staff_reminders_summary(db, user),
     )
 
 
@@ -337,186 +332,22 @@ def _staff_edit_ctx(
 def admin_settings_staff_edit_get(
     user_id: int,
     request: Request,
-    msg: str | None = None,
-    err: str | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
     u = db.scalar(select(User).options(selectinload(User.role_assignments)).where(User.id == user_id))
     if not u:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
-    error = None
-    info = None
-    if err == "tg_bot_username":
-        error = "Задайте TELEGRAM_BOT_USERNAME в настройках окружения, затем создайте ссылку снова."
-    elif err == "vk_group_domain":
-        error = "Задайте VK_GROUP_DOMAIN в окружении, затем создайте ссылку снова."
-    elif msg == "tg_connect":
-        info = "Ссылка для привязки Telegram создана (действует 24 часа)."
-    elif msg == "vk_connect":
-        info = "Ссылка для привязки VK создана (действует 24 часа)."
-    elif msg == "tg_disconnected":
-        info = "Telegram отключён."
-    elif msg == "vk_disconnected":
-        info = "VK отключён."
-
-    from starlette.responses import Response as StarletteResponse
-
-    cookie_sink = StarletteResponse()
-    flash = pop_notify_link_flash(request, cookie_sink)
-    link_flash = None
-    if flash:
-        ch = flash["channel"]
-        code = flash["code"]
-        if ch == CHANNEL_VK:
-            link_flash = {
-                "channel": "vk",
-                "label": "VK",
-                "deep_link": vk_deep_link(code),
-                "code": code,
-                "hint": f"если ссылка не сработала, напишите сообществу: привязка {code}",
-            }
-        elif ch == CHANNEL_TELEGRAM:
-            link_flash = {
-                "channel": "telegram",
-                "label": "Telegram",
-                "deep_link": telegram_deep_link(code),
-                "code": code,
-                "hint": "Откройте ссылку в Telegram или отправьте сотруднику.",
-            }
-
-    tmpl = templates.TemplateResponse(
+    return templates.TemplateResponse(
         "admin_settings_staff_form.html",
         _staff_edit_ctx(
             request,
             current_user=current_user,
             user=u,
             db=db,
-            error=error,
-            info=info,
-            link_flash=link_flash,
         ),
     )
-    for key, val in cookie_sink.headers.items():
-        if key.lower() == "set-cookie":
-            tmpl.headers.append(key, val)
-    return tmpl
 
-
-@router.post("/admin/settings/staff/{user_id}/telegram/connect")
-async def admin_settings_staff_telegram_connect(
-    user_id: int,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
-    db: Session = Depends(get_db),
-):
-    u = db.get(User, user_id)
-    if not u:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    if not get_settings().telegram_bot_username:
-        return RedirectResponse(
-            url=f"/admin/settings/staff/{user_id}/edit?err=tg_bot_username",
-            status_code=303,
-        )
-    plain, _deep = create_telegram_link_token(db, u.id)
-    write_audit_rows(
-        db,
-        log_model=UserAuditLog,
-        entity_field="user_id",
-        entity_id=u.id,
-        changed_by_user_id=current_user.id,
-        changes=[FieldChange("telegram_link", None, "код создан")],
-    )
-    db.commit()
-    resp = RedirectResponse(
-        url=f"/admin/settings/staff/{user_id}/edit?msg=tg_connect",
-        status_code=303,
-    )
-    set_notify_link_flash(resp, channel=CHANNEL_TELEGRAM, plain_code=plain)
-    return resp
-
-
-@router.post("/admin/settings/staff/{user_id}/telegram/disconnect")
-async def admin_settings_staff_telegram_disconnect(
-    user_id: int,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
-    db: Session = Depends(get_db),
-):
-    u = db.get(User, user_id)
-    if not u:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    old = str(u.telegram_chat_id) if u.telegram_chat_id is not None else None
-    unlink_telegram_chat(db, u)
-    write_audit_rows(
-        db,
-        log_model=UserAuditLog,
-        entity_field="user_id",
-        entity_id=u.id,
-        changed_by_user_id=current_user.id,
-        changes=[FieldChange("telegram_chat_id", old, None)],
-    )
-    db.commit()
-    return RedirectResponse(
-        url=f"/admin/settings/staff/{user_id}/edit?msg=tg_disconnected",
-        status_code=303,
-    )
-
-
-@router.post("/admin/settings/staff/{user_id}/vk/connect")
-async def admin_settings_staff_vk_connect(
-    user_id: int,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
-    db: Session = Depends(get_db),
-):
-    u = db.get(User, user_id)
-    if not u:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    if not get_settings().vk_group_domain:
-        return RedirectResponse(
-            url=f"/admin/settings/staff/{user_id}/edit?err=vk_group_domain",
-            status_code=303,
-        )
-    plain, _deep = create_vk_link_token(db, u.id)
-    write_audit_rows(
-        db,
-        log_model=UserAuditLog,
-        entity_field="user_id",
-        entity_id=u.id,
-        changed_by_user_id=current_user.id,
-        changes=[FieldChange("vk_link", None, "код создан")],
-    )
-    db.commit()
-    resp = RedirectResponse(
-        url=f"/admin/settings/staff/{user_id}/edit?msg=vk_connect",
-        status_code=303,
-    )
-    set_notify_link_flash(resp, channel=CHANNEL_VK, plain_code=plain)
-    return resp
-
-
-@router.post("/admin/settings/staff/{user_id}/vk/disconnect")
-async def admin_settings_staff_vk_disconnect(
-    user_id: int,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
-    db: Session = Depends(get_db),
-):
-    u = db.get(User, user_id)
-    if not u:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    old = str(u.vk_user_id) if u.vk_user_id is not None else None
-    unlink_vk_user(db, u)
-    write_audit_rows(
-        db,
-        log_model=UserAuditLog,
-        entity_field="user_id",
-        entity_id=u.id,
-        changed_by_user_id=current_user.id,
-        changes=[FieldChange("vk_user_id", old, None)],
-    )
-    db.commit()
-    return RedirectResponse(
-        url=f"/admin/settings/staff/{user_id}/edit?msg=vk_disconnected",
-        status_code=303,
-    )
 
 @router.post("/admin/settings/staff/{user_id}/edit", response_class=HTMLResponse)
 async def admin_settings_staff_edit_post(
@@ -537,7 +368,6 @@ async def admin_settings_staff_edit_post(
         new_active = True
     else:
         new_active = parse_bool(form.get("is_active"))
-    new_notify = parse_bool(form.get("notify_enabled"))
 
     def _form_err(msg: str):
         return templates.TemplateResponse(
@@ -578,7 +408,6 @@ async def admin_settings_staff_edit_post(
         display_name=u.display_name,
         phone=u.phone,
         is_active=u.is_active,
-        notify_enabled=u.notify_enabled,
         master_level=u.master_level,
         salon_cut_pct_override=u.salon_cut_pct_override,
         roles_summary=_roles_audit_summary(db, u.id),
@@ -586,7 +415,6 @@ async def admin_settings_staff_edit_post(
     u.display_name = display_name
     u.phone = phone_canon
     u.is_active = new_active
-    u.notify_enabled = new_notify
     u.master_level = ml
     u.salon_cut_pct_override = salon_cut_override
     pwd_changed = bool(new_password)
@@ -598,7 +426,6 @@ async def admin_settings_staff_edit_post(
         display_name=u.display_name,
         phone=u.phone,
         is_active=u.is_active,
-        notify_enabled=u.notify_enabled,
         master_level=u.master_level,
         salon_cut_pct_override=u.salon_cut_pct_override,
         roles_summary=_roles_audit_summary(db, u.id),
@@ -606,7 +433,7 @@ async def admin_settings_staff_edit_post(
     raw_changes = diff_fields(
         before,
         after,
-        ("display_name", "phone", "is_active", "notify_enabled", "master_level", "salon_cut_pct_override", "roles_summary"),
+        ("display_name", "phone", "is_active", "master_level", "salon_cut_pct_override", "roles_summary"),
     )
     changes = [FieldChange("roles" if c.field_name == "roles_summary" else c.field_name, c.old_value, c.new_value) for c in raw_changes]
     if pwd_changed:
