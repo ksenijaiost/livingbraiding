@@ -79,7 +79,16 @@ def _load_self_user(db: Session, user_id: int) -> User:
 def _build_payroll_home(db: Session, current_user: AuthUser, *, today: date, display_tz: str) -> dict[str, Any] | None:
     """Та же сводка, что на главной (без новых расчётов)."""
     is_helper = current_user.role == UserRole.HELPER
-    show_studio = (not is_helper) and (UserRole.ADMIN_SUPER in current_user.roles)
+    is_self_scoped = current_user.role in (UserRole.MASTER, UserRole.HELPER)
+    # Как на главной: фонд студии не показываем в кабинете мастера (даже с ADMIN_SUPER).
+    show_studio = (
+        (not is_helper)
+        and (not is_self_scoped)
+        and (
+            UserRole.ADMIN_SUPER in current_user.roles
+            or UserRole.TECHSPEC in current_user.roles
+        )
+    )
     period_ctx = build_home_payroll_period_ctx(
         db,
         today=today,
