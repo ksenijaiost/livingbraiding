@@ -33,6 +33,7 @@ from app.db.models import (
 from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.hourly_help import hourly_help_rows_from_visit
 from app.notifications import process_outbox
+from app.notify_prefs import user_wants_staff_assignment
 from app.time_utils import utcnow_naive
 from app.visit_addon_sales import addon_sales_from_visit_json
 
@@ -141,7 +142,7 @@ def notify_staff_assigned_on_create(
         created: list[NotificationOutbox] = []
         for uid in unique_ids:
             user = db.get(User, uid)
-            if user is None or not bool(user.notify_enabled):
+            if user is None or not user_wants_staff_assignment(user, entity_type):
                 continue
             targets = _user_channel_targets(user)
             if not targets:

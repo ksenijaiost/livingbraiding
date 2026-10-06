@@ -189,8 +189,8 @@
           {% if user.telegram_chat_id %}подключён{% else %}не подключён{% endif %}
         </p>
         <p class="lb-mt-0">
-          <strong>Уведомления:</strong>
-          {% if user.notify_enabled %}включены{% else %}выключены{% endif %}
+          <strong>Типы уведомлений:</strong>
+          {{ notify_types_summary }}
         </p>
         <p class="lb-mt-0">
           <strong>Напоминания о записях:</strong>

@@ -21,6 +21,10 @@ from app.db.models import (
 from app.db.session import get_db
 from app.booking_reminders import get_effective_reminder_minutes, minutes_to_hours_label
 from app.forms_parse import parse_bool, parse_float
+from app.notify_prefs import (
+    apply_default_notify_prefs_for_new_user,
+    enabled_notify_types_summary,
+)
 from app.security import hash_password
 from app.user_roles import (
     get_roles_for_user,
@@ -263,6 +267,7 @@ async def admin_settings_staff_new_post(
     db.add(u)
     db.flush()
     set_user_roles(db, u, roles)
+    apply_default_notify_prefs_for_new_user(u, roles)
     rs = ",".join(sorted(r.value for r in roles))
     write_audit_rows(
         db,
@@ -325,6 +330,7 @@ def _staff_edit_ctx(
         info=info,
         audit_rows=_staff_edit_audit_rows(db, user.id),
         notify_reminders_summary=_staff_reminders_summary(db, user),
+        notify_types_summary=enabled_notify_types_summary(user, get_roles_for_user(db, user.id)),
     )
 
 

@@ -35,10 +35,10 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime, get_display_timezone
-from app.forms_parse import parse_bool
 from app.master_schedule import build_master_schedule_banner
 from app.notifications import send_telegram, send_vk
 from app.notify_link_flash import pop_notify_link_flash, set_notify_link_flash
+from app.notify_prefs import apply_notify_prefs_from_form, notify_prefs_for_ui
 from app.payroll_fund import (
     build_home_payroll_period_ctx,
     employee_fund_balance,
@@ -213,6 +213,7 @@ def _me_page_response(
         ]
 
     settings = get_settings()
+    notify_type_cols = notify_prefs_for_ui(u, roles)
     notify_channels = [
         {
             "id": "vk",
@@ -222,7 +223,6 @@ def _me_page_response(
             "connect_url": "/me/vk/connect",
             "disconnect_url": "/me/vk/disconnect",
             "test_url": "/me/vk/test",
-            "settings": {"bookings": bool(u.notify_enabled)},
         },
         {
             "id": "telegram",
@@ -232,9 +232,12 @@ def _me_page_response(
             "connect_url": "/me/telegram/connect",
             "disconnect_url": "/me/telegram/disconnect",
             "test_url": "/me/telegram/test",
-            "settings": {"bookings": bool(u.notify_enabled)},
         },
     ]
+    first_connected_notify_idx = next(
+        (i for i, ch in enumerate(notify_channels) if ch["connected"]),
+        None,
+    )
 
     # Сначала читаем flash из cookie (сброс cookie повесим на ответ шаблона).
     from starlette.responses import Response as StarletteResponse
@@ -277,7 +280,9 @@ def _me_page_response(
             upcoming=upcoming,
             is_master=is_master,
             notify_channels=notify_channels,
-            has_connected_notify_channel=any(ch["connected"] for ch in notify_channels),
+            notify_type_cols=notify_type_cols,
+            first_connected_notify_idx=first_connected_notify_idx,
+            has_connected_notify_channel=first_connected_notify_idx is not None,
             reminder_items=list_reminder_settings_for_ui(db, u),
             reminders_configured=bool(u.reminders_configured),
             reminder_max=MAX_REMINDERS_PER_USER,
@@ -459,22 +464,20 @@ async def me_notify_settings(
 ):
     u = _load_self_user(db, current_user.id)
     form = await request.form()
-    # Общий notify_enabled; галочки каналов — одно и то же значение.
-    new_notify = (
-        parse_bool(form.get("telegram_bookings"))
-        or parse_bool(form.get("vk_bookings"))
-        or parse_bool(form.get("notify_enabled"))
-    )
-    old = bool(u.notify_enabled)
-    u.notify_enabled = new_notify
-    if old != new_notify:
+    roles = get_roles_for_user(db, int(u.id))
+    old_enabled = bool(u.notify_enabled)
+    pref_changes = apply_notify_prefs_from_form(u, roles, form)
+    changes = [FieldChange(field, old, new) for field, old, new in pref_changes]
+    if old_enabled != bool(u.notify_enabled):
+        changes.append(FieldChange("notify_enabled", str(old_enabled), str(bool(u.notify_enabled))))
+    if changes:
         write_audit_rows(
             db,
             log_model=UserAuditLog,
             entity_field="user_id",
             entity_id=u.id,
             changed_by_user_id=current_user.id,
-            changes=[FieldChange("notify_enabled", str(old), str(new_notify))],
+            changes=changes,
         )
     db.commit()
     return RedirectResponse(url="/me?msg=notify_saved", status_code=303)

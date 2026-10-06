@@ -145,7 +145,15 @@ class User(Base):
     # Каналы уведомлений мастера (Telegram / VK); заполняются при привязке, отправка — отдельно.
     telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     vk_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Legacy/сводка: OR типов ниже; синхронизируется при сохранении prefs.
     notify_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notify_bookings: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notify_visit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notify_work: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notify_hourly_work: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notify_product_sale: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notify_consultation: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notify_work_plan: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # False = ещё не настраивал: эффективны дефолты 24ч и 2ч; True = брать строки user_reminder_settings.
     reminders_configured: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 

@@ -86,6 +86,8 @@ def _user(
     vk: int | None = None,
     notify: bool = True,
 ) -> User:
+    from app.notify_prefs import apply_notify_prefs_from_legacy_flag
+
     u = User(
         username=username,
         password_hash="x",
@@ -99,6 +101,8 @@ def _user(
     db.add(u)
     db.flush()
     db.add(UserRoleAssignment(user_id=u.id, role=role))
+    db.flush()
+    apply_notify_prefs_from_legacy_flag(u, [role], enabled=notify)
     db.flush()
     return u
 

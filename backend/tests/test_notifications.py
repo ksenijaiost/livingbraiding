@@ -53,6 +53,8 @@ def _clear_settings_cache():
 
 
 def _seed(db, *, tg: int | None = 111, vk: int | None = None, notify: bool = True):
+    from app.notify_prefs import apply_notify_prefs_from_legacy_flag
+
     u = User(
         username="m1",
         password_hash="x",
@@ -65,6 +67,8 @@ def _seed(db, *, tg: int | None = 111, vk: int | None = None, notify: bool = Tru
     )
     c = Client(name="Клиент Катя", phone="+79990001111", is_confirmed=True)
     db.add_all([u, c])
+    db.flush()
+    apply_notify_prefs_from_legacy_flag(u, [UserRole.MASTER], enabled=notify)
     db.commit()
     db.refresh(u)
     db.refresh(c)

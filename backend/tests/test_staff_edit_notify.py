@@ -59,6 +59,8 @@ def _seed_user(
     vk_user_id: int | None = None,
     reminders_configured: bool = False,
 ) -> User:
+    from app.notify_prefs import apply_notify_prefs_from_legacy_flag
+
     u = User(
         username=username,
         password_hash=hash_password("secret1"),
@@ -73,6 +75,8 @@ def _seed_user(
     db.add(u)
     db.flush()
     db.add(UserRoleAssignment(user_id=u.id, role=role))
+    db.flush()
+    apply_notify_prefs_from_legacy_flag(u, [role], enabled=notify_enabled)
     db.commit()
     db.refresh(u)
     return u
@@ -113,6 +117,7 @@ def test_staff_edit_page_opens_notify_info_only(memory_db) -> None:
         r = client.get(f"/admin/settings/staff/{master.id}/edit", follow_redirects=False)
         assert r.status_code == 200
         assert "Уведомления" in r.text
+        assert "Типы уведомлений:" in r.text
         assert "Telegram:</strong>" in r.text or "<strong>Telegram:</strong>" in r.text
         assert "подключён" in r.text
         assert "не подключён" in r.text

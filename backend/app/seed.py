@@ -97,6 +97,22 @@ def _ensure_demo_user_role_assignments(db: Session) -> None:
         set_user_roles(db, u, roles)
 
 
+def _ensure_demo_notify_prefs(db: Session) -> None:
+    """Если prefs ещё пустые (create_all без миграции) — заполнить от notify_enabled и ролей."""
+    from app.notify_prefs import (
+        NOTIFY_TYPE_KEYS,
+        apply_notify_prefs_from_legacy_flag,
+        get_notify_pref,
+    )
+    from app.user_roles import get_roles_for_user
+
+    for u in db.scalars(select(User)).all():
+        if any(get_notify_pref(u, k) for k in NOTIFY_TYPE_KEYS):
+            continue
+        roles = get_roles_for_user(db, int(u.id)) or [u.role]
+        apply_notify_prefs_from_legacy_flag(u, roles, enabled=bool(u.notify_enabled))
+
+
 def ensure_seed_data(db: Session) -> None:
     """
     Legacy entrypoint (kept for compatibility).
@@ -213,6 +229,7 @@ def ensure_dev_seed_data(db: Session) -> None:
 
     db.flush()
     _ensure_demo_user_role_assignments(db)
+    _ensure_demo_notify_prefs(db)
 
     # Service catalogs + kits + derived price lists in catalog_products
     _ensure_vsy_golova_catalog_and_kits(db, include_demo_kits=True)

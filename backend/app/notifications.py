@@ -378,7 +378,9 @@ def enqueue_master_booking_notifications(
         user = db.get(User, uid)
         if user is None:
             continue
-        if not bool(user.notify_enabled):
+        from app.notify_prefs import user_wants_booking_notifications
+
+        if not user_wants_booking_notifications(user):
             continue
 
         channel_targets: list[tuple[NotificationChannel, int]] = []

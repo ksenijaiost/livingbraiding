@@ -53,6 +53,8 @@ def memory_db():
 
 
 def _seed_master(db, *, username: str = "m1", tg: int | None = 100, vk: int | None = None, notify: bool = True):
+    from app.notify_prefs import apply_notify_prefs_from_legacy_flag
+
     u = User(
         username=username,
         password_hash="x",
@@ -66,6 +68,8 @@ def _seed_master(db, *, username: str = "m1", tg: int | None = 100, vk: int | No
     )
     c = Client(name="Клиент", phone=f"+7999{abs(hash(username)) % 10000000:07d}", is_confirmed=True)
     db.add_all([u, c])
+    db.flush()
+    apply_notify_prefs_from_legacy_flag(u, [UserRole.MASTER], enabled=notify)
     db.commit()
     db.refresh(u)
     db.refresh(c)
