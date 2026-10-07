@@ -8,6 +8,7 @@ from app.setting_keys import (
     AUDIT_RETENTION_MONTHS,
     CALENDAR_DISPLAY_HOUR_FROM,
     CALENDAR_DISPLAY_HOUR_TO,
+    CLIENT_NOTIFY_SERVICES_MARKER,
     DISPLAY_TIMEZONE,
     EDIT_WINDOW_DAYS,
     KIT_MAX_RESERVES_PER_KIT,
@@ -278,6 +279,7 @@ SETTING_KEY_LABELS: dict[str, str] = {
     EDIT_WINDOW_DAYS: "Окно редактирования (дней)",
     AUDIT_RETENTION_MONTHS: "Хранение аудита (мес.)",
     DISPLAY_TIMEZONE: "Часовой пояс",
+    CLIENT_NOTIFY_SERVICES_MARKER: "Маркер списка услуг (уведомления клиентам)",
 }
 
 _JSON_FIELD_NAMES = frozenset(

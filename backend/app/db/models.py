@@ -329,6 +329,30 @@ class Client(Base):
     )
 
 
+class ClientNotificationRuleKind(str, enum.Enum):
+    BEFORE_BOOKING = "before_booking"
+    AFTER_BOOKING = "after_booking"
+
+
+class ClientNotificationRule(Base):
+    """Глобальные правила уведомлений клиентам (перед/после записи). Отправка — отдельным шагом."""
+
+    __tablename__ = "client_notification_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[ClientNotificationRuleKind] = mapped_column(
+        Enum(ClientNotificationRuleKind, native_enum=False, length=32),
+        nullable=False,
+        index=True,
+    )
+    hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    template: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ClientThermoTemplate(Base):
     """Сохранённый шаблон термозамещения клиента (для выбора «Старый» во визите)."""
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from types import SimpleNamespace
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -33,6 +33,7 @@ from app.db.models import (
     BookingStatus,
     Client,
     ClientAuditLog,
+    ClientNotificationRuleKind,
     ClientThermoTemplate,
     UserRole,
     Visit,
@@ -57,6 +58,21 @@ from app.client_status import (
     parse_client_status,
     status_hint,
     status_label,
+)
+from app.client_notifications import (
+    DEFAULT_AFTER_TEMPLATE,
+    DEFAULT_BEFORE_TEMPLATE,
+    KIND_AFTER,
+    KIND_BEFORE,
+    add_rule,
+    delete_rule,
+    ensure_default_rules,
+    get_services_marker,
+    move_rule,
+    parse_rule_hours,
+    rules_for_ui,
+    save_rules_from_form,
+    set_services_marker,
 )
 from app.db.session import get_db
 from app.display_time import get_display_timezone
@@ -317,6 +333,177 @@ def admin_clients_stats(
             cards=cards,
         ),
     )
+
+
+def _client_notifications_page(
+    request: Request,
+    *,
+    current_user: AuthUser,
+    db: Session,
+    error: str | None = None,
+    info: str | None = None,
+):
+    # Дефолты только при совсем пустой таблице (первый заход), не после ручной очистки.
+    if ensure_default_rules(db):
+        db.commit()
+    rules = rules_for_ui(db)
+    return templates.TemplateResponse(
+        "admin_client_notifications.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            before_rules=rules["before"],
+            after_rules=rules["after"],
+            services_marker=get_services_marker(db),
+            error=error,
+            info=info,
+        ),
+    )
+
+
+@router.get("/notifications", response_class=HTMLResponse)
+def admin_client_notifications(
+    request: Request,
+    msg: str | None = None,
+    err: str | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    error = None
+    info = None
+    if err == "invalid":
+        error = "Проверьте часы и текст шаблона."
+    elif err == "marker":
+        error = "Маркер списка услуг задан некорректно."
+    elif err == "missing":
+        error = "Правило не найдено."
+    elif err == "limit":
+        error = "Достигнут лимит правил этого типа."
+    elif msg == "saved":
+        info = "Настройки уведомлений сохранены."
+    elif msg == "added":
+        info = "Правило добавлено."
+    elif msg == "deleted":
+        info = "Правило удалено."
+    elif msg == "moved":
+        info = "Порядок обновлён."
+    # произвольное сообщение из query (валидация)
+    if err and err not in ("invalid", "marker", "missing", "limit") and error is None:
+        error = err
+    return _client_notifications_page(
+        request, current_user=current_user, db=db, error=error, info=info
+    )
+
+
+@router.post("/notifications/save")
+async def admin_client_notifications_save(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        set_services_marker(db, str(form.get("services_marker") or ""), user_id=current_user.id)
+        before_ids = form.getlist("before_id") if hasattr(form, "getlist") else []
+        before_hours = form.getlist("before_hours") if hasattr(form, "getlist") else []
+        before_templates = form.getlist("before_template") if hasattr(form, "getlist") else []
+        before_enabled = [
+            "1" if form.get(f"before_enabled_{rid}") else "0" for rid in before_ids
+        ]
+        save_rules_from_form(
+            db,
+            kind=KIND_BEFORE,
+            ids=before_ids,
+            hours_list=before_hours,
+            templates=before_templates,
+            enabled_flags=before_enabled,
+        )
+        after_ids = form.getlist("after_id") if hasattr(form, "getlist") else []
+        after_hours = form.getlist("after_hours") if hasattr(form, "getlist") else []
+        after_templates = form.getlist("after_template") if hasattr(form, "getlist") else []
+        after_enabled = [
+            "1" if form.get(f"after_enabled_{rid}") else "0" for rid in after_ids
+        ]
+        save_rules_from_form(
+            db,
+            kind=KIND_AFTER,
+            ids=after_ids,
+            hours_list=after_hours,
+            templates=after_templates,
+            enabled_flags=after_enabled,
+        )
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        msg = str(e) or "invalid"
+        if "Маркер" in msg:
+            return RedirectResponse(url="/clients/notifications?err=marker", status_code=303)
+        return RedirectResponse(
+            url=f"/clients/notifications?err={quote(msg)}",
+            status_code=303,
+        )
+    return RedirectResponse(url="/clients/notifications?msg=saved", status_code=303)
+
+
+@router.post("/notifications/add")
+async def admin_client_notifications_add(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    kind_raw = str(form.get("kind") or "").strip()
+    try:
+        kind = ClientNotificationRuleKind(kind_raw)
+    except ValueError:
+        return RedirectResponse(url="/clients/notifications?err=invalid", status_code=303)
+    try:
+        hours = parse_rule_hours(form.get("hours"), kind=kind)
+        template = DEFAULT_BEFORE_TEMPLATE if kind == KIND_BEFORE else DEFAULT_AFTER_TEMPLATE
+        add_rule(db, kind=kind, hours=hours, template=template)
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        msg = str(e) or "invalid"
+        if "Не больше" in msg:
+            return RedirectResponse(url="/clients/notifications?err=limit", status_code=303)
+        return RedirectResponse(
+            url=f"/clients/notifications?err={quote(msg)}",
+            status_code=303,
+        )
+    return RedirectResponse(url="/clients/notifications?msg=added", status_code=303)
+
+
+@router.post("/notifications/delete")
+async def admin_client_notifications_delete(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        delete_rule(db, int(str(form.get("rule_id") or "0")))
+        db.commit()
+    except (ValueError, TypeError):
+        db.rollback()
+        return RedirectResponse(url="/clients/notifications?err=missing", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=deleted", status_code=303)
+
+
+@router.post("/notifications/move")
+async def admin_client_notifications_move(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        move_rule(db, int(str(form.get("rule_id") or "0")), direction=str(form.get("direction") or ""))
+        db.commit()
+    except (ValueError, TypeError):
+        db.rollback()
+        return RedirectResponse(url="/clients/notifications?err=missing", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=moved", status_code=303)
 
 
 @router.get("/stats/retention", response_class=HTMLResponse)

@@ -248,3 +248,9 @@ python -m app.process_notification_outbox --limit 100 --max-attempts 5
 Тот же вызов: `bash scripts/process_notification_outbox.sh`.
 
 После лимита попыток статус остаётся `failed`, воркер больше не трогает запись. Ручной повтор — кнопка «Повторить» на `/admin/notification-outbox` (суперадмин / техспец).
+
+### Уведомления клиентам (настройки)
+
+Страница **Клиенты → Уведомления и рассылки** (`/clients/notifications`): правила «перед записью» / «после записи» и маркер списка услуг (`settings.client_notify_services_marker`, по умолчанию `•`).
+
+При первой загрузке пустой таблицы `client_notification_rules` создаются дефолты: before 24 ч и 2 ч (шаблон с `{{name}}` / `{{date_text}}` / …), after 0 ч («Спасибо, что были у нас!»). Отправка клиентам и outbox — отдельный шаг; блок «Рассылки» пока заглушка.

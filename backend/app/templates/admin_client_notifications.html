@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block help_page_id %}clients_notifications{% endblock %}
+{% block content %}
+  <div class="card">
+    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <h2 style="margin-top: 0;">Уведомления и рассылки</h2>
+      <a href="/clients"><button type="button" class="secondary">К списку клиентов</button></a>
+    </div>
+    <p class="muted" style="margin-top:0;">
+      Глобальные настройки напоминаний клиентам о записях. Отправка сообщений будет подключена отдельно.
+    </p>
+
+    {% if error %}
+      <p style="color:#b91c1c;">{{ error }}</p>
+    {% endif %}
+    {% if info %}
+      <p style="color:#15803d;">{{ info }}</p>
+    {% endif %}
+
+    <h3 class="section-title">Уведомления</h3>
+
+    <form method="post" action="/clients/notifications/save" style="margin-bottom:20px;"
+          onsubmit="this.querySelector('button[type=submit]').disabled=true;">
+      <div style="margin-bottom:14px;">
+        <label class="label-sub">Маркер списка услуг <span class="muted">(для {{ "{{services}}" }})</span></label>
+        <input name="services_marker" maxlength="20" value="{{ services_marker }}" style="width:4rem;" />
+      </div>
+
+      <h4 style="margin:16px 0 8px; font-size:1rem;">Перед записью</h4>
+      <p class="muted" style="font-size:12px; margin:0 0 10px;">
+        За сколько часов до <code>planned_date</code> брони отправить напоминание (целое число &gt; 0).
+      </p>
+      {% if before_rules %}
+        <div class="lb-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="lb-nowrap">Часы</th>
+                <th>Шаблон</th>
+                <th class="lb-nowrap">Вкл.</th>
+                <th class="lb-nowrap"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in before_rules %}
+                <tr>
+                  <td>
+                    <input type="hidden" name="before_id" value="{{ r.id }}" />
+                    <input type="number" name="before_hours" min="1" max="720" step="1" value="{{ r.hours }}"
+                           style="width:5rem;" required />
+                  </td>
+                  <td>
+                    <textarea name="before_template" rows="5" style="width:100%; min-width:16rem;" required>{{ r.template }}</textarea>
+                  </td>
+                  <td style="text-align:center;">
+                    <input type="checkbox" name="before_enabled_{{ r.id }}" value="1"
+                           {% if r.is_enabled %}checked{% endif %} />
+                  </td>
+                  <td class="lb-nowrap">
+                    <button type="submit" class="secondary" formaction="/clients/notifications/move"
+                            name="rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="this.form.direction.value='up';">↑</button>
+                    <button type="submit" class="secondary" formaction="/clients/notifications/move"
+                            name="rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="this.form.direction.value='down';">↓</button>
+                    <button type="submit" class="secondary" formaction="/clients/notifications/delete"
+                            name="rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="return confirm('Удалить это правило?');">Удалить</button>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">Правил пока нет.</p>
+      {% endif %}
+
+      <h4 style="margin:20px 0 8px; font-size:1rem;">После записи</h4>
+      <p class="muted" style="font-size:12px; margin:0 0 10px;">
+        Через сколько часов после начала записи (<code>planned_date</code>).
+        <strong>0</strong> = сразу в момент начала. Переменные в шаблоне пока не подставляются.
+      </p>
+      {% if after_rules %}
+        <div class="lb-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="lb-nowrap">Часы</th>
+                <th>Шаблон</th>
+                <th class="lb-nowrap">Вкл.</th>
+                <th class="lb-nowrap"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in after_rules %}
+                <tr>
+                  <td>
+                    <input type="hidden" name="after_id" value="{{ r.id }}" />
+                    <input type="number" name="after_hours" min="0" max="720" step="1" value="{{ r.hours }}"
+                           style="width:5rem;" required />
+                  </td>
+                  <td>
+                    <textarea name="after_template" rows="3" style="width:100%; min-width:16rem;" required>{{ r.template }}</textarea>
+                  </td>
+                  <td style="text-align:center;">
+                    <input type="checkbox" name="after_enabled_{{ r.id }}" value="1"
+                           {% if r.is_enabled %}checked{% endif %} />
+                  </td>
+                  <td class="lb-nowrap">
+                    <button type="submit" class="secondary" formaction="/clients/notifications/move"
+                            name="rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="this.form.direction.value='up';">↑</button>
+                    <button type="submit" class="secondary" formaction="/clients/notifications/move"
+                            name="rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="this.form.direction.value='down';">↓</button>
+                    <button type="submit" class="secondary" formaction="/clients/notifications/delete"
+                            name="rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="return confirm('Удалить это правило?');">Удалить</button>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">Правил пока нет.</p>
+      {% endif %}
+
+      <input type="hidden" name="direction" value="" />
+      <div style="margin-top:14px;">
+        <button type="submit">Сохранить</button>
+      </div>
+    </form>
+
+    <div style="display:flex; flex-wrap:wrap; gap:16px; margin-bottom:16px;">
+      <form method="post" action="/clients/notifications/add" style="margin:0;"
+            onsubmit="this.querySelector('button').disabled=true;">
+        <input type="hidden" name="kind" value="before_booking" />
+        <label class="label-sub">Добавить перед записью</label>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <input type="number" name="hours" min="1" max="720" step="1" value="24" style="width:5rem;" />
+          <span class="muted">ч</span>
+          <button type="submit">Добавить</button>
+        </div>
+      </form>
+      <form method="post" action="/clients/notifications/add" style="margin:0;"
+            onsubmit="this.querySelector('button').disabled=true;">
+        <input type="hidden" name="kind" value="after_booking" />
+        <label class="label-sub">Добавить после записи</label>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <input type="number" name="hours" min="0" max="720" step="1" value="0" style="width:5rem;" />
+          <span class="muted">ч</span>
+          <button type="submit">Добавить</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card" style="background:#fafafa; margin:0;">
+      <p style="margin:0 0 6px; font-weight:600; font-size:13px;">Переменные шаблона (только «Перед записью»)</p>
+      <ul class="muted" style="margin:0; padding-left:1.2rem; font-size:12px; line-height:1.5;">
+        <li><code>{{ "{{date}}" }}</code> — дата <code>ДД.ММ.ГГГГ</code></li>
+        <li><code>{{ "{{time}}" }}</code> — время <code>ЧЧ:ММ</code></li>
+        <li><code>{{ "{{datetime}}" }}</code> — <code>ДД.ММ.ГГГГ ЧЧ:ММ</code></li>
+        <li><code>{{ "{{date_text}}" }}</code> — дата словами, напр. <code>16 сентября</code></li>
+        <li><code>{{ "{{weekday}}" }}</code> — день недели, напр. <code>среда</code></li>
+        <li><code>{{ "{{name}}" }}</code> — имя клиента</li>
+        <li><code>{{ "{{services}}" }}</code> — услуги с новой строки и маркером</li>
+        <li><code>{{ "{{masters}}" }}</code> — мастера через запятую</li>
+      </ul>
+      <p class="muted" style="margin:8px 0 0; font-size:12px;">
+        Неизвестные <code>{{ "{{…}}" }}</code> остаются в тексте без изменений. Время — по часовому поясу студии, начало брони = <code>bookings.planned_date</code>.
+      </p>
+    </div>
+
+    <h3 class="section-title" style="margin-top:28px;">Рассылки</h3>
+    <p class="muted">Раздел в разработке.</p>
+  </div>
+{% endblock %}
