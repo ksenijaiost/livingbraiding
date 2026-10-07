@@ -298,6 +298,10 @@ class Client(Base):
     vk: Mapped[str | None] = mapped_column(String(120), nullable=True)
     instagram: Mapped[str | None] = mapped_column(String(120), nullable=True)
     other_contact: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Числовые ID мессенджеров для будущих уведомлений (не путать со строковыми контактами выше).
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
+    vk_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
+    max_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
     age_group: Mapped[ClientAgeGroup | None] = mapped_column(
         Enum(ClientAgeGroup, values_callable=_enum_values),
         nullable=True,

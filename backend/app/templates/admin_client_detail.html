@@ -113,6 +113,14 @@
       <tr><th>ВКонтакте</th><td>{{ client.vk or "—" }}</td></tr>
       <tr><th>Instagram</th><td>{{ client.instagram or "—" }}</td></tr>
       <tr><th>Другой контакт</th><td>{{ client.other_contact or "—" }}</td></tr>
+      <tr>
+        <th>Каналы уведомлений</th>
+        <td class="muted" style="font-size:13px;">
+          <div>VK: {% if client.vk_user_id %}ID {{ client.vk_user_id }}{% else %}не привязан{% endif %}</div>
+          <div>Max: {% if client.max_user_id %}ID {{ client.max_user_id }}{% else %}не привязан{% endif %}</div>
+          <div>Telegram: {% if client.telegram_chat_id %}ID {{ client.telegram_chat_id }}{% else %}не привязан{% endif %}</div>
+        </td>
+      </tr>
       <tr><th>Возрастная группа</th><td>{{ age_group_label }}</td></tr>
       <tr><th>День рождения</th><td>{{ birth_display }}</td></tr>
       <tr><th>Источник</th><td>{{ client.source or "—" }}</td></tr>
