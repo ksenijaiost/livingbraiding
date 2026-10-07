@@ -219,21 +219,27 @@ class UserAuditLog(Base):
 
 
 class TelegramLinkToken(Base):
-    """Одноразовый код привязки Telegram/VK; в БД хранится хеш. channel: telegram|vk."""
+    """Одноразовый код привязки канала; хеш в БД. Ровно один из user_id / client_id."""
 
     __tablename__ = "telegram_link_tokens"
     __table_args__ = (UniqueConstraint("token_hash", name="uq_telegram_link_tokens_hash"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    client_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    # telegram | vk — один механизм, разные deep link / вебхуки
+    # telegram | vk | max
     channel: Mapped[str] = mapped_column(String(16), nullable=False, default="telegram", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
+    client: Mapped["Client | None"] = relationship(foreign_keys=[client_id])
 
 
 class NotificationChannel(str, enum.Enum):
@@ -249,8 +255,14 @@ class NotificationOutboxStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class NotificationOutboxTargetKind(str, enum.Enum):
+    USER = "user"
+    CLIENT = "client"
+    ADMIN_CHAT = "admin_chat"
+
+
 class NotificationOutbox(Base):
-    """Очередь исходящих уведомлений мастерам (VK / Max / Telegram). Отправка — отдельным воркером."""
+    """Очередь исходящих уведомлений (мастер / клиент / чат админов)."""
 
     __tablename__ = "notification_outbox"
     __table_args__ = (
@@ -258,13 +270,16 @@ class NotificationOutbox(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True, index=True)
+    # user | client | admin_chat
+    target_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True, index=True)
     channel: Mapped[NotificationChannel] = mapped_column(
         Enum(NotificationChannel, native_enum=False, length=16),
         nullable=False,
     )
-    # booking_created | booking_updated | booking_cancelled (и др. позже)
+    # booking_created | client_booking_reminder | booking_client_cancel_request | …
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[NotificationOutboxStatus] = mapped_column(
@@ -274,15 +289,14 @@ class NotificationOutbox(Base):
         index=True,
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Уникальный ключ: event_type + booking_id + channel + версия события — без повторной отправки.
     dedupe_key: Mapped[str] = mapped_column(String(200), nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Захват воркером (status=sending); просроченный locked_at можно перехватить снова.
     locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
+    client: Mapped["Client | None"] = relationship(foreign_keys=[client_id])
     booking: Mapped["Booking | None"] = relationship(foreign_keys=[booking_id])
 
 
@@ -335,7 +349,7 @@ class ClientNotificationRuleKind(str, enum.Enum):
 
 
 class ClientNotificationRule(Base):
-    """Глобальные правила уведомлений клиентам (перед/после записи). Отправка — отдельным шагом."""
+    """Глобальные правила уведомлений клиентам (перед/после записи)."""
 
     __tablename__ = "client_notification_rules"
 
@@ -351,6 +365,49 @@ class ClientNotificationRule(Base):
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ClientNotificationSend(Base):
+    """Журнал успешно отправленных клиентских уведомлений (для «последнего напоминания»)."""
+
+    __tablename__ = "client_notification_sends"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False, index=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id"), nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("client_notification_rules.id"), nullable=True)
+    outbox_id: Mapped[int | None] = mapped_column(ForeignKey("notification_outbox.id"), nullable=True)
+    target_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class AdminChatTarget(Base):
+    """Общий чат админов по каналу (один chat_id на канал)."""
+
+    __tablename__ = "admin_chat_targets"
+    __table_args__ = (UniqueConstraint("channel", name="uq_admin_chat_targets_channel"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    linked_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class AdminChatLinkToken(Base):
+    """Одноразовый код привязки чата админов (/admins <код>)."""
+
+    __tablename__ = "admin_chat_link_tokens"
+    __table_args__ = (UniqueConstraint("token_hash", name="uq_admin_chat_link_tokens_hash"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class ClientThermoTemplate(Base):
@@ -837,6 +894,12 @@ class Booking(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     cancelled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Ответ клиента в мессенджере (1 = подтвердил, 3 = просит отменить; бронь не отменяется автоматически).
+    client_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_confirmed_via: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    client_cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_cancel_requested_via: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     quoted_price_text: Mapped[str | None] = mapped_column(String(120), nullable=True)
     deposit_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)

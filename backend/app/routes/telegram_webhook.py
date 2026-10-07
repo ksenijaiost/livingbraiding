@@ -1,4 +1,4 @@
-"""Уведомления: вебхук Telegram (привязка аккаунта, без логина CRM)."""
+"""Вебхук Telegram: привязка сотрудника/клиента, /admins, ответы 1/3."""
 
 from __future__ import annotations
 
@@ -9,14 +9,20 @@ from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
+from app.admin_chat import try_bind_admin_chat_from_text
 from app.db.session import get_db
+from app.messenger_inbound import process_inbound_message
 from app.notifications import send_telegram
 from app.settings import get_settings
 from app.telegram_link import (
+    CHANNEL_TELEGRAM,
+    MSG_CLIENT_LINKED_OK,
     MSG_LINK_INVALID,
     MSG_LINKED_OK,
+    ClientChannelTakenError,
+    bind_client_telegram,
     bind_telegram_chat,
-    consume_telegram_link_token,
+    consume_any_link_token,
     parse_telegram_start_code,
 )
 
@@ -57,26 +63,69 @@ async def telegram_webhook(
             return JSONResponse({"ok": True})
         chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}
         chat_id = chat.get("id")
-        text = message.get("text")
-        code = parse_telegram_start_code(text if isinstance(text, str) else None)
-        if code is None or chat_id is None:
+        text = message.get("text") if isinstance(message.get("text"), str) else None
+        if chat_id is None:
+            return JSONResponse({"ok": True})
+        chat_type = str(chat.get("type") or "").strip().lower()
+        title = chat.get("title") if isinstance(chat.get("title"), str) else None
+
+        # Группа: привязка чата админов
+        if chat_type in ("group", "supergroup"):
+            reply = try_bind_admin_chat_from_text(
+                db,
+                channel=CHANNEL_TELEGRAM,
+                chat_id=int(chat_id),
+                text=text,
+                title=title,
+            )
+            if reply:
+                try:
+                    send_telegram(int(chat_id), reply)
+                except Exception:
+                    logger.exception("telegram webhook: admin chat reply failed")
             return JSONResponse({"ok": True})
 
-        user = consume_telegram_link_token(db, code)
-        if user is None:
-            db.commit()
+        # Личка: код привязки /start
+        code = parse_telegram_start_code(text)
+        if code is not None:
+            user, client = consume_any_link_token(db, code, channel=CHANNEL_TELEGRAM)
+            if user is None and client is None:
+                db.commit()
+                try:
+                    send_telegram(int(chat_id), MSG_LINK_INVALID)
+                except Exception:
+                    logger.exception("telegram webhook: reply invalid failed")
+                return JSONResponse({"ok": True})
+            if user is not None:
+                bind_telegram_chat(db, user, int(chat_id))
+                db.commit()
+                try:
+                    send_telegram(int(chat_id), MSG_LINKED_OK)
+                except Exception:
+                    logger.exception("telegram webhook: reply ok failed")
+                return JSONResponse({"ok": True})
             try:
-                send_telegram(int(chat_id), MSG_LINK_INVALID)
-            except Exception:
-                logger.exception("telegram webhook: reply invalid failed chat_id=%s", chat_id)
+                bind_client_telegram(db, client, int(chat_id))
+                db.commit()
+                try:
+                    send_telegram(int(chat_id), MSG_CLIENT_LINKED_OK)
+                except Exception:
+                    logger.exception("telegram webhook: client reply ok failed")
+            except ClientChannelTakenError as e:
+                db.rollback()
+                try:
+                    send_telegram(int(chat_id), str(e))
+                except Exception:
+                    logger.exception("telegram webhook: client taken reply failed")
             return JSONResponse({"ok": True})
 
-        bind_telegram_chat(db, user, int(chat_id))
-        db.commit()
-        try:
-            send_telegram(int(chat_id), MSG_LINKED_OK)
-        except Exception:
-            logger.exception("telegram webhook: reply ok failed chat_id=%s", chat_id)
+        # Ответ клиента 1/3
+        from_user = message.get("from") if isinstance(message.get("from"), dict) else {}
+        from_id = from_user.get("id")
+        messenger_id = int(from_id) if from_id is not None else int(chat_id)
+        process_inbound_message(
+            db, channel=CHANNEL_TELEGRAM, messenger_id=messenger_id, text=text
+        )
     except Exception:
         logger.exception("telegram webhook: handler error")
         try:

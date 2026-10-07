@@ -115,10 +115,35 @@
       <tr><th>Другой контакт</th><td>{{ client.other_contact or "—" }}</td></tr>
       <tr>
         <th>Каналы уведомлений</th>
-        <td class="muted" style="font-size:13px;">
-          <div>VK: {% if client.vk_user_id %}ID {{ client.vk_user_id }}{% else %}не привязан{% endif %}</div>
-          <div>Max: {% if client.max_user_id %}ID {{ client.max_user_id }}{% else %}не привязан{% endif %}</div>
-          <div>Telegram: {% if client.telegram_chat_id %}ID {{ client.telegram_chat_id }}{% else %}не привязан{% endif %}</div>
+        <td style="font-size:13px;">
+          <div class="muted">
+            <div>VK: {% if client.vk_user_id %}ID {{ client.vk_user_id }}{% else %}не привязан{% endif %}</div>
+            <div>Max: {% if client.max_user_id %}ID {{ client.max_user_id }}{% else %}не привязан{% endif %}</div>
+            <div>Telegram: {% if client.telegram_chat_id %}ID {{ client.telegram_chat_id }}{% else %}не привязан{% endif %}</div>
+          </div>
+          {% if show_admin_actions %}
+            <form method="post" action="/clients/{{ client.id }}/channel-link" style="margin:10px 0 0;"
+                  onsubmit="this.querySelector('button').disabled=true;">
+              <label class="label-sub">Ссылка для привязки</label>
+              <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+                <select name="channel">
+                  <option value="vk">VK</option>
+                  <option value="max">Max</option>
+                  <option value="telegram">Telegram</option>
+                </select>
+                <button type="submit" class="secondary">Создать ссылку</button>
+              </div>
+            </form>
+            {% if channel_link %}
+              <p style="background:#eff6ff;border:1px solid #bfdbfe;padding:8px 10px;border-radius:8px;margin:8px 0 0;">
+                <strong>{{ channel_link.label }}</strong>
+                {% if channel_link.deep_link %}
+                  <div style="word-break:break-all;"><a href="{{ channel_link.deep_link }}" target="_blank" rel="noopener">{{ channel_link.deep_link }}</a></div>
+                {% endif %}
+                <div class="muted" style="font-size:12px;">код: <code style="user-select:all;">{{ channel_link.code }}</code> (24 ч)</div>
+              </p>
+            {% endif %}
+          {% endif %}
         </td>
       </tr>
       <tr><th>Возрастная группа</th><td>{{ age_group_label }}</td></tr>

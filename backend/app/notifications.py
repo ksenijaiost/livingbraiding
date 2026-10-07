@@ -440,10 +440,12 @@ def enqueue_master_booking_notifications(
 
 def send_telegram(chat_id: int, text: str) -> None:
     """Отправить сообщение через Telegram Bot API. При ошибке — исключение."""
-    token = (get_settings().telegram_bot_token or "").strip()
+    settings = get_settings()
+    token = (settings.telegram_bot_token or "").strip()
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN не задан")
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    base = (settings.telegram_api_base or "https://api.telegram.org").rstrip("/")
+    url = f"{base}/bot{token}/sendMessage"
     body = urllib.parse.urlencode(
         {
             "chat_id": str(chat_id),
@@ -472,14 +474,25 @@ def send_telegram(chat_id: int, text: str) -> None:
 MAX_HTTP_TIMEOUT_SEC = 8
 
 
-def send_max(user_id: int, text: str) -> None:
-    """Отправка в Max (POST /messages?user_id=). Без токена — «Max не настроен»."""
+def send_max(
+    user_id: int | None = None,
+    text: str = "",
+    *,
+    chat_id: int | None = None,
+) -> None:
+    """Отправка в Max: user_id (личка) или chat_id (группа). Без токена — «Max не настроен»."""
     settings = get_settings()
     token = (settings.max_bot_token or "").strip()
     if not token:
         raise RuntimeError("Max не настроен")
+    if chat_id is not None:
+        qs = f"chat_id={int(chat_id)}"
+    elif user_id is not None:
+        qs = f"user_id={int(user_id)}"
+    else:
+        raise RuntimeError("Max: нужен user_id или chat_id")
     base = (settings.max_api_base or "https://platform-api2.max.ru").rstrip("/")
-    url = f"{base}/messages?user_id={int(user_id)}"
+    url = f"{base}/messages?{qs}"
     body = json.dumps({"text": text}, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -511,19 +524,29 @@ def send_max(user_id: int, text: str) -> None:
         raise RuntimeError(str(data.get("error") or raw[:200]))
 
 
-def send_vk(user_id: int, text: str) -> None:
-    """Отправка во VK (messages.send). Без токена — «VK не настроен»; таймаут 5 с."""
+def send_vk(
+    user_id: int | None = None,
+    text: str = "",
+    *,
+    peer_id: int | None = None,
+) -> None:
+    """Отправка во VK (messages.send): user_id или peer_id беседы."""
     settings = get_settings()
     token = (settings.vk_group_token or "").strip()
     if not token:
         raise RuntimeError("VK не настроен")
-    params = {
-        "user_id": str(int(user_id)),
+    params: dict[str, str] = {
         "message": text,
         "random_id": str(random.randint(1, 2_147_483_647)),
         "access_token": token,
         "v": settings.vk_api_version or "5.199",
     }
+    if peer_id is not None:
+        params["peer_id"] = str(int(peer_id))
+    elif user_id is not None:
+        params["user_id"] = str(int(user_id))
+    else:
+        raise RuntimeError("VK: нужен user_id или peer_id")
     # Не логируем URL с access_token.
     url = "https://api.vk.com/method/messages.send?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, method="GET")
@@ -611,14 +634,50 @@ def _send_outbox_row(row: NotificationOutbox) -> None:
     if target is None:
         raise RuntimeError("Нет target_id в payload_json")
     target_id = int(target)
+    kind = (payload.get("target_kind") or row.target_kind or "user").strip().lower()
     if row.channel == NotificationChannel.TELEGRAM:
         send_telegram(target_id, text)
     elif row.channel == NotificationChannel.VK:
-        send_vk(target_id, text)
+        if kind == "admin_chat":
+            send_vk(text=text, peer_id=target_id)
+        else:
+            send_vk(target_id, text)
     elif row.channel == NotificationChannel.MAX:
-        send_max(target_id, text)
+        if kind == "admin_chat":
+            send_max(text=text, chat_id=target_id)
+        else:
+            send_max(target_id, text)
     else:
         raise RuntimeError(f"Неизвестный канал: {row.channel}")
+
+
+def _record_client_send_if_needed(db: Session, row: NotificationOutbox) -> None:
+    """После успешной отправки клиенту — строка в client_notification_sends."""
+    if (row.target_kind or "user") != "client" or row.client_id is None:
+        return
+    if row.event_type not in (
+        "client_booking_reminder",
+        "client_after_booking",
+    ):
+        return
+    payload = _parse_payload(row)
+    target = payload.get("target_id")
+    if target is None:
+        return
+    from app.db.models import ClientNotificationSend
+
+    db.add(
+        ClientNotificationSend(
+            client_id=int(row.client_id),
+            booking_id=int(row.booking_id) if row.booking_id is not None else 0,
+            channel=row.channel.value if hasattr(row.channel, "value") else str(row.channel),
+            event_type=str(row.event_type),
+            rule_id=int(payload["rule_id"]) if payload.get("rule_id") is not None else None,
+            outbox_id=int(row.id) if row.id is not None else None,
+            target_id=int(target),
+            sent_at=utcnow_naive(),
+        )
+    )
 
 
 def _eligible_outbox_clause(
@@ -762,6 +821,10 @@ def process_outbox(
         row.sent_at = utcnow_naive()
         row.error = None
         row.locked_at = None
+        try:
+            _record_client_send_if_needed(db, row)
+        except Exception:
+            logger.exception("notification_outbox #%s: client send log failed", row.id)
         stats["sent"] += 1
         db.commit()
     return stats

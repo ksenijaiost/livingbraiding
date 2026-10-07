@@ -10,7 +10,7 @@ from datetime import timedelta
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.db.models import NotificationChannel, TelegramLinkToken, User
+from app.db.models import Client, NotificationChannel, TelegramLinkToken, User
 from app.settings import get_settings
 from app.time_utils import utcnow_naive
 
@@ -18,6 +18,8 @@ LINK_TOKEN_TTL = timedelta(hours=24)
 MSG_LINKED_OK = "Готово, уведомления подключены"
 MSG_LINK_INVALID = "Ссылка устарела, запросите новую в CRM"
 MSG_MAX_TAKEN = "Этот аккаунт Max уже привязан к другому сотруднику"
+MSG_CLIENT_MAX_TAKEN = "Этот аккаунт Max уже привязан к другому клиенту"
+MSG_CLIENT_LINKED_OK = "Готово, уведомления о записях подключены"
 
 CHANNEL_TELEGRAM = NotificationChannel.TELEGRAM.value
 CHANNEL_VK = NotificationChannel.VK.value
@@ -85,6 +87,7 @@ def create_link_token(
     plain = secrets.token_urlsafe(24)
     row = TelegramLinkToken(
         user_id=int(user_id),
+        client_id=None,
         token_hash=hash_link_token(plain),
         channel=ch,
         created_at=now,
@@ -93,13 +96,15 @@ def create_link_token(
     )
     db.add(row)
     db.flush()
+    return plain, _deep_link_for_channel(ch, plain)
+
+
+def _deep_link_for_channel(ch: str, plain: str) -> str | None:
     if ch == CHANNEL_TELEGRAM:
-        deep = telegram_deep_link(plain)
-    elif ch == CHANNEL_VK:
-        deep = vk_deep_link(plain)
-    else:
-        deep = max_deep_link(plain)
-    return plain, deep
+        return telegram_deep_link(plain)
+    if ch == CHANNEL_VK:
+        return vk_deep_link(plain)
+    return max_deep_link(plain)
 
 
 def create_telegram_link_token(db: Session, user_id: int) -> tuple[str, str | None]:
@@ -114,13 +119,43 @@ def create_max_link_token(db: Session, user_id: int) -> tuple[str, str | None]:
     return create_link_token(db, user_id, channel=CHANNEL_MAX)
 
 
-def consume_link_token(
+def create_client_link_token(db: Session, client_id: int, *, channel: str) -> tuple[str, str | None]:
+    """Одноразовый код привязки канала для клиента."""
+    ch = (channel or "").strip().lower()
+    if ch not in (CHANNEL_TELEGRAM, CHANNEL_VK, CHANNEL_MAX):
+        raise ValueError(f"Неизвестный канал привязки: {channel}")
+    now = utcnow_naive()
+    db.execute(
+        update(TelegramLinkToken)
+        .where(
+            TelegramLinkToken.client_id == int(client_id),
+            TelegramLinkToken.channel == ch,
+            TelegramLinkToken.used_at.is_(None),
+        )
+        .values(used_at=now)
+    )
+    plain = secrets.token_urlsafe(24)
+    db.add(
+        TelegramLinkToken(
+            user_id=None,
+            client_id=int(client_id),
+            token_hash=hash_link_token(plain),
+            channel=ch,
+            created_at=now,
+            expires_at=now + LINK_TOKEN_TTL,
+            used_at=None,
+        )
+    )
+    db.flush()
+    return plain, _deep_link_for_channel(ch, plain)
+
+
+def _load_valid_link_row(
     db: Session,
     plain_token: str,
     *,
     channel: str | None = None,
-) -> User | None:
-    """Найти валидный код, пометить использованным, вернуть User; иначе None."""
+) -> TelegramLinkToken | None:
     plain = (plain_token or "").strip()
     if not plain:
         return None
@@ -138,14 +173,76 @@ def consume_link_token(
         row.used_at = now
         db.flush()
         return None
+    return row
+
+
+def consume_link_token(
+    db: Session,
+    plain_token: str,
+    *,
+    channel: str | None = None,
+) -> User | None:
+    """Найти валидный код сотрудника, пометить использованным, вернуть User; иначе None."""
+    row = _load_valid_link_row(db, plain_token, channel=channel)
+    if row is None or row.user_id is None:
+        if row is not None and row.user_id is None:
+            # клиентский код — не потребляем здесь
+            return None
+        return None
     user = db.get(User, int(row.user_id))
     if user is None:
-        row.used_at = now
+        row.used_at = utcnow_naive()
         db.flush()
         return None
-    row.used_at = now
+    row.used_at = utcnow_naive()
     db.flush()
     return user
+
+
+def consume_client_link_token(
+    db: Session,
+    plain_token: str,
+    *,
+    channel: str | None = None,
+) -> Client | None:
+    """Найти валидный код клиента, пометить использованным."""
+    row = _load_valid_link_row(db, plain_token, channel=channel)
+    if row is None or row.client_id is None:
+        return None
+    client = db.get(Client, int(row.client_id))
+    if client is None:
+        row.used_at = utcnow_naive()
+        db.flush()
+        return None
+    row.used_at = utcnow_naive()
+    db.flush()
+    return client
+
+
+def consume_any_link_token(
+    db: Session,
+    plain_token: str,
+    *,
+    channel: str | None = None,
+) -> tuple[User | None, Client | None]:
+    """Потребить код: вернуть (user, None) или (None, client)."""
+    row = _load_valid_link_row(db, plain_token, channel=channel)
+    if row is None:
+        return None, None
+    now = utcnow_naive()
+    if row.user_id is not None:
+        user = db.get(User, int(row.user_id))
+        row.used_at = now
+        db.flush()
+        return user, None
+    if row.client_id is not None:
+        client = db.get(Client, int(row.client_id))
+        row.used_at = now
+        db.flush()
+        return None, client
+    row.used_at = now
+    db.flush()
+    return None, None
 
 
 def consume_telegram_link_token(db: Session, plain_token: str) -> User | None:
@@ -216,6 +313,46 @@ def unlink_max_user(db: Session, user: User) -> None:
 
 # Обратная совместимость имён из промпта
 clear_max_user = unlink_max_user
+
+
+class ClientChannelTakenError(ValueError):
+    """ID канала уже привязан к другому клиенту."""
+
+
+def bind_client_telegram(db: Session, client: Client, chat_id: int) -> None:
+    cid = int(chat_id)
+    other = db.scalar(
+        select(Client).where(Client.telegram_chat_id == cid, Client.id != int(client.id)).limit(1)
+    )
+    if other is not None:
+        raise ClientChannelTakenError("Этот Telegram уже привязан к другому клиенту")
+    client.telegram_chat_id = cid
+    db.flush()
+
+
+def bind_client_vk(db: Session, client: Client, vk_user_id: int) -> None:
+    vid = int(vk_user_id)
+    other = db.scalar(
+        select(Client).where(Client.vk_user_id == vid, Client.id != int(client.id)).limit(1)
+    )
+    if other is not None:
+        raise ClientChannelTakenError("Этот VK уже привязан к другому клиенту")
+    client.vk_user_id = vid
+    db.flush()
+
+
+def bind_client_max(db: Session, client: Client, max_user_id: int) -> None:
+    mid = int(max_user_id)
+    other_c = db.scalar(
+        select(Client).where(Client.max_user_id == mid, Client.id != int(client.id)).limit(1)
+    )
+    if other_c is not None:
+        raise ClientChannelTakenError(MSG_CLIENT_MAX_TAKEN)
+    other_u = db.scalar(select(User).where(User.max_user_id == mid).limit(1))
+    if other_u is not None:
+        raise ClientChannelTakenError(MSG_CLIENT_MAX_TAKEN)
+    client.max_user_id = mid
+    db.flush()
 
 
 def parse_telegram_start_code(text: str | None) -> str | None:

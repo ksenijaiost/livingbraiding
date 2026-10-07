@@ -66,6 +66,13 @@
       <p class="lb-my-6"><strong>Дата и время записи</strong>: {{ format_naive_utc_datetime(booking.planned_date, display_tz) }} ({{ timezone_label(display_tz) }})</p>
       <p class="lb-my-6"><strong>Тип</strong>: {{ kind_label }}</p>
       <p class="lb-my-6"><strong>Статус</strong>: {{ status_label }}</p>
+      {% if client_confirm_badge %}
+        <p class="lb-my-6" style="display:inline-block; padding:6px 10px; border-radius:8px;
+          {% if booking.client_cancel_requested_at %}background:#fef2f2;border:1px solid #fecaca;color:#991b1b;
+          {% else %}background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;{% endif %}">
+          {{ client_confirm_badge }}
+        </p>
+      {% endif %}
       <p class="lb-my-6"><strong>Создал</strong>:
         {% if booking.created_by_user %}
           {{ booking.created_by_user.display_name }} ({{ ru_user_role(booking.created_by_user.role) }}) · {{ format_naive_utc_datetime(booking.created_at, display_tz) }}

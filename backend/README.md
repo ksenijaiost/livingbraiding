@@ -219,9 +219,10 @@ curl -X POST "https://platform-api2.max.ru/subscriptions" \
 Привязка: ссылка `https://t.me/<BOT_USERNAME>?start=<код>`. Вебхук `POST /webhooks/telegram`.
 
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET`
+- `TELEGRAM_API_BASE` — базовый URL Bot API (по умолчанию `https://api.telegram.org`; для прослойки на другом сервере)
 
 ```text
-https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<ДОМЕН>/webhooks/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>
+{TELEGRAM_API_BASE}/bot<TOKEN>/setWebhook?url=https://<ДОМЕН>/webhooks/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>
 ```
 
 Отправка броней идёт через outbox: для мастера с `vk_user_id` / `max_user_id` / `telegram_chat_id` создаются отдельные записи канала (без дублей внутри канала). Сбой одного канала не блокирует остальные и не ломает сохранение брони.
@@ -249,8 +250,10 @@ python -m app.process_notification_outbox --limit 100 --max-attempts 5
 
 После лимита попыток статус остаётся `failed`, воркер больше не трогает запись. Ручной повтор — кнопка «Повторить» на `/admin/notification-outbox` (суперадмин / техспец).
 
-### Уведомления клиентам (настройки)
+### Уведомления клиентам
 
-Страница **Клиенты → Уведомления и рассылки** (`/clients/notifications`): правила «перед записью» / «после записи» и маркер списка услуг (`settings.client_notify_services_marker`, по умолчанию `•`).
+Страница **Клиенты → Уведомления и рассылки** (`/clients/notifications`): правила before/after, маркер `{{services}}`, блок **общего чата админов** (код `/admins <код>` в VK/Max/Telegram).
 
-При первой загрузке пустой таблицы `client_notification_rules` создаются дефолты: before 24 ч и 2 ч (шаблон с `{{name}}` / `{{date_text}}` / …), after 0 ч («Спасибо, что были у нас!»). Отправка клиентам и outbox — отдельный шаг; блок «Рассылки» пока заглушка.
+Воркер ставит в outbox `client_booking_reminder` / `client_after_booking` по правилам; клиент отвечает `1` (подтвердил) или `3` (просит отменить — бронь не отменяется, уведомление мастерам и в чат админов). Привязка канала клиента — ссылка в карточке клиента.
+
+При первой загрузке пустой `client_notification_rules` — дефолты 24ч/2ч before и 0ч after. Блок «Рассылки» — заглушка.

@@ -28,6 +28,10 @@ class Settings:
         self.telegram_bot_token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
         self.telegram_webhook_secret = (os.getenv("TELEGRAM_WEBHOOK_SECRET") or "").strip()
         self.telegram_bot_username = (os.getenv("TELEGRAM_BOT_USERNAME") or "").strip().lstrip("@")
+        self.telegram_api_base = (
+            (os.getenv("TELEGRAM_API_BASE") or "https://api.telegram.org").strip().rstrip("/")
+            or "https://api.telegram.org"
+        )
         self.vk_group_token = (os.getenv("VK_GROUP_TOKEN") or "").strip()
         self.vk_group_id = (os.getenv("VK_GROUP_ID") or "").strip()
         self.vk_confirmation_code = (os.getenv("VK_CONFIRMATION_CODE") or "").strip()
