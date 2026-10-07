@@ -44,6 +44,8 @@ def _staff_notify_cell(u: User) -> dict[str, object]:
     channels: list[str] = []
     if u.vk_user_id is not None:
         channels.append("VK")
+    if u.max_user_id is not None:
+        channels.append("Max")
     if u.telegram_chat_id is not None:
         channels.append("Telegram")
     connected = bool(channels)

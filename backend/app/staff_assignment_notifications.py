@@ -73,7 +73,7 @@ _SALE_KIND_RU = {
     ProductSaleKind.OTHER: "Другое",
 }
 
-_CHANNELS = (NotificationChannel.TELEGRAM, NotificationChannel.VK)
+_CHANNELS = (NotificationChannel.VK, NotificationChannel.MAX, NotificationChannel.TELEGRAM)
 
 
 def build_staff_assignment_message(
@@ -106,10 +106,12 @@ def _dedupe_key(entity_type: str, entity_id: int, user_id: int, channel: Notific
 
 def _user_channel_targets(user: User) -> list[tuple[NotificationChannel, int]]:
     out: list[tuple[NotificationChannel, int]] = []
-    if user.telegram_chat_id is not None:
-        out.append((NotificationChannel.TELEGRAM, int(user.telegram_chat_id)))
     if user.vk_user_id is not None:
         out.append((NotificationChannel.VK, int(user.vk_user_id)))
+    if user.max_user_id is not None:
+        out.append((NotificationChannel.MAX, int(user.max_user_id)))
+    if user.telegram_chat_id is not None:
+        out.append((NotificationChannel.TELEGRAM, int(user.telegram_chat_id)))
     return out
 
 

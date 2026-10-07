@@ -67,6 +67,8 @@ AUDIT_FIELD_LABELS: dict[str, str] = {
     "telegram_link": "Ссылка Telegram",
     "vk_user_id": "VK user id",
     "vk_link": "Ссылка VK",
+    "max_user_id": "Max user id",
+    "max_link": "Ссылка Max",
     "roles_summary": "Роли",
     "master_level": "Уровень мастера",
     "salon_cut_pct_override": "Доля салона (переопределение)",

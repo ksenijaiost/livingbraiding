@@ -1,4 +1,4 @@
-"""Уведомления мастерам о бронях (Telegram / VK): текст, outbox, отправка."""
+"""Уведомления мастерам о бронях (VK / Max / Telegram): текст, outbox, отправка."""
 
 from __future__ import annotations
 
@@ -361,7 +361,9 @@ def enqueue_master_booking_notifications(
         return []
 
     allowed_channels = (
-        set(channels) if channels is not None else {NotificationChannel.TELEGRAM, NotificationChannel.VK}
+        set(channels)
+        if channels is not None
+        else {NotificationChannel.TELEGRAM, NotificationChannel.VK, NotificationChannel.MAX}
     )
     tz_name = get_display_timezone(db)
     text = text_override or build_booking_master_message(
@@ -384,10 +386,12 @@ def enqueue_master_booking_notifications(
             continue
 
         channel_targets: list[tuple[NotificationChannel, int]] = []
-        if NotificationChannel.TELEGRAM in allowed_channels and user.telegram_chat_id is not None:
-            channel_targets.append((NotificationChannel.TELEGRAM, int(user.telegram_chat_id)))
         if NotificationChannel.VK in allowed_channels and user.vk_user_id is not None:
             channel_targets.append((NotificationChannel.VK, int(user.vk_user_id)))
+        if NotificationChannel.MAX in allowed_channels and user.max_user_id is not None:
+            channel_targets.append((NotificationChannel.MAX, int(user.max_user_id)))
+        if NotificationChannel.TELEGRAM in allowed_channels and user.telegram_chat_id is not None:
+            channel_targets.append((NotificationChannel.TELEGRAM, int(user.telegram_chat_id)))
         if not channel_targets:
             continue
 
@@ -463,6 +467,48 @@ def send_telegram(chat_id: int, text: str) -> None:
         raise RuntimeError(f"Telegram: некорректный JSON ответа: {raw[:200]}") from e
     if not data.get("ok"):
         raise RuntimeError(data.get("description") or f"Telegram API error: {raw[:200]}")
+
+
+MAX_HTTP_TIMEOUT_SEC = 8
+
+
+def send_max(user_id: int, text: str) -> None:
+    """Отправка в Max (POST /messages?user_id=). Без токена — «Max не настроен»."""
+    settings = get_settings()
+    token = (settings.max_bot_token or "").strip()
+    if not token:
+        raise RuntimeError("Max не настроен")
+    base = (settings.max_api_base or "https://platform-api2.max.ru").rstrip("/")
+    url = f"{base}/messages?user_id={int(user_id)}"
+    body = json.dumps({"text": text}, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": token,
+            "Content-Type": "application/json; charset=utf-8",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=MAX_HTTP_TIMEOUT_SEC) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace") if e.fp else str(e)
+        raise RuntimeError(f"Max HTTP {e.code}: {detail[:500]}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Max сеть: {e.reason}") from e
+
+    if not raw.strip():
+        return
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return
+    if isinstance(data, dict) and data.get("success") is False:
+        raise RuntimeError(str(data.get("message") or data.get("error") or raw[:200]))
+    if isinstance(data, dict) and "error" in data and data.get("code") not in (None, 0, "ok"):
+        raise RuntimeError(str(data.get("error") or raw[:200]))
 
 
 def send_vk(user_id: int, text: str) -> None:
@@ -569,6 +615,8 @@ def _send_outbox_row(row: NotificationOutbox) -> None:
         send_telegram(target_id, text)
     elif row.channel == NotificationChannel.VK:
         send_vk(target_id, text)
+    elif row.channel == NotificationChannel.MAX:
+        send_max(target_id, text)
     else:
         raise RuntimeError(f"Неизвестный канал: {row.channel}")
 

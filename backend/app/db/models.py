@@ -142,9 +142,10 @@ class User(Base):
     salon_cut_pct_override: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Нормализованный номер (только цифры, ≥10), для входа вместо логина; уникален среди непустых.
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    # Каналы уведомлений мастера (Telegram / VK); заполняются при привязке, отправка — отдельно.
+    # Каналы уведомлений мастера (VK / Max / Telegram); заполняются при привязке, отправка — отдельно.
     telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     vk_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    max_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
     # Legacy/сводка: OR типов ниже; синхронизируется при сохранении prefs.
     notify_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notify_bookings: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -238,6 +239,7 @@ class TelegramLinkToken(Base):
 class NotificationChannel(str, enum.Enum):
     TELEGRAM = "telegram"
     VK = "vk"
+    MAX = "max"
 
 
 class NotificationOutboxStatus(str, enum.Enum):
@@ -248,7 +250,7 @@ class NotificationOutboxStatus(str, enum.Enum):
 
 
 class NotificationOutbox(Base):
-    """Очередь исходящих уведомлений мастерам (Telegram / VK). Отправка — отдельным воркером."""
+    """Очередь исходящих уведомлений мастерам (VK / Max / Telegram). Отправка — отдельным воркером."""
 
     __tablename__ = "notification_outbox"
     __table_args__ = (

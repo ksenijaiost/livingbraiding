@@ -129,6 +129,8 @@ from app.routes.telegram_webhook import router as telegram_webhook_router  # noq
 app.include_router(telegram_webhook_router)
 from app.routes.vk_webhook import router as vk_webhook_router  # noqa: E402
 app.include_router(vk_webhook_router)
+from app.routes.max_webhook import router as max_webhook_router  # noqa: E402
+app.include_router(max_webhook_router)
 from app.routes.notification_outbox import router as notification_outbox_router  # noqa: E402
 app.include_router(notification_outbox_router)
 from app.routes.master_visit import router as master_visit_router  # noqa: E402

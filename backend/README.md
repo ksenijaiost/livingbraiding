@@ -171,9 +171,9 @@ $env:LB_TECHSPEC_DISPLAY_NAME="Техспец"
 
 **Рекомендация для прода:** смонтировать постоянный том на `LB_MEDIA_ROOT`, чтобы не качать бэкап перед каждым деплоем. Object storage (S3/Spaces) — отдельная задача на будущее.
 
-### Уведомления мастерам (VK + Telegram)
+### Уведомления мастерам (VK + Max + Telegram)
 
-Основной канал на хостинге без доступа к Telegram — **VK** (Callback API сообщества). Telegram остаётся опциональным.
+Основной канал на хостинге без доступа к Telegram — **VK** (Callback API сообщества). **Max** — третий канал (тот же outbox). Telegram остаётся опциональным.
 
 #### VK (Callback API)
 
@@ -195,7 +195,24 @@ $env:LB_TECHSPEC_DISPLAY_NAME="Техспец"
 | `VK_API_VERSION` | версия API, по умолчанию `5.199` |
 | `VK_GROUP_DOMAIN` | короткое имя для `https://vk.me/<domain>?ref=<код>` |
 
-Привязка: «Подключить VK» в `/me` или карточке сотрудника → ссылка `vk.me/…?ref=<код>` или сообщение сообществу `привязка <код>`. Код одноразовый, 24 часа (тот же механизм, что Telegram, поле `channel` в токенах).
+Привязка: «Подключить VK» в `/me` → ссылка `vk.me/…?ref=<код>` или сообщение сообществу `привязка <код>`. Код одноразовый, 24 часа (тот же механизм, что Telegram/Max, поле `channel` в токенах).
+
+#### Max
+
+1. Создайте бота на [платформе MAX для партнёров](https://dev.max.ru/), дождитесь модерации, скопируйте токен.
+2. Пропишите на Timeweb (см. `.env.example`): `MAX_BOT_TOKEN`, `MAX_BOT_USERNAME` (без `@`), `MAX_WEBHOOK_SECRET` (случайная строка). Опционально `MAX_API_BASE` (по умолчанию `https://platform-api2.max.ru`).
+3. Подписка на webhook (пример):
+
+```bash
+curl -X POST "https://platform-api2.max.ru/subscriptions" \
+  -H "Authorization: <MAX_BOT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d "{\"url\":\"https://<ДОМЕН>/webhooks/max\",\"update_types\":[\"bot_started\",\"message_created\"],\"secret\":\"<MAX_WEBHOOK_SECRET>\"}"
+```
+
+4. Мастер жмёт «Подключить» Max на `/me` → диплинк `https://max.ru/<BOT_USERNAME>?start=<код>`.
+
+Авторизация API: заголовок `Authorization: <access_token>` (без `Bearer`). Отправка: `POST /messages?user_id=…` с `{"text":"…"}`. Вебхук проверяет `X-Max-Bot-Api-Secret`.
 
 #### Telegram (опционально)
 
@@ -207,7 +224,7 @@ $env:LB_TECHSPEC_DISPLAY_NAME="Техспец"
 https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<ДОМЕН>/webhooks/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>
 ```
 
-Отправка броней идёт через outbox: для мастера с `vk_user_id` и/или `telegram_chat_id` создаются отдельные записи канала (без дублей внутри канала). Сбой VK не блокирует Telegram и не ломает сохранение брони.
+Отправка броней идёт через outbox: для мастера с `vk_user_id` / `max_user_id` / `telegram_chat_id` создаются отдельные записи канала (без дублей внутри канала). Сбой одного канала не блокирует остальные и не ломает сохранение брони.
 
 #### Фоновый воркер outbox (вместо cron)
 

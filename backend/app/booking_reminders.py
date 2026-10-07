@@ -202,10 +202,12 @@ def _reminder_dedupe_key(
 
 def _user_channel_targets(user: User) -> list[tuple[NotificationChannel, int]]:
     targets: list[tuple[NotificationChannel, int]] = []
-    if user.telegram_chat_id is not None:
-        targets.append((NotificationChannel.TELEGRAM, int(user.telegram_chat_id)))
     if user.vk_user_id is not None:
         targets.append((NotificationChannel.VK, int(user.vk_user_id)))
+    if user.max_user_id is not None:
+        targets.append((NotificationChannel.MAX, int(user.max_user_id)))
+    if user.telegram_chat_id is not None:
+        targets.append((NotificationChannel.TELEGRAM, int(user.telegram_chat_id)))
     return targets
 
 

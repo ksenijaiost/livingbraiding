@@ -202,6 +202,8 @@ def test_booking_vk_send_and_tg_independent(memory_db, monkeypatch) -> None:
     monkeypatch.setenv("VK_GROUP_TOKEN", "tok")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg")
     get_settings.cache_clear()
+    from app.notify_prefs import apply_notify_prefs_from_legacy_flag
+
     u = User(
         username="both",
         password_hash="x",
@@ -214,6 +216,8 @@ def test_booking_vk_send_and_tg_independent(memory_db, monkeypatch) -> None:
     )
     c = Client(name="C", phone="+79991234567", is_confirmed=True)
     memory_db.add_all([u, c])
+    memory_db.flush()
+    apply_notify_prefs_from_legacy_flag(u, [UserRole.MASTER], enabled=True)
     memory_db.commit()
     memory_db.refresh(u)
     memory_db.refresh(c)

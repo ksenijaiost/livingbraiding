@@ -36,7 +36,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.master_schedule import build_master_schedule_banner
-from app.notifications import send_telegram, send_vk
+from app.notifications import send_max, send_telegram, send_vk
 from app.notify_link_flash import pop_notify_link_flash, set_notify_link_flash
 from app.notify_prefs import apply_notify_prefs_from_form, notify_prefs_for_ui
 from app.payroll_fund import (
@@ -49,11 +49,15 @@ from app.ru_labels import ru_user_role
 from app.security import hash_password, verify_password
 from app.settings import get_settings
 from app.telegram_link import (
+    CHANNEL_MAX,
     CHANNEL_TELEGRAM,
     CHANNEL_VK,
+    create_max_link_token,
     create_telegram_link_token,
     create_vk_link_token,
+    max_deep_link,
     telegram_deep_link,
+    unlink_max_user,
     unlink_telegram_chat,
     unlink_vk_user,
     vk_deep_link,
@@ -225,6 +229,15 @@ def _me_page_response(
             "test_url": "/me/vk/test",
         },
         {
+            "id": "max",
+            "label": "Max",
+            "connected": u.max_user_id is not None,
+            "status_label": "подключён" if u.max_user_id is not None else "не подключён",
+            "connect_url": "/me/max/connect",
+            "disconnect_url": "/me/max/disconnect",
+            "test_url": "/me/max/test",
+        },
+        {
             "id": "telegram",
             "label": "Telegram",
             "connected": u.telegram_chat_id is not None,
@@ -256,6 +269,15 @@ def _me_page_response(
                 "deep_link": deep,
                 "code": code,
                 "hint": f"если ссылка не сработала, напишите сообществу: привязка {code}",
+            }
+        elif ch == CHANNEL_MAX:
+            deep = max_deep_link(code)
+            link_flash = {
+                "channel": "max",
+                "label": "Max",
+                "deep_link": deep,
+                "code": code,
+                "hint": f"если ссылка не сработала, напишите боту: /start {code} или привязка {code}",
             }
         elif ch == CHANNEL_TELEGRAM:
             deep = telegram_deep_link(code)
@@ -314,14 +336,20 @@ def me_page(
         error = "Задайте TELEGRAM_BOT_USERNAME в настройках окружения, затем создайте ссылку снова."
     elif err == "vk_group_domain":
         error = "Задайте VK_GROUP_DOMAIN в окружении, затем создайте ссылку снова."
+    elif err == "max_bot_username":
+        error = "Задайте MAX_BOT_USERNAME в окружении, затем создайте ссылку снова."
     elif err == "tg_not_linked":
         error = "Сначала подключите Telegram."
     elif err == "vk_not_linked":
         error = "Сначала подключите VK."
+    elif err == "max_not_linked":
+        error = "Сначала подключите Max."
     elif err == "tg_test_fail":
         error = "Не удалось отправить тестовое сообщение в Telegram."
     elif err == "vk_test_fail":
         error = "Не удалось отправить тестовое сообщение во VK."
+    elif err == "max_test_fail":
+        error = "Не удалось отправить тестовое сообщение в Max."
     elif err == "pwd_current":
         error = "Неверный текущий пароль."
     elif err == "pwd_mismatch":
@@ -340,14 +368,20 @@ def me_page(
         info = "Ссылка для привязки Telegram создана (действует 24 часа)."
     elif msg == "vk_connect":
         info = "Ссылка для привязки VK создана (действует 24 часа)."
+    elif msg == "max_connect":
+        info = "Ссылка для привязки Max создана (действует 24 часа)."
     elif msg == "tg_disconnected":
         info = "Telegram отключён."
     elif msg == "vk_disconnected":
         info = "VK отключён."
+    elif msg == "max_disconnected":
+        info = "Max отключён."
     elif msg == "tg_test_ok":
         info = "Тестовое сообщение в Telegram отправлено."
     elif msg == "vk_test_ok":
         info = "Тестовое сообщение во VK отправлено."
+    elif msg == "max_test_ok":
+        info = "Тестовое сообщение в Max отправлено."
     elif msg == "notify_saved":
         info = "Настройка уведомлений сохранена."
     elif msg == "reminders_saved":
@@ -453,6 +487,49 @@ def me_vk_disconnect(
     )
     db.commit()
     return RedirectResponse(url="/me?msg=vk_disconnected", status_code=303)
+
+
+@router.post("/me/max/connect")
+def me_max_connect(
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    u = _load_self_user(db, current_user.id)
+    if not get_settings().max_bot_username:
+        return RedirectResponse(url="/me?err=max_bot_username", status_code=303)
+    plain, _deep = create_max_link_token(db, u.id)
+    write_audit_rows(
+        db,
+        log_model=UserAuditLog,
+        entity_field="user_id",
+        entity_id=u.id,
+        changed_by_user_id=current_user.id,
+        changes=[FieldChange("max_link", None, "код создан (моя карточка)")],
+    )
+    db.commit()
+    resp = RedirectResponse(url="/me?msg=max_connect", status_code=303)
+    set_notify_link_flash(resp, channel=CHANNEL_MAX, plain_code=plain)
+    return resp
+
+
+@router.post("/me/max/disconnect")
+def me_max_disconnect(
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    u = _load_self_user(db, current_user.id)
+    old = str(u.max_user_id) if u.max_user_id is not None else None
+    unlink_max_user(db, u)
+    write_audit_rows(
+        db,
+        log_model=UserAuditLog,
+        entity_field="user_id",
+        entity_id=u.id,
+        changed_by_user_id=current_user.id,
+        changes=[FieldChange("max_user_id", old, None)],
+    )
+    db.commit()
+    return RedirectResponse(url="/me?msg=max_disconnected", status_code=303)
 
 
 @router.post("/me/telegram/notify")
@@ -609,6 +686,21 @@ def me_vk_test(
     except Exception:
         return RedirectResponse(url="/me?err=vk_test_fail", status_code=303)
     return RedirectResponse(url="/me?msg=vk_test_ok", status_code=303)
+
+
+@router.post("/me/max/test")
+def me_max_test(
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    u = _load_self_user(db, current_user.id)
+    if u.max_user_id is None:
+        return RedirectResponse(url="/me?err=max_not_linked", status_code=303)
+    try:
+        send_max(int(u.max_user_id), "Тест Живём Плетём")
+    except Exception:
+        return RedirectResponse(url="/me?err=max_test_fail", status_code=303)
+    return RedirectResponse(url="/me?msg=max_test_ok", status_code=303)
 
 
 @router.post("/me/password")

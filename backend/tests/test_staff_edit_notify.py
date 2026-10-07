@@ -119,16 +119,20 @@ def test_staff_edit_page_opens_notify_info_only(memory_db) -> None:
         assert "Уведомления" in r.text
         assert "Типы уведомлений:" in r.text
         assert "Telegram:</strong>" in r.text or "<strong>Telegram:</strong>" in r.text
+        assert "Max:</strong>" in r.text or "<strong>Max:</strong>" in r.text
         assert "подключён" in r.text
         assert "не подключён" in r.text
         assert "по умолчанию 24ч+2ч" in r.text
         assert "Моя карточка" in r.text
         assert 'name="notify_enabled"' not in r.text
         assert "Подключить VK" not in r.text
+        assert "Подключить Max" not in r.text
         assert "Подключить Telegram" not in r.text
         assert "Отключить VK" not in r.text
+        assert "Отключить Max" not in r.text
         assert "Отключить Telegram" not in r.text
         assert f"/admin/settings/staff/{master.id}/vk/connect" not in r.text
+        assert f"/admin/settings/staff/{master.id}/max/connect" not in r.text
         assert f"/admin/settings/staff/{master.id}/telegram/connect" not in r.text
     finally:
         _clear_overrides()

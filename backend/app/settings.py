@@ -35,6 +35,14 @@ class Settings:
         self.vk_api_version = (os.getenv("VK_API_VERSION") or "5.199").strip() or "5.199"
         # Короткое имя для https://vk.me/<domain>?ref=… (club123 или screen name).
         self.vk_group_domain = (os.getenv("VK_GROUP_DOMAIN") or "").strip().lstrip("@").strip("/")
+        # Мессенджер Max (platform-api2.max.ru).
+        self.max_bot_token = (os.getenv("MAX_BOT_TOKEN") or "").strip()
+        self.max_bot_username = (os.getenv("MAX_BOT_USERNAME") or "").strip().lstrip("@")
+        self.max_webhook_secret = (os.getenv("MAX_WEBHOOK_SECRET") or "").strip()
+        self.max_api_base = (
+            (os.getenv("MAX_API_BASE") or "https://platform-api2.max.ru").strip().rstrip("/")
+            or "https://platform-api2.max.ru"
+        )
         # Фоновый воркер outbox: на проде по умолчанию вкл., локально/в тестах — выкл.
         self.notification_worker_enabled = _env_bool(
             "NOTIFICATION_WORKER_ENABLED",
