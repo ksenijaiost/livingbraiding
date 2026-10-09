@@ -40,6 +40,7 @@ from app.db.models import (
     VisitKitUsage,
 )
 from app.client_export import build_all_clients_csv_bytes
+from app.client_marks import apply_client_marks, no_promo_source_label
 from app.client_retention import (
     build_retention_report,
     default_retention_periods,
@@ -175,6 +176,10 @@ def admin_clients(
     status: str | None = None,
     created: int | None = None,
     updated: int | None = None,
+    no_promo: str | None = None,
+    interested_in_training: str | None = None,
+    is_student: str | None = None,
+    is_model: str | None = None,
     current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
@@ -200,6 +205,20 @@ def admin_clients(
             where.append(Client.id == -1)
         else:
             where.append(Client.id.in_(matched_ids))
+    mark_filters = {
+        "no_promo": parse_bool(no_promo),
+        "interested_in_training": parse_bool(interested_in_training),
+        "is_student": parse_bool(is_student),
+        "is_model": parse_bool(is_model),
+    }
+    if mark_filters["no_promo"]:
+        where.append(Client.no_promo.is_(True))
+    if mark_filters["interested_in_training"]:
+        where.append(Client.interested_in_training.is_(True))
+    if mark_filters["is_student"]:
+        where.append(Client.is_student.is_(True))
+    if mark_filters["is_model"]:
+        where.append(Client.is_model.is_(True))
 
     # One row per visit in the join; sum 1 only for real, non-cancelled visits
     visits_count = func.coalesce(func.sum(case((Visit.is_cancelled.is_(False), 1), else_=0)), 0)
@@ -227,6 +246,10 @@ def admin_clients(
             Client.name.label("name"),
             Client.is_confirmed.label("is_confirmed"),
             Client.is_blacklisted.label("is_blacklisted"),
+            Client.no_promo.label("no_promo"),
+            Client.interested_in_training.label("interested_in_training"),
+            Client.is_student.label("is_student"),
+            Client.is_model.label("is_model"),
             contact_preview,
             visits_count.label("visits_count"),
             has_active_booking,
@@ -235,7 +258,16 @@ def admin_clients(
         .join(Visit, Visit.client_id == Client.id, isouter=True)
         .join(Booking, Booking.client_id == Client.id, isouter=True)
         .where(*where)
-        .group_by(Client.id, Client.name, Client.is_confirmed, Client.is_blacklisted)
+        .group_by(
+            Client.id,
+            Client.name,
+            Client.is_confirmed,
+            Client.is_blacklisted,
+            Client.no_promo,
+            Client.interested_in_training,
+            Client.is_student,
+            Client.is_model,
+        )
         .order_by(Client.name.asc())
         .limit(500)
     )
@@ -265,6 +297,7 @@ def admin_clients(
             ],
             created_ok=created_ok,
             updated_ok=updated_ok,
+            mark_filters=mark_filters,
         ),
     )
 
@@ -924,6 +957,13 @@ async def admin_client_new_post(
         birth_year=birth_year,
         created_by_label=format_created_by_label(current_user),
     )
+    apply_client_marks(
+        client,
+        interested_in_training=parse_bool(form.get("interested_in_training")),
+        is_student=parse_bool(form.get("is_student")),
+        is_model=parse_bool(form.get("is_model")),
+        no_promo=parse_bool(form.get("no_promo")),
+    )
     db.add(client)
     db.commit()
     db.refresh(client)
@@ -985,6 +1025,12 @@ async def admin_client_edit_post(
                 "birth_day",
                 "birth_month",
                 "birth_year",
+                "no_promo",
+                "no_promo_at",
+                "no_promo_source",
+                "interested_in_training",
+                "is_student",
+                "is_model",
             )
         }
     )
@@ -1073,6 +1119,13 @@ async def admin_client_edit_post(
     client.birth_day = birth_day
     client.birth_month = birth_month
     client.birth_year = birth_year
+    apply_client_marks(
+        client,
+        interested_in_training=parse_bool(form.get("interested_in_training")),
+        is_student=parse_bool(form.get("is_student")),
+        is_model=parse_bool(form.get("is_model")),
+        no_promo=parse_bool(form.get("no_promo")),
+    )
 
     # photos: replace/clear
     clear_p1 = parse_bool(form_raw.get("clear_photo_1"))
@@ -1131,6 +1184,12 @@ async def admin_client_edit_post(
             "birth_day",
             "birth_month",
             "birth_year",
+            "no_promo",
+            "no_promo_at",
+            "no_promo_source",
+            "interested_in_training",
+            "is_student",
+            "is_model",
         ),
     )
     write_audit_rows(
@@ -1314,6 +1373,7 @@ def admin_client_detail(
             created_banner=msg == "created",
             comment_saved_banner=msg == "comment_saved",
             display_tz=display_tz,
+            no_promo_source_label=no_promo_source_label(client.no_promo_source),
             channel_link=channel_link,
         ),
     )

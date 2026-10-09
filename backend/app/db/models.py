@@ -326,6 +326,13 @@ class Client(Base):
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_blacklisted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     blacklist_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Отметки и отписка от акций (рассылки). Напоминания о записи no_promo не блокирует.
+    no_promo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    no_promo_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    no_promo_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    interested_in_training: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_student: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_model: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Optional birthday: all null = unknown; day+month without year = "only DM"
     birth_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
     birth_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
