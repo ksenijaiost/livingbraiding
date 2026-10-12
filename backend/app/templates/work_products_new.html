@@ -72,12 +72,13 @@
         <div id="work_booking_search_row" class="row" style="align-items: flex-end;">
           <div style="flex:1;">
             <label>Поиск брони по номеру, клиенту или дате</label>
-            <input type="search" id="booking_search_q" autocomplete="off" placeholder="№ брони, имя/телефон клиента или дата (дд.мм.гггг) — ввод или «Найти»" value="" />
+            <input type="search" id="booking_search_q" name="booking_query" autocomplete="off" placeholder="№ брони, имя/телефон клиента или дата (дд.мм.гггг) — ввод или «Найти»" value="{{ fp.booking_query or '' }}" />
           </div>
           <div>
             <button type="button" id="work_booking_find_btn" class="secondary">Найти</button>
           </div>
         </div>
+        <p class="muted" style="font-size:12px;margin:6px 0 0;">Если введён точный номер, бронь привяжется сама. Иначе нажмите на найденную строку.</p>
         <ul id="booking_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:260px;overflow:auto;"></ul>
         <div id="work_booking_selected_panel" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
           <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
@@ -1188,16 +1189,34 @@
       syncWorkBookingUi();
       syncOrderBookingModeUi();
     }
+    var bookingSuggestSeq = 0;
+    function exactBookingFromQuery(items, q) {
+      var trimmed = String(q || '').trim().replace(/^#/, '');
+      if (!/^\d+$/.test(trimmed)) return null;
+      for (var i = 0; i < items.length; i++) {
+        if (String(items[i].id) === trimmed) return items[i];
+      }
+      return null;
+    }
     async function bookingSuggest() {
       var qEl = document.getElementById('booking_search_q');
       if (qEl && qEl.disabled) return;
       var q = qEl ? qEl.value.trim() : '';
+      var seq = ++bookingSuggestSeq;
       var res = await fetch('/sales/work/bookings/suggest?q=' + encodeURIComponent(q));
+      if (seq !== bookingSuggestSeq) return;
+      qEl = document.getElementById('booking_search_q');
+      if (qEl && qEl.disabled) return;
       var data = await res.json();
       var ul = document.getElementById('booking_suggest_list');
       if (!ul) return;
-      ul.innerHTML = '';
       var items = data.bookings || [];
+      var exact = exactBookingFromQuery(items, q);
+      if (exact) {
+        selectBooking(exact);
+        return;
+      }
+      ul.innerHTML = '';
       if (!items.length) {
         var empty = document.createElement('li');
         empty.className = 'muted';

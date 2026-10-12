@@ -26,6 +26,7 @@ from app.client_payment import parse_client_payment_kind
 from app.client_validation import format_created_by_label
 from app.form_validation_log import log_user_validation_error
 from app.db.models import (
+    Booking,
     Client,
     ClientPaymentKind,
     Kit,
@@ -527,6 +528,31 @@ def _g_str(form: Any, name: str, default: str = "") -> str:
     if isinstance(v, (bytes, bytearray)):
         return v.decode().strip()
     return str(v).strip()
+
+
+def _material_snap_float(value: float | None) -> float:
+    """Цена грамма в снимке. Без граммов прайс не читается и приходит None."""
+    if value is None:
+        return 0.0
+    return float(value)
+
+
+def _eligible_work_booking(db: Session, booking_id: int):
+    """Бронь, которую ещё можно привязать к работе на заказ (как в подсказке поиска)."""
+    from app.routes.bookings import suggest_bookings_for_work_order
+
+    want = int(booking_id)
+    if want <= 0:
+        return None
+    for hit in suggest_bookings_for_work_order(db, str(want), limit=30):
+        if int(hit.get("id") or 0) == want:
+            return db.get(Booking, want)
+    return None
+
+
+def _booking_query_digits(form: Any) -> str:
+    raw = (_g_str(form, "booking_query", "") or "").strip().lstrip("#")
+    return raw if raw.isdigit() and int(raw) > 0 else ""
 
 
 def _g_float(form: Any, name: str, default: float = 0.0) -> float:
@@ -1449,12 +1475,34 @@ async def work_new_post(
         client_id: int | None = None
         amount_from_client: int | None = None
         client_payment_kind: ClientPaymentKind | None = None
+        posted_booking_id = ""
         if scope == WorkScope.CUSTOM_ORDER:
             order_mode = (_g_str(form, "order_booking_mode", "") or "").strip().lower()
             bid_check = (_g_str(form, "booking_id", "") or "").strip()
-            if order_mode == "with_booking" and not bid_check:
+            linked_booking = None
+            if bid_check.isdigit() and int(bid_check) > 0:
+                posted_booking_id = str(int(bid_check))
+                linked_booking = db.get(Booking, int(posted_booking_id))
+            elif order_mode == "with_booking":
+                # Номер в строке поиска не копировался в скрытое поле, пока строку не нажали.
+                q_digits = _booking_query_digits(form)
+                if q_digits:
+                    linked_booking = _eligible_work_booking(db, int(q_digits))
+                    if linked_booking is None:
+                        raise ValueError(
+                            f"Бронь №{q_digits} не найдена, уже закрыта или уже привязана к работе."
+                        )
+                    posted_booking_id = str(int(linked_booking.id))
+                    fp["booking_id"] = posted_booking_id
+            if order_mode == "with_booking" and not posted_booking_id:
                 raise ValueError("Выберите бронь или переключите на «без брони».")
+            if posted_booking_id:
+                fp["booking_id"] = posted_booking_id
+                fp["order_booking_mode"] = "with_booking"
             cid_raw = (_g_str(form, "client_id", "") or "").strip()
+            if not cid_raw and linked_booking is not None and linked_booking.client_id:
+                cid_raw = str(int(linked_booking.client_id))
+                fp["client_id"] = cid_raw
             try:
                 client_id = parse_int(cid_raw, min=1, field_name="client_id")
             except ValueError:
@@ -1929,7 +1977,7 @@ async def work_new_post(
             studio_profit_amount=studio_total,
             profit_total_amount=profit_total,
         )
-        bid_raw = (_g_str(form, "booking_id", "") or "").strip()
+        bid_raw = posted_booking_id or (_g_str(form, "booking_id", "") or "").strip()
         bid_for_auto_complete: int | None = None
         try:
             bid_i = parse_int(bid_raw, min=1, field_name="booking_id") if bid_raw else 0
@@ -2008,8 +2056,8 @@ async def work_new_post(
                 mat_cost=float(mat_cost),
                 kanek=float(kanek),
                 kudri=float(kudri),
-                k_snap=float(k_snap),
-                ku_snap=float(ku_snap),
+                k_snap=_material_snap_float(k_snap),
+                ku_snap=_material_snap_float(ku_snap),
                 mix_source=mix_source,
                 mix_complexity=mix_complexity,
                 grams_total=float(grams_total),
