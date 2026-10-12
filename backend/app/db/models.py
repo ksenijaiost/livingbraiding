@@ -253,6 +253,7 @@ class NotificationOutboxStatus(str, enum.Enum):
     SENDING = "sending"
     SENT = "sent"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class NotificationOutboxTargetKind(str, enum.Enum):
@@ -275,6 +276,8 @@ class NotificationOutbox(Base):
     # user | client | admin_chat
     target_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True, index=True)
+    # «После визита»: визит, из которого поставлена отправка (пусто, если ушло по брони до сохранения).
+    visit_id: Mapped[int | None] = mapped_column(ForeignKey("visits.id"), nullable=True, index=True)
     channel: Mapped[NotificationChannel] = mapped_column(
         Enum(NotificationChannel, native_enum=False, length=16),
         nullable=False,
@@ -292,6 +295,8 @@ class NotificationOutbox(Base):
     dedupe_key: Mapped[str] = mapped_column(String(200), nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    # Пусто — отправить сразу. Иначе воркер берёт строку, когда это время наступило.
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -366,7 +371,10 @@ class ClientNotificationRule(Base):
         nullable=False,
         index=True,
     )
-    hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    # before: целые часы до planned_date. after: задержка от сохранения визита, шаг 0.5, 0–72.
+    hours: Mapped[float] = mapped_column(Float, nullable=False)
+    # after: крайнее время студии в день визита/брони. Пусто — ждать только сохранения визита.
+    latest_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     template: Mapped[str] = mapped_column(Text, nullable=False)
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

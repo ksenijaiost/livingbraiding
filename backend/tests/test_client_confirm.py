@@ -186,10 +186,10 @@ def test_enqueue_before_after_dedupe(memory_db) -> None:
     )
     assert after is not None
     assert after.hours == 0
-    # after due: planned in the past within window
+    # «После» больше не считается от planned_date.
     b.planned_date = utcnow_naive() - timedelta(minutes=5)
     memory_db.commit()
-    assert client_rule_is_due(
+    assert not client_rule_is_due(
         kind=KIND_AFTER.value,
         planned_date=b.planned_date,
         hours=0,

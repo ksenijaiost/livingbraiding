@@ -554,6 +554,9 @@ async def admin_visit_cancel(
     storno_source_accruals(
         db, PayrollFundSourceKind.VISIT, visit.id, current_user.id, reason="отмене визита"
     )
+    from app.client_after_visit import cancel_scheduled_after_visit
+
+    cancel_scheduled_after_visit(db, visit)
     for vs in db.scalars(select(VisitService).where(VisitService.visit_id == visit.id)).all():
         storno_source_accruals(
             db,

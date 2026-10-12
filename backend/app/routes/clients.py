@@ -77,6 +77,7 @@ from app.client_notifications import (
     ensure_default_rules,
     get_services_marker,
     move_rule,
+    parse_latest_time,
     parse_rule_hours,
     rules_for_ui,
     save_rules_from_form,
@@ -582,6 +583,7 @@ async def admin_client_notifications_save(
         )
         after_ids = form.getlist("after_id") if hasattr(form, "getlist") else []
         after_hours = form.getlist("after_hours") if hasattr(form, "getlist") else []
+        after_latest = form.getlist("after_latest") if hasattr(form, "getlist") else []
         after_templates = form.getlist("after_template") if hasattr(form, "getlist") else []
         after_enabled = [
             "1" if form.get(f"after_enabled_{rid}") else "0" for rid in after_ids
@@ -593,6 +595,7 @@ async def admin_client_notifications_save(
             hours_list=after_hours,
             templates=after_templates,
             enabled_flags=after_enabled,
+            latest_times=after_latest,
         )
         db.commit()
     except ValueError as e:
@@ -621,8 +624,9 @@ async def admin_client_notifications_add(
         return RedirectResponse(url="/clients/notifications?err=invalid", status_code=303)
     try:
         hours = parse_rule_hours(form.get("hours"), kind=kind)
+        latest = parse_latest_time(form.get("latest_time")) if kind == KIND_AFTER else None
         template = DEFAULT_BEFORE_TEMPLATE if kind == KIND_BEFORE else DEFAULT_AFTER_TEMPLATE
-        add_rule(db, kind=kind, hours=hours, template=template)
+        add_rule(db, kind=kind, hours=hours, template=template, latest_time=latest)
         db.commit()
     except ValueError as e:
         db.rollback()

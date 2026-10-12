@@ -716,6 +716,14 @@ def _eligible_outbox_clause(
     return clause
 
 
+def _due_scheduled_clause(now):
+    """Пустой scheduled_at — как раньше, сразу. Иначе только когда время наступило."""
+    return or_(
+        NotificationOutbox.scheduled_at.is_(None),
+        NotificationOutbox.scheduled_at <= now,
+    )
+
+
 def _claim_outbox_rows(
     db: Session,
     *,
@@ -735,6 +743,8 @@ def _claim_outbox_rows(
         only_ids=only_ids,
         force=force,
     )
+    if not force:
+        clause = and_(clause, _due_scheduled_clause(now))
     stmt = (
         select(NotificationOutbox)
         .where(clause)

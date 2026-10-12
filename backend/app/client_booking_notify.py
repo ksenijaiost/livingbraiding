@@ -76,21 +76,13 @@ def client_rule_is_due(
     now: datetime,
     lateness_window: timedelta = CLIENT_REMINDER_LATENESS_WINDOW,
 ) -> bool:
-    """before: fire_at = planned − hours; after: fire_at = planned + hours."""
-    if planned_date is None:
+    """before: fire_at = planned − hours. «После визита» сюда не входит."""
+    if planned_date is None or kind != KIND_BEFORE.value:
         return False
     h = int(hours)
-    if kind == KIND_BEFORE.value:
-        if planned_date <= now:
-            return False
-        fire_at = planned_date - timedelta(hours=h)
-        if fire_at > now:
-            return False
-        if now - fire_at > lateness_window:
-            return False
-        return True
-    # after_booking
-    fire_at = planned_date + timedelta(hours=h)
+    if planned_date <= now:
+        return False
+    fire_at = planned_date - timedelta(hours=h)
     if fire_at > now:
         return False
     if now - fire_at > lateness_window:
@@ -240,7 +232,9 @@ def enqueue_due_client_notifications(
             continue
         for rule in rules:
             kind_val = rule.kind.value if hasattr(rule.kind, "value") else str(rule.kind)
-            if kind_val == KIND_BEFORE.value and booking.planned_date <= now:
+            if kind_val != KIND_BEFORE.value:
+                continue
+            if booking.planned_date <= now:
                 continue
             if not client_rule_is_due(
                 kind=kind_val,
@@ -253,4 +247,8 @@ def enqueue_due_client_notifications(
             if rows:
                 stats["enqueued"] += len(rows)
                 stats["bookings"] += 1
+    from app.client_after_visit import enqueue_due_after_booking_deadlines
+
+    extra = enqueue_due_after_booking_deadlines(db, now=now)
+    stats["enqueued"] += int(extra.get("enqueued") or 0)
     return stats

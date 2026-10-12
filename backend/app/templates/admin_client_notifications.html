@@ -76,19 +76,20 @@
         <p class="muted">Правил пока нет.</p>
       {% endif %}
 
-      <h4 style="margin:20px 0 8px; font-size:1rem;">После записи</h4>
+      <h4 style="margin:20px 0 8px; font-size:1rem;">После визита</h4>
       <p class="muted" style="font-size:12px; margin:0 0 10px;">
-        Через сколько часов после начала записи (<code>planned_date</code>).
-        <strong>0</strong> = сразу в момент начала.
-        Дата, услуги и мастера здесь не подставляются. Подставляются <code>{{ "{{name}}" }}</code> и переменные студии.
+        Через сколько — от момента, когда мастер сохранил визит. Пример: через 2 ч, но не позже 20:00 того же дня.
+        Время считается от момента, когда мастер сохранил визит (из брони или вручную). Если к времени „не позже“ визит ещё не сохранён — сообщение уйдёт в это время по брони того же дня.
+        Подставляются <code>{{ "{{name}}" }}</code> и переменные студии. Дата, услуги и мастера — нет.
       </p>
       {% if after_rules %}
         <div class="lb-table-wrap">
           <table>
             <thead>
               <tr>
-                <th class="lb-nowrap">Часы</th>
-                <th>Шаблон</th>
+                <th class="lb-nowrap">Через сколько</th>
+                <th class="lb-nowrap">Не позже</th>
+                <th>Текст</th>
                 <th class="lb-nowrap">Вкл.</th>
                 <th class="lb-nowrap"></th>
               </tr>
@@ -98,8 +99,11 @@
                 <tr>
                   <td>
                     <input type="hidden" name="after_id" value="{{ r.id }}" />
-                    <input type="number" name="after_hours" min="0" max="720" step="1" value="{{ r.hours }}"
+                    <input type="number" name="after_hours" min="0" max="72" step="0.5" value="{{ r.hours }}"
                            style="width:5rem;" required />
+                  </td>
+                  <td>
+                    <input type="time" name="after_latest" value="{{ r.latest_time }}" style="width:7rem;" />
                   </td>
                   <td>
                     <textarea name="after_template" rows="3" style="width:100%; min-width:16rem;" required>{{ r.template }}</textarea>
@@ -148,10 +152,11 @@
       <form method="post" action="/clients/notifications/add" style="margin:0;"
             onsubmit="this.querySelector('button').disabled=true;">
         <input type="hidden" name="kind" value="after_booking" />
-        <label class="label-sub">Добавить после записи</label>
+        <label class="label-sub">Добавить после визита</label>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-          <input type="number" name="hours" min="0" max="720" step="1" value="0" style="width:5rem;" />
-          <span class="muted">ч</span>
+          <input type="number" name="hours" min="0" max="72" step="0.5" value="2" style="width:5rem;" />
+          <span class="muted">ч, не позже</span>
+          <input type="time" name="latest_time" value="20:00" style="width:7rem;" />
           <button type="submit">Добавить</button>
         </div>
       </form>

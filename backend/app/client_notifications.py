@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any, Sequence
 from zoneinfo import ZoneInfo
 
@@ -30,7 +30,8 @@ from app.time_utils import utcnow_naive
 
 DEFAULT_SERVICES_MARKER = "•"
 MAX_RULES_PER_KIND = 20
-MAX_HOURS = 720  # 30 суток
+MAX_HOURS = 720  # 30 суток, только «перед записью»
+MAX_AFTER_DELAY_HOURS = 72
 
 KIND_BEFORE = ClientNotificationRuleKind.BEFORE_BOOKING
 KIND_AFTER = ClientNotificationRuleKind.AFTER_BOOKING
@@ -299,27 +300,53 @@ def ensure_default_rules(db: Session) -> bool:
     return True
 
 
-def parse_rule_hours(raw: Any, *, kind: ClientNotificationRuleKind) -> int:
+def parse_rule_hours(raw: Any, *, kind: ClientNotificationRuleKind) -> int | float:
     s = str(raw if raw is not None else "").strip().replace(",", ".")
     if not s:
         raise ValueError("Укажите число часов.")
     try:
-        # целые часы; «2.0» допускаем как 2
         val = float(s)
     except ValueError as e:
-        raise ValueError("Часы должны быть целым числом.") from e
-    if abs(val - round(val)) > 1e-9:
-        raise ValueError("Часы должны быть целым числом.")
-    hours = int(round(val))
+        raise ValueError("Часы должны быть числом.") from e
     if kind == KIND_BEFORE:
+        if abs(val - round(val)) > 1e-9:
+            raise ValueError("Часы должны быть целым числом.")
+        hours = int(round(val))
         if hours < 1:
             raise ValueError("Для напоминания перед записью укажите целое число часов больше 0.")
-    else:
-        if hours < 0:
-            raise ValueError("Для сообщения после записи укажите целое число часов не меньше 0.")
-    if hours > MAX_HOURS:
-        raise ValueError(f"Слишком большой интервал (максимум {MAX_HOURS} ч).")
-    return hours
+        if hours > MAX_HOURS:
+            raise ValueError(f"Слишком большой интервал (максимум {MAX_HOURS} ч).")
+        return hours
+    if val < 0 or val > MAX_AFTER_DELAY_HOURS:
+        raise ValueError(
+            f"Для сообщения после визита укажите часы от 0 до {MAX_AFTER_DELAY_HOURS}."
+        )
+    doubled = val * 2
+    if abs(doubled - round(doubled)) > 1e-6:
+        raise ValueError("Шаг — полчаса: 0, 0,5, 1 и так далее.")
+    snapped = round(doubled) / 2
+    if abs(snapped - round(snapped)) < 1e-9:
+        return int(round(snapped))
+    return snapped
+
+
+def parse_latest_time(raw: Any) -> time | None:
+    """Пусто — без «не позже». Иначе время студии ЧЧ:ММ."""
+    s = str(raw if raw is not None else "").strip()
+    if not s:
+        return None
+    s = s.replace(".", ":")
+    parts = s.split(":")
+    if len(parts) < 2:
+        raise ValueError("Время «не позже» укажите как ЧЧ:ММ.")
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError as e:
+        raise ValueError("Время «не позже» укажите как ЧЧ:ММ.") from e
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        raise ValueError("Время «не позже» укажите как ЧЧ:ММ.")
+    return time(hour, minute)
 
 
 def parse_template(raw: Any) -> str:
@@ -336,8 +363,9 @@ def add_rule(
     db: Session,
     *,
     kind: ClientNotificationRuleKind,
-    hours: int,
+    hours: int | float,
     template: str,
+    latest_time: time | None = None,
 ) -> ClientNotificationRule:
     existing = list_rules(db, kind)
     if len(existing) >= MAX_RULES_PER_KIND:
@@ -345,7 +373,8 @@ def add_rule(
     now = utcnow_naive()
     row = ClientNotificationRule(
         kind=kind,
-        hours=int(hours),
+        hours=float(hours),
+        latest_time=latest_time if kind == KIND_AFTER else None,
         template=template,
         position=len(existing),
         is_enabled=True,
@@ -398,6 +427,19 @@ def _renumber(db: Session, kind: ClientNotificationRuleKind) -> None:
     db.flush()
 
 
+def _hours_for_ui(hours: float) -> int | float:
+    val = float(hours)
+    if abs(val - round(val)) < 1e-9:
+        return int(round(val))
+    return round(val, 1)
+
+
+def _latest_for_ui(value: time | None) -> str:
+    if value is None:
+        return ""
+    return f"{int(value.hour):02d}:{int(value.minute):02d}"
+
+
 def save_rules_from_form(
     db: Session,
     *,
@@ -406,15 +448,21 @@ def save_rules_from_form(
     hours_list: Sequence[Any],
     templates: Sequence[Any],
     enabled_flags: Sequence[Any],
+    latest_times: Sequence[Any] | None = None,
 ) -> None:
     """Обновить существующие строки kind в порядке формы; лишние id игнорируются."""
     if not (len(ids) == len(hours_list) == len(templates) == len(enabled_flags)):
+        raise ValueError("Некорректные данные формы правил.")
+    if latest_times is not None and len(latest_times) != len(ids):
         raise ValueError("Некорректные данные формы правил.")
     by_id = {int(r.id): r for r in list_rules(db, kind)}
     seen: set[int] = set()
     now = utcnow_naive()
     position = 0
-    for raw_id, raw_h, raw_t, raw_en in zip(ids, hours_list, templates, enabled_flags):
+    paired_latest = list(latest_times) if latest_times is not None else [None] * len(ids)
+    for raw_id, raw_h, raw_t, raw_en, raw_latest in zip(
+        ids, hours_list, templates, enabled_flags, paired_latest
+    ):
         try:
             rid = int(raw_id)
         except (TypeError, ValueError) as e:
@@ -425,7 +473,9 @@ def save_rules_from_form(
         if rid in seen:
             continue
         seen.add(rid)
-        row.hours = parse_rule_hours(raw_h, kind=kind)
+        row.hours = float(parse_rule_hours(raw_h, kind=kind))
+        if kind == KIND_AFTER and latest_times is not None:
+            row.latest_time = parse_latest_time(raw_latest)
         row.template = parse_template(raw_t)
         row.is_enabled = str(raw_en).strip().lower() in ("1", "true", "on", "yes")
         row.position = position
@@ -442,7 +492,7 @@ def rules_for_ui(db: Session) -> dict[str, list[dict[str, Any]]]:
         "before": [
             {
                 "id": int(r.id),
-                "hours": int(r.hours),
+                "hours": _hours_for_ui(r.hours),
                 "template": r.template,
                 "is_enabled": bool(r.is_enabled),
                 "position": int(r.position),
@@ -452,7 +502,8 @@ def rules_for_ui(db: Session) -> dict[str, list[dict[str, Any]]]:
         "after": [
             {
                 "id": int(r.id),
-                "hours": int(r.hours),
+                "hours": _hours_for_ui(r.hours),
+                "latest_time": _latest_for_ui(r.latest_time),
                 "template": r.template,
                 "is_enabled": bool(r.is_enabled),
                 "position": int(r.position),
