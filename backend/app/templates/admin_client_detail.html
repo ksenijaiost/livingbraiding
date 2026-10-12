@@ -173,6 +173,33 @@
       <tr><th>Подтверждён</th><td>{% if client.is_confirmed %}Да{% else %}Нет (черновик){% endif %}</td></tr>
     </table>
 
+    <h3 class="section-title">Последние сообщения</h3>
+    {% if not recent_messages %}
+      <p class="muted">Сообщений пока нет.</p>
+    {% else %}
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        {% for item in recent_messages %}
+          <div style="border:1px solid #e5e7eb; border-radius:8px; padding:8px 10px; font-size:14px;">
+            <div>
+              {% if item.kind == 'in' %}
+                <strong>Входящее</strong> · {{ item.channel_label }} · {{ item.at_label }}
+                · {{ item.parsed_label }}
+              {% else %}
+                <strong>{{ item.type_label }}</strong> · {{ item.channel_label }} · {{ item.destination }}
+                · {{ item.at_label }} · {{ item.status_label }}
+              {% endif %}
+              {% if item.booking_id %}
+                · <a href="/bookings/{{ item.booking_id }}">бронь #{{ item.booking_id }}</a>
+              {% endif %}
+            </div>
+            {% if item.text %}
+              <div style="white-space:pre-wrap; margin-top:4px;">{{ item.text }}</div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
     <h3 class="section-title">Активная бронь</h3>
     {% if not active_bookings %}
       <p class="muted">Активных броней нет.</p>

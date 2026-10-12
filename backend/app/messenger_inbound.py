@@ -26,6 +26,7 @@ from app.db.models import (
     BookingPlannedService,
     BookingPlannedServiceMaster,
     Client,
+    ClientInboundMessage,
     ClientNotificationSend,
     NotificationChannel,
     NotificationOutbox,
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 EVENT_BOOKING_CLIENT_CANCEL_REQUEST = "booking_client_cancel_request"
 EVENT_BOOKING_CLIENT_RESCHEDULE_REQUEST = "booking_client_reschedule_request"
 EVENT_CLIENT_CONTACT_REQUEST = "client_contact_request"
+EVENT_CLIENT_BOT_REPLY = "client_bot_reply"
 
 MSG_HINT = BOT_REPLY_DEFAULTS["hint"]
 MSG_NO_BOOKING = BOT_REPLY_DEFAULTS["no_booking"]
@@ -57,6 +59,104 @@ _CHANNEL_LABEL = {
     NotificationChannel.MAX.value: "Max",
     NotificationChannel.TELEGRAM.value: "Telegram",
 }
+
+_PARSED_BY_DIGIT = {
+    "1": "confirm",
+    "2": "reschedule",
+    "3": "cancel",
+    "4": "contact_admin",
+    "5": "directions",
+}
+
+
+def _log_client_inbound(
+    db: Session,
+    *,
+    client_id: int | None,
+    booking_id: int | None,
+    channel: str,
+    messenger_id: int,
+    text: str | None,
+    parsed_action: str,
+    answer: str | None,
+    reply_key: str | None,
+) -> str | None:
+    raw = text if isinstance(text, str) else ""
+    if len(raw) > 8000:
+        raw = raw[:8000]
+    db.add(
+        ClientInboundMessage(
+            client_id=int(client_id) if client_id is not None else None,
+            booking_id=int(booking_id) if booking_id is not None else None,
+            channel=channel.strip().lower(),
+            external_user_id=int(messenger_id),
+            text=raw,
+            parsed_action=parsed_action or "unknown",
+            received_at=utcnow_naive(),
+        )
+    )
+    db.flush()
+    if answer and client_id is not None and reply_key:
+        db.info["lb_bot_reply"] = {
+            "client_id": int(client_id),
+            "booking_id": int(booking_id) if booking_id is not None else None,
+            "reply_key": reply_key,
+            "channel": channel.strip().lower(),
+            "messenger_id": int(messenger_id),
+            "text": answer,
+        }
+    else:
+        db.info.pop("lb_bot_reply", None)
+    return answer
+
+
+def _save_bot_reply_outbox(
+    db: Session,
+    meta: dict,
+    *,
+    status: NotificationOutboxStatus,
+    error: str | None,
+    text: str,
+) -> None:
+    now = utcnow_naive()
+    channel = str(meta.get("channel") or "")
+    key = (
+        f"cbr:{meta.get('client_id')}:{channel}:"
+        f"{now.strftime('%Y%m%d%H%M%S%f')}:{meta.get('reply_key')}"
+    )
+    if len(key) > 200:
+        key = key[:200]
+    booking_id = meta.get("booking_id")
+    client_id = meta.get("client_id")
+    payload = {
+        "text": text,
+        "target_id": int(meta["messenger_id"]),
+        "target_kind": "client",
+        "event_type": EVENT_CLIENT_BOT_REPLY,
+        "reply_key": meta.get("reply_key"),
+        "booking_id": int(booking_id) if booking_id else None,
+        "client_id": int(client_id) if client_id else None,
+    }
+    db.add(
+        NotificationOutbox(
+            user_id=None,
+            client_id=int(client_id) if client_id else None,
+            target_kind="client",
+            booking_id=int(booking_id) if booking_id else None,
+            channel=NotificationChannel(channel),
+            event_type=EVENT_CLIENT_BOT_REPLY,
+            payload_json=json.dumps(payload, ensure_ascii=False),
+            status=status,
+            error=(error or None),
+            dedupe_key=key,
+            attempt_count=1,
+            created_at=now,
+            scheduled_at=now,
+            sent_at=now if status == NotificationOutboxStatus.SENT else None,
+            body=text,
+        )
+    )
+    db.flush()
 
 
 def normalize_client_reply(text: str | None) -> str | None:
@@ -283,6 +383,7 @@ def _enqueue_cancel_request_notices(
                     channel=ch,
                     event_type=EVENT_BOOKING_CLIENT_CANCEL_REQUEST,
                     payload_json=json.dumps(payload, ensure_ascii=False),
+                    body=text,
                     status=NotificationOutboxStatus.PENDING,
                     dedupe_key=key,
                     attempt_count=0,
@@ -313,6 +414,7 @@ def _enqueue_cancel_request_notices(
                 channel=channel_enum,
                 event_type=EVENT_BOOKING_CLIENT_CANCEL_REQUEST,
                 payload_json=json.dumps(payload, ensure_ascii=False),
+                body=text,
                 status=NotificationOutboxStatus.PENDING,
                 dedupe_key=key,
                 attempt_count=0,
@@ -388,6 +490,7 @@ def _enqueue_admin_chats(
                 channel=channel_enum,
                 event_type=event_type,
                 payload_json=json.dumps(payload, ensure_ascii=False),
+                body=text,
                 status=NotificationOutboxStatus.PENDING,
                 dedupe_key=key,
                 attempt_count=0,
@@ -452,37 +555,114 @@ def handle_client_text(
         return None
     client = find_client_by_channel_id(db, channel, messenger_id)
     if client is None:
-        return None
+        return _log_client_inbound(
+            db,
+            client_id=None,
+            booking_id=None,
+            channel=channel,
+            messenger_id=messenger_id,
+            text=text,
+            parsed_action="unknown",
+            answer=None,
+            reply_key=None,
+        )
     reply = normalize_client_reply(text)
     ch = channel.strip().lower()
+    parsed = _PARSED_BY_DIGIT.get(reply or "", "unknown")
     if reply is None:
-        return render_bot_reply(db, "hint")
+        return _log_client_inbound(
+            db,
+            client_id=int(client.id),
+            booking_id=None,
+            channel=ch,
+            messenger_id=messenger_id,
+            text=text,
+            parsed_action="unknown",
+            answer=render_bot_reply(db, "hint"),
+            reply_key="hint",
+        )
 
-    # 4 и 5 не требуют активной брони.
+    # 4 и 5 не требуют активной брони и к записи не привязываются.
     if reply == "4":
         try:
             _enqueue_contact_admin(db, client, channel=ch, messenger_id=int(messenger_id))
         except Exception:
             logger.exception("messenger_inbound: contact notify enqueue failed client=%s", client.id)
-        return render_bot_reply(db, contact_reply_key(ch))
+        key = contact_reply_key(ch)
+        return _log_client_inbound(
+            db,
+            client_id=int(client.id),
+            booking_id=None,
+            channel=ch,
+            messenger_id=messenger_id,
+            text=text,
+            parsed_action="contact_admin",
+            answer=render_bot_reply(db, key),
+            reply_key=key,
+        )
     if reply == "5":
-        return render_bot_reply(db, "directions_5")
+        return _log_client_inbound(
+            db,
+            client_id=int(client.id),
+            booking_id=None,
+            channel=ch,
+            messenger_id=messenger_id,
+            text=text,
+            parsed_action="directions",
+            answer=render_bot_reply(db, "directions_5"),
+            reply_key="directions_5",
+        )
 
     booking = find_booking_for_client_reply(db, client)
     if booking is None:
         if reply == "2":
-            return render_bot_reply(db, "no_booking_reschedule")
-        return render_bot_reply(db, "no_booking")
+            answer = render_bot_reply(db, "no_booking_reschedule")
+            key = "no_booking_reschedule"
+        else:
+            answer = render_bot_reply(db, "no_booking")
+            key = "no_booking"
+        return _log_client_inbound(
+            db,
+            client_id=int(client.id),
+            booking_id=None,
+            channel=ch,
+            messenger_id=messenger_id,
+            text=text,
+            parsed_action=parsed,
+            answer=answer,
+            reply_key=key,
+        )
 
     booking = _load_booking_graph(db, booking)
     now = utcnow_naive()
+    booking_id = int(booking.id)
     if reply == "1":
         if booking.client_confirmed_at is not None:
-            return MSG_ALREADY_CONFIRMED
+            return _log_client_inbound(
+                db,
+                client_id=int(client.id),
+                booking_id=booking_id,
+                channel=ch,
+                messenger_id=messenger_id,
+                text=text,
+                parsed_action="confirm",
+                answer=MSG_ALREADY_CONFIRMED,
+                reply_key="already_confirmed",
+            )
         booking.client_confirmed_at = now
         booking.client_confirmed_via = ch
         db.flush()
-        return render_bot_reply(db, "confirm_1")
+        return _log_client_inbound(
+            db,
+            client_id=int(client.id),
+            booking_id=booking_id,
+            channel=ch,
+            messenger_id=messenger_id,
+            text=text,
+            parsed_action="confirm",
+            answer=render_bot_reply(db, "confirm_1"),
+            reply_key="confirm_1",
+        )
     if reply == "2":
         repeat = booking.client_reschedule_requested_at is not None
         booking.client_reschedule_requested_at = now
@@ -495,7 +675,17 @@ def handle_client_text(
                 logger.exception(
                     "messenger_inbound: reschedule notify enqueue failed booking=%s", booking.id
                 )
-        return render_bot_reply(db, "reschedule_2")
+        return _log_client_inbound(
+            db,
+            client_id=int(client.id),
+            booking_id=booking_id,
+            channel=ch,
+            messenger_id=messenger_id,
+            text=text,
+            parsed_action="reschedule",
+            answer=render_bot_reply(db, "reschedule_2"),
+            reply_key="reschedule_2",
+        )
 
     # reply == "3" — логика отмены как раньше, текст из настройки.
     booking.client_cancel_requested_at = now
@@ -505,7 +695,17 @@ def handle_client_text(
         _enqueue_cancel_request_notices(db, booking, client, channel=ch)
     except Exception:
         logger.exception("messenger_inbound: cancel notify enqueue failed booking=%s", booking.id)
-    return render_bot_reply(db, "cancel_3")
+    return _log_client_inbound(
+        db,
+        client_id=int(client.id),
+        booking_id=booking_id,
+        channel=ch,
+        messenger_id=messenger_id,
+        text=text,
+        parsed_action="cancel",
+        answer=render_bot_reply(db, "cancel_3"),
+        reply_key="cancel_3",
+    )
 
 
 def process_inbound_message(
@@ -517,15 +717,31 @@ def process_inbound_message(
 ) -> None:
     """Обработать и ответить клиенту. Ошибки глотает."""
     try:
+        db.info.pop("lb_bot_reply", None)
         answer = handle_client_text(db, channel=channel, messenger_id=messenger_id, text=text)
+        meta = db.info.pop("lb_bot_reply", None)
         db.commit()
         if answer:
+            status = NotificationOutboxStatus.SENT
+            error: str | None = None
             try:
                 reply_to_messenger(channel, messenger_id, answer)
-            except Exception:
+            except Exception as e:
+                status = NotificationOutboxStatus.FAILED
+                error = str(e)[:2000]
                 logger.exception(
                     "messenger_inbound: reply failed channel=%s id=%s", channel, messenger_id
                 )
+            if isinstance(meta, dict):
+                try:
+                    _save_bot_reply_outbox(db, meta, status=status, error=error, text=answer)
+                    db.commit()
+                except Exception:
+                    logger.exception("messenger_inbound: bot reply log failed")
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
     except Exception:
         logger.exception("messenger_inbound: handler error channel=%s", channel)
         try:

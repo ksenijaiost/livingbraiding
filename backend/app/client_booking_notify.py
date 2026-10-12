@@ -165,6 +165,8 @@ def enqueue_client_rule_notifications(
             channel=channel,
             event_type=event_type,
             payload_json=json.dumps(payload, ensure_ascii=False),
+            body=text,
+            rule_id=int(rule.id),
             status=NotificationOutboxStatus.PENDING,
             error=None,
             dedupe_key=key,

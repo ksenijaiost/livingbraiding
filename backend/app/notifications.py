@@ -817,16 +817,21 @@ def process_outbox(
             continue
         stats["processed"] += 1
         row.attempt_count = int(row.attempt_count or 0) + 1
+        intended = str(_parse_payload(row).get("text") or "").strip()
         try:
             _send_outbox_row(row)
         except Exception as e:
             row.status = NotificationOutboxStatus.FAILED
             row.error = str(e)[:2000]
+            if not (row.body or "").strip() and intended:
+                row.body = intended
             row.locked_at = None
             stats["failed"] += 1
             logger.warning("notification_outbox #%s failed: %s", row.id, e)
             db.commit()
             continue
+        if intended:
+            row.body = intended
         row.status = NotificationOutboxStatus.SENT
         row.sent_at = utcnow_naive()
         row.error = None

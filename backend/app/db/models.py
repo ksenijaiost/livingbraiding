@@ -299,6 +299,12 @@ class NotificationOutbox(Base):
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Правило before/after, если сообщение из него. Текст, который ушёл или должен уйти.
+    rule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("client_notification_rules.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
     client: Mapped["Client | None"] = relationship(foreign_keys=[client_id])
@@ -430,6 +436,22 @@ class ClientNotificationSend(Base):
     outbox_id: Mapped[int | None] = mapped_column(ForeignKey("notification_outbox.id"), nullable=True)
     target_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     sent_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class ClientInboundMessage(Base):
+    """Входящее сообщение клиента из VK / Max / Telegram (не сотрудник и не чат админов)."""
+
+    __tablename__ = "client_inbound_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True, index=True)
+    booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True, index=True)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    external_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # confirm | reschedule | cancel | contact_admin | directions | unknown
+    parsed_action: Mapped[str] = mapped_column(String(32), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class AdminChatTarget(Base):

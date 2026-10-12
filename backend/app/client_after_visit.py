@@ -147,6 +147,8 @@ def _insert_after_outbox(
         channel=channel,
         event_type=EVENT_CLIENT_AFTER_BOOKING,
         payload_json=json.dumps(payload, ensure_ascii=False),
+        body=text,
+        rule_id=int(rule.id),
         status=NotificationOutboxStatus.PENDING,
         error=None,
         dedupe_key=key,

@@ -463,6 +463,35 @@
       <p class="muted lb-font-12 lb-mt-8">При отмене брони резерв снимается автоматически. При редактировании брони (другой комплект или режим) старый резерв снимается и создаётся новый по форме.</p>
     {% endif %}
 
+    <h3 style="margin-top: 18px;">Уведомления клиенту</h3>
+    {% if not notify_timeline %}
+      <p class="muted">Сообщений по этой записи пока нет.</p>
+    {% else %}
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        {% for item in notify_timeline %}
+          <div style="border:1px solid #e5e7eb; border-radius:8px; padding:8px 10px;">
+            {% if item.kind == 'in' %}
+              <div><strong>Ответ клиента</strong> · {{ item.channel_label }} · {{ item.at_label }}</div>
+              <div>{{ item.parsed_label }}</div>
+              <div style="white-space:pre-wrap;">{{ item.text }}</div>
+            {% else %}
+              <div>
+                <strong>{{ item.type_label }}</strong>
+                {% if item.mark %}<span class="muted"> · {{ item.mark }}</span>{% endif %}
+              </div>
+              <div class="muted">{{ item.channel_label }} · {{ item.destination }} · {{ item.status_label }}</div>
+              {% if item.text %}
+                <details>
+                  <summary>Текст</summary>
+                  <div style="white-space:pre-wrap; margin-top:6px;">{{ item.text }}</div>
+                </details>
+              {% endif %}
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
     <h3 style="margin-top: 18px;">Аудит</h3>
     {% if not audit_rows %}
       <p class="muted">Пока нет изменений.</p>

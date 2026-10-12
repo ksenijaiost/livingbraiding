@@ -27,6 +27,7 @@ from app.client_validation import (
 )
 from app.forms_parse import parse_bool
 from app.consultation_booking import OPEN_BOOKING_STATUSES
+from app.client_notify_history import client_recent_messages
 from app.db.models import (
     Booking,
     BookingMaster,
@@ -1536,6 +1537,7 @@ def admin_client_detail(
             display_tz=display_tz,
             no_promo_source_label=no_promo_source_label(client.no_promo_source),
             channel_link=channel_link,
+            recent_messages=client_recent_messages(db, int(client.id), tz_name=display_tz),
         ),
     )
     if raw_link:
