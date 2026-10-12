@@ -23,6 +23,13 @@ ALLOWED_CONTENT_TYPES = {
 }
 MAX_BYTES = 10 * 1024 * 1024  # 10MB
 
+VIDEO_EXTS = {".mp4", ".mov", ".webm"}
+VIDEO_MIME = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+}
+
 # Имена как у save_upload_image: <32 hex>.<ext> (бэкап — без HEIC).
 _BACKUP_STORED_NAME_RE = re.compile(r"^[a-f0-9]{32}\.(?:jpg|jpeg|png|webp)$", re.IGNORECASE)
 _BACKUP_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -271,6 +278,59 @@ async def save_upload_image(upload: object) -> str:
         pass
 
     return f"/media/{rel_name}"
+
+
+def _video_ext(filename: str | None) -> str | None:
+    ext = Path(filename or "").suffix.lower()
+    if ext in VIDEO_EXTS:
+        return ext
+    return None
+
+
+async def save_upload_video(upload: object, *, max_bytes: int) -> tuple[str, str, int]:
+    """Сохранить видео в каталог загрузок. Возвращает (имя файла, исходное имя, размер)."""
+    ext = _video_ext(getattr(upload, "filename", None))
+    if not ext:
+        raise ValueError("Видео: допускаются файлы mp4, mov и webm.")
+    limit = max(1, int(max_bytes))
+    rel_name = f"{uuid.uuid4().hex}{ext}"
+    dest = media_root_dir() / rel_name
+    original = Path(str(getattr(upload, "filename", None) or "video")).name[:200] or "video"
+    total = 0
+    with dest.open("wb") as f:
+        while True:
+            chunk = await upload.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > limit:
+                try:
+                    f.close()
+                    dest.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                mb = max(1, limit // (1024 * 1024))
+                raise ValueError(f"Видео слишком большое (лимит {mb} МБ).")
+            f.write(chunk)
+    if total <= 0:
+        dest.unlink(missing_ok=True)
+        raise ValueError("Файл видео пустой.")
+    try:
+        await upload.seek(0)
+    except Exception:
+        pass
+    return rel_name, original, total
+
+
+def delete_media_file(rel_name: str | None) -> None:
+    """Удалить файл из каталога загрузок по относительному имени (без каталогов)."""
+    name = Path(str(rel_name or "")).name
+    if not name or name in (".", ".."):
+        return
+    try:
+        (media_root_dir() / name).unlink(missing_ok=True)
+    except Exception:
+        return
 
 
 async def replace_or_clear_photo(form: object, current: str | None, field: str) -> tuple[str | None, bool]:

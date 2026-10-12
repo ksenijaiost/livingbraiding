@@ -374,6 +374,29 @@ class ClientNotificationRule(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class StudioTemplateVariable(Base):
+    """Переменные студии для шаблонов уведомлений: встроенные и свои."""
+
+    __tablename__ = "studio_template_variables"
+    __table_args__ = (
+        UniqueConstraint("key", name="uq_studio_template_variables_key"),
+        UniqueConstraint("public_token", name="uq_studio_template_variables_token"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(32), nullable=False)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # text | url | video
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    file_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    file_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Неугадываемый токен публичной ссылки /media/v/<token> (только видео).
+    public_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
 class ClientNotificationSend(Base):
     """Журнал успешно отправленных клиентских уведомлений (для «последнего напоминания»)."""
 

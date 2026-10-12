@@ -160,34 +160,48 @@ def render_client_notify_template(
     client: Client,
     tz_name: str,
     marker: str = DEFAULT_SERVICES_MARKER,
+    db: Session | None = None,
+    substitute_system: bool = True,
 ) -> str:
-    """Подставить переменные before_booking. Неизвестные {{...}} оставляет как есть."""
-    text = template if template is not None else ""
-    local = _to_local(booking.planned_date, tz_name)
-    if local is None:
-        date_s = time_s = datetime_s = date_text = weekday = ""
-    else:
-        date_s = local.strftime("%d.%m.%Y")
-        time_s = local.strftime("%H:%M")
-        datetime_s = f"{date_s} {time_s}"
-        date_text = f"{local.day} {_MONTHS_GENITIVE[local.month]}"
-        weekday = _WEEKDAYS[local.weekday()]
+    """Подставить переменные. Неизвестные {{...}} оставляет как есть.
 
-    values = {
-        "date": date_s,
-        "time": time_s,
-        "datetime": datetime_s,
-        "date_text": date_text,
-        "weekday": weekday,
-        "name": (client.name or "").strip(),
-        "services": _services_block(booking, marker),
-        "masters": _masters_csv(booking),
-    }
+    substitute_system=False — шаблон «после записи»: дата/имя/услуги не трогаем,
+    переменные студии и свои подставляем, если передан db.
+    """
+    text = template if template is not None else ""
+    values: dict[str, str] = {}
+    if substitute_system:
+        local = _to_local(booking.planned_date, tz_name)
+        if local is None:
+            date_s = time_s = datetime_s = date_text = weekday = ""
+        else:
+            date_s = local.strftime("%d.%m.%Y")
+            time_s = local.strftime("%H:%M")
+            datetime_s = f"{date_s} {time_s}"
+            date_text = f"{local.day} {_MONTHS_GENITIVE[local.month]}"
+            weekday = _WEEKDAYS[local.weekday()]
+        values = {
+            "date": date_s,
+            "time": time_s,
+            "datetime": datetime_s,
+            "date_text": date_text,
+            "weekday": weekday,
+            "name": (client.name or "").strip(),
+            "services": _services_block(booking, marker),
+            "masters": _masters_csv(booking),
+        }
+    studio: dict[str, str] = {}
+    if db is not None:
+        from app.studio_template_variables import studio_template_values
+
+        studio = studio_template_values(db)
 
     def _repl(m: re.Match[str]) -> str:
         key = m.group(1)
         if key in values:
             return values[key]
+        if key in studio:
+            return studio[key]
         return m.group(0)
 
     return _VAR_RE.sub(_repl, text)

@@ -394,6 +394,12 @@ def _client_notifications_page(
     if ensure_default_rules(db):
         db.commit()
     rules = rules_for_ui(db)
+    from app.studio_template_variables import ensure_builtin_studio_variables, variables_for_ui
+    from app.settings import get_settings
+
+    if ensure_builtin_studio_variables(db):
+        db.commit()
+    var_ui = variables_for_ui(db)
     is_admin = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
     return templates.TemplateResponse(
         "admin_client_notifications.html",
@@ -406,6 +412,10 @@ def _client_notifications_page(
             admin_chats=admin_chats_for_ui(db),
             can_manage_admin_chat=is_admin,
             admin_link_code=admin_link_code,
+            studio_builtins=var_ui["builtins"],
+            studio_custom=var_ui["custom"],
+            template_palette=var_ui["palette"],
+            video_max_mb=get_settings().studio_route_video_max_mb,
             error=error,
             info=info,
         ),
@@ -438,6 +448,16 @@ def admin_client_notifications(
         info = "Правило удалено."
     elif msg == "moved":
         info = "Порядок обновлён."
+    elif msg == "vars_saved":
+        info = "Переменные студии сохранены."
+    elif msg == "var_added":
+        info = "Своя переменная добавлена."
+    elif msg == "var_deleted":
+        info = "Своя переменная удалена."
+    elif msg == "video_saved":
+        info = "Видео «Как нас найти» сохранено."
+    elif msg == "video_cleared":
+        info = "Видео удалено."
     elif msg == "admin_code":
         info = "Код для чата админов создан (24 часа)."
     elif msg == "admin_unlinked":
@@ -640,6 +660,118 @@ async def admin_client_notifications_move(
         db.rollback()
         return RedirectResponse(url="/clients/notifications?err=missing", status_code=303)
     return RedirectResponse(url="/clients/notifications?msg=moved", status_code=303)
+
+
+@router.post("/notifications/variables/builtin")
+async def admin_client_notifications_variables_builtin(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.studio_template_variables import BUILTIN_KINDS, KIND_VIDEO, save_builtin_values
+
+    form = await request.form()
+    values = {
+        key: str(form.get(f"builtin_{key}") or "")
+        for key, kind in BUILTIN_KINDS.items()
+        if kind != KIND_VIDEO
+    }
+    try:
+        save_builtin_values(db, values, user_id=current_user.id)
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=vars_saved", status_code=303)
+
+
+@router.post("/notifications/variables/video")
+async def admin_client_notifications_variables_video(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.studio_template_variables import clear_route_video, save_route_video
+
+    form = await request.form()
+    try:
+        if parse_bool(form.get("clear")):
+            clear_route_video(db, user_id=current_user.id)
+            db.commit()
+            return RedirectResponse(url="/clients/notifications?msg=video_cleared", status_code=303)
+        upload = get_nonempty_upload(form, "video")
+        if upload is None:
+            raise ValueError("Выберите файл видео (mp4, mov или webm).")
+        await save_route_video(db, upload, user_id=current_user.id)
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=video_saved", status_code=303)
+
+
+@router.post("/notifications/variables/custom/add")
+async def admin_client_notifications_variables_add(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.studio_template_variables import add_custom_variable
+
+    form = await request.form()
+    try:
+        add_custom_variable(
+            db,
+            str(form.get("key") or ""),
+            str(form.get("value") or ""),
+            user_id=current_user.id,
+        )
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=var_added", status_code=303)
+
+
+@router.post("/notifications/variables/custom/save")
+async def admin_client_notifications_variables_save(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.studio_template_variables import update_custom_variable
+
+    form = await request.form()
+    try:
+        update_custom_variable(
+            db,
+            str(form.get("key") or ""),
+            str(form.get("value") or ""),
+            user_id=current_user.id,
+        )
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=vars_saved", status_code=303)
+
+
+@router.post("/notifications/variables/custom/delete")
+async def admin_client_notifications_variables_delete(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.studio_template_variables import delete_variable
+
+    form = await request.form()
+    try:
+        delete_variable(db, str(form.get("key") or ""))
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=var_deleted", status_code=303)
 
 
 @router.get("/stats/retention", response_class=HTMLResponse)

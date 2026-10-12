@@ -122,10 +122,21 @@ def enqueue_client_rule_notifications(
             client=client,
             tz_name=tz_name,
             marker=marker,
+            db=db,
+            substitute_system=True,
         )
         event_type = EVENT_CLIENT_BOOKING_REMINDER
     else:
-        text = rule.template  # after — без подстановки переменных
+        # Системные переменные в «после» не подставляются; переменные студии — да.
+        text = render_client_notify_template(
+            rule.template,
+            booking=booking,
+            client=client,
+            tz_name=tz_name,
+            marker=marker,
+            db=db,
+            substitute_system=False,
+        )
         event_type = EVENT_CLIENT_AFTER_BOOKING
     if not (text or "").strip():
         return []
