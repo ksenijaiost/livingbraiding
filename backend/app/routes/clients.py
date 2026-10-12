@@ -40,6 +40,13 @@ from app.db.models import (
     Visit,
     VisitKitUsage,
 )
+from app.client_bulk_import import (
+    MAX_BULK_CLIENTS,
+    MAX_BULK_JSON_BYTES,
+    import_single_client_row,
+    parse_bulk_clients_json,
+    summarize_bulk_client_results,
+)
 from app.client_export import build_all_clients_csv_bytes
 from app.client_marks import apply_client_marks, no_promo_source_label
 from app.client_retention import (
@@ -1115,6 +1122,86 @@ def admin_clients_retention_lost(
             return_label=f"{ret_d0.isoformat()} — {ret_d1.isoformat()}",
             back_url="/clients/stats/retention?" + urlencode(back_q),
         ),
+    )
+
+
+def _clients_bulk_import_page(
+    request: Request,
+    current_user: AuthUser,
+    *,
+    results,
+    top_error: str | None,
+    payload_prefill: str,
+    status_code: int = 200,
+):
+    summary = summarize_bulk_client_results(results) if results is not None else None
+    return templates.TemplateResponse(
+        "admin_clients_bulk_import.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            results=results,
+            summary=summary,
+            top_error=top_error,
+            payload_prefill=payload_prefill,
+            max_bytes=MAX_BULK_JSON_BYTES,
+            max_clients=MAX_BULK_CLIENTS,
+        ),
+        status_code=status_code,
+    )
+
+
+@router.get("/bulk-import", response_class=HTMLResponse)
+def admin_clients_bulk_import_get(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+):
+    return _clients_bulk_import_page(
+        request,
+        current_user,
+        results=None,
+        top_error=None,
+        payload_prefill="",
+    )
+
+
+@router.post("/bulk-import", response_class=HTMLResponse)
+async def admin_clients_bulk_import_post(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    payload = str(form.get("payload") or "")
+    try:
+        rows = parse_bulk_clients_json(payload)
+    except ValueError as exc:
+        return _clients_bulk_import_page(
+            request,
+            current_user,
+            results=None,
+            top_error=str(exc),
+            payload_prefill=payload,
+            status_code=400,
+        )
+    reserved: set[str] = set()
+    results = []
+    for index, row in enumerate(rows, start=1):
+        results.append(
+            import_single_client_row(
+                db,
+                row,
+                reserved_phones=reserved,
+                changed_by_user_id=current_user.id,
+                line=index,
+            )
+        )
+    return _clients_bulk_import_page(
+        request,
+        current_user,
+        results=results,
+        top_error=None,
+        payload_prefill=payload,
     )
 
 

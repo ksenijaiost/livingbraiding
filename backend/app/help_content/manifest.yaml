@@ -88,6 +88,11 @@ pages:
     - admin_senior
     - admin_super
     file: client_form.md
+  clients_bulk_import:
+    title: Массовое добавление клиентов
+    roles:
+    - admin_super
+    file: clients_bulk_import.md
   clients_list:
     title: Клиенты
     roles:

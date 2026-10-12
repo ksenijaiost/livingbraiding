@@ -13,6 +13,9 @@
         {% if current_user.role.value in ["ADMIN", "ADMIN_SUPER"] %}
           <a href="/clients/new"><button type="button">Новый клиент</button></a>
         {% endif %}
+        {% if current_user.role.value == "ADMIN_SUPER" %}
+          <a href="/clients/bulk-import"><button type="button" class="secondary">Массовое добавление</button></a>
+        {% endif %}
       </div>
     </div>
 
