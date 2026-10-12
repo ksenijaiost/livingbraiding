@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block help_page_id %}clients_bulk_import{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="lb-flex-between-center">
+      <h2 class="lb-mt-0">Массовое добавление клиентов (JSON)</h2>
+      <a href="/clients"><button type="button" class="secondary">К списку клиентов</button></a>
+    </div>
+    <p class="muted">Доступно только суперадминистратору. Корень JSON — <strong>массив</strong> объектов; допускается только <strong>строгий JSON</strong> (без <code>//</code> и хвостовых запятых). Лимиты: до {{ (max_bytes // 1024)|int }} KB текста, не более {{ max_clients }} клиентов за один запрос.</p>
+    <p class="muted">Телефон нормализуется так же, как в карточке клиента. Если такой телефон уже есть в базе или выше в этом файле, строка не создаётся. Без телефона клиент создаётся, дубли по имени не проверяются. Визиты не создаются.</p>
+
+    <h3 class="lb-mt-0">Поля JSON</h3>
+    <table style="width:100%;max-width:960px;border-collapse:collapse;font-size:14px;margin:12px 0 20px;">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
+          <th style="padding:6px 8px;">Поле JSON</th>
+          <th style="padding:6px 8px;">Обязательность</th>
+          <th style="padding:6px 8px;">Как в карточке</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">name</td><td style="padding:8px;">Да</td><td style="padding:8px;"><strong>Имя</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">phone</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Телефон</strong>. Пустой — клиент всё равно создаётся, если есть другой контакт.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">telegram<br/>vk<br/>instagram<br/>other_contact</td><td style="padding:8px;">—</td><td style="padding:8px;">Контакты, как в форме. Нужен хотя бы один контакт.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">birth_day<br/>birth_month<br/>birth_year</td><td style="padding:8px;">—</td><td style="padding:8px;">Дата рождения: день и месяц вместе, год можно не указывать. Только год — можно.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">age_group</td><td style="padding:8px;">—</td><td style="padding:8px;"><code>U10</code>, <code>10_18</code>, <code>18_30</code>, <code>30_50</code>, <code>50P</code></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">source<br/>source_other</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Источник</strong> — подпись из списка карточки (например «Вконтакте»). <code>source_other</code> — дополнение.</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">comment</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Комментарий</strong></td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">no_promo<br/>interested_in_training<br/>is_student<br/>is_model</td><td style="padding:8px;">—</td><td style="padding:8px;">Отметки, <code>true</code> / <code>false</code>. Нет ключа — отметка не ставится.</td></tr>
+      </tbody>
+    </table>
+    <p class="muted">Лишнее поле в объекте — ошибка этой строки, остальные строки загружаются.</p>
+
+    {% if top_error %}
+      <div class="error lb-mb-12">{{ top_error }}</div>
+    {% endif %}
+
+    <h3>Пример JSON</h3>
+    <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;overflow:auto;font-size:13px;max-height:360px;">[
+  {
+    "name": "Анна",
+    "phone": "+7 999 000-11-22",
+    "telegram": "@anna",
+    "birth_day": 5,
+    "birth_month": 3,
+    "age_group": "18_30",
+    "source": "Вконтакте",
+    "comment": "Из старой базы",
+    "no_promo": false
+  },
+  {
+    "name": "Мария",
+    "telegram": "@maria"
+  }
+]</pre>
+
+    <form method="post" action="/clients/bulk-import" style="margin-top:20px;">
+      <label for="payload"><strong>JSON для загрузки</strong></label>
+      <textarea id="payload" name="payload" rows="18" style="width:100%;font-family:monospace;font-size:13px;margin-top:8px;" required>{{ payload_prefill }}</textarea>
+      <div style="margin-top:12px;">
+        <button type="submit">Загрузить</button>
+      </div>
+    </form>
+
+    {% if results is not none %}
+      <h3 style="margin-top:24px;">Результат</h3>
+      <p>Создано {{ summary.created }}, пропущено дублей {{ summary.skipped }}, ошибок {{ summary.errors }}.</p>
+      <table style="width:100%;max-width:960px;border-collapse:collapse;font-size:14px;">
+        <thead>
+          <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
+            <th style="padding:6px 8px;">Строка</th>
+            <th style="padding:6px 8px;">Имя</th>
+            <th style="padding:6px 8px;">Телефон</th>
+            <th style="padding:6px 8px;">Статус</th>
+            <th style="padding:6px 8px;">ID</th>
+            <th style="padding:6px 8px;">Сообщение</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in results %}
+            <tr style="border-bottom:1px solid #e5e7eb;{% if r.status == 'пропущен: дубль' %}background:#fffbeb;{% elif not r.ok %}background:#fef2f2;{% endif %}">
+              <td style="padding:8px;">{{ r.line }}</td>
+              <td style="padding:8px;">{{ r.name or "—" }}</td>
+              <td style="padding:8px;font-family:monospace;">{{ r.phone or "—" }}</td>
+              <td style="padding:8px;">{% if r.ok %}<span class="lb-flash-ok">OK</span> {% endif %}{{ r.status }}</td>
+              <td style="padding:8px;">{% if r.client_id %}<a href="/clients/{{ r.client_id }}">{{ r.client_id }}</a>{% else %}—{% endif %}</td>
+              <td style="padding:8px;">{{ r.message }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+{% endblock %}

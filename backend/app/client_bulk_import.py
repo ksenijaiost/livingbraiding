@@ -1,0 +1,252 @@
+"""Массовое добавление клиентов из JSON (суперадмин)."""
+
+from __future__ import annotations
+
+import json
+from typing import Any, TypedDict
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.client_marks import CLIENT_MARK_IMPORT_KEYS, apply_client_import_marks
+from app.client_validation import (
+    CLIENT_AGE_GROUP_OPTIONS,
+    client_has_any_contact,
+    load_client_source_options,
+    parse_age_group,
+    parse_birth_fields,
+    parse_client_source,
+    strip_or_none,
+)
+from app.db.models import Client
+from app.time_utils import utcnow_naive
+
+MAX_BULK_JSON_BYTES = 512 * 1024
+MAX_BULK_CLIENTS = 1000
+
+BULK_CREATED_BY_LABEL = "Массовое добавление"
+
+_ALLOWED_KEYS = frozenset(
+    {
+        "name",
+        "phone",
+        "telegram",
+        "vk",
+        "instagram",
+        "other_contact",
+        "birth_day",
+        "birth_month",
+        "birth_year",
+        "age_group",
+        "source",
+        "source_other",
+        "comment",
+        *CLIENT_MARK_IMPORT_KEYS,
+    }
+)
+
+STATUS_CREATED = "создан"
+STATUS_DUPLICATE = "пропущен: дубль"
+STATUS_ERROR = "ошибка"
+
+
+class BulkClientRowResult(TypedDict):
+    line: int
+    name: str
+    phone: str
+    status: str
+    ok: bool
+    client_id: int | None
+    message: str
+
+
+def parse_bulk_clients_json(raw: str) -> list[dict[str, Any]]:
+    s = (raw or "").strip()
+    if not s:
+        raise ValueError("Введите JSON (массив объектов).")
+    if len(s.encode("utf-8")) > MAX_BULK_JSON_BYTES:
+        raise ValueError(f"Слишком большой файл (лимит {MAX_BULK_JSON_BYTES // 1024} KB).")
+    try:
+        data = json.loads(s)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Некорректный JSON: {e}") from None
+    if not isinstance(data, list):
+        raise ValueError("Корень JSON должен быть массивом клиентов.")
+    if len(data) > MAX_BULK_CLIENTS:
+        raise ValueError(f"Слишком много строк (лимит {MAX_BULK_CLIENTS}).")
+    out: list[dict[str, Any]] = []
+    for i, row in enumerate(data):
+        if not isinstance(row, dict):
+            raise ValueError(f"Строка {i + 1}: ожидался объект, не {type(row).__name__}.")
+        out.append(row)
+    return out
+
+
+def summarize_bulk_client_results(results: list[BulkClientRowResult]) -> dict[str, int]:
+    return {
+        "created": sum(1 for row in results if row["status"] == STATUS_CREATED),
+        "skipped": sum(1 for row in results if row["status"] == STATUS_DUPLICATE),
+        "errors": sum(1 for row in results if row["status"] == STATUS_ERROR),
+    }
+
+
+def _text(row: dict[str, Any], key: str) -> str:
+    value = row.get(key)
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        raise ValueError(f"Поле «{key}» должно быть строкой.")
+    return str(value)
+
+
+def _birth_raw(row: dict[str, Any], key: str) -> str | None:
+    if key not in row or row[key] is None or row[key] == "":
+        return None
+    if isinstance(row[key], bool) or isinstance(row[key], (dict, list)):
+        raise ValueError("Введите целое число для даты рождения.")
+    return str(row[key]).strip()
+
+
+def _reject_unknown_keys(row: dict[str, Any]) -> None:
+    unknown = [str(key) for key in row.keys() if key not in _ALLOWED_KEYS]
+    if not unknown:
+        return
+    listed = ", ".join(f"«{key}»" for key in unknown)
+    raise ValueError(f"Неизвестное поле: {listed}.")
+
+
+def _age_group(row: dict[str, Any]):
+    if "age_group" not in row or row["age_group"] in (None, ""):
+        return None
+    raw = _text(row, "age_group").strip()
+    if not raw:
+        return None
+    try:
+        return parse_age_group(raw)
+    except ValueError as e:
+        opts = ", ".join(f"{code} ({label})" for code, label in CLIENT_AGE_GROUP_OPTIONS if code)
+        raise ValueError(f"{e} Допустимо: {opts}.") from e
+
+
+def _source(row: dict[str, Any]) -> str | None:
+    if "source" not in row:
+        return None
+    raw = _text(row, "source")
+    try:
+        return parse_client_source(raw)
+    except ValueError as e:
+        labels = ", ".join(item["label"] for item in load_client_source_options())
+        raise ValueError(f"{e} Допустимо: {labels}.") from e
+
+
+def _find_client_id_by_phone(db: Session, phone: str) -> int | None:
+    found = db.scalar(select(Client.id).where(Client.phone == phone).order_by(Client.id.asc()).limit(1))
+    if found is None:
+        return None
+    return int(found)
+
+
+def import_single_client_row(
+    db: Session,
+    row: dict[str, Any],
+    *,
+    reserved_phones: set[str],
+    changed_by_user_id: int,
+    line: int = 0,
+) -> BulkClientRowResult:
+    """Одна строка JSON. Ошибка не откатывает уже сохранённые строки."""
+    name_preview = ""
+    phone_preview = ""
+    try:
+        raw_name = row.get("name")
+        if not isinstance(raw_name, (dict, list)):
+            name_preview = str(raw_name or "").strip()
+        raw_phone = row.get("phone")
+        if not isinstance(raw_phone, (dict, list)) and raw_phone is not None:
+            phone_preview = str(raw_phone).strip()
+        _reject_unknown_keys(row)
+        if isinstance(raw_name, (dict, list)) or not name_preview:
+            raise ValueError("Укажите имя клиента.")
+        name = name_preview[:200]
+        phone = strip_or_none(_text(row, "phone"), 30)
+        telegram = strip_or_none(_text(row, "telegram"), 100)
+        vk = strip_or_none(_text(row, "vk"), 120)
+        instagram = strip_or_none(_text(row, "instagram"), 120)
+        other_contact = strip_or_none(_text(row, "other_contact"), 200)
+        phone_preview = phone or ""
+        if not client_has_any_contact(phone, telegram, vk, instagram, other_contact):
+            raise ValueError("Нужен хотя бы один контакт: телефон или любая из соцсетей.")
+        birth_day, birth_month, birth_year = parse_birth_fields(
+            _birth_raw(row, "birth_day"),
+            _birth_raw(row, "birth_month"),
+            _birth_raw(row, "birth_year"),
+        )
+        age_group = _age_group(row)
+        source = _source(row)
+        if phone and (phone in reserved_phones or _find_client_id_by_phone(db, phone) is not None):
+            existing_id = _find_client_id_by_phone(db, phone)
+            return {
+                "line": int(line),
+                "name": name,
+                "phone": phone,
+                "status": STATUS_DUPLICATE,
+                "ok": False,
+                "client_id": existing_id,
+                "message": STATUS_DUPLICATE,
+            }
+        client = Client(
+            name=name,
+            phone=phone,
+            telegram=telegram,
+            vk=vk,
+            instagram=instagram,
+            other_contact=other_contact,
+            age_group=age_group,
+            source=source,
+            source_other=strip_or_none(_text(row, "source_other"), 200),
+            comment=strip_or_none(_text(row, "comment")) or None,
+            is_confirmed=True,
+            birth_day=birth_day,
+            birth_month=birth_month,
+            birth_year=birth_year,
+            created_by_label=BULK_CREATED_BY_LABEL,
+            updated_by_user_id=int(changed_by_user_id),
+            updated_at=utcnow_naive(),
+        )
+        apply_client_import_marks(client, row)
+        db.add(client)
+        db.flush()
+        db.commit()
+        if phone:
+            reserved_phones.add(phone)
+        return {
+            "line": int(line),
+            "name": name,
+            "phone": phone or "",
+            "status": STATUS_CREATED,
+            "ok": True,
+            "client_id": int(client.id),
+            "message": "Создан.",
+        }
+    except ValueError as e:
+        db.rollback()
+        return {
+            "line": int(line),
+            "name": name_preview,
+            "phone": phone_preview,
+            "status": STATUS_ERROR,
+            "ok": False,
+            "client_id": None,
+            "message": str(e),
+        }
+    except Exception as e:
+        db.rollback()
+        return {
+            "line": int(line),
+            "name": name_preview,
+            "phone": phone_preview,
+            "status": STATUS_ERROR,
+            "ok": False,
+            "client_id": None,
+            "message": f"Ошибка: {e}",
+        }
