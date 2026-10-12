@@ -394,10 +394,13 @@ def _client_notifications_page(
     if ensure_default_rules(db):
         db.commit()
     rules = rules_for_ui(db)
-    from app.studio_template_variables import ensure_builtin_studio_variables, variables_for_ui
+    from app.client_bot_replies import bot_replies_for_ui, ensure_bot_reply_templates
     from app.settings import get_settings
+    from app.studio_template_variables import ensure_builtin_studio_variables, variables_for_ui
 
-    if ensure_builtin_studio_variables(db):
+    changed = ensure_builtin_studio_variables(db)
+    changed = ensure_bot_reply_templates(db) or changed
+    if changed:
         db.commit()
     var_ui = variables_for_ui(db)
     is_admin = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
@@ -416,6 +419,7 @@ def _client_notifications_page(
             studio_custom=var_ui["custom"],
             template_palette=var_ui["palette"],
             video_max_mb=get_settings().studio_route_video_max_mb,
+            bot_replies=bot_replies_for_ui(db),
             error=error,
             info=info,
         ),
@@ -458,6 +462,8 @@ def admin_client_notifications(
         info = "Видео «Как нас найти» сохранено."
     elif msg == "video_cleared":
         info = "Видео удалено."
+    elif msg == "bot_replies":
+        info = "Тексты ответов бота сохранены."
     elif msg == "admin_code":
         info = "Код для чата админов создан (24 часа)."
     elif msg == "admin_unlinked":
@@ -772,6 +778,25 @@ async def admin_client_notifications_variables_delete(
         db.rollback()
         return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
     return RedirectResponse(url="/clients/notifications?msg=var_deleted", status_code=303)
+
+
+@router.post("/notifications/bot-replies")
+async def admin_client_notifications_bot_replies(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.client_bot_replies import BOT_REPLY_LABELS, save_bot_reply_templates
+
+    form = await request.form()
+    values = {key: str(form.get(f"bot_{key}") or "") for key, _label in BOT_REPLY_LABELS}
+    try:
+        save_bot_reply_templates(db, values, user_id=current_user.id)
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=bot_replies", status_code=303)
 
 
 @router.get("/stats/retention", response_class=HTMLResponse)

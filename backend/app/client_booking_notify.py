@@ -127,7 +127,7 @@ def enqueue_client_rule_notifications(
         )
         event_type = EVENT_CLIENT_BOOKING_REMINDER
     else:
-        # Системные переменные в «после» не подставляются; переменные студии — да.
+        # «После»: имя и переменные студии. Дата, услуги и мастера не подставляются.
         text = render_client_notify_template(
             rule.template,
             booking=booking,
@@ -136,6 +136,7 @@ def enqueue_client_rule_notifications(
             marker=marker,
             db=db,
             substitute_system=False,
+            system_keys=frozenset({"name"}),
         )
         event_type = EVENT_CLIENT_AFTER_BOOKING
     if not (text or "").strip():

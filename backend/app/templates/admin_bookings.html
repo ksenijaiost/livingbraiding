@@ -120,6 +120,7 @@
               <td class="lb-nowrap">
                 <strong>{{ booking_status_display(b.status) }}</strong>
                 {% if b.client_cancel_requested_at %}<span title="Клиент просит отменить">❗</span>
+                {% elif b.client_reschedule_requested_at %}<span title="Клиент просит перенести">🔀</span>
                 {% elif b.client_confirmed_at %}<span title="Клиент подтвердил">✅</span>{% endif %}
               </td>
               {% if can_manage %}

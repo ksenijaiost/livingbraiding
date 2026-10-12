@@ -40,9 +40,14 @@ DEFAULT_BEFORE_TEMPLATE = (
     "Напоминаем: {{date_text}} ({{weekday}}) в {{time}} вы записаны:\n"
     "{{services}}\n"
     "Мастер: {{masters}}\n\n"
-    "Ответьте 1 — подтвердить, 3 — отменить."
+    "Ответьте: 1 — подтвердить, 2 — перенести, 3 — отменить, 4 — написать администратору, 5 — как добраться."
 )
-DEFAULT_AFTER_TEMPLATE = "Спасибо, что были у нас!"
+DEFAULT_AFTER_TEMPLATE = (
+    "Спасибо, что были у нас, {{name}}! 💛\n"
+    "Будем рады отзыву: {{review_yandex}}\n"
+    "или в 2ГИС: {{review_2gis}}\n"
+    "Записаться снова: {{booking_link}}"
+)
 
 _VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 
@@ -162,15 +167,18 @@ def render_client_notify_template(
     marker: str = DEFAULT_SERVICES_MARKER,
     db: Session | None = None,
     substitute_system: bool = True,
+    system_keys: frozenset[str] | None = None,
 ) -> str:
     """Подставить переменные. Неизвестные {{...}} оставляет как есть.
 
-    substitute_system=False — шаблон «после записи»: дата/имя/услуги не трогаем,
-    переменные студии и свои подставляем, если передан db.
+    substitute_system=False — не подставлять дату/услуги/мастеров.
+    system_keys при этом ограничивает системные ключи (для «после» — только name).
+    Переменные студии подставляются, если передан db.
     """
     text = template if template is not None else ""
     values: dict[str, str] = {}
-    if substitute_system:
+    use_system = substitute_system or bool(system_keys)
+    if use_system:
         local = _to_local(booking.planned_date, tz_name)
         if local is None:
             date_s = time_s = datetime_s = date_text = weekday = ""
@@ -190,6 +198,8 @@ def render_client_notify_template(
             "services": _services_block(booking, marker),
             "masters": _masters_csv(booking),
         }
+        if system_keys is not None:
+            values = {k: values[k] for k in system_keys if k in values}
     studio: dict[str, str] = {}
     if db is not None:
         from app.studio_template_variables import studio_template_values

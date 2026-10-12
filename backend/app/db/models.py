@@ -397,6 +397,17 @@ class StudioTemplateVariable(Base):
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
+class ClientBotReplyTemplate(Base):
+    """Редактируемые ответы бота клиенту (1–5, подсказка, нет записи)."""
+
+    __tablename__ = "client_bot_reply_templates"
+
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
 class ClientNotificationSend(Base):
     """Журнал успешно отправленных клиентских уведомлений (для «последнего напоминания»)."""
 
@@ -930,6 +941,15 @@ class Booking(Base):
     client_confirmed_via: Mapped[str | None] = mapped_column(String(16), nullable=True)
     client_cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     client_cancel_requested_via: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    client_cancel_handled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_cancel_handled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # 2 = просит перенести. «Обработано» снимает requested_at и пишет handled_*.
+    client_reschedule_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_reschedule_requested_via: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    client_reschedule_handled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_reschedule_handled_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
 
     quoted_price_text: Mapped[str | None] = mapped_column(String(120), nullable=True)
     deposit_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -122,7 +122,10 @@ def test_normalize_reply() -> None:
     assert normalize_client_reply("1") == "1"
     assert normalize_client_reply(" 1. ") == "1"
     assert normalize_client_reply("3") == "3"
-    assert normalize_client_reply("2") is None
+    assert normalize_client_reply("2") == "2"
+    assert normalize_client_reply("4") == "4"
+    assert normalize_client_reply("5") == "5"
+    assert normalize_client_reply("6") is None
     assert normalize_client_reply("привет") is None
 
 

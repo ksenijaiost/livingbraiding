@@ -31,7 +31,7 @@ from app.booking_notifications import (
     notify_booking_updated_with_master_diff,
 )
 from app.client_status import is_first_non_cancelled_booking
-from app.messenger_inbound import client_confirm_badge
+from app.messenger_inbound import client_reply_badges, mark_client_reply_handled
 from app.notifications import booking_planned_master_user_ids, capture_booking_notify_snapshot
 from app.client_validation import format_created_by_label, strip_or_none
 from app.consultation_booking import (
@@ -3026,7 +3026,8 @@ def admin_booking_detail(
             booking_client_is_new=is_first_non_cancelled_booking(db, b),
             kind_label=_booking_kind_label(b.kind.value),
             status_label=_booking_status_label(b.status.value),
-            client_confirm_badge=client_confirm_badge(b, tz_name=display_tz),
+            client_reply_badges=client_reply_badges(b, tz_name=display_tz),
+            can_handle_client_replies=current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER),
             product_kind_label=_product_kind_label(b.planned_product_kind),
             booking_can_create_master_records=booking_can_create_master_records,
             booking_link_master_only_title=booking_link_master_only_title,
@@ -3677,6 +3678,26 @@ def admin_bookings(
             search_id=search_id,
         ),
     )
+
+
+@router.post("/{booking_id}/client-reply-handled")
+@legacy_bookings_admin_router.post("/{booking_id}/client-reply-handled")
+def admin_booking_client_reply_handled(
+    booking_id: int,
+    kind: str = Form(""),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    b = db.get(Booking, booking_id)
+    if b is None:
+        raise HTTPException(status_code=404, detail="Бронь не найдена")
+    try:
+        mark_client_reply_handled(db, b, (kind or "").strip().lower(), user_id=current_user.id)
+        db.commit()
+    except ValueError:
+        db.rollback()
+        return RedirectResponse(url=f"/bookings/{booking_id}?err=reply", status_code=303)
+    return RedirectResponse(url=f"/bookings/{booking_id}?msg=reply_handled", status_code=303)
 
 
 @router.post("/{booking_id}/cancel")
