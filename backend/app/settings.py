@@ -28,6 +28,10 @@ class Settings:
         self.telegram_bot_token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
         self.telegram_webhook_secret = (os.getenv("TELEGRAM_WEBHOOK_SECRET") or "").strip()
         self.telegram_bot_username = (os.getenv("TELEGRAM_BOT_USERNAME") or "").strip().lstrip("@")
+        self.telegram_api_base = (
+            (os.getenv("TELEGRAM_API_BASE") or "https://api.telegram.org").strip().rstrip("/")
+            or "https://api.telegram.org"
+        )
         self.vk_group_token = (os.getenv("VK_GROUP_TOKEN") or "").strip()
         self.vk_group_id = (os.getenv("VK_GROUP_ID") or "").strip()
         self.vk_confirmation_code = (os.getenv("VK_CONFIRMATION_CODE") or "").strip()
@@ -35,6 +39,14 @@ class Settings:
         self.vk_api_version = (os.getenv("VK_API_VERSION") or "5.199").strip() or "5.199"
         # Короткое имя для https://vk.me/<domain>?ref=… (club123 или screen name).
         self.vk_group_domain = (os.getenv("VK_GROUP_DOMAIN") or "").strip().lstrip("@").strip("/")
+        # Мессенджер Max (platform-api2.max.ru).
+        self.max_bot_token = (os.getenv("MAX_BOT_TOKEN") or "").strip()
+        self.max_bot_username = (os.getenv("MAX_BOT_USERNAME") or "").strip().lstrip("@")
+        self.max_webhook_secret = (os.getenv("MAX_WEBHOOK_SECRET") or "").strip()
+        self.max_api_base = (
+            (os.getenv("MAX_API_BASE") or "https://platform-api2.max.ru").strip().rstrip("/")
+            or "https://platform-api2.max.ru"
+        )
         # Фоновый воркер outbox: на проде по умолчанию вкл., локально/в тестах — выкл.
         self.notification_worker_enabled = _env_bool(
             "NOTIFICATION_WORKER_ENABLED",
@@ -45,6 +57,13 @@ class Settings:
         except ValueError:
             interval = 45
         self.notification_worker_interval_seconds = max(5, min(interval, 3600))
+        # Публичный адрес сайта для ссылок в сообщениях клиентам (видео «как нас найти»).
+        self.public_base_url = (os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+        try:
+            video_mb = int(os.getenv("STUDIO_ROUTE_VIDEO_MAX_MB") or "50")
+        except ValueError:
+            video_mb = 50
+        self.studio_route_video_max_mb = max(1, min(video_mb, 500))
 
 
 @functools.lru_cache(maxsize=1)

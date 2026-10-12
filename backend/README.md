@@ -171,9 +171,9 @@ $env:LB_TECHSPEC_DISPLAY_NAME="Техспец"
 
 **Рекомендация для прода:** смонтировать постоянный том на `LB_MEDIA_ROOT`, чтобы не качать бэкап перед каждым деплоем. Object storage (S3/Spaces) — отдельная задача на будущее.
 
-### Уведомления мастерам (VK + Telegram)
+### Уведомления мастерам (VK + Max + Telegram)
 
-Основной канал на хостинге без доступа к Telegram — **VK** (Callback API сообщества). Telegram остаётся опциональным.
+Основной канал на хостинге без доступа к Telegram — **VK** (Callback API сообщества). **Max** — третий канал (тот же outbox). Telegram остаётся опциональным.
 
 #### VK (Callback API)
 
@@ -195,19 +195,37 @@ $env:LB_TECHSPEC_DISPLAY_NAME="Техспец"
 | `VK_API_VERSION` | версия API, по умолчанию `5.199` |
 | `VK_GROUP_DOMAIN` | короткое имя для `https://vk.me/<domain>?ref=<код>` |
 
-Привязка: «Подключить VK» в `/me` или карточке сотрудника → ссылка `vk.me/…?ref=<код>` или сообщение сообществу `привязка <код>`. Код одноразовый, 24 часа (тот же механизм, что Telegram, поле `channel` в токенах).
+Привязка: «Подключить VK» в `/me` → ссылка `vk.me/…?ref=<код>` или сообщение сообществу `привязка <код>`. Код одноразовый, 24 часа (тот же механизм, что Telegram/Max, поле `channel` в токенах).
+
+#### Max
+
+1. Создайте бота на [платформе MAX для партнёров](https://dev.max.ru/), дождитесь модерации, скопируйте токен.
+2. Пропишите на Timeweb (см. `.env.example`): `MAX_BOT_TOKEN`, `MAX_BOT_USERNAME` (без `@`), `MAX_WEBHOOK_SECRET` (случайная строка). Опционально `MAX_API_BASE` (по умолчанию `https://platform-api2.max.ru`).
+3. Подписка на webhook (пример):
+
+```bash
+curl -X POST "https://platform-api2.max.ru/subscriptions" \
+  -H "Authorization: <MAX_BOT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d "{\"url\":\"https://<ДОМЕН>/webhooks/max\",\"update_types\":[\"bot_started\",\"message_created\"],\"secret\":\"<MAX_WEBHOOK_SECRET>\"}"
+```
+
+4. Мастер жмёт «Подключить» Max на `/me` → диплинк `https://max.ru/<BOT_USERNAME>?start=<код>`.
+
+Авторизация API: заголовок `Authorization: <access_token>` (без `Bearer`). Отправка: `POST /messages?user_id=…` с `{"text":"…"}`. Вебхук проверяет `X-Max-Bot-Api-Secret`.
 
 #### Telegram (опционально)
 
 Привязка: ссылка `https://t.me/<BOT_USERNAME>?start=<код>`. Вебхук `POST /webhooks/telegram`.
 
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET`
+- `TELEGRAM_API_BASE` — базовый URL Bot API (по умолчанию `https://api.telegram.org`; для прослойки на другом сервере)
 
 ```text
-https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<ДОМЕН>/webhooks/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>
+{TELEGRAM_API_BASE}/bot<TOKEN>/setWebhook?url=https://<ДОМЕН>/webhooks/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>
 ```
 
-Отправка броней идёт через outbox: для мастера с `vk_user_id` и/или `telegram_chat_id` создаются отдельные записи канала (без дублей внутри канала). Сбой VK не блокирует Telegram и не ломает сохранение брони.
+Отправка броней идёт через outbox: для мастера с `vk_user_id` / `max_user_id` / `telegram_chat_id` создаются отдельные записи канала (без дублей внутри канала). Сбой одного канала не блокирует остальные и не ломает сохранение брони.
 
 #### Фоновый воркер outbox (вместо cron)
 
@@ -231,3 +249,11 @@ python -m app.process_notification_outbox --limit 100 --max-attempts 5
 Тот же вызов: `bash scripts/process_notification_outbox.sh`.
 
 После лимита попыток статус остаётся `failed`, воркер больше не трогает запись. Ручной повтор — кнопка «Повторить» на `/admin/notification-outbox` (суперадмин / техспец).
+
+### Уведомления клиентам
+
+Страница **Клиенты → Уведомления и рассылки** (`/clients/notifications`): правила before/after, маркер `{{services}}`, блок **переменных студии** (адрес, ссылки, видео «как нас найти» по публичной ссылке `/media/v/<token>`, свои ключи), блок **общего чата админов** (код `/admins <код>` в VK/Max/Telegram). Лимит видео — `STUDIO_ROUTE_VIDEO_MAX_MB` (по умолчанию 50), абсолютный адрес ссылки — `PUBLIC_BASE_URL`.
+
+В карточке брони блок «Уведомления клиенту» показывает исходящие и ответы клиентки по этой записи. В карточке клиента — последние сообщения. Воркер ставит в outbox напоминания до записи от `planned_date`. Сообщение после визита ставится, когда мастер сохранил визит: через заданные часы, но не позже времени студии в этот день. Если к этому времени визита нет, сообщение уходит по брони того же дня и второй раз после сохранения визита не отправляется. К сообщению после визита можно приложить памятки-картинки по услугам каталога (галочка «Памятка» у правила). Клиент отвечает цифрой: `1` подтвердить, `2` перенести (чат админов), `3` отменить (мастера и чат админов, бронь не отменяется), `4` связаться с админом, `5` как добраться. Тексты ответов редактируются на той же странице. В шаблоне «после» подставляются `{{name}}` и переменные студии. Привязка канала клиента — ссылка в карточке клиента.
+
+При первой загрузке пустой `client_notification_rules` — дефолты 24ч/2ч before и 0ч after. Блок «Рассылки» — заглушка.

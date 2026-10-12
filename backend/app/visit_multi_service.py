@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
@@ -90,6 +91,7 @@ from app.questionnaire.runtime_merge import load_merged_questionnaire_specs
 from app.thermo_visit import parse_thermo_from_form, persist_new_thermo_template_if_needed
 from app.user_roles import user_has_role
 
+logger = logging.getLogger(__name__)
 
 _LINE_KEY_RE = re.compile(r"^line_(\d+)_")
 
@@ -862,6 +864,12 @@ def save_visit_with_services(
     # внутри post_visit_accruals → студия по услуге есть, ЗП мастера нет.
     db.flush()
     post_visit_accruals(db, visit, visit.created_by_user_id)
+    try:
+        from app.client_after_visit import schedule_after_visit_notifications
+
+        schedule_after_visit_notifications(db, visit)
+    except Exception:
+        logger.exception("after-visit notify schedule failed visit_id=%s", getattr(visit, "id", None))
     db.commit()
     db.refresh(visit)
     from app.staff_assignment_notifications import notify_visit_staff_assigned_on_create
@@ -1690,6 +1698,7 @@ def update_visit_with_services(
 ) -> Visit:
     """Обновить визит. Проводки ЗП всегда пересобираются (сторно + начисление заново).
 
+    Повторное сохранение не планирует сообщение «после визита» — его ставит только создание.
     force_replace_accruals сохранён для совместимости вызовов; поведение такое же.
     """
     if not inp.lines:

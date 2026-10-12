@@ -64,6 +64,10 @@ def client_db_to_form_dict(client: Client) -> dict[str, str]:
         "is_confirmed": "1" if client.is_confirmed else "0",
         "is_blacklisted": "1" if getattr(client, "is_blacklisted", False) else "0",
         "blacklist_comment": getattr(client, "blacklist_comment", None) or "",
+        "no_promo": "1" if getattr(client, "no_promo", False) else "0",
+        "interested_in_training": "1" if getattr(client, "interested_in_training", False) else "0",
+        "is_student": "1" if getattr(client, "is_student", False) else "0",
+        "is_model": "1" if getattr(client, "is_model", False) else "0",
     }
 
 

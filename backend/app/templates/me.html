@@ -46,28 +46,43 @@
               <tr>
                 <th>Канал</th>
                 <th>Статус</th>
-                <th>Брони</th>
+                {% for col in notify_type_cols %}
+                  <th title="{{ col.label }}">{{ col.label }}</th>
+                {% endfor %}
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {% for ch in notify_channels %}
+                {% set ch_idx = loop.index0 %}
                 <tr>
                   <td><strong>{{ ch.label }}</strong></td>
                   <td>{{ ch.status_label }}</td>
-                  <td>
-                    {% if ch.connected %}
-                      <input
-                        type="checkbox"
-                        name="{{ ch.id }}_bookings"
-                        value="1"
-                        {% if ch.settings.bookings %}checked{% endif %}
-                        title="Уведомления о бронях"
-                      />
-                    {% else %}
-                      <span class="muted">—</span>
-                    {% endif %}
-                  </td>
+                  {% for col in notify_type_cols %}
+                    <td>
+                      {% if not ch.connected %}
+                        <span class="muted">—</span>
+                      {% elif not col.available %}
+                        <input type="checkbox" disabled title="Недоступно для ваших ролей" style="opacity:0.45;" />
+                      {% elif ch_idx == first_connected_notify_idx %}
+                        <input
+                          type="checkbox"
+                          name="{{ col.form_name }}"
+                          value="1"
+                          {% if col.enabled %}checked{% endif %}
+                          title="{{ col.label }} (общее для каналов)"
+                        />
+                      {% else %}
+                        <input
+                          type="checkbox"
+                          disabled
+                          {% if col.enabled %}checked{% endif %}
+                          title="{{ col.label }} (общее для каналов)"
+                          style="opacity:0.7;"
+                        />
+                      {% endif %}
+                    </td>
+                  {% endfor %}
                   <td>
                     <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
                       {% if not ch.connected %}
@@ -94,7 +109,7 @@
       </form>
       <p class="muted" style="font-size:12px; margin:10px 0 0;">
         Основной канал на проде — VK. Подключите канал, откройте ссылку и подтвердите диалог.
-        Галочка «Брони» общая для всех каналов (notify_enabled).
+        Типы уведомлений общие для всех каналов; серые галочки недоступны для ваших ролей.
       </p>
 
       <div style="margin-top:18px; padding-top:14px; border-top:1px solid #e5e7eb;">

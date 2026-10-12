@@ -44,6 +44,12 @@
       <div style="align-self:end;">
         <button type="submit">Найти</button>
       </div>
+      <div style="align-self:end; display:flex; flex-wrap:wrap; gap:10px 14px; font-size:13px;">
+        <label style="margin:0;"><input type="checkbox" name="interested_in_training" value="1" {% if mark_filters.interested_in_training %}checked{% endif %} /> Интерес к обучению</label>
+        <label style="margin:0;"><input type="checkbox" name="is_student" value="1" {% if mark_filters.is_student %}checked{% endif %} /> Ученица</label>
+        <label style="margin:0;"><input type="checkbox" name="is_model" value="1" {% if mark_filters.is_model %}checked{% endif %} /> Модель</label>
+        <label style="margin:0;"><input type="checkbox" name="no_promo" value="1" {% if mark_filters.no_promo %}checked{% endif %} /> Не присылать акции</label>
+      </div>
     </form>
 
     <div class="lb-table-wrap">
@@ -70,6 +76,10 @@
                 {% if not row.is_confirmed %}
                   <span class="muted" title="Ждёт подтверждения администратора">· черновик</span>
                 {% endif %}
+                {% if row.no_promo %}<span title="Не присылать акции">🚫</span>{% endif %}
+                {% if row.interested_in_training %}<span title="Интерес к обучению">🎓</span>{% endif %}
+                {% if row.is_student %}<span title="Ученица">📘</span>{% endif %}
+                {% if row.is_model %}<span title="Модель">✦</span>{% endif %}
               </td>
               <td class="lb-nowrap">
                 <span style="font-size:12px; font-weight:600;

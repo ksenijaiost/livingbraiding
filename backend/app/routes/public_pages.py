@@ -118,7 +118,16 @@ def home(
     if role_gets_home_dashboard(current_user.role):
         is_helper = current_user.role == UserRole.HELPER
         is_self_scoped = current_user.role in (UserRole.MASTER, UserRole.HELPER)
-        show_studio = (not is_helper) and (UserRole.ADMIN_SUPER in current_user.roles)
+        # Фонд студии — только полный срез вне кабинета мастера/помощника.
+        # Иначе при MASTER+ADMIN_SUPER показывался урезанный фонд «только со своих».
+        show_studio = (
+            (not is_helper)
+            and (not is_self_scoped)
+            and (
+                UserRole.ADMIN_SUPER in current_user.roles
+                or UserRole.TECHSPEC in current_user.roles
+            )
+        )
 
         payroll_home = {
             "personal_balance": _money0(employee_fund_balance(db, current_user.id)),

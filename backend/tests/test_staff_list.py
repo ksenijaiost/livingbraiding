@@ -62,6 +62,8 @@ def _seed_staff(
     vk_user_id: int | None = None,
     notify_enabled: bool = True,
 ) -> User:
+    from app.notify_prefs import apply_notify_prefs_from_legacy_flag
+
     u = User(
         username=username,
         password_hash=hash_password("secret1"),
@@ -76,6 +78,8 @@ def _seed_staff(
     db.add(u)
     db.flush()
     db.add(UserRoleAssignment(user_id=u.id, role=role))
+    db.flush()
+    apply_notify_prefs_from_legacy_flag(u, [role], enabled=notify_enabled)
     db.commit()
     db.refresh(u)
     return u

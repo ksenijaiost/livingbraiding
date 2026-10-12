@@ -66,6 +66,23 @@
       <p class="lb-my-6"><strong>Дата и время записи</strong>: {{ format_naive_utc_datetime(booking.planned_date, display_tz) }} ({{ timezone_label(display_tz) }})</p>
       <p class="lb-my-6"><strong>Тип</strong>: {{ kind_label }}</p>
       <p class="lb-my-6"><strong>Статус</strong>: {{ status_label }}</p>
+      {% if flash_msg == 'reply_handled' %}
+        <p class="lb-flash" style="background:#d1fae5;border-color:#6ee7b7;color:#065f46;">Запрос отмечен как обработанный.</p>
+      {% endif %}
+      {% for badge in client_reply_badges %}
+        <p class="lb-my-6" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:6px 10px; border-radius:8px;
+          {% if badge.tone == 'danger' %}background:#fef2f2;border:1px solid #fecaca;color:#991b1b;
+          {% elif badge.tone == 'warn' %}background:#fffbeb;border:1px solid #fde68a;color:#92400e;
+          {% else %}background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;{% endif %}">
+          <span>{{ badge.text }}</span>
+          {% if can_handle_client_replies and badge.kind %}
+            <form method="post" action="/bookings/{{ booking.id }}/client-reply-handled" style="margin:0;">
+              <input type="hidden" name="kind" value="{{ badge.kind }}" />
+              <button type="submit" class="secondary" style="padding:2px 8px; font-size:12px;">Обработано</button>
+            </form>
+          {% endif %}
+        </p>
+      {% endfor %}
       <p class="lb-my-6"><strong>Создал</strong>:
         {% if booking.created_by_user %}
           {{ booking.created_by_user.display_name }} ({{ ru_user_role(booking.created_by_user.role) }}) · {{ format_naive_utc_datetime(booking.created_at, display_tz) }}
@@ -444,6 +461,36 @@
         </tbody>
       </table>
       <p class="muted lb-font-12 lb-mt-8">При отмене брони резерв снимается автоматически. При редактировании брони (другой комплект или режим) старый резерв снимается и создаётся новый по форме.</p>
+    {% endif %}
+
+    <h3 style="margin-top: 18px;">Уведомления клиенту</h3>
+    {% if not notify_timeline %}
+      <p class="muted">Сообщений по этой записи пока нет.</p>
+    {% else %}
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        {% for item in notify_timeline %}
+          <div style="border:1px solid #e5e7eb; border-radius:8px; padding:8px 10px;">
+            {% if item.kind == 'in' %}
+              <div><strong>Ответ клиента</strong> · {{ item.channel_label }} · {{ item.at_label }}</div>
+              <div>{{ item.parsed_label }}</div>
+              <div style="white-space:pre-wrap;">{{ item.text }}</div>
+            {% else %}
+              <div>
+                <strong>{{ item.type_label }}</strong>
+                {% if item.mark %}<span class="muted"> · {{ item.mark }}</span>{% endif %}
+              </div>
+              <div class="muted">{{ item.channel_label }} · {{ item.destination }} · {{ item.status_label }}</div>
+              {% if item.memos_label %}<div>{{ item.memos_label }}</div>{% endif %}
+              {% if item.text %}
+                <details>
+                  <summary>Текст</summary>
+                  <div style="white-space:pre-wrap; margin-top:6px;">{{ item.text }}</div>
+                </details>
+              {% endif %}
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
     {% endif %}
 
     <h3 style="margin-top: 18px;">Аудит</h3>

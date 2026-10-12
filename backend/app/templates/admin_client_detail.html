@@ -51,6 +51,26 @@
     <div class="client-detail-header">
       <div>
         <h2 style="margin: 0 0 8px;">{{ client.name }}</h2>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px;">
+          {% if client.interested_in_training %}
+            <span style="font-size:12px; padding:2px 8px; border-radius:999px; background:#eff6ff; color:#1d4ed8;">Интерес к обучению</span>
+          {% endif %}
+          {% if client.is_student %}
+            <span style="font-size:12px; padding:2px 8px; border-radius:999px; background:#f5f3ff; color:#6d28d9;">Ученица</span>
+          {% endif %}
+          {% if client.is_model %}
+            <span style="font-size:12px; padding:2px 8px; border-radius:999px; background:#ecfdf5; color:#047857;">Модель</span>
+          {% endif %}
+          {% if client.no_promo %}
+            <span style="font-size:12px; font-weight:600; padding:2px 8px; border-radius:999px; background:#fef2f2; color:#991b1b; border:1px solid #fecaca;">
+              Не присылать акции
+              {% if client.no_promo_at %}
+                · {{ format_naive_utc_datetime(client.no_promo_at, display_tz, "%d.%m.%Y %H:%M") }}
+              {% endif %}
+              {% if no_promo_source_label %}· {{ no_promo_source_label }}{% endif %}
+            </span>
+          {% endif %}
+        </div>
         <p class="muted" style="margin:0;">
           id {{ client.id }}
           · <strong style="color:{% if client_status.value == 'REGULAR' %}#16a34a{% elif client_status.value == 'SLEEPING' %}#ea580c{% elif client_status.value in ['LOST','BLOCKED'] %}#dc2626{% else %}#6b7280{% endif %};">{{ client_status_label }}</strong>
@@ -113,12 +133,72 @@
       <tr><th>ВКонтакте</th><td>{{ client.vk or "—" }}</td></tr>
       <tr><th>Instagram</th><td>{{ client.instagram or "—" }}</td></tr>
       <tr><th>Другой контакт</th><td>{{ client.other_contact or "—" }}</td></tr>
+      <tr>
+        <th>Каналы уведомлений</th>
+        <td style="font-size:13px;">
+          <div class="muted">
+            <div>VK: {% if client.vk_user_id %}ID {{ client.vk_user_id }}{% else %}не привязан{% endif %}</div>
+            <div>Max: {% if client.max_user_id %}ID {{ client.max_user_id }}{% else %}не привязан{% endif %}</div>
+            <div>Telegram: {% if client.telegram_chat_id %}ID {{ client.telegram_chat_id }}{% else %}не привязан{% endif %}</div>
+          </div>
+          {% if show_admin_actions %}
+            <form method="post" action="/clients/{{ client.id }}/channel-link" style="margin:10px 0 0;"
+                  onsubmit="this.querySelector('button').disabled=true;">
+              <label class="label-sub">Ссылка для привязки</label>
+              <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+                <select name="channel">
+                  <option value="vk">VK</option>
+                  <option value="max">Max</option>
+                  <option value="telegram">Telegram</option>
+                </select>
+                <button type="submit" class="secondary">Создать ссылку</button>
+              </div>
+            </form>
+            {% if channel_link %}
+              <p style="background:#eff6ff;border:1px solid #bfdbfe;padding:8px 10px;border-radius:8px;margin:8px 0 0;">
+                <strong>{{ channel_link.label }}</strong>
+                {% if channel_link.deep_link %}
+                  <div style="word-break:break-all;"><a href="{{ channel_link.deep_link }}" target="_blank" rel="noopener">{{ channel_link.deep_link }}</a></div>
+                {% endif %}
+                <div class="muted" style="font-size:12px;">код: <code style="user-select:all;">{{ channel_link.code }}</code> (24 ч)</div>
+              </p>
+            {% endif %}
+          {% endif %}
+        </td>
+      </tr>
       <tr><th>Возрастная группа</th><td>{{ age_group_label }}</td></tr>
       <tr><th>День рождения</th><td>{{ birth_display }}</td></tr>
       <tr><th>Источник</th><td>{{ client.source or "—" }}</td></tr>
       <tr><th>Уточнение</th><td>{{ client.source_other or "—" }}</td></tr>
       <tr><th>Подтверждён</th><td>{% if client.is_confirmed %}Да{% else %}Нет (черновик){% endif %}</td></tr>
     </table>
+
+    <h3 class="section-title">Последние сообщения</h3>
+    {% if not recent_messages %}
+      <p class="muted">Сообщений пока нет.</p>
+    {% else %}
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        {% for item in recent_messages %}
+          <div style="border:1px solid #e5e7eb; border-radius:8px; padding:8px 10px; font-size:14px;">
+            <div>
+              {% if item.kind == 'in' %}
+                <strong>Входящее</strong> · {{ item.channel_label }} · {{ item.at_label }}
+                · {{ item.parsed_label }}
+              {% else %}
+                <strong>{{ item.type_label }}</strong> · {{ item.channel_label }} · {{ item.destination }}
+                · {{ item.at_label }} · {{ item.status_label }}
+              {% endif %}
+              {% if item.booking_id %}
+                · <a href="/bookings/{{ item.booking_id }}">бронь #{{ item.booking_id }}</a>
+              {% endif %}
+            </div>
+            {% if item.text %}
+              <div style="white-space:pre-wrap; margin-top:4px;">{{ item.text }}</div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
 
     <h3 class="section-title">Активная бронь</h3>
     {% if not active_bookings %}

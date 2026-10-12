@@ -23,17 +23,43 @@ ALLOWED_CONTENT_TYPES = {
 }
 MAX_BYTES = 10 * 1024 * 1024  # 10MB
 
-# Имена как у save_upload_image: <32 hex>.<ext> (бэкап — без HEIC).
-_BACKUP_STORED_NAME_RE = re.compile(r"^[a-f0-9]{32}\.(?:jpg|jpeg|png|webp)$", re.IGNORECASE)
+VIDEO_EXTS = {".mp4", ".mov", ".webm"}
+VIDEO_MIME = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+}
+
+# Имена как у save_upload_image: <32 hex>.<ext> в корне или в care_memos/ (бэкап — без HEIC).
+_BACKUP_STORED_NAME_RE = re.compile(
+    r"^(?:care_memos/)?[a-f0-9]{32}\.(?:jpg|jpeg|png|webp)$",
+    re.IGNORECASE,
+)
 _BACKUP_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+CARE_MEMO_BACKUP_DIR = "care_memos"
 
 
 def is_stored_media_backup_filename(name: str) -> bool:
-    return bool(_BACKUP_STORED_NAME_RE.match(name)) and Path(name).suffix.lower() in _BACKUP_ALLOWED_EXTS
+    normalized = (name or "").replace("\\", "/").strip()
+    return bool(_BACKUP_STORED_NAME_RE.match(normalized)) and Path(normalized).suffix.lower() in _BACKUP_ALLOWED_EXTS
+
+
+def media_backup_arcname(root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.name
 
 
 def iter_media_backup_paths(root: Path) -> list[Path]:
-    return sorted(p for p in root.iterdir() if p.is_file() and is_stored_media_backup_filename(p.name))
+    found: list[Path] = []
+    if not root.is_dir():
+        return found
+    found.extend(p for p in root.iterdir() if p.is_file() and is_stored_media_backup_filename(p.name))
+    sub = root / CARE_MEMO_BACKUP_DIR
+    if sub.is_dir():
+        found.extend(p for p in sub.iterdir() if p.is_file() and is_stored_media_backup_filename(p.name))
+    return sorted(found, key=lambda p: media_backup_arcname(root, p))
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +76,7 @@ def iter_media_backup_entries(root: Path) -> list[MediaBackupEntry]:
         st = p.stat()
         out.append(
             MediaBackupEntry(
-                name=p.name,
+                name=media_backup_arcname(root, p),
                 size=int(st.st_size),
                 mtime=int(st.st_mtime),
                 path=p,
@@ -271,6 +297,59 @@ async def save_upload_image(upload: object) -> str:
         pass
 
     return f"/media/{rel_name}"
+
+
+def _video_ext(filename: str | None) -> str | None:
+    ext = Path(filename or "").suffix.lower()
+    if ext in VIDEO_EXTS:
+        return ext
+    return None
+
+
+async def save_upload_video(upload: object, *, max_bytes: int) -> tuple[str, str, int]:
+    """Сохранить видео в каталог загрузок. Возвращает (имя файла, исходное имя, размер)."""
+    ext = _video_ext(getattr(upload, "filename", None))
+    if not ext:
+        raise ValueError("Видео: допускаются файлы mp4, mov и webm.")
+    limit = max(1, int(max_bytes))
+    rel_name = f"{uuid.uuid4().hex}{ext}"
+    dest = media_root_dir() / rel_name
+    original = Path(str(getattr(upload, "filename", None) or "video")).name[:200] or "video"
+    total = 0
+    with dest.open("wb") as f:
+        while True:
+            chunk = await upload.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > limit:
+                try:
+                    f.close()
+                    dest.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                mb = max(1, limit // (1024 * 1024))
+                raise ValueError(f"Видео слишком большое (лимит {mb} МБ).")
+            f.write(chunk)
+    if total <= 0:
+        dest.unlink(missing_ok=True)
+        raise ValueError("Файл видео пустой.")
+    try:
+        await upload.seek(0)
+    except Exception:
+        pass
+    return rel_name, original, total
+
+
+def delete_media_file(rel_name: str | None) -> None:
+    """Удалить файл из каталога загрузок по относительному имени (без каталогов)."""
+    name = Path(str(rel_name or "")).name
+    if not name or name in (".", ".."):
+        return
+    try:
+        (media_root_dir() / name).unlink(missing_ok=True)
+    except Exception:
+        return
 
 
 async def replace_or_clear_photo(form: object, current: str | None, field: str) -> tuple[str | None, bool]:

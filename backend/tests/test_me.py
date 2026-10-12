@@ -70,6 +70,8 @@ def _seed_user(
     tg: int | None = None,
     notify: bool = True,
 ) -> User:
+    from app.notify_prefs import apply_notify_prefs_from_legacy_flag
+
     u = User(
         username=username,
         password_hash=hash_password(password),
@@ -83,6 +85,8 @@ def _seed_user(
     db.add(u)
     db.flush()
     db.add(UserRoleAssignment(user_id=u.id, role=role))
+    db.flush()
+    apply_notify_prefs_from_legacy_flag(u, [role], enabled=notify)
     db.commit()
     db.refresh(u)
     return u
@@ -135,21 +139,24 @@ def test_me_page_opens_for_each_role(memory_db, role) -> None:
 
 
 def test_me_cannot_change_other_user_notify(memory_db) -> None:
-    a = _seed_user(memory_db, username="a1", role=UserRole.MASTER, notify=True)
+    a = _seed_user(memory_db, username="a1", role=UserRole.MASTER, notify=True, tg=111)
     b = _seed_user(memory_db, username="b1", role=UserRole.MASTER, notify=True, tg=999)
     client = _client_for(memory_db, a)
     try:
         # Подложенный user_id в форме игнорируется — меняется только сессионный пользователь.
+        # Без галочек notify_* доступные типы пользователя a выключаются.
         r = client.post(
-            "/me/telegram/notify",
-            data={"telegram_bookings": "", "user_id": str(b.id)},
+            "/me/notify",
+            data={"user_id": str(b.id)},
             follow_redirects=False,
         )
         assert r.status_code == 303
         memory_db.refresh(a)
         memory_db.refresh(b)
         assert a.notify_enabled is False
+        assert a.notify_bookings is False
         assert b.notify_enabled is True
+        assert b.notify_bookings is True
         assert b.telegram_chat_id == 999
     finally:
         _clear_overrides()

@@ -52,6 +52,8 @@ def memory_db():
 
 
 def _seed(db, *, tg: int | None = 555, notify: bool = True, planned_delta_hours: int = 48, username: str = "m1"):
+    from app.notify_prefs import apply_notify_prefs_from_legacy_flag
+
     u = User(
         username=username,
         password_hash="x",
@@ -63,6 +65,8 @@ def _seed(db, *, tg: int | None = 555, notify: bool = True, planned_delta_hours:
     )
     c = Client(name="Клиент", phone=f"+7999{abs(hash(username)) % 10000000:07d}", is_confirmed=True)
     db.add_all([u, c])
+    db.flush()
+    apply_notify_prefs_from_legacy_flag(u, [UserRole.MASTER], enabled=notify)
     db.commit()
     db.refresh(u)
     db.refresh(c)
@@ -229,6 +233,8 @@ def test_past_booking_skipped(memory_db) -> None:
 
 
 def test_master_added_gets_created_removed_gets_unassign(memory_db) -> None:
+    from app.notify_prefs import apply_notify_prefs_from_legacy_flag
+
     u1, b = _seed(memory_db, tg=111, username="m_a")
     u2 = User(
         username="m_b",
@@ -240,6 +246,8 @@ def test_master_added_gets_created_removed_gets_unassign(memory_db) -> None:
         notify_enabled=True,
     )
     memory_db.add(u2)
+    memory_db.flush()
+    apply_notify_prefs_from_legacy_flag(u2, [UserRole.MASTER], enabled=True)
     memory_db.commit()
     memory_db.refresh(u2)
 

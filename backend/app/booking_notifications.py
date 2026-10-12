@@ -26,7 +26,7 @@ from app.time_utils import utcnow_naive
 
 logger = logging.getLogger(__name__)
 
-_CHANNELS = (NotificationChannel.TELEGRAM, NotificationChannel.VK)
+_CHANNELS = (NotificationChannel.VK, NotificationChannel.MAX, NotificationChannel.TELEGRAM)
 
 
 def booking_is_notifiable_for_masters(booking: Booking, *, for_cancel: bool = False) -> bool:

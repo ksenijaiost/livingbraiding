@@ -1,0 +1,412 @@
+{% extends "base.html" %}
+{% block help_page_id %}clients_notifications{% endblock %}
+{% block content %}
+  <div class="card">
+    <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <h2 style="margin-top: 0;">Уведомления и рассылки</h2>
+      <a href="/clients"><button type="button" class="secondary">К списку клиентов</button></a>
+    </div>
+    <p class="muted" style="margin-top:0;">
+      Глобальные настройки напоминаний клиентам о записях. Отправка сообщений будет подключена отдельно.
+    </p>
+
+    {% if error %}
+      <p style="color:#b91c1c;">{{ error }}</p>
+    {% endif %}
+    {% if info %}
+      <p style="color:#15803d;">{{ info }}</p>
+    {% endif %}
+
+    <h3 class="section-title">Уведомления</h3>
+
+    <form method="post" action="/clients/notifications/save" style="margin-bottom:20px;"
+          onsubmit="this.querySelector('button[type=submit]').disabled=true;">
+      <div style="margin-bottom:14px;">
+        <label class="label-sub">Маркер списка услуг <span class="muted">(для {{ "{{services}}" }})</span></label>
+        <input name="services_marker" maxlength="20" value="{{ services_marker }}" style="width:4rem;" />
+      </div>
+
+      <h4 style="margin:16px 0 8px; font-size:1rem;">Перед записью</h4>
+      <p class="muted" style="font-size:12px; margin:0 0 10px;">
+        За сколько часов до <code>planned_date</code> брони отправить напоминание (целое число &gt; 0).
+      </p>
+      {% if before_rules %}
+        <div class="lb-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="lb-nowrap">Часы</th>
+                <th>Шаблон</th>
+                <th class="lb-nowrap">Вкл.</th>
+                <th class="lb-nowrap"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in before_rules %}
+                <tr>
+                  <td>
+                    <input type="hidden" name="before_id" value="{{ r.id }}" />
+                    <input type="number" name="before_hours" min="1" max="720" step="1" value="{{ r.hours }}"
+                           style="width:5rem;" required />
+                  </td>
+                  <td>
+                    <textarea name="before_template" rows="5" style="width:100%; min-width:16rem;" required>{{ r.template }}</textarea>
+                  </td>
+                  <td style="text-align:center;">
+                    <input type="checkbox" name="before_enabled_{{ r.id }}" value="1"
+                           {% if r.is_enabled %}checked{% endif %} />
+                  </td>
+                  <td class="lb-nowrap">
+                    <button type="submit" class="secondary" formaction="/clients/notifications/move"
+                            name="rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="this.form.direction.value='up';">↑</button>
+                    <button type="submit" class="secondary" formaction="/clients/notifications/move"
+                            name="rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="this.form.direction.value='down';">↓</button>
+                    <button type="submit" class="secondary" formaction="/clients/notifications/delete"
+                            name="rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="return confirm('Удалить это правило?');">Удалить</button>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">Правил пока нет.</p>
+      {% endif %}
+
+      <h4 style="margin:20px 0 8px; font-size:1rem;">После визита</h4>
+      <p class="muted" style="font-size:12px; margin:0 0 10px;">
+        Через сколько — от момента, когда мастер сохранил визит. Пример: через 2 ч, но не позже 20:00 того же дня.
+        Время считается от момента, когда мастер сохранил визит (из брони или вручную). Если к времени „не позже“ визит ещё не сохранён — сообщение уйдёт в это время по брони того же дня.
+        Подставляются <code>{{ "{{name}}" }}</code> и переменные студии. Дата, услуги и мастера — нет.
+      </p>
+      {% if after_rules %}
+        <div class="lb-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="lb-nowrap">Через сколько</th>
+                <th class="lb-nowrap">Не позже</th>
+                <th>Текст</th>
+                <th class="lb-nowrap">Вкл.</th>
+                <th class="lb-nowrap">Памятка</th>
+                <th class="lb-nowrap"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in after_rules %}
+                <tr>
+                  <td>
+                    <input type="hidden" name="after_id" value="{{ r.id }}" />
+                    <input type="number" name="after_hours" min="0" max="72" step="0.5" value="{{ r.hours }}"
+                           style="width:5rem;" required />
+                  </td>
+                  <td>
+                    <input type="time" name="after_latest" value="{{ r.latest_time }}" style="width:7rem;" />
+                  </td>
+                  <td>
+                    <textarea name="after_template" rows="3" style="width:100%; min-width:16rem;" required>{{ r.template }}</textarea>
+                  </td>
+                  <td style="text-align:center;">
+                    <input type="checkbox" name="after_enabled_{{ r.id }}" value="1"
+                           {% if r.is_enabled %}checked{% endif %} />
+                  </td>
+                  <td style="text-align:center;">
+                    <input type="checkbox" name="after_memo_{{ r.id }}" value="1"
+                           title="Отправлять памятку"
+                           {% if r.send_care_memo %}checked{% endif %} />
+                  </td>
+                  <td class="lb-nowrap">
+                    <button type="submit" class="secondary" formaction="/clients/notifications/move"
+                            name="rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="this.form.direction.value='up';">↑</button>
+                    <button type="submit" class="secondary" formaction="/clients/notifications/move"
+                            name="rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="this.form.direction.value='down';">↓</button>
+                    <button type="submit" class="secondary" formaction="/clients/notifications/delete"
+                            name="rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="return confirm('Удалить это правило?');">Удалить</button>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">Правил пока нет.</p>
+      {% endif %}
+
+      <input type="hidden" name="direction" value="" />
+      <div style="margin-top:14px;">
+        <button type="submit">Сохранить</button>
+      </div>
+    </form>
+
+    <div style="display:flex; flex-wrap:wrap; gap:16px; margin-bottom:16px;">
+      <form method="post" action="/clients/notifications/add" style="margin:0;"
+            onsubmit="this.querySelector('button').disabled=true;">
+        <input type="hidden" name="kind" value="before_booking" />
+        <label class="label-sub">Добавить перед записью</label>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <input type="number" name="hours" min="1" max="720" step="1" value="24" style="width:5rem;" />
+          <span class="muted">ч</span>
+          <button type="submit">Добавить</button>
+        </div>
+      </form>
+      <form method="post" action="/clients/notifications/add" style="margin:0;"
+            onsubmit="this.querySelector('button').disabled=true;">
+        <input type="hidden" name="kind" value="after_booking" />
+        <label class="label-sub">Добавить после визита</label>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <input type="number" name="hours" min="0" max="72" step="0.5" value="2" style="width:5rem;" />
+          <span class="muted">ч, не позже</span>
+          <input type="time" name="latest_time" value="20:00" style="width:7rem;" />
+          <button type="submit">Добавить</button>
+        </div>
+      </form>
+    </div>
+
+    <h3 class="section-title">Памятки</h3>
+    <p class="muted" style="font-size:12px; margin:0 0 10px;">
+      Картинки после визита (JPG, PNG или WebP). Кодовое название уникально.
+    </p>
+    {% if memo_delete and memo_delete.links %}
+      <div style="border:1px solid #b91c1c; border-radius:8px; padding:10px 12px; margin-bottom:12px;">
+        <p style="margin:0 0 8px;"><strong>Точно ли хотите удалить?</strong> Памятка «{{ memo_delete.name }}» привязана:</p>
+        <ul style="margin:0 0 10px;">
+          {% for link in memo_delete.links %}
+            <li>{{ link.kind }}: <a href="{{ link.href }}">{{ link.name }}</a></li>
+          {% endfor %}
+        </ul>
+        <form method="post" action="/clients/notifications/memos/{{ memo_delete.id }}/delete" style="margin:0;">
+          <input type="hidden" name="confirm" value="1" />
+          <button type="submit">Удалить</button>
+        </form>
+      </div>
+    {% endif %}
+    {% if care_memos %}
+      {% for m in care_memos %}
+        <div style="display:flex; gap:12px; align-items:flex-start; margin:0 0 14px; flex-wrap:wrap;">
+          <img src="{{ m.preview_url }}" alt="" style="width:72px; height:72px; object-fit:cover; border-radius:6px; background:#f3f4f6;" />
+          <div style="flex:1; min-width:16rem;">
+            <div><strong>{{ m.name }}</strong></div>
+            <div class="muted" style="font-size:12px;">{{ m.file_name }} · {{ m.created_label }}</div>
+            <form method="post" action="/clients/notifications/memos/{{ m.id }}/rename" style="display:flex; gap:6px; margin:6px 0; flex-wrap:wrap;">
+              <input name="name" value="{{ m.name }}" required maxlength="80" style="min-width:12rem;" />
+              <button type="submit" class="secondary">Переименовать</button>
+            </form>
+            <form method="post" action="/clients/notifications/memos/{{ m.id }}/replace" enctype="multipart/form-data" style="display:flex; gap:6px; margin:0 0 6px; flex-wrap:wrap; align-items:center;">
+              <input type="file" name="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required />
+              <button type="submit" class="secondary">Заменить файл</button>
+            </form>
+            <form method="post" action="/clients/notifications/memos/{{ m.id }}/delete" style="margin:0;">
+              <button type="submit" class="secondary">Удалить</button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">Памяток пока нет.</p>
+    {% endif %}
+    <form method="post" action="/clients/notifications/memos/add" enctype="multipart/form-data" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:18px;">
+      <input name="name" placeholder="Кодовое название" required maxlength="80" />
+      <input type="file" name="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required />
+      <button type="submit">Добавить</button>
+    </form>
+
+    <div class="card" style="background:#fafafa; margin:0;">
+      <p style="margin:0 0 8px; font-weight:600; font-size:13px;">Доступные переменные</p>
+      <p class="muted" style="margin:0 0 8px; font-size:12px;">
+        Системные — в шаблонах «перед записью». <code>{{ "{{name}}" }}</code> и переменные студии — ещё и «после».
+        Неизвестные <code>{{ "{{…}}" }}</code> остаются как есть.
+      </p>
+      <ul style="list-style:none; margin:0; padding:0; font-size:13px;">
+        {% for item in template_palette %}
+          <li style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 6px;">
+            <code style="user-select:all;">{{ item.copy }}</code>
+            <span class="muted">{{ item.label }}</span>
+            <button type="button" class="secondary" style="padding:2px 8px; font-size:12px;"
+                    data-copy="{{ item.copy }}"
+                    onclick="navigator.clipboard.writeText(this.getAttribute('data-copy'));">скопировать</button>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <h4 style="margin:22px 0 8px; font-size:1rem;">Ответы бота</h4>
+    <p class="muted" style="font-size:12px; margin:0 0 10px;">
+      Тексты, которые бот пишет клиенту в ответ на цифры. Можно вставлять переменные студии.
+    </p>
+    <form method="post" action="/clients/notifications/bot-replies" style="margin-bottom:8px;"
+          onsubmit="this.querySelector('button[type=submit]').disabled=true;">
+      {% for item in bot_replies %}
+        <div style="margin-bottom:12px;">
+          <label class="label-sub">{{ item.label }}</label>
+          <textarea name="bot_{{ item.key }}" rows="3" style="width:100%;">{{ item.body }}</textarea>
+        </div>
+      {% endfor %}
+      <button type="submit">Сохранить ответы бота</button>
+    </form>
+
+    <h3 class="section-title" style="margin-top:28px;">Переменные</h3>
+    <p class="muted" style="font-size:13px;">
+      Значения задаются один раз и подставляются в любые шаблоны. Встроенные удалить нельзя — только очистить.
+    </p>
+
+    <form method="post" action="/clients/notifications/variables/builtin" style="margin-bottom:16px;"
+          onsubmit="this.querySelector('button[type=submit]').disabled=true;">
+      {% for v in studio_builtins if v.kind != 'video' %}
+        <div style="margin-bottom:12px;">
+          <label class="label-sub">{{ v.title }} <code>{{ v.copy }}</code></label>
+          {% if v.kind == 'text' %}
+            <textarea name="builtin_{{ v.key }}" rows="3" style="width:100%;">{{ v.value }}</textarea>
+          {% else %}
+            <input type="url" name="builtin_{{ v.key }}" value="{{ v.value }}" placeholder="https://" style="width:100%;" />
+          {% endif %}
+        </div>
+      {% endfor %}
+      <button type="submit">Сохранить переменные</button>
+    </form>
+
+    {% for v in studio_builtins if v.kind == 'video' %}
+      <div class="card" style="background:#fafafa; margin:0 0 16px;">
+        <label class="label-sub">{{ v.title }} <code>{{ v.copy }}</code></label>
+        <p class="muted" style="font-size:12px; margin:4px 0 8px;">
+          mp4, mov или webm, до {{ video_max_mb }} МБ. В тексте шаблона подставится ссылка на файл.
+        </p>
+        {% if v.has_video %}
+          <video controls preload="metadata" src="{{ v.video_url }}" style="max-width:320px; width:100%; display:block; margin-bottom:8px;"></video>
+          <p class="muted" style="font-size:12px; margin:0 0 8px;">{{ v.file_name }}</p>
+        {% else %}
+          <p class="muted" style="font-size:12px;">Видео не загружено.</p>
+        {% endif %}
+        <form method="post" action="/clients/notifications/variables/video" enctype="multipart/form-data" style="margin:0;">
+          <input type="file" name="video" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" />
+          <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="submit">{% if v.has_video %}Заменить{% else %}Загрузить{% endif %}</button>
+            {% if v.has_video %}
+              <button type="submit" class="secondary" name="clear" value="1"
+                      onclick="return confirm('Удалить видео?');">Удалить</button>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+    {% endfor %}
+
+    <h4 style="margin:8px 0; font-size:1rem;">Свои переменные</h4>
+    {% if studio_custom %}
+      <div class="lb-table-wrap" style="margin-bottom:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Ключ</th>
+              <th>Значение</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in studio_custom %}
+              <tr>
+                <td class="lb-nowrap"><code>{{ v.copy }}</code></td>
+                <td>
+                  <form method="post" action="/clients/notifications/variables/custom/save" id="var-save-{{ v.key }}">
+                    <input type="hidden" name="key" value="{{ v.key }}" />
+                    <textarea name="value" rows="2" style="width:100%; min-width:12rem;">{{ v.value }}</textarea>
+                  </form>
+                </td>
+                <td class="lb-nowrap">
+                  <button type="submit" class="secondary" form="var-save-{{ v.key }}">Сохранить</button>
+                  <form method="post" action="/clients/notifications/variables/custom/delete" style="display:inline;"
+                        onsubmit="return confirm('Удалить переменную {{ v.key }}?');">
+                    <input type="hidden" name="key" value="{{ v.key }}" />
+                    <button type="submit" class="secondary">Удалить</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Своих переменных пока нет.</p>
+    {% endif %}
+    <form method="post" action="/clients/notifications/variables/custom/add" style="margin:0 0 8px;"
+          onsubmit="this.querySelector('button[type=submit]').disabled=true;">
+      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end;">
+        <div>
+          <label class="label-sub">Ключ</label>
+          <input name="key" maxlength="32" placeholder="parking" style="width:10rem;" required />
+        </div>
+        <div style="flex:1; min-width:12rem;">
+          <label class="label-sub">Значение</label>
+          <input name="value" placeholder="текст" style="width:100%;" />
+        </div>
+        <button type="submit">Добавить</button>
+      </div>
+      <p class="muted" style="font-size:12px; margin:6px 0 0;">Латиница, цифры и _, 2–32 символа. В шаблоне: <code>{{ "{{ключ}}" }}</code>.</p>
+    </form>
+
+    <h3 class="section-title" style="margin-top:28px;">Общий чат админов</h3>
+    <p class="muted" style="font-size:13px;">
+      Сюда уходят запросы клиентов на отмену записи. Получите код и напишите в нужной беседе:
+      <code>/admins &lt;код&gt;</code> (бот/сообщество должны быть в чате).
+    </p>
+    {% if admin_link_code %}
+      <p style="background:#eff6ff;border:1px solid #bfdbfe;padding:10px 12px;border-radius:8px;">
+        Код (24 ч): <code style="user-select:all;">{{ admin_link_code }}</code><br />
+        <span class="muted" style="font-size:12px;">Команда: <code>/admins {{ admin_link_code }}</code></span>
+      </p>
+    {% endif %}
+    {% if can_manage_admin_chat %}
+      <form method="post" action="/clients/notifications/admin-chat/code" style="margin:0 0 12px;"
+            onsubmit="this.querySelector('button').disabled=true;">
+        <button type="submit">Получить код</button>
+      </form>
+    {% else %}
+      <p class="muted" style="font-size:12px;">Код выдаёт администратор.</p>
+    {% endif %}
+    <div class="lb-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Канал</th>
+            <th>Статус</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ch in admin_chats %}
+            <tr>
+              <td><strong>{{ ch.label }}</strong></td>
+              <td>
+                {% if ch.connected %}
+                  подключён{% if ch.chat_id %} (id {{ ch.chat_id }}){% endif %}
+                {% else %}
+                  <span class="muted">не подключён</span>
+                {% endif %}
+              </td>
+              <td class="lb-nowrap">
+                {% if can_manage_admin_chat and ch.connected %}
+                  <form method="post" action="/clients/notifications/admin-chat/test" style="display:inline;">
+                    <input type="hidden" name="channel" value="{{ ch.channel }}" />
+                    <button type="submit" class="secondary" style="padding:2px 8px; font-size:12px;">Тест</button>
+                  </form>
+                  <form method="post" action="/clients/notifications/admin-chat/unlink" style="display:inline;"
+                        onsubmit="return confirm('Отключить чат админов для {{ ch.label }}?');">
+                    <input type="hidden" name="channel" value="{{ ch.channel }}" />
+                    <button type="submit" class="secondary" style="padding:2px 8px; font-size:12px;">Отключить</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="section-title" style="margin-top:28px;">Рассылки</h3>
+    <p class="muted">Раздел в разработке.</p>
+  </div>
+{% endblock %}

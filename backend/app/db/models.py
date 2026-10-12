@@ -142,10 +142,19 @@ class User(Base):
     salon_cut_pct_override: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Нормализованный номер (только цифры, ≥10), для входа вместо логина; уникален среди непустых.
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    # Каналы уведомлений мастера (Telegram / VK); заполняются при привязке, отправка — отдельно.
+    # Каналы уведомлений мастера (VK / Max / Telegram); заполняются при привязке, отправка — отдельно.
     telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     vk_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    max_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
+    # Legacy/сводка: OR типов ниже; синхронизируется при сохранении prefs.
     notify_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notify_bookings: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notify_visit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notify_work: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notify_hourly_work: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notify_product_sale: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notify_consultation: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notify_work_plan: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # False = ещё не настраивал: эффективны дефолты 24ч и 2ч; True = брать строки user_reminder_settings.
     reminders_configured: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
@@ -210,26 +219,33 @@ class UserAuditLog(Base):
 
 
 class TelegramLinkToken(Base):
-    """Одноразовый код привязки Telegram/VK; в БД хранится хеш. channel: telegram|vk."""
+    """Одноразовый код привязки канала; хеш в БД. Ровно один из user_id / client_id."""
 
     __tablename__ = "telegram_link_tokens"
     __table_args__ = (UniqueConstraint("token_hash", name="uq_telegram_link_tokens_hash"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    client_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    # telegram | vk — один механизм, разные deep link / вебхуки
+    # telegram | vk | max
     channel: Mapped[str] = mapped_column(String(16), nullable=False, default="telegram", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
+    client: Mapped["Client | None"] = relationship(foreign_keys=[client_id])
 
 
 class NotificationChannel(str, enum.Enum):
     TELEGRAM = "telegram"
     VK = "vk"
+    MAX = "max"
 
 
 class NotificationOutboxStatus(str, enum.Enum):
@@ -237,10 +253,17 @@ class NotificationOutboxStatus(str, enum.Enum):
     SENDING = "sending"
     SENT = "sent"
     FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class NotificationOutboxTargetKind(str, enum.Enum):
+    USER = "user"
+    CLIENT = "client"
+    ADMIN_CHAT = "admin_chat"
 
 
 class NotificationOutbox(Base):
-    """Очередь исходящих уведомлений мастерам (Telegram / VK). Отправка — отдельным воркером."""
+    """Очередь исходящих уведомлений (мастер / клиент / чат админов)."""
 
     __tablename__ = "notification_outbox"
     __table_args__ = (
@@ -248,13 +271,18 @@ class NotificationOutbox(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True, index=True)
+    # user | client | admin_chat
+    target_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True, index=True)
+    # «После визита»: визит, из которого поставлена отправка (пусто, если ушло по брони до сохранения).
+    visit_id: Mapped[int | None] = mapped_column(ForeignKey("visits.id"), nullable=True, index=True)
     channel: Mapped[NotificationChannel] = mapped_column(
         Enum(NotificationChannel, native_enum=False, length=16),
         nullable=False,
     )
-    # booking_created | booking_updated | booking_cancelled (и др. позже)
+    # booking_created | client_booking_reminder | booking_client_cancel_request | …
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[NotificationOutboxStatus] = mapped_column(
@@ -264,15 +292,22 @@ class NotificationOutbox(Base):
         index=True,
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Уникальный ключ: event_type + booking_id + channel + версия события — без повторной отправки.
     dedupe_key: Mapped[str] = mapped_column(String(200), nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    # Пусто — отправить сразу. Иначе воркер берёт строку, когда это время наступило.
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Захват воркером (status=sending); просроченный locked_at можно перехватить снова.
     locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Правило before/after, если сообщение из него. Текст, который ушёл или должен уйти.
+    rule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("client_notification_rules.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
+    client: Mapped["Client | None"] = relationship(foreign_keys=[client_id])
     booking: Mapped["Booking | None"] = relationship(foreign_keys=[booking_id])
 
 
@@ -288,6 +323,10 @@ class Client(Base):
     vk: Mapped[str | None] = mapped_column(String(120), nullable=True)
     instagram: Mapped[str | None] = mapped_column(String(120), nullable=True)
     other_contact: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Числовые ID мессенджеров для будущих уведомлений (не путать со строковыми контактами выше).
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
+    vk_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
+    max_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
     age_group: Mapped[ClientAgeGroup | None] = mapped_column(
         Enum(ClientAgeGroup, values_callable=_enum_values),
         nullable=True,
@@ -298,6 +337,13 @@ class Client(Base):
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_blacklisted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     blacklist_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Отметки и отписка от акций (рассылки). Напоминания о записи no_promo не блокирует.
+    no_promo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    no_promo_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    no_promo_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    interested_in_training: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_student: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_model: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Optional birthday: all null = unknown; day+month without year = "only DM"
     birth_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
     birth_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -313,6 +359,128 @@ class Client(Base):
         back_populates="client",
         order_by="ClientThermoTemplate.id",
     )
+
+
+class ClientNotificationRuleKind(str, enum.Enum):
+    BEFORE_BOOKING = "before_booking"
+    AFTER_BOOKING = "after_booking"
+
+
+class ClientNotificationRule(Base):
+    """Глобальные правила уведомлений клиентам (перед/после записи)."""
+
+    __tablename__ = "client_notification_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[ClientNotificationRuleKind] = mapped_column(
+        Enum(ClientNotificationRuleKind, native_enum=False, length=32),
+        nullable=False,
+        index=True,
+    )
+    # before: целые часы до planned_date. after: задержка от сохранения визита, шаг 0.5, 0–72.
+    hours: Mapped[float] = mapped_column(Float, nullable=False)
+    # after: крайнее время студии в день визита/брони. Пусто — ждать только сохранения визита.
+    latest_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    template: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # after: прикладывать памятки услуг к сообщению.
+    send_care_memo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class StudioTemplateVariable(Base):
+    """Переменные студии для шаблонов уведомлений: встроенные и свои."""
+
+    __tablename__ = "studio_template_variables"
+    __table_args__ = (
+        UniqueConstraint("key", name="uq_studio_template_variables_key"),
+        UniqueConstraint("public_token", name="uq_studio_template_variables_token"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(32), nullable=False)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # text | url | video
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    file_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    file_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Неугадываемый токен публичной ссылки /media/v/<token> (только видео).
+    public_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class ClientBotReplyTemplate(Base):
+    """Редактируемые ответы бота клиенту (1–5, подсказка, нет записи)."""
+
+    __tablename__ = "client_bot_reply_templates"
+
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class ClientNotificationSend(Base):
+    """Журнал успешно отправленных клиентских уведомлений (для «последнего напоминания»)."""
+
+    __tablename__ = "client_notification_sends"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False, index=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id"), nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("client_notification_rules.id"), nullable=True)
+    outbox_id: Mapped[int | None] = mapped_column(ForeignKey("notification_outbox.id"), nullable=True)
+    target_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class ClientInboundMessage(Base):
+    """Входящее сообщение клиента из VK / Max / Telegram (не сотрудник и не чат админов)."""
+
+    __tablename__ = "client_inbound_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True, index=True)
+    booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True, index=True)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    external_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # confirm | reschedule | cancel | contact_admin | directions | unknown
+    parsed_action: Mapped[str] = mapped_column(String(32), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class AdminChatTarget(Base):
+    """Общий чат админов по каналу (один chat_id на канал)."""
+
+    __tablename__ = "admin_chat_targets"
+    __table_args__ = (UniqueConstraint("channel", name="uq_admin_chat_targets_channel"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    linked_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class AdminChatLinkToken(Base):
+    """Одноразовый код привязки чата админов (/admins <код>)."""
+
+    __tablename__ = "admin_chat_link_tokens"
+    __table_args__ = (UniqueConstraint("token_hash", name="uq_admin_chat_link_tokens_hash"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class ClientThermoTemplate(Base):
@@ -392,6 +560,24 @@ class ConsultationKind(str, enum.Enum):
     OTHER = "OTHER"
 
 
+class CareMemo(Base):
+    """Картинка-памятка, которую можно приложить к сообщению после визита."""
+
+    __tablename__ = "care_memos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    file_path: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime: Mapped[str] = mapped_column(String(64), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    vk_attachment: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    max_image_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    telegram_file_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ServiceCategory(Base):
     __tablename__ = "service_categories"
 
@@ -404,6 +590,7 @@ class ServiceCategory(Base):
         default=ConsultationKind.BRAIDING,
         nullable=False,
     )
+    care_memo_id: Mapped[int | None] = mapped_column(ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
@@ -463,6 +650,9 @@ class ServiceSubcategory(Base):
     show_material_description: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Расширенный блок термозамещения на шаге 2 визита + шаблоны клиента (без общих полей категории).
     show_thermo_visit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # inherit — памятка категории; custom — своя (в том числе «нет»).
+    care_memo_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_id: Mapped[int | None] = mapped_column(ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
@@ -500,6 +690,9 @@ class Service(Base):
     tail_section_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # None — брать из подкатегории show_material_description; True — показывать; False — не показывать.
     material_description_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # inherit — памятка подкатегории (с учётом её наследования); custom — своя.
+    care_memo_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_id: Mapped[int | None] = mapped_column(ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True)
 
     # Розница «Продажа материала»: какие блоки ценообразования показывать (независимые флаги).
     retail_material_kanekalon: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -799,6 +992,21 @@ class Booking(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     cancelled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Ответ клиента в мессенджере (1 = подтвердил, 3 = просит отменить; бронь не отменяется автоматически).
+    client_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_confirmed_via: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    client_cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_cancel_requested_via: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    client_cancel_handled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_cancel_handled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # 2 = просит перенести. «Обработано» снимает requested_at и пишет handled_*.
+    client_reschedule_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_reschedule_requested_via: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    client_reschedule_handled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_reschedule_handled_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
 
     quoted_price_text: Mapped[str | None] = mapped_column(String(120), nullable=True)
     deposit_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)

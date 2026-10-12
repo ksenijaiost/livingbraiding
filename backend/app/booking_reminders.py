@@ -202,10 +202,12 @@ def _reminder_dedupe_key(
 
 def _user_channel_targets(user: User) -> list[tuple[NotificationChannel, int]]:
     targets: list[tuple[NotificationChannel, int]] = []
-    if user.telegram_chat_id is not None:
-        targets.append((NotificationChannel.TELEGRAM, int(user.telegram_chat_id)))
     if user.vk_user_id is not None:
         targets.append((NotificationChannel.VK, int(user.vk_user_id)))
+    if user.max_user_id is not None:
+        targets.append((NotificationChannel.MAX, int(user.max_user_id)))
+    if user.telegram_chat_id is not None:
+        targets.append((NotificationChannel.TELEGRAM, int(user.telegram_chat_id)))
     return targets
 
 
@@ -218,8 +220,10 @@ def enqueue_booking_reminder(
     now: datetime | None = None,
 ) -> list[NotificationOutbox]:
     """Поставить напоминание во все подключённые каналы (с dedupe)."""
+    from app.notify_prefs import user_wants_booking_notifications
+
     _ = now  # reserved for callers; lateness checked upstream
-    if not bool(user.notify_enabled):
+    if not user_wants_booking_notifications(user):
         return []
     targets = _user_channel_targets(user)
     if not targets:
@@ -297,6 +301,8 @@ def enqueue_due_booking_reminders(
     limit_bookings: int = 200,
 ) -> dict[str, int]:
     """Найти due-напоминания и поставить в outbox. Вызывается из воркера."""
+    from app.notify_prefs import user_wants_booking_notifications
+
     now = now or utcnow_naive()
     max_horizon = timedelta(hours=MAX_REMINDER_HOURS)
     # planned в будущем, но не дальше макс. горизонта (+ небольшой запас под окно).
@@ -337,7 +343,7 @@ def enqueue_due_booking_reminders(
                 user_cache[uid] = u
                 reminder_cache[uid] = get_effective_reminder_minutes(db, u)
             user = user_cache[uid]
-            if not bool(user.notify_enabled):
+            if not user_wants_booking_notifications(user):
                 continue
             if not _user_channel_targets(user):
                 continue

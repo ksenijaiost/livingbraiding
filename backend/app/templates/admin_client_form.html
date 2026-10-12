@@ -159,6 +159,31 @@
       </section>
 
       <section class="form-section">
+        <h3>Отметки</h3>
+        <label class="checkbox-row" style="margin-top:0;">
+          <input type="checkbox" name="interested_in_training" value="1" {% if form.get('interested_in_training') == '1' %}checked{% endif %} />
+          <span>Интерес к обучению</span>
+        </label>
+        <label class="checkbox-row" style="margin-top:8px;">
+          <input type="checkbox" name="is_student" value="1" {% if form.get('is_student') == '1' %}checked{% endif %} />
+          <span>Ученица</span>
+        </label>
+        <label class="checkbox-row" style="margin-top:8px;">
+          <input type="checkbox" name="is_model" value="1" {% if form.get('is_model') == '1' %}checked{% endif %} />
+          <span>Модель</span>
+        </label>
+      </section>
+
+      <section class="form-section">
+        <h3>Акции</h3>
+        <label class="checkbox-row" style="margin-top:0;">
+          <input type="checkbox" name="no_promo" value="1" {% if form.get('no_promo') == '1' %}checked{% endif %} />
+          <span>Не присылать акции</span>
+        </label>
+        <p class="section-hint">Только рассылки. Напоминания о записи и сообщения после визита уходят как обычно.</p>
+      </section>
+
+      <section class="form-section">
         <h3>Комментарий</h3>
         <div class="row">
           <div>

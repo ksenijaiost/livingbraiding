@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from types import SimpleNamespace
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -27,18 +27,21 @@ from app.client_validation import (
 )
 from app.forms_parse import parse_bool
 from app.consultation_booking import OPEN_BOOKING_STATUSES
+from app.client_notify_history import client_recent_messages
 from app.db.models import (
     Booking,
     BookingMaster,
     BookingStatus,
     Client,
     ClientAuditLog,
+    ClientNotificationRuleKind,
     ClientThermoTemplate,
     UserRole,
     Visit,
     VisitKitUsage,
 )
 from app.client_export import build_all_clients_csv_bytes
+from app.client_marks import apply_client_marks, no_promo_source_label
 from app.client_retention import (
     build_retention_report,
     default_retention_periods,
@@ -57,6 +60,35 @@ from app.client_status import (
     parse_client_status,
     status_hint,
     status_label,
+)
+from app.admin_chat import (
+    MSG_ADMIN_CHAT_TEST,
+    admin_chats_for_ui,
+    create_admin_chat_link_token,
+    send_to_chat,
+    unlink_admin_chat,
+)
+from app.client_notifications import (
+    DEFAULT_AFTER_TEMPLATE,
+    DEFAULT_BEFORE_TEMPLATE,
+    KIND_AFTER,
+    KIND_BEFORE,
+    add_rule,
+    delete_rule,
+    ensure_default_rules,
+    get_services_marker,
+    move_rule,
+    parse_latest_time,
+    parse_rule_hours,
+    rules_for_ui,
+    save_rules_from_form,
+    set_services_marker,
+)
+from app.telegram_link import (
+    CHANNEL_MAX,
+    CHANNEL_TELEGRAM,
+    CHANNEL_VK,
+    create_client_link_token,
 )
 from app.db.session import get_db
 from app.display_time import get_display_timezone
@@ -146,6 +178,10 @@ def admin_clients(
     status: str | None = None,
     created: int | None = None,
     updated: int | None = None,
+    no_promo: str | None = None,
+    interested_in_training: str | None = None,
+    is_student: str | None = None,
+    is_model: str | None = None,
     current_user=Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
@@ -171,6 +207,20 @@ def admin_clients(
             where.append(Client.id == -1)
         else:
             where.append(Client.id.in_(matched_ids))
+    mark_filters = {
+        "no_promo": parse_bool(no_promo),
+        "interested_in_training": parse_bool(interested_in_training),
+        "is_student": parse_bool(is_student),
+        "is_model": parse_bool(is_model),
+    }
+    if mark_filters["no_promo"]:
+        where.append(Client.no_promo.is_(True))
+    if mark_filters["interested_in_training"]:
+        where.append(Client.interested_in_training.is_(True))
+    if mark_filters["is_student"]:
+        where.append(Client.is_student.is_(True))
+    if mark_filters["is_model"]:
+        where.append(Client.is_model.is_(True))
 
     # One row per visit in the join; sum 1 only for real, non-cancelled visits
     visits_count = func.coalesce(func.sum(case((Visit.is_cancelled.is_(False), 1), else_=0)), 0)
@@ -198,6 +248,10 @@ def admin_clients(
             Client.name.label("name"),
             Client.is_confirmed.label("is_confirmed"),
             Client.is_blacklisted.label("is_blacklisted"),
+            Client.no_promo.label("no_promo"),
+            Client.interested_in_training.label("interested_in_training"),
+            Client.is_student.label("is_student"),
+            Client.is_model.label("is_model"),
             contact_preview,
             visits_count.label("visits_count"),
             has_active_booking,
@@ -206,7 +260,16 @@ def admin_clients(
         .join(Visit, Visit.client_id == Client.id, isouter=True)
         .join(Booking, Booking.client_id == Client.id, isouter=True)
         .where(*where)
-        .group_by(Client.id, Client.name, Client.is_confirmed, Client.is_blacklisted)
+        .group_by(
+            Client.id,
+            Client.name,
+            Client.is_confirmed,
+            Client.is_blacklisted,
+            Client.no_promo,
+            Client.interested_in_training,
+            Client.is_student,
+            Client.is_model,
+        )
         .order_by(Client.name.asc())
         .limit(500)
     )
@@ -236,6 +299,7 @@ def admin_clients(
             ],
             created_ok=created_ok,
             updated_ok=updated_ok,
+            mark_filters=mark_filters,
         ),
     )
 
@@ -317,6 +381,532 @@ def admin_clients_stats(
             cards=cards,
         ),
     )
+
+
+def _client_notifications_page(
+    request: Request,
+    *,
+    current_user: AuthUser,
+    db: Session,
+    error: str | None = None,
+    info: str | None = None,
+    admin_link_code: str | None = None,
+    memo_delete: dict | None = None,
+):
+    # Дефолты только при совсем пустой таблице (первый заход), не после ручной очистки.
+    if ensure_default_rules(db):
+        db.commit()
+    rules = rules_for_ui(db)
+    from app.client_bot_replies import bot_replies_for_ui, ensure_bot_reply_templates
+    from app.settings import get_settings
+    from app.studio_template_variables import ensure_builtin_studio_variables, variables_for_ui
+
+    changed = ensure_builtin_studio_variables(db)
+    changed = ensure_bot_reply_templates(db) or changed
+    if changed:
+        db.commit()
+    var_ui = variables_for_ui(db)
+    from app.care_memos import care_memos_for_ui
+
+    is_admin = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
+    return templates.TemplateResponse(
+        "admin_client_notifications.html",
+        _ctx(
+            request,
+            current_user=current_user,
+            before_rules=rules["before"],
+            after_rules=rules["after"],
+            services_marker=get_services_marker(db),
+            admin_chats=admin_chats_for_ui(db),
+            can_manage_admin_chat=is_admin,
+            admin_link_code=admin_link_code,
+            studio_builtins=var_ui["builtins"],
+            studio_custom=var_ui["custom"],
+            template_palette=var_ui["palette"],
+            video_max_mb=get_settings().studio_route_video_max_mb,
+            bot_replies=bot_replies_for_ui(db),
+            care_memos=care_memos_for_ui(db),
+            memo_delete=memo_delete,
+            error=error,
+            info=info,
+        ),
+    )
+
+
+@router.get("/notifications", response_class=HTMLResponse)
+def admin_client_notifications(
+    request: Request,
+    msg: str | None = None,
+    err: str | None = None,
+    memo_confirm: int | None = None,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    error = None
+    info = None
+    if err == "invalid":
+        error = "Проверьте часы и текст шаблона."
+    elif err == "marker":
+        error = "Маркер списка услуг задан некорректно."
+    elif err == "missing":
+        error = "Правило не найдено."
+    elif err == "limit":
+        error = "Достигнут лимит правил этого типа."
+    elif msg == "saved":
+        info = "Настройки уведомлений сохранены."
+    elif msg == "added":
+        info = "Правило добавлено."
+    elif msg == "deleted":
+        info = "Правило удалено."
+    elif msg == "moved":
+        info = "Порядок обновлён."
+    elif msg == "vars_saved":
+        info = "Переменные студии сохранены."
+    elif msg == "var_added":
+        info = "Своя переменная добавлена."
+    elif msg == "var_deleted":
+        info = "Своя переменная удалена."
+    elif msg == "video_saved":
+        info = "Видео «Как нас найти» сохранено."
+    elif msg == "video_cleared":
+        info = "Видео удалено."
+    elif msg == "bot_replies":
+        info = "Тексты ответов бота сохранены."
+    elif msg == "memo_saved":
+        info = "Памятка сохранена."
+    elif msg == "memo_deleted":
+        info = "Памятка удалена."
+    elif msg == "admin_code":
+        info = "Код для чата админов создан (24 часа)."
+    elif msg == "admin_unlinked":
+        info = "Чат админов отключён."
+    elif msg == "admin_test_ok":
+        info = "Тестовое сообщение в чат админов отправлено."
+    elif err == "admin_forbidden":
+        error = "Привязка чата админов доступна только администратору."
+    elif err == "admin_test_fail":
+        error = "Не удалось отправить тест в чат админов."
+    elif err == "admin_missing":
+        error = "Чат админов для этого канала не подключён."
+    # произвольное сообщение из query (валидация)
+    if err and err not in (
+        "invalid",
+        "marker",
+        "missing",
+        "limit",
+        "admin_forbidden",
+        "admin_test_fail",
+        "admin_missing",
+    ) and error is None:
+        error = err
+    admin_link_code = request.cookies.get("lb_admin_chat_code")
+    memo_delete = None
+    if memo_confirm:
+        from app.care_memos import memo_delete_preview
+
+        memo_delete = memo_delete_preview(db, int(memo_confirm))
+    resp = _client_notifications_page(
+        request,
+        current_user=current_user,
+        db=db,
+        error=error,
+        info=info,
+        admin_link_code=admin_link_code,
+        memo_delete=memo_delete,
+    )
+    if admin_link_code:
+        resp.delete_cookie("lb_admin_chat_code", path="/")
+    return resp
+
+
+@router.post("/notifications/admin-chat/code")
+def admin_client_notifications_admin_code(
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    plain = create_admin_chat_link_token(db, created_by_user_id=current_user.id)
+    db.commit()
+    resp = RedirectResponse(url="/clients/notifications?msg=admin_code", status_code=303)
+    resp.set_cookie(
+        "lb_admin_chat_code",
+        plain,
+        max_age=15 * 60,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return resp
+
+
+@router.post("/notifications/admin-chat/unlink")
+async def admin_client_notifications_admin_unlink(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    channel = str(form.get("channel") or "").strip().lower()
+    try:
+        unlink_admin_chat(db, channel, notify=True)
+        db.commit()
+    except Exception:
+        db.rollback()
+        return RedirectResponse(url="/clients/notifications?err=admin_missing", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=admin_unlinked", status_code=303)
+
+
+@router.post("/notifications/admin-chat/test")
+async def admin_client_notifications_admin_test(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    channel = str(form.get("channel") or "").strip().lower()
+    from app.admin_chat import get_admin_chat_target
+
+    row = get_admin_chat_target(db, channel)
+    if row is None:
+        return RedirectResponse(url="/clients/notifications?err=admin_missing", status_code=303)
+    try:
+        send_to_chat(channel, int(row.chat_id), MSG_ADMIN_CHAT_TEST)
+    except Exception:
+        return RedirectResponse(url="/clients/notifications?err=admin_test_fail", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=admin_test_ok", status_code=303)
+
+
+@router.post("/notifications/save")
+async def admin_client_notifications_save(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        set_services_marker(db, str(form.get("services_marker") or ""), user_id=current_user.id)
+        before_ids = form.getlist("before_id") if hasattr(form, "getlist") else []
+        before_hours = form.getlist("before_hours") if hasattr(form, "getlist") else []
+        before_templates = form.getlist("before_template") if hasattr(form, "getlist") else []
+        before_enabled = [
+            "1" if form.get(f"before_enabled_{rid}") else "0" for rid in before_ids
+        ]
+        save_rules_from_form(
+            db,
+            kind=KIND_BEFORE,
+            ids=before_ids,
+            hours_list=before_hours,
+            templates=before_templates,
+            enabled_flags=before_enabled,
+        )
+        after_ids = form.getlist("after_id") if hasattr(form, "getlist") else []
+        after_hours = form.getlist("after_hours") if hasattr(form, "getlist") else []
+        after_latest = form.getlist("after_latest") if hasattr(form, "getlist") else []
+        after_templates = form.getlist("after_template") if hasattr(form, "getlist") else []
+        after_enabled = [
+            "1" if form.get(f"after_enabled_{rid}") else "0" for rid in after_ids
+        ]
+        after_memo = [
+            "1" if form.get(f"after_memo_{rid}") else "0" for rid in after_ids
+        ]
+        save_rules_from_form(
+            db,
+            kind=KIND_AFTER,
+            ids=after_ids,
+            hours_list=after_hours,
+            templates=after_templates,
+            enabled_flags=after_enabled,
+            latest_times=after_latest,
+            memo_flags=after_memo,
+        )
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        msg = str(e) or "invalid"
+        if "Маркер" in msg:
+            return RedirectResponse(url="/clients/notifications?err=marker", status_code=303)
+        return RedirectResponse(
+            url=f"/clients/notifications?err={quote(msg)}",
+            status_code=303,
+        )
+    return RedirectResponse(url="/clients/notifications?msg=saved", status_code=303)
+
+
+def _memo_err(exc: Exception) -> RedirectResponse:
+    return RedirectResponse(url=f"/clients/notifications?err={quote(str(exc))}", status_code=303)
+
+
+@router.post("/notifications/memos/add")
+async def admin_care_memo_add(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.care_memos import create_care_memo
+    from app.media_store import get_nonempty_upload
+
+    form = await request.form()
+    try:
+        await create_care_memo(db, name=form.get("name"), upload=get_nonempty_upload(form, "file"))
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return _memo_err(e)
+    return RedirectResponse(url="/clients/notifications?msg=memo_saved", status_code=303)
+
+
+@router.post("/notifications/memos/{memo_id}/rename")
+async def admin_care_memo_rename(
+    memo_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.care_memos import rename_care_memo
+
+    form = await request.form()
+    try:
+        rename_care_memo(db, memo_id, form.get("name"))
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return _memo_err(e)
+    return RedirectResponse(url="/clients/notifications?msg=memo_saved", status_code=303)
+
+
+@router.post("/notifications/memos/{memo_id}/replace")
+async def admin_care_memo_replace(
+    memo_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.care_memos import replace_care_memo_file
+    from app.media_store import get_nonempty_upload
+
+    form = await request.form()
+    try:
+        await replace_care_memo_file(db, memo_id, get_nonempty_upload(form, "file"))
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return _memo_err(e)
+    return RedirectResponse(url="/clients/notifications?msg=memo_saved", status_code=303)
+
+
+@router.post("/notifications/memos/{memo_id}/delete")
+async def admin_care_memo_delete(
+    memo_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.care_memos import CareMemoInUse, delete_care_memo
+
+    form = await request.form()
+    confirmed = str(form.get("confirm") or "").strip() == "1"
+    try:
+        delete_care_memo(db, memo_id, confirmed=confirmed)
+        db.commit()
+    except CareMemoInUse:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?memo_confirm={int(memo_id)}", status_code=303)
+    except ValueError as e:
+        db.rollback()
+        return _memo_err(e)
+    return RedirectResponse(url="/clients/notifications?msg=memo_deleted", status_code=303)
+
+
+@router.post("/notifications/add")
+async def admin_client_notifications_add(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    kind_raw = str(form.get("kind") or "").strip()
+    try:
+        kind = ClientNotificationRuleKind(kind_raw)
+    except ValueError:
+        return RedirectResponse(url="/clients/notifications?err=invalid", status_code=303)
+    try:
+        hours = parse_rule_hours(form.get("hours"), kind=kind)
+        latest = parse_latest_time(form.get("latest_time")) if kind == KIND_AFTER else None
+        template = DEFAULT_BEFORE_TEMPLATE if kind == KIND_BEFORE else DEFAULT_AFTER_TEMPLATE
+        add_rule(db, kind=kind, hours=hours, template=template, latest_time=latest)
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        msg = str(e) or "invalid"
+        if "Не больше" in msg:
+            return RedirectResponse(url="/clients/notifications?err=limit", status_code=303)
+        return RedirectResponse(
+            url=f"/clients/notifications?err={quote(msg)}",
+            status_code=303,
+        )
+    return RedirectResponse(url="/clients/notifications?msg=added", status_code=303)
+
+
+@router.post("/notifications/delete")
+async def admin_client_notifications_delete(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        delete_rule(db, int(str(form.get("rule_id") or "0")))
+        db.commit()
+    except (ValueError, TypeError):
+        db.rollback()
+        return RedirectResponse(url="/clients/notifications?err=missing", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=deleted", status_code=303)
+
+
+@router.post("/notifications/move")
+async def admin_client_notifications_move(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        move_rule(db, int(str(form.get("rule_id") or "0")), direction=str(form.get("direction") or ""))
+        db.commit()
+    except (ValueError, TypeError):
+        db.rollback()
+        return RedirectResponse(url="/clients/notifications?err=missing", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=moved", status_code=303)
+
+
+@router.post("/notifications/variables/builtin")
+async def admin_client_notifications_variables_builtin(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.studio_template_variables import BUILTIN_KINDS, KIND_VIDEO, save_builtin_values
+
+    form = await request.form()
+    values = {
+        key: str(form.get(f"builtin_{key}") or "")
+        for key, kind in BUILTIN_KINDS.items()
+        if kind != KIND_VIDEO
+    }
+    try:
+        save_builtin_values(db, values, user_id=current_user.id)
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=vars_saved", status_code=303)
+
+
+@router.post("/notifications/variables/video")
+async def admin_client_notifications_variables_video(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.studio_template_variables import clear_route_video, save_route_video
+
+    form = await request.form()
+    try:
+        if parse_bool(form.get("clear")):
+            clear_route_video(db, user_id=current_user.id)
+            db.commit()
+            return RedirectResponse(url="/clients/notifications?msg=video_cleared", status_code=303)
+        upload = get_nonempty_upload(form, "video")
+        if upload is None:
+            raise ValueError("Выберите файл видео (mp4, mov или webm).")
+        await save_route_video(db, upload, user_id=current_user.id)
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=video_saved", status_code=303)
+
+
+@router.post("/notifications/variables/custom/add")
+async def admin_client_notifications_variables_add(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.studio_template_variables import add_custom_variable
+
+    form = await request.form()
+    try:
+        add_custom_variable(
+            db,
+            str(form.get("key") or ""),
+            str(form.get("value") or ""),
+            user_id=current_user.id,
+        )
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=var_added", status_code=303)
+
+
+@router.post("/notifications/variables/custom/save")
+async def admin_client_notifications_variables_save(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.studio_template_variables import update_custom_variable
+
+    form = await request.form()
+    try:
+        update_custom_variable(
+            db,
+            str(form.get("key") or ""),
+            str(form.get("value") or ""),
+            user_id=current_user.id,
+        )
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=vars_saved", status_code=303)
+
+
+@router.post("/notifications/variables/custom/delete")
+async def admin_client_notifications_variables_delete(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.studio_template_variables import delete_variable
+
+    form = await request.form()
+    try:
+        delete_variable(db, str(form.get("key") or ""))
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=var_deleted", status_code=303)
+
+
+@router.post("/notifications/bot-replies")
+async def admin_client_notifications_bot_replies(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.client_bot_replies import BOT_REPLY_LABELS, save_bot_reply_templates
+
+    form = await request.form()
+    values = {key: str(form.get(f"bot_{key}") or "") for key, _label in BOT_REPLY_LABELS}
+    try:
+        save_bot_reply_templates(db, values, user_id=current_user.id)
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=bot_replies", status_code=303)
 
 
 @router.get("/stats/retention", response_class=HTMLResponse)
@@ -634,6 +1224,13 @@ async def admin_client_new_post(
         birth_year=birth_year,
         created_by_label=format_created_by_label(current_user),
     )
+    apply_client_marks(
+        client,
+        interested_in_training=parse_bool(form.get("interested_in_training")),
+        is_student=parse_bool(form.get("is_student")),
+        is_model=parse_bool(form.get("is_model")),
+        no_promo=parse_bool(form.get("no_promo")),
+    )
     db.add(client)
     db.commit()
     db.refresh(client)
@@ -695,6 +1292,12 @@ async def admin_client_edit_post(
                 "birth_day",
                 "birth_month",
                 "birth_year",
+                "no_promo",
+                "no_promo_at",
+                "no_promo_source",
+                "interested_in_training",
+                "is_student",
+                "is_model",
             )
         }
     )
@@ -783,6 +1386,13 @@ async def admin_client_edit_post(
     client.birth_day = birth_day
     client.birth_month = birth_month
     client.birth_year = birth_year
+    apply_client_marks(
+        client,
+        interested_in_training=parse_bool(form.get("interested_in_training")),
+        is_student=parse_bool(form.get("is_student")),
+        is_model=parse_bool(form.get("is_model")),
+        no_promo=parse_bool(form.get("no_promo")),
+    )
 
     # photos: replace/clear
     clear_p1 = parse_bool(form_raw.get("clear_photo_1"))
@@ -841,6 +1451,12 @@ async def admin_client_edit_post(
             "birth_day",
             "birth_month",
             "birth_year",
+            "no_promo",
+            "no_promo_at",
+            "no_promo_source",
+            "interested_in_training",
+            "is_student",
+            "is_model",
         ),
     )
     write_audit_rows(
@@ -989,7 +1605,20 @@ def admin_client_detail(
     show_admin_actions = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
     display_tz = get_display_timezone(db)
     client_status = client_display_status(db, client)
-    return templates.TemplateResponse(
+    channel_link = None
+    raw_link = request.cookies.get("lb_client_channel_link")
+    if raw_link:
+        # channel|code|deep
+        parts = raw_link.split("|", 2)
+        if len(parts) >= 2:
+            labels = {"vk": "VK", "max": "Max", "telegram": "Telegram"}
+            channel_link = {
+                "channel": parts[0],
+                "label": labels.get(parts[0], parts[0]),
+                "code": parts[1],
+                "deep_link": parts[2] if len(parts) > 2 and parts[2] else None,
+            }
+    tmpl = templates.TemplateResponse(
         "admin_client_detail.html",
         _ctx(
             request,
@@ -1011,8 +1640,43 @@ def admin_client_detail(
             created_banner=msg == "created",
             comment_saved_banner=msg == "comment_saved",
             display_tz=display_tz,
+            no_promo_source_label=no_promo_source_label(client.no_promo_source),
+            channel_link=channel_link,
+            recent_messages=client_recent_messages(db, int(client.id), tz_name=display_tz),
         ),
     )
+    if raw_link:
+        tmpl.delete_cookie("lb_client_channel_link", path="/")
+    return tmpl
+
+
+@router.post("/{client_id}/channel-link")
+async def admin_client_channel_link(
+    client_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    client = db.get(Client, client_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    form = await request.form()
+    channel = str(form.get("channel") or "").strip().lower()
+    if channel not in (CHANNEL_VK, CHANNEL_MAX, CHANNEL_TELEGRAM):
+        return RedirectResponse(url=f"/clients/{client_id}", status_code=303)
+    plain, deep = create_client_link_token(db, client.id, channel=channel)
+    db.commit()
+    resp = RedirectResponse(url=f"/clients/{client_id}", status_code=303)
+    cookie_val = f"{channel}|{plain}|{deep or ''}"
+    resp.set_cookie(
+        "lb_client_channel_link",
+        cookie_val,
+        max_age=15 * 60,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return resp
 
 
 @router.post("/{client_id}/comment")
