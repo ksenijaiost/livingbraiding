@@ -26,6 +26,7 @@ from app.media_store import (
     is_stored_media_backup_filename,
     iter_media_backup_entries,
     iter_media_backup_paths,
+    media_backup_arcname,
     media_root_dir,
     parse_media_manifest,
 )
@@ -57,16 +58,18 @@ def _unlink_quiet(path: str) -> None:
 
 
 def _safe_arc_basename(member: str) -> str | None:
+    """Имя в архиве: файл в корне или care_memos/<файл>."""
     n = member.replace("\\", "/").strip()
     if not n or n.endswith("/"):
         return None
     parts = [p for p in n.split("/") if p]
-    if len(parts) != 1:
+    if not parts or any(p in (".", "..") for p in parts):
         return None
-    base = parts[0]
-    if not base or base in (".", ".."):
-        return None
-    return base
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2 and parts[0] == "care_memos":
+        return f"care_memos/{parts[1]}"
+    return None
 
 
 def _build_backup_zip(paths: list[Path]) -> str:
@@ -75,7 +78,7 @@ def _build_backup_zip(paths: list[Path]) -> str:
     try:
         with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for p in paths:
-                zf.write(p, arcname=p.name)
+                zf.write(p, arcname=media_backup_arcname(media_root_dir(), p))
     except Exception:
         _unlink_quiet(tmp_path)
         raise HTTPException(status_code=500, detail="Не удалось собрать архив.")
@@ -107,7 +110,7 @@ def techspec_media_manifest(
 def techspec_media_backup_zip_get(
     current_user: Annotated[AuthUser, Depends(require_techspec_user())],
 ):
-    """Скачать архив всех файлов из каталога загрузок (только файлы в корне каталога)."""
+    """Скачать архив загрузок: картинки в корне каталога и care_memos/."""
     root = media_root_dir().resolve()
     root.mkdir(parents=True, exist_ok=True)
     paths = iter_media_backup_paths(root)
@@ -228,9 +231,9 @@ async def techspec_media_restore_zip(
                 if base is None:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Недопустимый путь в архиве (нужен один файл в корне): {info.filename!r}",
+                        detail=f"Недопустимый путь в архиве: {info.filename!r}",
                     )
-                if _should_skip_restore_basename(base):
+                if _should_skip_restore_basename(Path(base).name):
                     skipped += 1
                     continue
                 if not is_stored_media_backup_filename(base):
@@ -244,6 +247,7 @@ async def techspec_media_restore_zip(
                     dest.relative_to(root)
                 except ValueError:
                     raise HTTPException(status_code=400, detail="Обход каталога в архиве.")
+                dest.parent.mkdir(parents=True, exist_ok=True)
 
                 with zf.open(info, "r") as src, open(dest, "wb") as dst:
                     copied = 0

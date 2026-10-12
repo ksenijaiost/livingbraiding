@@ -30,17 +30,36 @@ VIDEO_MIME = {
     ".webm": "video/webm",
 }
 
-# Имена как у save_upload_image: <32 hex>.<ext> (бэкап — без HEIC).
-_BACKUP_STORED_NAME_RE = re.compile(r"^[a-f0-9]{32}\.(?:jpg|jpeg|png|webp)$", re.IGNORECASE)
+# Имена как у save_upload_image: <32 hex>.<ext> в корне или в care_memos/ (бэкап — без HEIC).
+_BACKUP_STORED_NAME_RE = re.compile(
+    r"^(?:care_memos/)?[a-f0-9]{32}\.(?:jpg|jpeg|png|webp)$",
+    re.IGNORECASE,
+)
 _BACKUP_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+CARE_MEMO_BACKUP_DIR = "care_memos"
 
 
 def is_stored_media_backup_filename(name: str) -> bool:
-    return bool(_BACKUP_STORED_NAME_RE.match(name)) and Path(name).suffix.lower() in _BACKUP_ALLOWED_EXTS
+    normalized = (name or "").replace("\\", "/").strip()
+    return bool(_BACKUP_STORED_NAME_RE.match(normalized)) and Path(normalized).suffix.lower() in _BACKUP_ALLOWED_EXTS
+
+
+def media_backup_arcname(root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.name
 
 
 def iter_media_backup_paths(root: Path) -> list[Path]:
-    return sorted(p for p in root.iterdir() if p.is_file() and is_stored_media_backup_filename(p.name))
+    found: list[Path] = []
+    if not root.is_dir():
+        return found
+    found.extend(p for p in root.iterdir() if p.is_file() and is_stored_media_backup_filename(p.name))
+    sub = root / CARE_MEMO_BACKUP_DIR
+    if sub.is_dir():
+        found.extend(p for p in sub.iterdir() if p.is_file() and is_stored_media_backup_filename(p.name))
+    return sorted(found, key=lambda p: media_backup_arcname(root, p))
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +76,7 @@ def iter_media_backup_entries(root: Path) -> list[MediaBackupEntry]:
         st = p.stat()
         out.append(
             MediaBackupEntry(
-                name=p.name,
+                name=media_backup_arcname(root, p),
                 size=int(st.st_size),
                 mtime=int(st.st_mtime),
                 path=p,

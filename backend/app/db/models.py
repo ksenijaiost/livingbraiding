@@ -384,6 +384,8 @@ class ClientNotificationRule(Base):
     template: Mapped[str] = mapped_column(Text, nullable=False)
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # after: прикладывать памятки услуг к сообщению.
+    send_care_memo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -558,6 +560,24 @@ class ConsultationKind(str, enum.Enum):
     OTHER = "OTHER"
 
 
+class CareMemo(Base):
+    """Картинка-памятка, которую можно приложить к сообщению после визита."""
+
+    __tablename__ = "care_memos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    file_path: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime: Mapped[str] = mapped_column(String(64), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    vk_attachment: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    max_image_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    telegram_file_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ServiceCategory(Base):
     __tablename__ = "service_categories"
 
@@ -570,6 +590,7 @@ class ServiceCategory(Base):
         default=ConsultationKind.BRAIDING,
         nullable=False,
     )
+    care_memo_id: Mapped[int | None] = mapped_column(ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
@@ -629,6 +650,9 @@ class ServiceSubcategory(Base):
     show_material_description: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Расширенный блок термозамещения на шаге 2 визита + шаблоны клиента (без общих полей категории).
     show_thermo_visit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # inherit — памятка категории; custom — своя (в том числе «нет»).
+    care_memo_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_id: Mapped[int | None] = mapped_column(ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
@@ -666,6 +690,9 @@ class Service(Base):
     tail_section_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # None — брать из подкатегории show_material_description; True — показывать; False — не показывать.
     material_description_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # inherit — памятка подкатегории (с учётом её наследования); custom — своя.
+    care_memo_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_id: Mapped[int | None] = mapped_column(ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True)
 
     # Розница «Продажа материала»: какие блоки ценообразования показывать (независимые флаги).
     retail_material_kanekalon: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

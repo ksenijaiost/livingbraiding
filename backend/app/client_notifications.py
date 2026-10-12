@@ -449,19 +449,23 @@ def save_rules_from_form(
     templates: Sequence[Any],
     enabled_flags: Sequence[Any],
     latest_times: Sequence[Any] | None = None,
+    memo_flags: Sequence[Any] | None = None,
 ) -> None:
     """Обновить существующие строки kind в порядке формы; лишние id игнорируются."""
     if not (len(ids) == len(hours_list) == len(templates) == len(enabled_flags)):
         raise ValueError("Некорректные данные формы правил.")
     if latest_times is not None and len(latest_times) != len(ids):
         raise ValueError("Некорректные данные формы правил.")
+    if memo_flags is not None and len(memo_flags) != len(ids):
+        raise ValueError("Некорректные данные формы правил.")
     by_id = {int(r.id): r for r in list_rules(db, kind)}
     seen: set[int] = set()
     now = utcnow_naive()
     position = 0
     paired_latest = list(latest_times) if latest_times is not None else [None] * len(ids)
-    for raw_id, raw_h, raw_t, raw_en, raw_latest in zip(
-        ids, hours_list, templates, enabled_flags, paired_latest
+    paired_memo = list(memo_flags) if memo_flags is not None else [None] * len(ids)
+    for raw_id, raw_h, raw_t, raw_en, raw_latest, raw_memo in zip(
+        ids, hours_list, templates, enabled_flags, paired_latest, paired_memo
     ):
         try:
             rid = int(raw_id)
@@ -478,6 +482,8 @@ def save_rules_from_form(
             row.latest_time = parse_latest_time(raw_latest)
         row.template = parse_template(raw_t)
         row.is_enabled = str(raw_en).strip().lower() in ("1", "true", "on", "yes")
+        if kind == KIND_AFTER and memo_flags is not None:
+            row.send_care_memo = str(raw_memo).strip().lower() in ("1", "true", "on", "yes")
         row.position = position
         row.updated_at = now
         position += 1
@@ -506,6 +512,7 @@ def rules_for_ui(db: Session) -> dict[str, list[dict[str, Any]]]:
                 "latest_time": _latest_for_ui(r.latest_time),
                 "template": r.template,
                 "is_enabled": bool(r.is_enabled),
+                "send_care_memo": bool(getattr(r, "send_care_memo", True)),
                 "position": int(r.position),
             }
             for r in after

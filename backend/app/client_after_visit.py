@@ -119,6 +119,7 @@ def _insert_after_outbox(
     booking_id: int | None,
     visit_id: int | None,
     scheduled_at: datetime,
+    care_memo_ids: list[int] | None = None,
 ) -> NotificationOutbox | None:
     key = _after_dedupe_key(
         rule_id=int(rule.id),
@@ -138,6 +139,8 @@ def _insert_after_outbox(
         "visit_id": int(visit_id) if visit_id else None,
         "rule_id": int(rule.id),
     }
+    if care_memo_ids:
+        payload["care_memo_ids"] = [int(mid) for mid in care_memo_ids]
     row = NotificationOutbox(
         user_id=None,
         client_id=int(client.id),
@@ -212,6 +215,9 @@ def schedule_after_visit_notifications(db: Session, visit: Visit) -> list[Notifi
             latest_time=rule.latest_time,
             tz_name=tz_name,
         )
+        from app.care_memos import memo_ids_if_enabled
+
+        memo_ids = memo_ids_if_enabled(db, rule, visit=visit)
         for channel, target_id in targets:
             row = _insert_after_outbox(
                 db,
@@ -223,6 +229,7 @@ def schedule_after_visit_notifications(db: Session, visit: Visit) -> list[Notifi
                 booking_id=booking_id,
                 visit_id=int(visit.id),
                 scheduled_at=scheduled_at,
+                care_memo_ids=memo_ids,
             )
             if row is not None:
                 created.append(row)
@@ -318,6 +325,9 @@ def enqueue_due_after_booking_deadlines(
             text = _render_after(db, rule, client, loaded)
             if not (text or "").strip():
                 continue
+            from app.care_memos import memo_ids_if_enabled
+
+            memo_ids = memo_ids_if_enabled(db, rule, booking=loaded)
             for channel, target_id in targets:
                 row = _insert_after_outbox(
                     db,
@@ -329,6 +339,7 @@ def enqueue_due_after_booking_deadlines(
                     booking_id=int(booking.id),
                     visit_id=None,
                     scheduled_at=deadline,
+                    care_memo_ids=memo_ids,
                 )
                 if row is not None:
                     stats["enqueued"] += 1

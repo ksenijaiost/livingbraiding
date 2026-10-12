@@ -8,6 +8,8 @@
       <div class="error">Укажите название.</div>
     {% elif err == "duplicate" %}
       <div class="error">Такое имя уже есть в этой категории.</div>
+    {% elif err == "memo" %}
+      <div class="error">Памятка не найдена.</div>
     {% endif %}
     <form method="post" action="{% if is_new %}/admin/catalog/subcategories/new{% else %}/admin/catalog/subcategories/{{ sub.id }}/edit{% endif %}">
       {% if is_new %}
@@ -41,6 +43,26 @@
         <input type="checkbox" name="show_thermo_visit" {% if form_show_thermo %}checked{% endif %} />
         Блок «Термозамещение» на шаге 2 визита (без общих полей анкеты категории)
       </label>
+      {% if not is_new %}
+        <div style="margin-top: 16px;">
+          <div style="font-weight: 600; margin-bottom: 6px;">Памятка</div>
+          <label style="display:flex; align-items:center; gap:8px; font-weight:normal;">
+            <input type="radio" name="care_memo_mode" value="inherit" {% if form_care_memo_mode != 'custom' %}checked{% endif %} />
+            Как в категории
+            <span class="muted">({{ care_memo_inherit_label }})</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:8px; margin-top: 8px; font-weight:normal;">
+            <input type="radio" name="care_memo_mode" value="custom" {% if form_care_memo_mode == 'custom' %}checked{% endif %} />
+            Выбрать
+          </label>
+          <select name="care_memo_id" style="margin-top: 8px;">
+            <option value="">нет</option>
+            {% for m in care_memos %}
+              <option value="{{ m.id }}" {% if form_care_memo_id == m.id %}selected{% endif %}>{{ m.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
       <p style="margin-top: 16px;">
         <button type="submit">Сохранить</button>
         <a href="/admin/catalog/categories/{{ category.id }}/subcategories"><button type="button" class="secondary">Отмена</button></a>

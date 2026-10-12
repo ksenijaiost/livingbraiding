@@ -91,6 +91,7 @@
                 <th class="lb-nowrap">Не позже</th>
                 <th>Текст</th>
                 <th class="lb-nowrap">Вкл.</th>
+                <th class="lb-nowrap">Памятка</th>
                 <th class="lb-nowrap"></th>
               </tr>
             </thead>
@@ -111,6 +112,11 @@
                   <td style="text-align:center;">
                     <input type="checkbox" name="after_enabled_{{ r.id }}" value="1"
                            {% if r.is_enabled %}checked{% endif %} />
+                  </td>
+                  <td style="text-align:center;">
+                    <input type="checkbox" name="after_memo_{{ r.id }}" value="1"
+                           title="Отправлять памятку"
+                           {% if r.send_care_memo %}checked{% endif %} />
                   </td>
                   <td class="lb-nowrap">
                     <button type="submit" class="secondary" formaction="/clients/notifications/move"
@@ -161,6 +167,54 @@
         </div>
       </form>
     </div>
+
+    <h3 class="section-title">Памятки</h3>
+    <p class="muted" style="font-size:12px; margin:0 0 10px;">
+      Картинки после визита (JPG, PNG или WebP). Кодовое название уникально.
+    </p>
+    {% if memo_delete and memo_delete.links %}
+      <div style="border:1px solid #b91c1c; border-radius:8px; padding:10px 12px; margin-bottom:12px;">
+        <p style="margin:0 0 8px;"><strong>Точно ли хотите удалить?</strong> Памятка «{{ memo_delete.name }}» привязана:</p>
+        <ul style="margin:0 0 10px;">
+          {% for link in memo_delete.links %}
+            <li>{{ link.kind }}: <a href="{{ link.href }}">{{ link.name }}</a></li>
+          {% endfor %}
+        </ul>
+        <form method="post" action="/clients/notifications/memos/{{ memo_delete.id }}/delete" style="margin:0;">
+          <input type="hidden" name="confirm" value="1" />
+          <button type="submit">Удалить</button>
+        </form>
+      </div>
+    {% endif %}
+    {% if care_memos %}
+      {% for m in care_memos %}
+        <div style="display:flex; gap:12px; align-items:flex-start; margin:0 0 14px; flex-wrap:wrap;">
+          <img src="{{ m.preview_url }}" alt="" style="width:72px; height:72px; object-fit:cover; border-radius:6px; background:#f3f4f6;" />
+          <div style="flex:1; min-width:16rem;">
+            <div><strong>{{ m.name }}</strong></div>
+            <div class="muted" style="font-size:12px;">{{ m.file_name }} · {{ m.created_label }}</div>
+            <form method="post" action="/clients/notifications/memos/{{ m.id }}/rename" style="display:flex; gap:6px; margin:6px 0; flex-wrap:wrap;">
+              <input name="name" value="{{ m.name }}" required maxlength="80" style="min-width:12rem;" />
+              <button type="submit" class="secondary">Переименовать</button>
+            </form>
+            <form method="post" action="/clients/notifications/memos/{{ m.id }}/replace" enctype="multipart/form-data" style="display:flex; gap:6px; margin:0 0 6px; flex-wrap:wrap; align-items:center;">
+              <input type="file" name="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required />
+              <button type="submit" class="secondary">Заменить файл</button>
+            </form>
+            <form method="post" action="/clients/notifications/memos/{{ m.id }}/delete" style="margin:0;">
+              <button type="submit" class="secondary">Удалить</button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">Памяток пока нет.</p>
+    {% endif %}
+    <form method="post" action="/clients/notifications/memos/add" enctype="multipart/form-data" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:18px;">
+      <input name="name" placeholder="Кодовое название" required maxlength="80" />
+      <input type="file" name="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required />
+      <button type="submit">Добавить</button>
+    </form>
 
     <div class="card" style="background:#fafafa; margin:0;">
       <p style="margin:0 0 8px; font-weight:600; font-size:13px;">Доступные переменные</p>

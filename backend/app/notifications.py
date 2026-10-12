@@ -830,6 +830,12 @@ def process_outbox(
             logger.warning("notification_outbox #%s failed: %s", row.id, e)
             db.commit()
             continue
+        try:
+            from app.care_memo_send import deliver_care_memos
+
+            deliver_care_memos(db, row)
+        except Exception:
+            logger.exception("notification_outbox #%s: care memo attach failed", row.id)
         if intended:
             row.body = intended
         row.status = NotificationOutboxStatus.SENT

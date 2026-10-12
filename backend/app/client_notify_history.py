@@ -119,6 +119,8 @@ def _out_type(row: NotificationOutbox, hours_by_rule: dict[int, float]) -> tuple
         return _hours_label(hours_by_rule.get(int(rid)) if rid is not None else None), mark
     if event == "client_after_booking":
         return "После визита", mark
+    if event == "client_care_memo_error":
+        return ((row.body or "").strip() or "Памятка — ошибка"), mark
     if event == "client_bot_reply":
         key = str(payload.get("reply_key") or "")
         return _BOT.get(key, "Ответ бота"), mark
@@ -156,6 +158,16 @@ def _status_label(row: NotificationOutbox, tz_name: str) -> str:
     return f"запланировано ({when})" if when else "запланировано"
 
 
+def _memos_label(row: NotificationOutbox) -> str:
+    names = _payload(row).get("care_memos_attached") or []
+    if not isinstance(names, list):
+        return ""
+    clean = [str(name).strip() for name in names if str(name).strip()]
+    if not clean:
+        return ""
+    return "Памятки: " + ", ".join(clean)
+
+
 def _out_item(row: NotificationOutbox, tz_name: str, hours_by_rule: dict[int, float]) -> dict:
     type_label, mark = _out_type(row, hours_by_rule)
     text = (row.body or "").strip() or str(_payload(row).get("text") or "").strip()
@@ -172,6 +184,7 @@ def _out_item(row: NotificationOutbox, tz_name: str, hours_by_rule: dict[int, fl
         "status_label": _status_label(row, tz_name),
         "text": text,
         "parsed_label": "",
+        "memos_label": _memos_label(row),
         "booking_id": int(row.booking_id) if row.booking_id else None,
     }
 
@@ -190,6 +203,7 @@ def _in_item(row: ClientInboundMessage, tz_name: str) -> dict:
         "status_label": "",
         "text": row.text or "",
         "parsed_label": parsed,
+        "memos_label": "",
         "booking_id": int(row.booking_id) if row.booking_id else None,
     }
 

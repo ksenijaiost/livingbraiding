@@ -8,6 +8,8 @@
       <div class="error">Укажите название.</div>
     {% elif err == "duplicate" %}
       <div class="error">Категория с таким именем уже есть.</div>
+    {% elif err == "memo" %}
+      <div class="error">Памятка не найдена.</div>
     {% endif %}
     <form method="post" action="{% if is_new %}/admin/catalog/categories/new{% else %}/admin/catalog/categories/{{ category.id }}/edit{% endif %}">
       <label>Название
@@ -35,6 +37,16 @@
           Определяет, в каких консультациях показываются услуги этой категории.
         </p>
       </div>
+      {% if not is_new %}
+        <label style="margin-top: 12px; display:block;">Памятка
+          <select name="care_memo_id">
+            <option value="">нет</option>
+            {% for m in care_memos %}
+              <option value="{{ m.id }}" {% if form_care_memo_id == m.id %}selected{% endif %}>{{ m.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      {% endif %}
       <p style="margin-top: 16px;">
         <button type="submit">Сохранить</button>
         {% if not is_new %}

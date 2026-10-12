@@ -391,6 +391,7 @@ def _client_notifications_page(
     error: str | None = None,
     info: str | None = None,
     admin_link_code: str | None = None,
+    memo_delete: dict | None = None,
 ):
     # Дефолты только при совсем пустой таблице (первый заход), не после ручной очистки.
     if ensure_default_rules(db):
@@ -405,6 +406,8 @@ def _client_notifications_page(
     if changed:
         db.commit()
     var_ui = variables_for_ui(db)
+    from app.care_memos import care_memos_for_ui
+
     is_admin = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
     return templates.TemplateResponse(
         "admin_client_notifications.html",
@@ -422,6 +425,8 @@ def _client_notifications_page(
             template_palette=var_ui["palette"],
             video_max_mb=get_settings().studio_route_video_max_mb,
             bot_replies=bot_replies_for_ui(db),
+            care_memos=care_memos_for_ui(db),
+            memo_delete=memo_delete,
             error=error,
             info=info,
         ),
@@ -433,6 +438,7 @@ def admin_client_notifications(
     request: Request,
     msg: str | None = None,
     err: str | None = None,
+    memo_confirm: int | None = None,
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
@@ -466,6 +472,10 @@ def admin_client_notifications(
         info = "Видео удалено."
     elif msg == "bot_replies":
         info = "Тексты ответов бота сохранены."
+    elif msg == "memo_saved":
+        info = "Памятка сохранена."
+    elif msg == "memo_deleted":
+        info = "Памятка удалена."
     elif msg == "admin_code":
         info = "Код для чата админов создан (24 часа)."
     elif msg == "admin_unlinked":
@@ -490,6 +500,11 @@ def admin_client_notifications(
     ) and error is None:
         error = err
     admin_link_code = request.cookies.get("lb_admin_chat_code")
+    memo_delete = None
+    if memo_confirm:
+        from app.care_memos import memo_delete_preview
+
+        memo_delete = memo_delete_preview(db, int(memo_confirm))
     resp = _client_notifications_page(
         request,
         current_user=current_user,
@@ -497,6 +512,7 @@ def admin_client_notifications(
         error=error,
         info=info,
         admin_link_code=admin_link_code,
+        memo_delete=memo_delete,
     )
     if admin_link_code:
         resp.delete_cookie("lb_admin_chat_code", path="/")
@@ -589,6 +605,9 @@ async def admin_client_notifications_save(
         after_enabled = [
             "1" if form.get(f"after_enabled_{rid}") else "0" for rid in after_ids
         ]
+        after_memo = [
+            "1" if form.get(f"after_memo_{rid}") else "0" for rid in after_ids
+        ]
         save_rules_from_form(
             db,
             kind=KIND_AFTER,
@@ -597,6 +616,7 @@ async def admin_client_notifications_save(
             templates=after_templates,
             enabled_flags=after_enabled,
             latest_times=after_latest,
+            memo_flags=after_memo,
         )
         db.commit()
     except ValueError as e:
@@ -609,6 +629,91 @@ async def admin_client_notifications_save(
             status_code=303,
         )
     return RedirectResponse(url="/clients/notifications?msg=saved", status_code=303)
+
+
+def _memo_err(exc: Exception) -> RedirectResponse:
+    return RedirectResponse(url=f"/clients/notifications?err={quote(str(exc))}", status_code=303)
+
+
+@router.post("/notifications/memos/add")
+async def admin_care_memo_add(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.care_memos import create_care_memo
+    from app.media_store import get_nonempty_upload
+
+    form = await request.form()
+    try:
+        await create_care_memo(db, name=form.get("name"), upload=get_nonempty_upload(form, "file"))
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return _memo_err(e)
+    return RedirectResponse(url="/clients/notifications?msg=memo_saved", status_code=303)
+
+
+@router.post("/notifications/memos/{memo_id}/rename")
+async def admin_care_memo_rename(
+    memo_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.care_memos import rename_care_memo
+
+    form = await request.form()
+    try:
+        rename_care_memo(db, memo_id, form.get("name"))
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return _memo_err(e)
+    return RedirectResponse(url="/clients/notifications?msg=memo_saved", status_code=303)
+
+
+@router.post("/notifications/memos/{memo_id}/replace")
+async def admin_care_memo_replace(
+    memo_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.care_memos import replace_care_memo_file
+    from app.media_store import get_nonempty_upload
+
+    form = await request.form()
+    try:
+        await replace_care_memo_file(db, memo_id, get_nonempty_upload(form, "file"))
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        return _memo_err(e)
+    return RedirectResponse(url="/clients/notifications?msg=memo_saved", status_code=303)
+
+
+@router.post("/notifications/memos/{memo_id}/delete")
+async def admin_care_memo_delete(
+    memo_id: int,
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.care_memos import CareMemoInUse, delete_care_memo
+
+    form = await request.form()
+    confirmed = str(form.get("confirm") or "").strip() == "1"
+    try:
+        delete_care_memo(db, memo_id, confirmed=confirmed)
+        db.commit()
+    except CareMemoInUse:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?memo_confirm={int(memo_id)}", status_code=303)
+    except ValueError as e:
+        db.rollback()
+        return _memo_err(e)
+    return RedirectResponse(url="/clients/notifications?msg=memo_deleted", status_code=303)
 
 
 @router.post("/notifications/add")

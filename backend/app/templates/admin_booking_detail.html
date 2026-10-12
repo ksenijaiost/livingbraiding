@@ -480,6 +480,7 @@
                 {% if item.mark %}<span class="muted"> · {{ item.mark }}</span>{% endif %}
               </div>
               <div class="muted">{{ item.channel_label }} · {{ item.destination }} · {{ item.status_label }}</div>
+              {% if item.memos_label %}<div>{{ item.memos_label }}</div>{% endif %}
               {% if item.text %}
                 <details>
                   <summary>Текст</summary>

@@ -570,6 +570,8 @@ def category_edit_form(
     cat = db.get(ServiceCategory, category_id)
     if cat is None:
         raise HTTPException(status_code=404, detail="Категория не найдена")
+    from app.care_memos import list_care_memos
+
     return templates.TemplateResponse(
         "admin_catalog_category_form.html",
         _ctx(
@@ -584,6 +586,8 @@ def category_edit_form(
             form_include_in_visit=True,
             form_consultation_kind=cat.consultation_kind.value,
             consultation_kind_choices=CONSULTATION_TYPE_CHOICES,
+            care_memos=list_care_memos(db),
+            form_care_memo_id=cat.care_memo_id,
         ),
     )
 
@@ -595,6 +599,7 @@ def category_edit_save(
     short_name: str | None = Form(None),
     is_active: str | None = Form(None),
     consultation_kind: str = Form(ConsultationKind.BRAIDING.value),
+    care_memo_id: str | None = Form(None),
     current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
@@ -617,6 +622,15 @@ def category_edit_save(
     cat.short_name = _parse_optional_short_name(short_name, max_len=120)
     cat.is_active = _is_checked(is_active)
     cat.consultation_kind = _parse_consultation_kind(consultation_kind)
+    from app.care_memos import apply_category_memo
+
+    try:
+        apply_category_memo(db, cat, care_memo_id)
+    except ValueError:
+        return RedirectResponse(
+            url=f"/admin/catalog/categories/{category_id}/edit?err=memo",
+            status_code=303,
+        )
     cat.updated_at = utcnow_naive()
     cat.updated_by_user_id = current_user.id
     write_audit_rows(
@@ -774,6 +788,8 @@ def subcategory_edit_form(
     cat = db.get(ServiceCategory, sub.category_id)
     if cat and (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
         return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
+    from app.care_memos import inherit_label_for_subcategory, list_care_memos
+
     return templates.TemplateResponse(
         "admin_catalog_subcategory_form.html",
         _ctx(
@@ -790,6 +806,10 @@ def subcategory_edit_form(
             form_show_tail=getattr(sub, "show_tail_section", False),
             form_show_material=sub.show_material_description,
             form_show_thermo=sub.show_thermo_visit,
+            care_memos=list_care_memos(db),
+            form_care_memo_mode=sub.care_memo_mode or "inherit",
+            form_care_memo_id=sub.care_memo_id,
+            care_memo_inherit_label=inherit_label_for_subcategory(db, sub),
         ),
     )
 
@@ -804,6 +824,8 @@ def subcategory_edit_save(
     show_tail_section: str | None = Form(None),
     show_material_description: str | None = Form(None),
     show_thermo_visit: str | None = Form(None),
+    care_memo_mode: str | None = Form(None),
+    care_memo_id: str | None = Form(None),
     current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
@@ -835,6 +857,15 @@ def subcategory_edit_save(
     sub.show_tail_section = _is_checked(show_tail_section)
     sub.show_material_description = _is_checked(show_material_description)
     sub.show_thermo_visit = _is_checked(show_thermo_visit)
+    from app.care_memos import apply_care_memo_choice
+
+    try:
+        apply_care_memo_choice(db, sub, care_memo_mode, care_memo_id)
+    except ValueError:
+        return RedirectResponse(
+            url=f"/admin/catalog/subcategories/{subcategory_id}/edit?err=memo",
+            status_code=303,
+        )
     sub.updated_at = utcnow_naive()
     sub.updated_by_user_id = current_user.id
     write_audit_rows(
@@ -1041,6 +1072,8 @@ def service_edit_form(
     cat = db.get(ServiceCategory, sub.category_id) if sub else None
     if cat and (cat.name or "").strip() in _PRODUCT_CATALOG_ONLY_CATEGORIES:
         return RedirectResponse(url="/products-catalog?category=" + quote(cat.name, safe=""), status_code=303)
+    from app.care_memos import inherit_label_for_service, list_care_memos
+
     return templates.TemplateResponse(
         "admin_catalog_service_form.html",
         _ctx(
@@ -1079,6 +1112,10 @@ def service_edit_form(
             form_retail_kudri=svc.retail_material_kudri,
             form_retail_mix=svc.retail_material_mix,
             form_duration=str(svc.estimated_duration_minutes),
+            care_memos=list_care_memos(db),
+            form_care_memo_mode=svc.care_memo_mode or "inherit",
+            form_care_memo_id=svc.care_memo_id,
+            care_memo_inherit_label=inherit_label_for_service(db, svc),
         ),
     )
 
@@ -1102,6 +1139,8 @@ def service_edit_save(
     retail_material_kudri: str | None = Form(None),
     retail_material_mix: str | None = Form(None),
     estimated_duration_minutes: str = Form(...),
+    care_memo_mode: str | None = Form(None),
+    care_memo_id: str | None = Form(None),
     current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
@@ -1172,6 +1211,15 @@ def service_edit_save(
     svc.retail_material_kanekalon = _is_checked(retail_material_kanekalon)
     svc.retail_material_kudri = _is_checked(retail_material_kudri)
     svc.retail_material_mix = _is_checked(retail_material_mix)
+    from app.care_memos import apply_care_memo_choice
+
+    try:
+        apply_care_memo_choice(db, svc, care_memo_mode, care_memo_id)
+    except ValueError:
+        return RedirectResponse(
+            url=f"/admin/catalog/services/{service_id}/edit?err=memo",
+            status_code=303,
+        )
     svc.updated_at = utcnow_naive()
     svc.updated_by_user_id = current_user.id
     write_audit_rows(
