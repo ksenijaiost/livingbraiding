@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import UploadFile
-from sqlalchemy import and_, case, delete, exists, func, or_, select
+from sqlalchemy import String, and_, case, cast, delete, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.audit import FieldChange, diff_fields, write_audit_rows
@@ -1622,12 +1622,8 @@ def suggest_bookings_for_work_order(db: Session, q: str, *, limit: int = 30) -> 
         ]
         if digits:
             conds.append(phone_norm.ilike(f"%{digits}%"))
-            try:
-                bid = int(digits)
-                if bid > 0:
-                    conds.append(Booking.id == bid)
-            except ValueError:
-                pass
+            # Префикс номера: «41» находит и 41, и 416, пока номер ещё набирают.
+            conds.append(cast(Booking.id, String(20)).like(digits + "%"))
         stmt = stmt.join(Client, Client.id == Booking.client_id).where(or_(*conds))
 
     rows = list(db.scalars(stmt).all())
