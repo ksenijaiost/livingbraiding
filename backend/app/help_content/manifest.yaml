@@ -93,6 +93,14 @@ pages:
     roles:
     - admin_super
     file: clients_bulk_import.md
+  clients_notifications:
+    title: Уведомления и рассылки
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: clients_notifications.md
   clients_list:
     title: Клиенты
     roles:

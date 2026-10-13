@@ -120,6 +120,9 @@ def test_step7_remaining_pages_sample() -> None:
         ("me", UserRole.MASTER),
         ("notification_outbox", UserRole.ADMIN_SUPER),
         ("notification_outbox", UserRole.TECHSPEC),
+        ("clients_notifications", UserRole.MASTER),
+        ("clients_notifications", UserRole.ADMIN_SENIOR),
+        ("clients_bulk_import", UserRole.ADMIN_SUPER),
     ]
     for page_id, role in cases:
         doc = get_page_help(page_id, role)
@@ -131,6 +134,7 @@ def test_step7_remaining_pages_sample() -> None:
     assert get_page_help("kits_bulk_price_update", UserRole.ADMIN) is None
     assert get_page_help("master_statistics", UserRole.MASTER) is None
     assert get_page_help("notification_outbox", UserRole.MASTER) is None
+    assert get_page_help("clients_bulk_import", UserRole.ADMIN) is None
     assert get_page_help("master_statistics", UserRole.ADMIN_SUPER).title == "Статистика сотрудника"
     assert get_page_help("me", UserRole.MASTER).title == "Моя карточка"
 
