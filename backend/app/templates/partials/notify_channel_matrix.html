@@ -1,0 +1,164 @@
+{# Строки — типы, столбцы — каналы. notify_editable: галочки и кнопки канала. #}
+<style>
+  .lb-notify-matrix { width: 100%; table-layout: fixed; }
+  .lb-notify-matrix th,
+  .lb-notify-matrix td {
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+    padding: 6px 4px;
+  }
+  .lb-notify-matrix .lb-notify-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+  }
+  .lb-notify-matrix .lb-notify-actions button {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 4px 2px;
+    font-size: 12px;
+  }
+  .lb-notify-matrix .lb-notify-status { font-size: 12px; }
+  @media (max-width: 640px) {
+    .lb-notify-matrix { font-size: 12px; }
+    .lb-notify-matrix th,
+    .lb-notify-matrix td { padding: 4px 2px; font-size: 12px; }
+    .lb-notify-matrix .lb-notify-actions button { font-size: 11px; }
+  }
+</style>
+{% if notify_editable %}
+  {% set ns = namespace(any_box=false) %}
+  {% for ch in notify_matrix.channels %}
+    {% if ch.connected %}
+      {% for cell in ch.cells %}
+        {% if cell.available %}{% set ns.any_box = true %}{% endif %}
+      {% endfor %}
+    {% endif %}
+  {% endfor %}
+  {% if ns.any_box %}
+    <label style="display:inline-flex; align-items:center; gap:8px; margin:0 0 10px;">
+      <input type="checkbox" id="notify_master_all" />
+      <span>Включить все / Выключить все</span>
+    </label>
+  {% endif %}
+{% endif %}
+<table class="lb-notify-matrix">
+  <thead>
+    <tr>
+      <th>Тип</th>
+      {% for ch in notify_matrix.channels %}
+        <th>
+          <div>{{ ch.label }}</div>
+          <div class="muted lb-notify-status">{{ ch.status_label }}</div>
+          {% if notify_editable %}
+            {% if ch.connected %}
+              <input type="hidden" name="notify_channel_{{ ch.id }}" value="1" />
+            {% endif %}
+            <div class="lb-notify-actions">
+              {% if not ch.connected %}
+                <button type="submit" formaction="{{ ch.connect_url }}" formmethod="post">Подключить</button>
+              {% else %}
+                <button type="submit" class="secondary" formaction="{{ ch.disconnect_url }}" formmethod="post"
+                  onclick="return confirm('Отключить {{ ch.label }} от вашей учётной записи?');">Отключить</button>
+                <button type="submit" class="secondary" formaction="{{ ch.test_url }}" formmethod="post">Тест</button>
+              {% endif %}
+            </div>
+            {% if ch.connected %}
+              <label style="display:inline-flex; align-items:center; gap:4px; margin-top:6px; font-weight:400;">
+                <input type="checkbox" class="js-notify-col-all" data-channel="{{ ch.id }}" />
+                <span>Все</span>
+              </label>
+            {% endif %}
+          {% endif %}
+        </th>
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for typ in notify_matrix.types %}
+      {% set type_idx = loop.index0 %}
+      <tr>
+        <td>{{ typ.label }}</td>
+        {% for ch in notify_matrix.channels %}
+          {% set cell = ch.cells[type_idx] %}
+          <td>
+            {% if not ch.connected %}
+              <span class="muted">—</span>
+            {% elif not cell.available %}
+              <input type="checkbox" disabled title="Недоступно для ваших ролей" style="opacity:0.45;" />
+            {% elif notify_editable %}
+              <input
+                type="checkbox"
+                name="{{ cell.form_name }}"
+                value="1"
+                data-notify-box="1"
+                data-channel="{{ ch.id }}"
+                {% if cell.enabled %}checked{% endif %}
+                title="{{ typ.label }}"
+              />
+            {% else %}
+              <input type="checkbox" disabled {% if cell.enabled %}checked{% endif %} title="{{ typ.label }}" />
+            {% endif %}
+          </td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if notify_editable %}
+<script>
+(function () {
+  function boxes(channel) {
+    var sel = 'input[data-notify-box="1"]';
+    if (channel) sel += '[data-channel="' + channel + '"]';
+    return Array.prototype.slice.call(document.querySelectorAll(sel));
+  }
+  function paint(box, inputs) {
+    if (!box) return;
+    if (!inputs.length) {
+      box.disabled = true;
+      box.checked = false;
+      box.indeterminate = false;
+      return;
+    }
+    box.disabled = false;
+    var on = 0;
+    for (var i = 0; i < inputs.length; i++) {
+      if (inputs[i].checked) on += 1;
+    }
+    box.checked = on === inputs.length;
+    box.indeterminate = on > 0 && on < inputs.length;
+  }
+  function refresh() {
+    var cols = document.querySelectorAll(".js-notify-col-all");
+    for (var i = 0; i < cols.length; i++) {
+      paint(cols[i], boxes(cols[i].getAttribute("data-channel")));
+    }
+    paint(document.getElementById("notify_master_all"), boxes(null));
+  }
+  function setAll(inputs, on) {
+    for (var i = 0; i < inputs.length; i++) inputs[i].checked = on;
+  }
+  var cols = document.querySelectorAll(".js-notify-col-all");
+  for (var c = 0; c < cols.length; c++) {
+    cols[c].addEventListener("change", function () {
+      setAll(boxes(this.getAttribute("data-channel")), this.checked);
+      refresh();
+    });
+  }
+  var master = document.getElementById("notify_master_all");
+  if (master) {
+    master.addEventListener("change", function () {
+      setAll(boxes(null), this.checked);
+      refresh();
+    });
+  }
+  var allBoxes = boxes(null);
+  for (var b = 0; b < allBoxes.length; b++) {
+    allBoxes[b].addEventListener("change", refresh);
+  }
+  refresh();
+})();
+</script>
+{% endif %}

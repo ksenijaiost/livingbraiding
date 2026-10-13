@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 from app.setting_keys import (
@@ -318,10 +319,27 @@ def setting_key_audit_label(setting_key: str) -> str:
     return SETTING_KEY_LABELS.get(key, key or "Настройка")
 
 
+_NOTIFY_CHANNEL_AUDIT = {"vk": "VK", "max": "Max", "telegram": "Telegram"}
+_NOTIFY_KEY_AUDIT = {
+    "bookings": "брони",
+    "visit": "визит",
+    "work": "работа",
+    "hourly_work": "почасовая",
+    "product_sale": "продажа",
+    "consultation": "консультация",
+    "work_plan": "план работ",
+}
+
+
 def audit_field_label(field_name: str) -> str:
     raw = str(field_name or "").strip()
     if not raw:
         return "—"
+    channel_pref = re.fullmatch(r"notify_(vk|max|telegram)_([a-z_]+)", raw)
+    if channel_pref and channel_pref.group(2) in _NOTIFY_KEY_AUDIT:
+        channel_label = _NOTIFY_CHANNEL_AUDIT[channel_pref.group(1)]
+        kind = _NOTIFY_KEY_AUDIT[channel_pref.group(2)]
+        return f"Уведомления {channel_label}: {kind}"
     if raw in AUDIT_FIELD_LABELS:
         return AUDIT_FIELD_LABELS[raw]
     for prefix in _HUMAN_PREFIXES:

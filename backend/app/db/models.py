@@ -170,6 +170,27 @@ class User(Base):
         cascade="all, delete-orphan",
         order_by="UserReminderSetting.position",
     )
+    notify_channel_prefs: Mapped[list["UserNotifyChannelPref"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class UserNotifyChannelPref(Base):
+    """Тип уведомления для пары (сотрудник, канал)."""
+
+    __tablename__ = "user_notify_channel_prefs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "channel", "pref_key", name="uq_user_notify_channel_pref"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)  # vk | max | telegram
+    pref_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="notify_channel_prefs")
 
 
 class UserReminderSetting(Base):

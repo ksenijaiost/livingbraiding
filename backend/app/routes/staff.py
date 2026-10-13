@@ -23,7 +23,7 @@ from app.booking_reminders import get_effective_reminder_minutes, minutes_to_hou
 from app.forms_parse import parse_bool, parse_float
 from app.notify_prefs import (
     apply_default_notify_prefs_for_new_user,
-    enabled_notify_types_summary,
+    notify_matrix_for_ui,
 )
 from app.security import hash_password
 from app.user_roles import (
@@ -332,7 +332,8 @@ def _staff_edit_ctx(
         info=info,
         audit_rows=_staff_edit_audit_rows(db, user.id),
         notify_reminders_summary=_staff_reminders_summary(db, user),
-        notify_types_summary=enabled_notify_types_summary(user, get_roles_for_user(db, user.id)),
+        notify_matrix=notify_matrix_for_ui(user, get_roles_for_user(db, user.id)),
+        notify_editable=False,
     )
 
 

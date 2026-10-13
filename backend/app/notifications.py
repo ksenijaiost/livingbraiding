@@ -382,9 +382,6 @@ def enqueue_master_booking_notifications(
             continue
         from app.notify_prefs import user_wants_booking_notifications
 
-        if not user_wants_booking_notifications(user):
-            continue
-
         channel_targets: list[tuple[NotificationChannel, int]] = []
         if NotificationChannel.VK in allowed_channels and user.vk_user_id is not None:
             channel_targets.append((NotificationChannel.VK, int(user.vk_user_id)))
@@ -396,6 +393,8 @@ def enqueue_master_booking_notifications(
             continue
 
         for channel, target_id in channel_targets:
+            if not user_wants_booking_notifications(user, channel):
+                continue
             key = _dedupe_key(
                 event_type=event_type,
                 booking_id=int(booking.id),

@@ -123,11 +123,12 @@ def test_me_helper_checkboxes_disabled(memory_db) -> None:
     try:
         r = client.get("/me", follow_redirects=False)
         assert r.status_code == 200
-        assert 'name="notify_hourly_work"' in r.text
-        assert 'name="notify_work_plan"' in r.text
-        assert 'name="notify_work"' not in r.text
-        assert 'name="notify_product_sale"' not in r.text
+        assert 'name="notify_telegram_hourly_work"' in r.text
+        assert 'name="notify_telegram_work_plan"' in r.text
+        assert 'name="notify_telegram_work"' not in r.text
+        assert 'name="notify_telegram_product_sale"' not in r.text
         assert "Недоступно для ваших ролей" in r.text
+        assert "Для каждого канала можно выбрать свои типы уведомлений" in r.text
     finally:
         _clear()
 
@@ -141,7 +142,8 @@ def test_me_master_almost_all_active(memory_db) -> None:
         r = client.get("/me", follow_redirects=False)
         assert r.status_code == 200
         for key in NOTIFY_TYPE_KEYS:
-            assert f'name="notify_{key}"' in r.text
+            assert f'name="notify_telegram_{key}"' in r.text
+            assert f'name="notify_vk_{key}"' not in r.text
     finally:
         _clear()
 
@@ -154,10 +156,11 @@ def test_post_does_not_enable_disabled_types(memory_db) -> None:
         r = client.post(
             "/me/notify",
             data={
-                "notify_hourly_work": "1",
-                "notify_work_plan": "1",
-                "notify_work": "1",  # недоступно HELPER — игнорируется
-                "notify_product_sale": "1",
+                "notify_channel_telegram": "1",
+                "notify_telegram_hourly_work": "1",
+                "notify_telegram_work_plan": "1",
+                "notify_telegram_work": "1",  # недоступно HELPER — игнорируется
+                "notify_telegram_product_sale": "1",
             },
             follow_redirects=False,
         )
@@ -174,11 +177,10 @@ def test_post_does_not_enable_disabled_types(memory_db) -> None:
 def test_visit_pref_off_skips_staff_assignment(memory_db) -> None:
     from sqlalchemy import func, select
 
-    from app.notify_prefs import sync_notify_enabled_from_prefs
+    from app.notify_prefs import set_notify_pref
 
     u = _seed(memory_db, username="m1", role=UserRole.MASTER, tg=55)
-    u.notify_visit = False
-    sync_notify_enabled_from_prefs(u)
+    set_notify_pref(u, "visit", False)
     memory_db.commit()
     with patch("app.notifications.send_telegram"):
         notify_staff_assigned_on_create(
@@ -194,11 +196,10 @@ def test_bookings_pref_off_skips_booking_notify(memory_db) -> None:
     from app.db.models import Booking, BookingKind, BookingMaster, BookingStatus, Client, VisitMastersScope
     from app.time_utils import utcnow_naive
 
-    u = _seed(memory_db, username="m1", role=UserRole.MASTER, tg=77)
-    u.notify_bookings = False
-    from app.notify_prefs import sync_notify_enabled_from_prefs
+    from app.notify_prefs import set_notify_pref
 
-    sync_notify_enabled_from_prefs(u)
+    u = _seed(memory_db, username="m1", role=UserRole.MASTER, tg=77)
+    set_notify_pref(u, "bookings", False)
     c = Client(name="K", phone="+79991112233", is_confirmed=True)
     memory_db.add(c)
     memory_db.flush()
@@ -269,8 +270,100 @@ def test_admin_staff_edit_shows_types_summary(memory_db) -> None:
     try:
         r = client.get(f"/admin/settings/staff/{master.id}/edit", follow_redirects=False)
         assert r.status_code == 200
-        assert "Типы уведомлений:" in r.text
         assert "Брони" in r.text
         assert "Визит" in r.text
+        assert "VK" in r.text
+        assert "Max" in r.text
+        assert "Telegram" in r.text
+        assert "Включить все" not in r.text
+        assert ">Подключить<" not in r.text
     finally:
         _clear()
+
+
+def test_copy_shared_prefs_to_all_channels(memory_db) -> None:
+    from sqlalchemy import func, select
+
+    from app.db.models import UserNotifyChannelPref
+    from app.notify_prefs import NOTIFY_CHANNEL_IDS, copy_shared_notify_prefs_to_channels, get_channel_pref
+
+    u = User(
+        username="copy1",
+        password_hash="x",
+        display_name="copy",
+        role=UserRole.MASTER,
+        is_active=True,
+        notify_enabled=True,
+        notify_bookings=True,
+        notify_visit=False,
+        notify_work=True,
+        notify_hourly_work=False,
+        notify_product_sale=True,
+        notify_consultation=False,
+        notify_work_plan=True,
+    )
+    memory_db.add(u)
+    memory_db.commit()
+    copy_shared_notify_prefs_to_channels(memory_db.connection())
+    memory_db.commit()
+    memory_db.expire_all()
+    u = memory_db.get(User, u.id)
+    assert u is not None
+    for ch in NOTIFY_CHANNEL_IDS:
+        assert get_channel_pref(u, "bookings", ch) is True
+        assert get_channel_pref(u, "visit", ch) is False
+        assert get_channel_pref(u, "work", ch) is True
+        assert get_channel_pref(u, "hourly_work", ch) is False
+    n = int(memory_db.scalar(select(func.count()).select_from(UserNotifyChannelPref)) or 0)
+    assert n == 7 * 3
+    copy_shared_notify_prefs_to_channels(memory_db.connection())
+    memory_db.commit()
+    n2 = int(memory_db.scalar(select(func.count()).select_from(UserNotifyChannelPref)) or 0)
+    assert n2 == n
+
+
+def test_save_one_channel_does_not_touch_others(memory_db) -> None:
+    from app.notify_prefs import get_channel_pref
+
+    u = _seed(memory_db, username="m_ch", role=UserRole.MASTER, tg=11)
+    u.vk_user_id = 22
+    u.max_user_id = 33
+    memory_db.commit()
+    client = _client_for(memory_db, u)
+    try:
+        r = client.post(
+            "/me/notify",
+            data={
+                "notify_channel_vk": "1",
+                "notify_vk_visit": "1",
+            },
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
+        memory_db.refresh(u)
+        assert get_channel_pref(u, "bookings", "vk") is False
+        assert get_channel_pref(u, "visit", "vk") is True
+        assert get_channel_pref(u, "bookings", "max") is True
+        assert get_channel_pref(u, "bookings", "telegram") is True
+        assert get_channel_pref(u, "visit", "telegram") is True
+    finally:
+        _clear()
+
+
+def test_disabled_channel_skips_outbox_other_channel_sends(memory_db) -> None:
+    from sqlalchemy import select
+
+    from app.db.models import NotificationChannel
+    from app.notify_prefs import set_notify_pref
+
+    u = _seed(memory_db, username="m_out", role=UserRole.MASTER, tg=77)
+    u.vk_user_id = 88
+    set_notify_pref(u, "visit", False, "vk")
+    set_notify_pref(u, "visit", True, "telegram")
+    memory_db.commit()
+    with patch("app.notifications.send_telegram"), patch("app.notifications.send_vk"):
+        notify_staff_assigned_on_create(
+            memory_db, entity_type="visit", entity_id=9, user_ids=[u.id]
+        )
+    rows = list(memory_db.scalars(select(NotificationOutbox)).all())
+    assert [row.channel for row in rows] == [NotificationChannel.TELEGRAM]

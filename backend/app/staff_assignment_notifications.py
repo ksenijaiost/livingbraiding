@@ -144,12 +144,14 @@ def notify_staff_assigned_on_create(
         created: list[NotificationOutbox] = []
         for uid in unique_ids:
             user = db.get(User, uid)
-            if user is None or not user_wants_staff_assignment(user, entity_type):
+            if user is None:
                 continue
             targets = _user_channel_targets(user)
             if not targets:
                 continue
             for channel, target_id in targets:
+                if not user_wants_staff_assignment(user, entity_type, channel):
+                    continue
                 key = _dedupe_key(entity_type, int(entity_id), uid, channel)
                 exists = db.scalar(
                     select(NotificationOutbox.id).where(NotificationOutbox.dedupe_key == key).limit(1)

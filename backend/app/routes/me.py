@@ -38,7 +38,7 @@ from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.master_schedule import build_master_schedule_banner
 from app.notifications import send_max, send_telegram, send_vk
 from app.notify_link_flash import pop_notify_link_flash, set_notify_link_flash
-from app.notify_prefs import apply_notify_prefs_from_form, notify_prefs_for_ui
+from app.notify_prefs import apply_notify_prefs_from_form, notify_matrix_for_ui
 from app.payroll_fund import (
     build_home_payroll_period_ctx,
     employee_fund_balance,
@@ -217,40 +217,8 @@ def _me_page_response(
         ]
 
     settings = get_settings()
-    notify_type_cols = notify_prefs_for_ui(u, roles)
-    notify_channels = [
-        {
-            "id": "vk",
-            "label": "VK",
-            "connected": u.vk_user_id is not None,
-            "status_label": "подключён" if u.vk_user_id is not None else "не подключён",
-            "connect_url": "/me/vk/connect",
-            "disconnect_url": "/me/vk/disconnect",
-            "test_url": "/me/vk/test",
-        },
-        {
-            "id": "max",
-            "label": "Max",
-            "connected": u.max_user_id is not None,
-            "status_label": "подключён" if u.max_user_id is not None else "не подключён",
-            "connect_url": "/me/max/connect",
-            "disconnect_url": "/me/max/disconnect",
-            "test_url": "/me/max/test",
-        },
-        {
-            "id": "telegram",
-            "label": "Telegram",
-            "connected": u.telegram_chat_id is not None,
-            "status_label": "подключён" if u.telegram_chat_id is not None else "не подключён",
-            "connect_url": "/me/telegram/connect",
-            "disconnect_url": "/me/telegram/disconnect",
-            "test_url": "/me/telegram/test",
-        },
-    ]
-    first_connected_notify_idx = next(
-        (i for i, ch in enumerate(notify_channels) if ch["connected"]),
-        None,
-    )
+    notify_matrix = notify_matrix_for_ui(u, roles)
+    has_connected_notify_channel = any(ch["connected"] for ch in notify_matrix["channels"])
 
     # Сначала читаем flash из cookie (сброс cookie повесим на ответ шаблона).
     from starlette.responses import Response as StarletteResponse
@@ -301,10 +269,9 @@ def _me_page_response(
             master_schedule_banner=schedule_banner,
             upcoming=upcoming,
             is_master=is_master,
-            notify_channels=notify_channels,
-            notify_type_cols=notify_type_cols,
-            first_connected_notify_idx=first_connected_notify_idx,
-            has_connected_notify_channel=first_connected_notify_idx is not None,
+            notify_matrix=notify_matrix,
+            notify_editable=True,
+            has_connected_notify_channel=has_connected_notify_channel,
             reminder_items=list_reminder_settings_for_ui(db, u),
             reminders_configured=bool(u.reminders_configured),
             reminder_max=MAX_REMINDERS_PER_USER,
