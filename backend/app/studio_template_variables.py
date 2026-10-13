@@ -44,7 +44,6 @@ BUILTIN_SPECS: tuple[tuple[str, str, str], ...] = (
     ("route_video", "Видео «Как нас найти»", KIND_VIDEO),
     ("review_yandex", "Ссылка на отзывы Яндекс Карты", KIND_URL),
     ("review_2gis", "Ссылка на отзывы 2ГИС", KIND_URL),
-    ("booking_link", "Ссылка для записи", KIND_URL),
     ("studio_vk", "Сообщество VK", KIND_URL),
     ("studio_telegram", "Аккаунт студии в Telegram", KIND_URL),
     ("studio_max", "Аккаунт студии в Max", KIND_URL),
@@ -125,11 +124,11 @@ def variables_palette(db: Session) -> list[dict[str, str]]:
     """Системные, встроенные и свои — для подсказки со «скопировать»."""
     items: list[dict[str, str]] = []
     for key, label in SYSTEM_TEMPLATE_PALETTE:
-        items.append({"group": "system", "key": key, "label": label, "copy": copy_token(key)})
+        items.append({"group": "system", "key": key, "label": label, "token": copy_token(key)})
     custom: list[StudioTemplateVariable] = []
     by_key = {r.key: r for r in list_variables(db)}
     for key, title, _kind in BUILTIN_SPECS:
-        items.append({"group": "studio", "key": key, "label": title, "copy": copy_token(key)})
+        items.append({"group": "studio", "key": key, "label": title, "token": copy_token(key)})
     for row in by_key.values():
         if not row.is_builtin:
             custom.append(row)
@@ -139,7 +138,7 @@ def variables_palette(db: Session) -> list[dict[str, str]]:
                 "group": "custom",
                 "key": row.key,
                 "label": "своя переменная",
-                "copy": copy_token(row.key),
+                "token": copy_token(row.key),
             }
         )
     return items
@@ -161,11 +160,11 @@ def variables_for_ui(db: Session) -> dict[str, object]:
                 "file_size": int(row.file_size or 0) if row else 0,
                 "has_video": bool(row and row.kind == KIND_VIDEO and row.public_token and row.file_path),
                 "video_url": public_video_url(row.public_token) if row and row.public_token and row.file_path else "",
-                "copy": copy_token(key),
+                "token": copy_token(key),
             }
         )
     custom = [
-        {"key": r.key, "value": r.value or "", "copy": copy_token(r.key)}
+        {"key": r.key, "value": r.value or "", "token": copy_token(r.key)}
         for r in rows
         if not r.is_builtin
     ]
