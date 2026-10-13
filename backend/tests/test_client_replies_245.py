@@ -236,8 +236,9 @@ def test_render_reply_templates_and_after_name(memory_db) -> None:
     row.file_path = "clip.mp4"
     memory_db.commit()
     directions = render_bot_reply(memory_db, "directions_5")
-    assert "дом 5" in directions
-    assert "/media/v/" + ("a" * 32) in directions
+    assert directions == "Как добраться: дом 5"
+    assert "/media/" not in directions
+    assert "route_video" not in directions
     tg = render_bot_reply(memory_db, "contact_telegram")
     assert tg == "Напишите нам: https://t.me/studio"
     after = render_client_notify_template(

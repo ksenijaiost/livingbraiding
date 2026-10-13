@@ -1,4 +1,4 @@
-"""3.21: переменные студии в шаблонах уведомлений и публичное видео."""
+"""3.21: переменные студии в шаблонах уведомлений."""
 
 from __future__ import annotations
 
@@ -128,9 +128,7 @@ def test_public_video_by_token(tmp_path, monkeypatch) -> None:
         try:
             client = TestClient(app)
             ok = client.get(f"/media/v/{token}")
-            assert ok.status_code == 200
-            assert ok.content == b"fake-mp4"
-            assert ok.headers["content-type"].startswith("video/mp4")
+            assert ok.status_code == 404
             missing = client.get("/media/v/" + ("b" * 32))
             assert missing.status_code == 404
             short = client.get("/media/v/nope")

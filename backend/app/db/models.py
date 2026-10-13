@@ -407,8 +407,11 @@ class StudioTemplateVariable(Base):
     file_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
     file_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Неугадываемый токен публичной ссылки /media/v/<token> (только видео).
+    # Старый токен публичной ссылки. Клиентам больше не отдаётся.
     public_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    vk_video_attachment: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    max_video_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    telegram_video_file_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 

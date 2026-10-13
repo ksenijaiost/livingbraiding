@@ -72,13 +72,13 @@
         <div id="work_booking_search_row" class="row" style="align-items: flex-end;">
           <div style="flex:1;">
             <label>Поиск брони по номеру, клиенту или дате</label>
-            <input type="search" id="booking_search_q" name="booking_query" autocomplete="off" placeholder="№ брони, имя/телефон клиента или дата (дд.мм.гггг) — ввод или «Найти»" value="{{ fp.booking_query or '' }}" />
+            <input type="search" id="booking_search_q" name="booking_query" autocomplete="off" placeholder="№ брони, имя/телефон клиента или дата (дд.мм.гггг)" value="{{ fp.booking_query or '' }}" role="combobox" aria-autocomplete="list" aria-controls="booking_suggest_list" aria-expanded="false" />
           </div>
           <div>
             <button type="button" id="work_booking_find_btn" class="secondary">Найти</button>
           </div>
         </div>
-        <p class="muted" style="font-size:12px;margin:6px 0 0;">Если введён точный номер, бронь привяжется сама. Иначе нажмите на найденную строку.</p>
+        <p class="muted" style="font-size:12px;margin:6px 0 0;">Пока печатаете, показывается список. Бронь выбирается щелчком, стрелками и Enter или кнопкой «Найти».</p>
         <ul id="booking_suggest_list" style="list-style:none;padding:0;margin:10px 0 0;max-height:260px;overflow:auto;"></ul>
         <div id="work_booking_selected_panel" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid #6ee7b7;background:#ecfdf5;font-size:14px;">
           <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;justify-content:space-between;">
@@ -461,6 +461,7 @@
   <script type="application/json" id="planned_work_masters">{{ (planned_work_masters_json or '[]') | safe }}</script>
   <script type="application/json" id="work_price_meta">{{ work_price_meta_json | safe }}</script>
   <script src="/static/correction_custom_amount.js"></script>
+  <script src="/static/booking_search.js?v=20261013"></script>
   <script>
     function kitTableCurrentUserId() {
       var el = document.getElementById('kit_table_state');
@@ -1107,6 +1108,8 @@
       if (bid) bid.value = '';
       var ul = document.getElementById('booking_suggest_list');
       if (ul) ul.innerHTML = '';
+      bookingSuggestItems = [];
+      bookingHighlight = -1;
       var q = document.getElementById('booking_search_q');
       if (q) q.value = '';
       var lab = document.getElementById('work_booking_selected_label');
@@ -1176,6 +1179,8 @@
       if (det) det.textContent = item.details_text || ((item.kind_label || '') + (item.status_label ? (' · ' + item.status_label) : ''));
       var ul = document.getElementById('booking_suggest_list');
       if (ul) ul.innerHTML = '';
+      bookingSuggestItems = [];
+      bookingHighlight = -1;
       var prefill = item.prefill || {};
       if (item.client_id) selectClient(item.client_id, item.client_name || '', false);
       applyBookingPrefill(prefill);
@@ -1190,34 +1195,18 @@
       syncOrderBookingModeUi();
     }
     var bookingSuggestSeq = 0;
-    function exactBookingFromQuery(items, q) {
-      var trimmed = String(q || '').trim().replace(/^#/, '');
-      if (!/^\d+$/.test(trimmed)) return null;
-      for (var i = 0; i < items.length; i++) {
-        if (String(items[i].id) === trimmed) return items[i];
-      }
-      return null;
-    }
-    async function bookingSuggest() {
-      var qEl = document.getElementById('booking_search_q');
-      if (qEl && qEl.disabled) return;
-      var q = qEl ? qEl.value.trim() : '';
-      var seq = ++bookingSuggestSeq;
-      var res = await fetch('/sales/work/bookings/suggest?q=' + encodeURIComponent(q));
-      if (seq !== bookingSuggestSeq) return;
-      qEl = document.getElementById('booking_search_q');
-      if (qEl && qEl.disabled) return;
-      var data = await res.json();
+    var bookingSuggestAbort = null;
+    var bookingSuggestItems = [];
+    var bookingHighlight = -1;
+    function renderBookingList(items) {
+      bookingSuggestItems = items || [];
+      bookingHighlight = -1;
       var ul = document.getElementById('booking_suggest_list');
+      var qEl = document.getElementById('booking_search_q');
+      if (qEl) qEl.setAttribute('aria-expanded', bookingSuggestItems.length ? 'true' : 'false');
       if (!ul) return;
-      var items = data.bookings || [];
-      var exact = exactBookingFromQuery(items, q);
-      if (exact) {
-        selectBooking(exact);
-        return;
-      }
       ul.innerHTML = '';
-      if (!items.length) {
+      if (!bookingSuggestItems.length) {
         var empty = document.createElement('li');
         empty.className = 'muted';
         empty.style.margin = '0 0 8px';
@@ -1225,13 +1214,14 @@
         ul.appendChild(empty);
         return;
       }
-      for (var i = 0; i < items.length; i++) {
-        (function (b) {
+      for (var i = 0; i < bookingSuggestItems.length; i++) {
+        (function (b, idx) {
           var li = document.createElement('li');
           li.style.margin = '0 0 8px';
           var btn = document.createElement('button');
           btn.type = 'button';
           btn.className = 'secondary';
+          btn.setAttribute('data-booking-idx', String(idx));
           btn.style.width = '100%';
           btn.style.textAlign = 'left';
           btn.style.lineHeight = '1.35';
@@ -1242,8 +1232,60 @@
           btn.addEventListener('click', function () { selectBooking(b); });
           li.appendChild(btn);
           ul.appendChild(li);
-        })(items[i]);
+        })(bookingSuggestItems[i], i);
       }
+    }
+    function paintBookingHighlight() {
+      var ul = document.getElementById('booking_suggest_list');
+      if (!ul) return;
+      var buttons = ul.querySelectorAll('button[data-booking-idx]');
+      for (var i = 0; i < buttons.length; i++) {
+        var on = i === bookingHighlight;
+        buttons[i].style.outline = on ? '2px solid #047857' : '';
+        buttons[i].setAttribute('aria-selected', on ? 'true' : 'false');
+      }
+      if (bookingHighlight >= 0 && buttons[bookingHighlight]) {
+        buttons[bookingHighlight].scrollIntoView({ block: 'nearest' });
+      }
+    }
+    async function bookingSuggest(commit) {
+      var qEl = document.getElementById('booking_search_q');
+      if (qEl && qEl.disabled) return;
+      var q = qEl ? qEl.value.trim() : '';
+      var seq = ++bookingSuggestSeq;
+      if (bookingSuggestAbort) bookingSuggestAbort.abort();
+      var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      bookingSuggestAbort = ctrl;
+      var res;
+      try {
+        res = await fetch(
+          '/sales/work/bookings/suggest?q=' + encodeURIComponent(q),
+          ctrl ? { signal: ctrl.signal } : undefined
+        );
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+        return;
+      }
+      var api = window.lbBookingSearch;
+      qEl = document.getElementById('booking_search_q');
+      var currentQ = qEl ? qEl.value : '';
+      if (!api || !api.suggestStillCurrent(q, currentQ, seq, bookingSuggestSeq)) return;
+      if (qEl && qEl.disabled) return;
+      var data = await res.json();
+      qEl = document.getElementById('booking_search_q');
+      currentQ = qEl ? qEl.value : '';
+      if (!api.suggestStillCurrent(q, currentQ, seq, bookingSuggestSeq)) return;
+      if (qEl && qEl.disabled) return;
+      var applied = api.applySuggestResponse(
+        { seq: seq, query: currentQ, bookingId: '', items: bookingSuggestItems, highlight: bookingHighlight },
+        { seq: seq, query: q, items: data.bookings || [], commit: !!commit }
+      );
+      if (applied.ignored) return;
+      if (applied.selected && applied.item) {
+        selectBooking(applied.item);
+        return;
+      }
+      renderBookingList(applied.items || []);
     }
     var bookingSuggestTimer = null;
     function syncWorkClientUi() {
@@ -1327,16 +1369,37 @@
         syncOrderBookingModeUi();
       });
     });
+    function commitBookingSearch() {
+      if (bookingSuggestTimer) clearTimeout(bookingSuggestTimer);
+      bookingSuggest(true);
+    }
     var bookingFind = document.getElementById('work_booking_find_btn');
-    if (bookingFind) bookingFind.addEventListener('click', bookingSuggest);
+    if (bookingFind) bookingFind.addEventListener('click', commitBookingSearch);
     var bookingQ = document.getElementById('booking_search_q');
     if (bookingQ) {
       bookingQ.addEventListener('input', function () {
+        bookingSuggestSeq++;
+        bookingHighlight = -1;
+        if (bookingSuggestAbort) bookingSuggestAbort.abort();
         if (bookingSuggestTimer) clearTimeout(bookingSuggestTimer);
-        bookingSuggestTimer = setTimeout(bookingSuggest, 350);
+        bookingSuggestTimer = setTimeout(function () { bookingSuggest(false); }, 300);
       });
       bookingQ.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); bookingSuggest(); }
+        var api = window.lbBookingSearch;
+        if (!api) return;
+        var action = api.bookingQueryKeyAction(e.key, bookingHighlight, bookingSuggestItems.length);
+        if (action.type === 'none') return;
+        e.preventDefault();
+        if (action.type === 'move') {
+          bookingHighlight = api.nextHighlight(bookingHighlight, action.delta, bookingSuggestItems.length);
+          paintBookingHighlight();
+          return;
+        }
+        if (action.type === 'select-highlight') {
+          selectBooking(bookingSuggestItems[bookingHighlight]);
+          return;
+        }
+        commitBookingSearch();
       });
     }
     var bookingChg = document.getElementById('work_booking_change_btn');

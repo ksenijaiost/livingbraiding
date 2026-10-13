@@ -4,10 +4,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, get_current_user
-from app.db.session import get_db
 from app.media_store import media_root_dir
 
 
@@ -15,15 +13,10 @@ router = APIRouter()
 
 
 @router.get("/media/v/{token}")
-def media_video_public(token: str, db: Session = Depends(get_db)):
-    """Публичное видео студии по неугадываемому токену. Без авторизации."""
-    from app.studio_template_variables import resolve_public_video
-
-    found = resolve_public_video(db, token)
-    if found is None:
-        raise HTTPException(status_code=404, detail="Not found")
-    path, media_type = found
-    return FileResponse(str(path), media_type=media_type)
+def media_video_public(token: str):
+    """Публичной ссылки на видео больше нет: клиентам файл уходит в чат."""
+    _ = token
+    raise HTTPException(status_code=404, detail="Not found")
 
 
 @router.get("/media/{path:path}")

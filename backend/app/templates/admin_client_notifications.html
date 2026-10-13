@@ -17,6 +17,13 @@
       <p style="color:#15803d;">{{ info }}</p>
     {% endif %}
 
+    {% if booking_link_warning %}
+      <p style="background:#fffbeb;border:1px solid #fcd34d;color:#92400e;padding:10px 12px;border-radius:8px;">
+        В шаблонах ещё есть <code>{{ "{{booking_link}}" }}</code>.
+        Этой переменной больше нет — замените её вручную. Уже сохранённый текст не меняется и останется как есть.
+      </p>
+    {% endif %}
+
     <h3 class="section-title">Уведомления</h3>
 
     <form method="post" action="/clients/notifications/save" style="margin-bottom:20px;"
@@ -225,10 +232,10 @@
       <ul style="list-style:none; margin:0; padding:0; font-size:13px;">
         {% for item in template_palette %}
           <li style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 6px;">
-            <code style="user-select:all;">{{ item.copy }}</code>
-            <span class="muted">{{ item.label }}</span>
+            <code style="user-select:all;">{{ item["token"] }}</code>
+            <span class="muted">{{ item["label"] }}</span>
             <button type="button" class="secondary" style="padding:2px 8px; font-size:12px;"
-                    data-copy="{{ item.copy }}"
+                    data-copy="{{ item["token"] }}"
                     onclick="navigator.clipboard.writeText(this.getAttribute('data-copy'));">скопировать</button>
           </li>
         {% endfor %}
@@ -259,7 +266,7 @@
           onsubmit="this.querySelector('button[type=submit]').disabled=true;">
       {% for v in studio_builtins if v.kind != 'video' %}
         <div style="margin-bottom:12px;">
-          <label class="label-sub">{{ v.title }} <code>{{ v.copy }}</code></label>
+          <label class="label-sub">{{ v["title"] }} <code>{{ v["token"] }}</code></label>
           {% if v.kind == 'text' %}
             <textarea name="builtin_{{ v.key }}" rows="3" style="width:100%;">{{ v.value }}</textarea>
           {% else %}
@@ -272,9 +279,9 @@
 
     {% for v in studio_builtins if v.kind == 'video' %}
       <div class="card" style="background:#fafafa; margin:0 0 16px;">
-        <label class="label-sub">{{ v.title }} <code>{{ v.copy }}</code></label>
+        <label class="label-sub">{{ v["title"] }} <code>{{ v["token"] }}</code></label>
         <p class="muted" style="font-size:12px; margin:4px 0 8px;">
-          mp4, mov или webm, до {{ video_max_mb }} МБ. В тексте шаблона подставится ссылка на файл.
+          Видео отправляется файлом в чат, ссылка на сайт не показывается. Формат MP4 (H.264), до 50 МБ.
         </p>
         {% if v.has_video %}
           <video controls preload="metadata" src="{{ v.video_url }}" style="max-width:320px; width:100%; display:block; margin-bottom:8px;"></video>
@@ -309,7 +316,7 @@
           <tbody>
             {% for v in studio_custom %}
               <tr>
-                <td class="lb-nowrap"><code>{{ v.copy }}</code></td>
+                <td class="lb-nowrap"><code>{{ v["token"] }}</code></td>
                 <td>
                   <form method="post" action="/clients/notifications/variables/custom/save" id="var-save-{{ v.key }}">
                     <input type="hidden" name="key" value="{{ v.key }}" />

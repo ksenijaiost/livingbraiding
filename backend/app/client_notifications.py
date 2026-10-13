@@ -47,7 +47,7 @@ DEFAULT_AFTER_TEMPLATE = (
     "Спасибо, что были у нас, {{name}}! 💛\n"
     "Будем рады отзыву: {{review_yandex}}\n"
     "или в 2ГИС: {{review_2gis}}\n"
-    "Записаться снова: {{booking_link}}"
+    "Чтобы записаться снова, просто напишите нам здесь"
 )
 
 _VAR_RE = re.compile(r"\{\{(\w+)\}\}")
@@ -176,7 +176,9 @@ def render_client_notify_template(
     system_keys при этом ограничивает системные ключи (для «после» — только name).
     Переменные студии подставляются, если передан db.
     """
-    text = template if template is not None else ""
+    from app.route_video_send import strip_route_video_placeholder
+
+    text = strip_route_video_placeholder(template if template is not None else "")
     values: dict[str, str] = {}
     use_system = substitute_system or bool(system_keys)
     if use_system:
@@ -252,6 +254,20 @@ def list_rules(db: Session, kind: ClientNotificationRuleKind | None = None) -> l
     if kind is not None:
         stmt = stmt.where(ClientNotificationRule.kind == kind)
     return list(db.scalars(stmt).all())
+
+
+def booking_link_still_used(db: Session) -> bool:
+    """Старые шаблоны с {{booking_link}} не переписываем — только предупреждаем."""
+    needle = "{{booking_link}}"
+    for text in db.scalars(select(ClientNotificationRule.template)).all():
+        if needle in (text or ""):
+            return True
+    from app.db.models import ClientBotReplyTemplate
+
+    for text in db.scalars(select(ClientBotReplyTemplate.body)).all():
+        if needle in (text or ""):
+            return True
+    return False
 
 
 def ensure_default_rules(db: Session) -> bool:
