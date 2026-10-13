@@ -817,9 +817,12 @@ def process_outbox(
             continue
         stats["processed"] += 1
         row.attempt_count = int(row.attempt_count or 0) + 1
-        intended = str(_parse_payload(row).get("text") or "").strip()
+        payload = _parse_payload(row)
+        intended = str(payload.get("text") or "").strip()
+        attach_video = bool(payload.get("attach_route_video"))
         try:
-            _send_outbox_row(row)
+            if intended or not attach_video:
+                _send_outbox_row(row)
         except Exception as e:
             row.status = NotificationOutboxStatus.FAILED
             row.error = str(e)[:2000]
@@ -836,6 +839,12 @@ def process_outbox(
             deliver_care_memos(db, row)
         except Exception:
             logger.exception("notification_outbox #%s: care memo attach failed", row.id)
+        try:
+            from app.route_video_send import deliver_route_video
+
+            deliver_route_video(db, row)
+        except Exception:
+            logger.exception("notification_outbox #%s: route video attach failed", row.id)
         if intended:
             row.body = intended
         row.status = NotificationOutboxStatus.SENT

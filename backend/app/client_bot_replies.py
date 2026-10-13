@@ -72,8 +72,10 @@ def bot_reply_body(db: Session, key: str) -> str:
 
 
 def render_bot_reply(db: Session, key: str) -> str:
-    text = bot_reply_body(db, key)
+    from app.route_video_send import strip_route_video_placeholder
     from app.studio_template_variables import studio_template_values
+
+    text = strip_route_video_placeholder(bot_reply_body(db, key))
 
     studio = studio_template_values(db)
 

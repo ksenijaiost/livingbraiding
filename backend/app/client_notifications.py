@@ -176,7 +176,9 @@ def render_client_notify_template(
     system_keys при этом ограничивает системные ключи (для «после» — только name).
     Переменные студии подставляются, если передан db.
     """
-    text = template if template is not None else ""
+    from app.route_video_send import strip_route_video_placeholder
+
+    text = strip_route_video_placeholder(template if template is not None else "")
     values: dict[str, str] = {}
     use_system = substitute_system or bool(system_keys)
     if use_system:

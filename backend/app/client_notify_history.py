@@ -121,6 +121,8 @@ def _out_type(row: NotificationOutbox, hours_by_rule: dict[int, float]) -> tuple
         return "После визита", mark
     if event == "client_care_memo_error":
         return ((row.body or "").strip() or "Памятка — ошибка"), mark
+    if event == "client_route_video_error":
+        return ((row.body or "").strip() or "Видео „Как нас найти“ — ошибка"), mark
     if event == "client_bot_reply":
         key = str(payload.get("reply_key") or "")
         return _BOT.get(key, "Ответ бота"), mark

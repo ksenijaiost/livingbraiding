@@ -281,7 +281,7 @@
       <div class="card" style="background:#fafafa; margin:0 0 16px;">
         <label class="label-sub">{{ v["title"] }} <code>{{ v["token"] }}</code></label>
         <p class="muted" style="font-size:12px; margin:4px 0 8px;">
-          mp4, mov или webm, до {{ video_max_mb }} МБ. В тексте шаблона подставится ссылка на файл.
+          Видео отправляется файлом в чат, ссылка на сайт не показывается. Формат MP4 (H.264), до 50 МБ.
         </p>
         {% if v.has_video %}
           <video controls preload="metadata" src="{{ v.video_url }}" style="max-width:320px; width:100%; display:block; margin-bottom:8px;"></video>

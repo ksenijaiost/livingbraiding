@@ -742,6 +742,18 @@ def process_inbound_message(
                         db.rollback()
                     except Exception:
                         pass
+                if status == NotificationOutboxStatus.SENT:
+                    try:
+                        from app.route_video_send import deliver_route_video_for_bot_reply
+
+                        deliver_route_video_for_bot_reply(db, meta)
+                        db.commit()
+                    except Exception:
+                        logger.exception("messenger_inbound: route video failed")
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
     except Exception:
         logger.exception("messenger_inbound: handler error channel=%s", channel)
         try:

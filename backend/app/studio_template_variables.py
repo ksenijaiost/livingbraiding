@@ -7,14 +7,13 @@
 from __future__ import annotations
 
 import re
-import secrets
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import StudioTemplateVariable
-from app.media_store import VIDEO_MIME, delete_media_file, media_root_dir, save_upload_video
+from app.media_store import delete_media_file, save_upload_video
 from app.settings import get_settings
 from app.time_utils import utcnow_naive
 
@@ -55,7 +54,6 @@ BUILTIN_KINDS = {spec[0]: spec[2] for spec in BUILTIN_SPECS}
 ROUTE_VIDEO_KEY = "route_video"
 
 _KEY_RE = re.compile(r"^[A-Za-z0-9_]{2,32}$")
-_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 _MAX_TEXT = 8000
 
 
@@ -95,29 +93,25 @@ def list_variables(db: Session) -> list[StudioTemplateVariable]:
 
 
 def studio_template_values(db: Session) -> dict[str, str]:
-    """Ключ → подстановка. Пустое значение — пустая строка. Видео — публичная ссылка или ''."""
+    """Ключ → подстановка. Пустое значение — пустая строка. Видео в текст не подставляется."""
     rows = list(db.scalars(select(StudioTemplateVariable)).all())
     out: dict[str, str] = {}
     for row in rows:
         key = (row.key or "").strip()
-        if not key:
+        if not key or row.kind == KIND_VIDEO:
             continue
-        if row.kind == KIND_VIDEO:
-            out[key] = public_video_url(row.public_token) if row.public_token and row.file_path else ""
-        else:
-            out[key] = row.value or ""
+        out[key] = row.value or ""
     return out
 
 
-def public_video_url(token: str | None) -> str:
-    raw = (token or "").strip()
-    if not raw:
+def _staff_video_url(row: StudioTemplateVariable | None) -> str:
+    """Превью на странице уведомлений для вошедшего сотрудника."""
+    if row is None or row.kind != KIND_VIDEO or not row.file_path:
         return ""
-    path = f"/media/v/{raw}"
-    base = (get_settings().public_base_url or "").rstrip("/")
-    if base:
-        return f"{base}{path}"
-    return path
+    name = Path(str(row.file_path)).name
+    if not name or name != row.file_path or ".." in name:
+        return ""
+    return f"/media/{name}"
 
 
 def variables_palette(db: Session) -> list[dict[str, str]]:
@@ -158,8 +152,8 @@ def variables_for_ui(db: Session) -> dict[str, object]:
                 "value": (row.value or "") if row else "",
                 "file_name": (row.file_name or "") if row else "",
                 "file_size": int(row.file_size or 0) if row else 0,
-                "has_video": bool(row and row.kind == KIND_VIDEO and row.public_token and row.file_path),
-                "video_url": public_video_url(row.public_token) if row and row.public_token and row.file_path else "",
+                "has_video": bool(_staff_video_url(row)),
+                "video_url": _staff_video_url(row),
                 "token": copy_token(key),
             }
         )
@@ -269,17 +263,11 @@ def _route_video_row(db: Session) -> StudioTemplateVariable:
     return row
 
 
-def _new_token(db: Session) -> str:
-    for _ in range(5):
-        token = secrets.token_urlsafe(32)[:64]
-        if not _TOKEN_RE.fullmatch(token):
-            continue
-        taken = db.scalar(
-            select(StudioTemplateVariable.id).where(StudioTemplateVariable.public_token == token).limit(1)
-        )
-        if taken is None:
-            return token
-    raise ValueError("Не удалось выдать ссылку на видео. Повторите загрузку.")
+def _clear_route_video_channel_cache(row: StudioTemplateVariable) -> None:
+    row.vk_video_attachment = None
+    row.max_video_token = None
+    row.telegram_video_file_id = None
+    row.public_token = None
 
 
 async def save_route_video(db: Session, upload: object, *, user_id: int | None) -> None:
@@ -288,8 +276,7 @@ async def save_route_video(db: Session, upload: object, *, user_id: int | None) 
     rel_name, original, size = await save_upload_video(upload, max_bytes=max_bytes)
     row = _route_video_row(db)
     old = row.file_path
-    if not row.public_token:
-        row.public_token = _new_token(db)
+    _clear_route_video_channel_cache(row)
     row.file_path = rel_name
     row.file_name = original
     row.file_size = int(size)
@@ -308,35 +295,9 @@ def clear_route_video(db: Session, *, user_id: int | None) -> None:
     row.file_path = None
     row.file_name = None
     row.file_size = None
-    row.public_token = None
     row.value = None
+    _clear_route_video_channel_cache(row)
     row.updated_at = utcnow_naive()
     row.updated_by_user_id = user_id
     db.flush()
     delete_media_file(old)
-
-
-def resolve_public_video(db: Session, token: str) -> tuple[Path, str] | None:
-    raw = (token or "").strip()
-    if not _TOKEN_RE.fullmatch(raw):
-        return None
-    row = db.scalar(
-        select(StudioTemplateVariable).where(StudioTemplateVariable.public_token == raw).limit(1)
-    )
-    if row is None or row.kind != KIND_VIDEO or not row.file_path:
-        return None
-    name = Path(row.file_path).name
-    if not name or name != row.file_path or ".." in name:
-        return None
-    root = media_root_dir().resolve()
-    path = (root / name).resolve()
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return None
-    if not path.is_file():
-        return None
-    mime = VIDEO_MIME.get(path.suffix.lower())
-    if not mime:
-        return None
-    return path, mime

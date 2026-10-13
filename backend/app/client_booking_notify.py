@@ -28,6 +28,7 @@ from app.db.models import (
     NotificationOutboxStatus,
 )
 from app.display_time import get_display_timezone
+from app.route_video_send import template_wants_route_video
 from app.time_utils import utcnow_naive
 
 logger = logging.getLogger(__name__)
@@ -131,7 +132,8 @@ def enqueue_client_rule_notifications(
             system_keys=frozenset({"name"}),
         )
         event_type = EVENT_CLIENT_AFTER_BOOKING
-    if not (text or "").strip():
+    wants_video = template_wants_route_video(rule.template)
+    if not (text or "").strip() and not wants_video:
         return []
 
     version = _planned_version(booking)
@@ -157,6 +159,8 @@ def enqueue_client_rule_notifications(
             "booking_id": int(booking.id),
             "rule_id": int(rule.id),
         }
+        if wants_video:
+            payload["attach_route_video"] = True
         row = NotificationOutbox(
             user_id=None,
             client_id=int(client.id),

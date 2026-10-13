@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.client_booking_notify import EVENT_CLIENT_AFTER_BOOKING, _client_channel_targets
+from app.route_video_send import template_wants_route_video
 from app.client_notifications import (
     KIND_AFTER,
     get_services_marker,
@@ -139,6 +140,8 @@ def _insert_after_outbox(
         "visit_id": int(visit_id) if visit_id else None,
         "rule_id": int(rule.id),
     }
+    if template_wants_route_video(rule.template):
+        payload["attach_route_video"] = True
     if care_memo_ids:
         payload["care_memo_ids"] = [int(mid) for mid in care_memo_ids]
     row = NotificationOutbox(
@@ -206,7 +209,7 @@ def schedule_after_visit_notifications(db: Session, visit: Visit) -> list[Notifi
     created: list[NotificationOutbox] = []
     for rule in rules:
         text = _render_after(db, rule, client, booking)
-        if not (text or "").strip():
+        if not (text or "").strip() and not template_wants_route_video(rule.template):
             continue
         scheduled_at = after_visit_scheduled_at(
             saved_at=saved_at,
@@ -323,7 +326,7 @@ def enqueue_due_after_booking_deadlines(
             if now < deadline:
                 continue
             text = _render_after(db, rule, client, loaded)
-            if not (text or "").strip():
+            if not (text or "").strip() and not template_wants_route_video(rule.template):
                 continue
             from app.care_memos import memo_ids_if_enabled
 

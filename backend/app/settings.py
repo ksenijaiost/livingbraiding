@@ -57,8 +57,6 @@ class Settings:
         except ValueError:
             interval = 45
         self.notification_worker_interval_seconds = max(5, min(interval, 3600))
-        # Публичный адрес сайта для ссылок в сообщениях клиентам (видео «как нас найти»).
-        self.public_base_url = (os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
         try:
             video_mb = int(os.getenv("STUDIO_ROUTE_VIDEO_MAX_MB") or "50")
         except ValueError:
