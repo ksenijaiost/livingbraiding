@@ -117,9 +117,10 @@ def test_staff_edit_page_opens_notify_info_only(memory_db) -> None:
         r = client.get(f"/admin/settings/staff/{master.id}/edit", follow_redirects=False)
         assert r.status_code == 200
         assert "Уведомления" in r.text
-        assert "Типы уведомлений:" in r.text
-        assert "Telegram:</strong>" in r.text or "<strong>Telegram:</strong>" in r.text
-        assert "Max:</strong>" in r.text or "<strong>Max:</strong>" in r.text
+        assert "Брони" in r.text
+        assert ">Telegram<" in r.text or "Telegram" in r.text
+        assert "Max" in r.text
+        assert "Включить все" not in r.text
         assert "подключён" in r.text
         assert "не подключён" in r.text
         assert "по умолчанию 24ч+2ч" in r.text

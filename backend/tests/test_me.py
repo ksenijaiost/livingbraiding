@@ -147,7 +147,7 @@ def test_me_cannot_change_other_user_notify(memory_db) -> None:
         # Без галочек notify_* доступные типы пользователя a выключаются.
         r = client.post(
             "/me/notify",
-            data={"user_id": str(b.id)},
+            data={"user_id": str(b.id), "notify_channel_telegram": "1"},
             follow_redirects=False,
         )
         assert r.status_code == 303

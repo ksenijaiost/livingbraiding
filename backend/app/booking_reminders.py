@@ -223,8 +223,6 @@ def enqueue_booking_reminder(
     from app.notify_prefs import user_wants_booking_notifications
 
     _ = now  # reserved for callers; lateness checked upstream
-    if not user_wants_booking_notifications(user):
-        return []
     targets = _user_channel_targets(user)
     if not targets:
         return []
@@ -234,6 +232,8 @@ def enqueue_booking_reminder(
     time_version = _booking_time_version(booking)
     created: list[NotificationOutbox] = []
     for channel, target_id in targets:
+        if not user_wants_booking_notifications(user, channel):
+            continue
         key = _reminder_dedupe_key(
             booking_id=int(booking.id),
             user_id=int(user.id),
