@@ -38,7 +38,7 @@ def _print_body(status: int, raw: bytes) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Подписки вебхука Max (с бандлом CA из MAX_CA_BUNDLE).",
+        description="Подписки вебхука Max (бандл CA: MAX_CA_PEM или файл MAX_CA_BUNDLE).",
     )
     parser.add_argument(
         "--set",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from pathlib import Path
@@ -13,12 +14,9 @@ from app.max_http import clear_max_ca_bundle_cache, max_ca_bundle_path, max_requ
 from app.settings import get_settings
 
 
-def _reset(monkeypatch, value: str | None) -> None:
-    if value is None:
-        monkeypatch.delenv("MAX_CA_BUNDLE", raising=False)
-        monkeypatch.setenv("MAX_CA_BUNDLE", "")
-    else:
-        monkeypatch.setenv("MAX_CA_BUNDLE", value)
+def _reset(monkeypatch, bundle: str | None = None, pem: str | None = None) -> None:
+    monkeypatch.setenv("MAX_CA_PEM", pem or "")
+    monkeypatch.setenv("MAX_CA_BUNDLE", bundle or "")
     get_settings.cache_clear()
     clear_max_ca_bundle_cache()
 
@@ -44,6 +42,41 @@ def test_missing_bundle_uses_certifi_and_warns(monkeypatch, caplog) -> None:
     assert path == certifi.where()
     assert "MAX_CA_BUNDLE" in caplog.text
     assert "certifi" in caplog.text
+
+
+def _marker_pem(marker: str) -> str:
+    return f"-----BEGIN CERTIFICATE-----\n{marker}\n-----END CERTIFICATE-----\n"
+
+
+def test_pem_multiline(monkeypatch) -> None:
+    _reset(monkeypatch, pem=_marker_pem("LB-MULTI"))
+    text = Path(max_ca_bundle_path()).read_text(encoding="utf-8")
+    assert "LB-MULTI" in text
+    assert Path(certifi.where()).read_text(encoding="utf-8").strip() in text
+
+
+def test_pem_literal_backslash_n(monkeypatch) -> None:
+    raw = "-----BEGIN CERTIFICATE-----\\nLB-SLASH-N\\n-----END CERTIFICATE-----\\n"
+    _reset(monkeypatch, pem=raw)
+    text = Path(max_ca_bundle_path()).read_text(encoding="utf-8")
+    assert "-----BEGIN CERTIFICATE-----\nLB-SLASH-N\n-----END CERTIFICATE-----" in text
+
+
+def test_pem_base64(monkeypatch) -> None:
+    encoded = base64.b64encode(_marker_pem("LB-B64").encode("utf-8")).decode("ascii")
+    assert not encoded.startswith("-----BEGIN")
+    _reset(monkeypatch, pem=encoded)
+    text = Path(max_ca_bundle_path()).read_text(encoding="utf-8")
+    assert "LB-B64" in text
+
+
+def test_pem_beats_bundle_file(monkeypatch, tmp_path) -> None:
+    file_pem = tmp_path / "russian.pem"
+    file_pem.write_text(_marker_pem("FROM-FILE"), encoding="utf-8")
+    _reset(monkeypatch, bundle=str(file_pem), pem=_marker_pem("FROM-ENV"))
+    text = Path(max_ca_bundle_path()).read_text(encoding="utf-8")
+    assert "FROM-ENV" in text
+    assert "FROM-FILE" not in text
 
 
 def test_missing_file_uses_certifi_and_warns(monkeypatch, tmp_path, caplog) -> None:

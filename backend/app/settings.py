@@ -47,7 +47,9 @@ class Settings:
             (os.getenv("MAX_API_BASE") or "https://platform-api2.max.ru").strip().rstrip("/")
             or "https://platform-api2.max.ru"
         )
-        # PEM Минцифры вне репозитория. Пусто — только certifi.
+        # PEM Минцифры в переменной (переживает очистку диска). Пусто — смотреть файл.
+        self.max_ca_pem = os.getenv("MAX_CA_PEM") or ""
+        # Либо путь к PEM вне репозитория. Пусто вместе с MAX_CA_PEM — только certifi.
         self.max_ca_bundle = (os.getenv("MAX_CA_BUNDLE") or "").strip()
         # Фоновый воркер outbox: на проде по умолчанию вкл., локально/в тестах — выкл.
         self.notification_worker_enabled = _env_bool(
