@@ -214,11 +214,12 @@ def _max_video_token(db: Session, row: StudioTemplateVariable) -> str:
         f"{base}/uploads?type=video",
         method="POST",
         headers={"Authorization": token},
+        use_max_ca=True,
     )
     url = meta.get("url") if isinstance(meta, dict) else None
     if not isinstance(url, str) or not url:
         raise RuntimeError("Max не вернул адрес загрузки видео")
-    uploaded = _post_file(url, "data", row)
+    uploaded = _post_file(url, "data", row, use_max_ca=True)
     got = _find_token(uploaded)
     if not got:
         raise RuntimeError("Max не вернул token видео")
@@ -242,7 +243,7 @@ def _max_send_video(user_id: int, video_token: str) -> None:
     last = "attachment.not.ready"
     for attempt in range(_MAX_NOT_READY_TRIES):
         try:
-            data = _read_json(url, method="POST", data=body, headers=headers)
+            data = _read_json(url, method="POST", data=body, headers=headers, use_max_ca=True)
         except RuntimeError as exc:
             last = str(exc)
             if "attachment.not.ready" in last.lower() and attempt + 1 < _MAX_NOT_READY_TRIES:
@@ -290,7 +291,13 @@ def _telegram_send_video(db: Session, chat_id: int, row: StudioTemplateVariable)
         db.flush()
 
 
-def _post_file(url: str, field: str, row: StudioTemplateVariable) -> dict[str, Any]:
+def _post_file(
+    url: str,
+    field: str,
+    row: StudioTemplateVariable,
+    *,
+    use_max_ca: bool = False,
+) -> dict[str, Any]:
     raw, content_type = _multipart(
         {},
         field,
@@ -298,7 +305,13 @@ def _post_file(url: str, field: str, row: StudioTemplateVariable) -> dict[str, A
         _video_bytes(row),
         _video_mime(row),
     )
-    data = _read_json(url, method="POST", data=raw, headers={"Content-Type": content_type})
+    data = _read_json(
+        url,
+        method="POST",
+        data=raw,
+        headers={"Content-Type": content_type},
+        use_max_ca=use_max_ca,
+    )
     return data if isinstance(data, dict) else {}
 
 

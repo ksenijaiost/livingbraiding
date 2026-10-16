@@ -182,13 +182,14 @@ def ensure_max_token(db: Session, memo: CareMemo) -> str:
         method="POST",
         data=b"",
         headers={"Authorization": token},
+        use_max_ca=True,
     )
     found = _find_token(meta)
     if not found:
         url = str(meta.get("url") or "") if isinstance(meta, dict) else ""
         if not url:
             raise RuntimeError("Max: нет адреса загрузки")
-        uploaded = _post_file(url, "data", memo)
+        uploaded = _post_file(url, "data", memo, use_max_ca=True)
         found = _find_token(uploaded)
     if not found:
         raise RuntimeError("Max: нет токена картинки")
@@ -249,6 +250,7 @@ def _max_message(user_id: int, tokens: list[str]) -> None:
         method="POST",
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers={"Authorization": token, "Content-Type": "application/json; charset=utf-8"},
+        use_max_ca=True,
     )
 
 
@@ -307,7 +309,7 @@ def _telegram_upload(chat_id: int, memo: CareMemo) -> dict[str, Any]:
     return data
 
 
-def _post_file(url: str, field: str, memo: CareMemo) -> dict[str, Any]:
+def _post_file(url: str, field: str, memo: CareMemo, *, use_max_ca: bool = False) -> dict[str, Any]:
     raw, content_type = _multipart(
         {},
         field,
@@ -315,7 +317,13 @@ def _post_file(url: str, field: str, memo: CareMemo) -> dict[str, Any]:
         _file_bytes(memo),
         memo.mime or "image/jpeg",
     )
-    data = _read_json(url, method="POST", data=raw, headers={"Content-Type": content_type})
+    data = _read_json(
+        url,
+        method="POST",
+        data=raw,
+        headers={"Content-Type": content_type},
+        use_max_ca=use_max_ca,
+    )
     return data if isinstance(data, dict) else {}
 
 
@@ -367,16 +375,36 @@ def _read_json(
     method: str,
     data: bytes | None = None,
     headers: dict[str, str] | None = None,
+    use_max_ca: bool = False,
 ) -> Any:
-    req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
-    try:
-        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
-            raw = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace") if e.fp else str(e)
-        raise RuntimeError(f"HTTP {e.code}: {detail[:300]}") from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"сеть: {e.reason}") from e
+    if use_max_ca:
+        import httpx
+
+        from app.max_http import max_request
+
+        try:
+            status, raw_bytes = max_request(
+                method,
+                url,
+                content=data,
+                headers=headers,
+                timeout=_HTTP_TIMEOUT,
+            )
+        except httpx.HTTPError as e:
+            raise RuntimeError(f"сеть: {e}") from e
+        raw = raw_bytes.decode("utf-8", errors="replace")
+        if status >= 400:
+            raise RuntimeError(f"HTTP {status}: {raw[:300]}")
+    else:
+        req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
+                raw = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="replace") if e.fp else str(e)
+            raise RuntimeError(f"HTTP {e.code}: {detail[:300]}") from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"сеть: {e.reason}") from e
     if not raw.strip():
         return {}
     try:

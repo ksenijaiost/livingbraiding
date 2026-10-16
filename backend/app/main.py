@@ -59,6 +59,9 @@ def _run_startup_seed() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.max_http import max_ca_bundle_path
+
+    max_ca_bundle_path()
     _run_startup_seed()
     worker = start_notification_worker()
     try:

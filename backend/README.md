@@ -201,16 +201,17 @@ $env:LB_TECHSPEC_DISPLAY_NAME="Техспец"
 
 1. Создайте бота на [платформе MAX для партнёров](https://dev.max.ru/), дождитесь модерации, скопируйте токен.
 2. Пропишите на Timeweb (см. `.env.example`): `MAX_BOT_TOKEN`, `MAX_BOT_USERNAME` (без `@`), `MAX_WEBHOOK_SECRET` (случайная строка). Опционально `MAX_API_BASE` (по умолчанию `https://platform-api2.max.ru`).
-3. Подписка на webhook (пример):
+3. У Max сертификат Минцифры. Положите корневой и промежуточный PEM в один файл вне репозитория и укажите путь в `MAX_CA_BUNDLE` (ссылки на сертификаты — в `.env.example`). При старте приложение дописывает этот файл к certifi. Проверку SSL не отключаем.
+4. Подписка на webhook из каталога `backend` (тот же бандл CA):
 
 ```bash
-curl -X POST "https://platform-api2.max.ru/subscriptions" \
-  -H "Authorization: <MAX_BOT_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d "{\"url\":\"https://<ДОМЕН>/webhooks/max\",\"update_types\":[\"bot_started\",\"message_created\"],\"secret\":\"<MAX_WEBHOOK_SECRET>\"}"
+python -m app.scripts.max_subscribe
+python -m app.scripts.max_subscribe --set https://<ДОМЕН>
 ```
 
-4. Мастер жмёт «Подключить» Max на `/me` → диплинк `https://max.ru/<BOT_USERNAME>?start=<код>`.
+Без аргумента URL берётся из `PUBLIC_BASE_URL`. Подписка: `message_created`, `bot_started`, секрет `MAX_WEBHOOK_SECRET`, адрес `https://<ДОМЕН>/webhooks/max`.
+
+5. Мастер жмёт «Подключить» Max на `/me` → диплинк `https://max.ru/<BOT_USERNAME>?start=<код>`.
 
 Авторизация API: заголовок `Authorization: <access_token>` (без `Bearer`). Отправка: `POST /messages?user_id=…` с `{"text":"…"}`. Вебхук проверяет `X-Max-Bot-Api-Secret`.
 
