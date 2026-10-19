@@ -9,6 +9,7 @@ from pathlib import Path
 
 from app.auth import AuthUser
 from app.db.models import Client, ClientAgeGroup
+from app.phone_ru import display_phone
 
 _CLIENT_SOURCES_PATH = Path(__file__).resolve().parent / "data" / "client_sources.json"
 
@@ -47,7 +48,7 @@ def client_db_to_form_dict(client: Client) -> dict[str, str]:
     ag = client.age_group.value if client.age_group else ""
     return {
         "name": client.name,
-        "phone": client.phone or "",
+        "phone": display_phone(getattr(client, "phone_normalized", None), client.phone),
         "photo_1": getattr(client, "photo_1", None) or "",
         "photo_2": getattr(client, "photo_2", None) or "",
         "telegram": client.telegram or "",

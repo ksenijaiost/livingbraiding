@@ -4,12 +4,13 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, require_role
 from app.db.models import Client, UserRole
 from app.db.session import get_db
+from app.phone_ru import display_phone, phone_search_digits
 from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.thermo_visit import list_client_thermo_templates_for_visit
 
@@ -21,34 +22,18 @@ def _client_suggest_items(db: Session, q: str) -> list[dict[str, str | int | boo
     needle = (q or "").strip()
     stmt = select(Client).order_by(Client.name.asc()).limit(30)
     if needle:
-        digits = "".join(ch for ch in needle if ch.isdigit())
-        phone_norm = func.replace(
-            func.replace(
-                func.replace(
-                    func.replace(
-                        func.replace(func.replace(func.coalesce(Client.phone, ""), "+", ""), " ", ""),
-                        "-",
-                        "",
-                    ),
-                    "(",
-                    "",
-                ),
-                ")",
-                "",
-            ),
-            ".",
-            "",
-        )
         conds = [Client.name.ilike(f"%{needle}%")]
-        if digits:
-            conds.append(phone_norm.like(f"%{digits}%"))
+        phone_digits = phone_search_digits(needle)
+        if phone_digits:
+            conds.append(Client.phone_normalized.like(f"%{phone_digits}%"))
         stmt = select(Client).where(or_(*conds)).order_by(Client.name.asc()).limit(30)
     rows = list(db.scalars(stmt).all())
     clients: list[dict[str, str | int | bool]] = []
     for c in rows:
         parts: list[str] = []
-        if c.phone:
-            parts.append(c.phone)
+        shown_phone = display_phone(c.phone_normalized, c.phone)
+        if shown_phone:
+            parts.append(shown_phone)
         if c.telegram:
             parts.append(f"TG {c.telegram}")
         if c.vk:

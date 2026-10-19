@@ -24,6 +24,7 @@ from app.display_time import (
     resolve_request_display_timezone,
     timezone_label,
 )
+from app.phone_ru import display_phone, tel_href
 from app.planned_service_time import format_planned_service_start_local
 from app.ui_service_display import format_duration_minutes_ru, format_service_catalog_path
 from app.ru_labels import (
@@ -72,6 +73,20 @@ templates.env.filters["dt_local"] = _jinja_dt_local
 templates.env.globals["ru_master_level"] = ru_master_level
 templates.env.globals["ru_questionnaire_field_type"] = ru_questionnaire_field_type
 templates.env.globals["ru_user_role"] = ru_user_role
+def _format_client_phone(client: Any) -> str:
+    if client is None:
+        return ""
+    return display_phone(getattr(client, "phone_normalized", None), getattr(client, "phone", None))
+
+
+def _client_tel(client: Any) -> str:
+    if client is None:
+        return ""
+    return tel_href(getattr(client, "phone_normalized", None)) or ""
+
+
+templates.env.globals["format_client_phone"] = _format_client_phone
+templates.env.globals["client_tel"] = _client_tel
 templates.env.globals["format_price_integer_rub"] = format_price_integer_rub
 templates.env.globals["format_naive_utc_datetime"] = format_naive_utc_datetime
 templates.env.globals["format_planned_service_start_local"] = format_planned_service_start_local

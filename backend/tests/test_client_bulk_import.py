@@ -74,7 +74,7 @@ def test_create_client_without_visit(db) -> None:
     )
     assert result["status"] == STATUS_CREATED
     assert result["ok"] is True
-    assert result["phone"] == "+7 999 000-11-22"
+    assert result["phone"] == "+7 (999) 000-11-22"
     client = db.get(Client, result["client_id"])
     assert client is not None
     assert client.name == "Анна"
@@ -85,7 +85,7 @@ def test_create_client_without_visit(db) -> None:
     assert client.no_promo is True
     assert client.is_student is True
     assert client_display_status(db, client) == ClientStatus.NEVER
-    assert "+7 999 000-11-22" in reserved
+    assert "79990001122" in reserved
 
     no_phone = import_single_client_row(
         db,
@@ -107,18 +107,24 @@ def test_create_client_without_visit(db) -> None:
 
 
 def test_duplicate_phone_in_db_and_batch(db) -> None:
-    db.add(Client(name="Уже есть", phone="79990001122", is_confirmed=True))
+    from app.client_phone import apply_client_phone
+
+    existing = Client(name="Уже есть", is_confirmed=True)
+    apply_client_phone(existing, "79990001122", db)
+    db.add(existing)
     db.commit()
-    existing = db.scalar(select(Client).where(Client.phone == "79990001122"))
+    existing = db.scalar(select(Client).where(Client.phone_normalized == "79990001122"))
     reserved: set[str] = set()
     skipped = import_single_client_row(
         db,
-        {"name": "Копия", "phone": "79990001122"},
+        {"name": "Копия", "phone": "8 (999) 000-11-22"},
         reserved_phones=reserved,
         changed_by_user_id=1,
         line=1,
     )
     assert skipped["status"] == STATUS_DUPLICATE
+    assert "Уже есть" in skipped["message"]
+    assert "+7 (999) 000-11-22" in skipped["message"]
     assert skipped["client_id"] == existing.id
     assert db.scalar(select(func.count()).select_from(Client)) == 1
 
@@ -140,7 +146,7 @@ def test_duplicate_phone_in_db_and_batch(db) -> None:
     assert first["status"] == STATUS_CREATED
     assert second["status"] == STATUS_DUPLICATE
     assert second["client_id"] == first["client_id"]
-    assert db.scalar(select(func.count()).select_from(Client).where(Client.phone == "70001112233")) == 1
+    assert db.scalar(select(func.count()).select_from(Client).where(Client.phone_normalized == "70001112233")) == 1
 
 
 def test_unknown_key_and_bad_birth_do_not_block_next_row(db) -> None:
@@ -186,6 +192,15 @@ def test_unknown_key_and_bad_birth_do_not_block_next_row(db) -> None:
         changed_by_user_id=1,
         line=5,
     )
+    bad_phone = import_single_client_row(
+        db,
+        {"name": "Кривой", "phone": "12345"},
+        reserved_phones=reserved,
+        changed_by_user_id=1,
+        line=6,
+    )
+    assert bad_phone["status"] == STATUS_ERROR
+    assert bad_phone["message"] == "Некорректный номер телефона"
     assert bad_age["status"] == STATUS_ERROR
     assert "18_30" in bad_age["message"]
     assert db.scalar(select(func.count()).select_from(Client)) == 1

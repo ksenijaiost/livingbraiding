@@ -17,6 +17,8 @@ from starlette.datastructures import UploadFile
 from sqlalchemy.orm import Session, selectinload
 
 from app.client_payment import parse_client_payment_kind
+from app.client_phone import DuplicateClientPhone, apply_client_phone
+from app.phone_ru import InvalidPhoneError, normalize_phone
 from app.db.models import (
     Client,
     ClientPaymentKind,
@@ -1230,6 +1232,16 @@ def validate_master_visit_step1(db: Session, inp: KitInlayFormInput) -> None:
             inp.draft_other_contact,
         ):
             raise ValueError("Для черновика нужен хотя бы один контакт (телефон или соцсеть).")
+        if str(inp.draft_phone or "").strip():
+            try:
+                normalize_phone(inp.draft_phone)
+            except InvalidPhoneError as exc:
+                raise ValueError(str(exc)) from exc
+            probe = Client(name=inp.draft_name.strip()[:200] or "—")
+            try:
+                apply_client_phone(probe, inp.draft_phone, db)
+            except DuplicateClientPhone as exc:
+                raise ValueError(str(exc)) from exc
     else:
         if not inp.existing_client_id:
             raise ValueError("Найдите и выберите клиента из списка или переключитесь на «Новый черновик».")

@@ -338,6 +338,8 @@ class Client(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # «7» + 10 цифр. NULL у клиентов без телефона; уникальность NULL не нарушает.
+    phone_normalized: Mapped[str | None] = mapped_column(String(11), nullable=True, unique=True)
     photo_1: Mapped[str | None] = mapped_column(String(300), nullable=True)
     photo_2: Mapped[str | None] = mapped_column(String(300), nullable=True)
     telegram: Mapped[str | None] = mapped_column(String(100), nullable=True)

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.datastructures import UploadFile
 from sqlalchemy import case, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_admin_super_assigned, require_role
@@ -25,7 +26,9 @@ from app.client_validation import (
     source_extra_option_for_form,
     strip_or_none,
 )
+from app.client_phone import DuplicateClientPhone, apply_client_phone, find_client_by_normalized_phone
 from app.forms_parse import parse_bool
+from app.phone_ru import InvalidPhoneError, display_phone, normalize_phone, phone_search_digits
 from app.consultation_booking import OPEN_BOOKING_STATUSES
 from app.client_notify_history import client_recent_messages
 from app.db.models import (
@@ -126,6 +129,42 @@ _CLIENTS_ADMINS = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _SUPER_EXPORT = Depends(require_admin_super_assigned())
 
 
+def _client_contact_preview(row: dict) -> str | None:
+    shown = display_phone(row.get("phone_normalized"), row.get("phone"))
+    if shown:
+        return shown
+    for key in ("telegram", "vk", "instagram", "other_contact"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _phone_field_error(raw: str) -> str | None:
+    if not str(raw or "").strip():
+        return None
+    try:
+        normalize_phone(raw)
+    except InvalidPhoneError as exc:
+        return str(exc)
+    return None
+
+
+def _duplicate_phone_page(request, current_user, form, exc: DuplicateClientPhone, *, is_new: bool, client_id, created_by):
+    message = exc.html()
+    return _admin_client_form_page(
+        request,
+        current_user,
+        form=form,
+        error=message,
+        phone_error=message,
+        is_new=is_new,
+        client_id=client_id,
+        created_by_display=created_by,
+        status_code=400,
+    )
+
+
 def _admin_client_form_page(
     request: Request,
     current_user: AuthUser,
@@ -133,6 +172,7 @@ def _admin_client_form_page(
     form: dict,
     error: str | None,
     is_new: bool,
+    phone_error: str | None = None,
     client_id: int | None = None,
     created_by_display: str | None = None,
     status_code: int = 200,
@@ -154,6 +194,7 @@ def _admin_client_form_page(
             created_by_label=created_by_display,
             form=form,
             error=error,
+            phone_error=phone_error,
         ),
         status_code=status_code,
     )
@@ -199,16 +240,18 @@ def admin_clients(
     where = []
     if q_norm:
         like = f"%{q_norm}%"
-        where.append(
-            or_(
-                Client.name.ilike(like),
-                Client.phone.ilike(like),
-                Client.telegram.ilike(like),
-                Client.vk.ilike(like),
-                Client.instagram.ilike(like),
-                Client.other_contact.ilike(like),
-            )
-        )
+        search_conds = [
+            Client.name.ilike(like),
+            Client.phone.ilike(like),
+            Client.telegram.ilike(like),
+            Client.vk.ilike(like),
+            Client.instagram.ilike(like),
+            Client.other_contact.ilike(like),
+        ]
+        phone_digits = phone_search_digits(q_norm)
+        if phone_digits:
+            search_conds.append(Client.phone_normalized.like(f"%{phone_digits}%"))
+        where.append(or_(*search_conds))
     if status_filter is not None:
         matched_ids = filter_client_ids_by_status(db, status_filter)
         if not matched_ids:
@@ -233,18 +276,6 @@ def admin_clients(
     # One row per visit in the join; sum 1 only for real, non-cancelled visits
     visits_count = func.coalesce(func.sum(case((Visit.is_cancelled.is_(False), 1), else_=0)), 0)
 
-    def _nz(col):
-        return func.nullif(func.trim(col), "")
-
-    # Phone first, then first non-empty social (same order as coalesce)
-    contact_preview = func.coalesce(
-        _nz(Client.phone),
-        _nz(Client.telegram),
-        _nz(Client.vk),
-        _nz(Client.instagram),
-        _nz(Client.other_contact),
-    ).label("contact_preview")
-
     has_active_booking = func.coalesce(
         func.max(case((Booking.status.in_(OPEN_BOOKING_STATUSES), 1), else_=0)),
         0,
@@ -260,7 +291,12 @@ def admin_clients(
             Client.interested_in_training.label("interested_in_training"),
             Client.is_student.label("is_student"),
             Client.is_model.label("is_model"),
-            contact_preview,
+            Client.phone.label("phone"),
+            Client.phone_normalized.label("phone_normalized"),
+            Client.telegram.label("telegram"),
+            Client.vk.label("vk"),
+            Client.instagram.label("instagram"),
+            Client.other_contact.label("other_contact"),
             visits_count.label("visits_count"),
             has_active_booking,
         )
@@ -277,6 +313,12 @@ def admin_clients(
             Client.interested_in_training,
             Client.is_student,
             Client.is_model,
+            Client.phone,
+            Client.phone_normalized,
+            Client.telegram,
+            Client.vk,
+            Client.instagram,
+            Client.other_contact,
         )
         .order_by(Client.name.asc())
         .limit(500)
@@ -290,6 +332,7 @@ def admin_clients(
         st = display_status(is_blacklisted=bool(row.get("is_blacklisted")), activity=act)
         row["status"] = st
         row["status_label"] = status_label(st)
+        row["contact_preview"] = _client_contact_preview(row)
         enriched.append(row)
     created_ok = db.get(Client, created) if created is not None else None
     updated_ok = db.get(Client, updated) if updated is not None else None
@@ -1095,7 +1138,7 @@ def admin_clients_retention_lost(
             {
                 "id": int(c.id),
                 "name": c.name,
-                "phone": c.phone or "",
+                "phone": display_phone(c.phone_normalized, c.phone),
                 "last_visit": act.last.isoformat() if act.last else "",
                 "visits": act.count,
             }
@@ -1243,8 +1286,11 @@ async def admin_client_new_post(
     comment = str(form.get("comment") or "")
     mark_draft = str(form.get("mark_draft") or "")
 
+    phone_error = _phone_field_error(phone)
     if not name:
         err = "Укажите имя клиента."
+    elif phone_error:
+        err = phone_error
     elif not client_has_any_contact(phone, telegram, vk, instagram, other_contact):
         err = "Нужен хотя бы один контакт: телефон или любая из соцсетей."
 
@@ -1270,7 +1316,8 @@ async def admin_client_new_post(
             request,
             current_user,
             form=form,
-            error=err,
+            error=None if phone_error and err == phone_error else err,
+            phone_error=phone_error,
             is_new=True,
             status_code=400,
         )
@@ -1296,7 +1343,6 @@ async def admin_client_new_post(
 
     client = Client(
         name=name[:200],
-        phone=strip_or_none(phone, 30),
         photo_1=photo_1_url,
         photo_2=photo_2_url,
         telegram=strip_or_none(telegram, 100),
@@ -1320,8 +1366,42 @@ async def admin_client_new_post(
         is_model=parse_bool(form.get("is_model")),
         no_promo=parse_bool(form.get("no_promo")),
     )
-    db.add(client)
-    db.commit()
+    try:
+        apply_client_phone(client, phone, db)
+        db.add(client)
+        db.commit()
+    except DuplicateClientPhone as exc:
+        db.rollback()
+        return _duplicate_phone_page(
+            request, current_user, form, exc, is_new=True, client_id=None, created_by=None
+        )
+    except IntegrityError:
+        db.rollback()
+        taken = None
+        try:
+            normalized = normalize_phone(phone)
+        except InvalidPhoneError:
+            normalized = None
+        if normalized:
+            taken = find_client_by_normalized_phone(db, normalized)
+        if taken is not None:
+            return _duplicate_phone_page(
+                request,
+                current_user,
+                form,
+                DuplicateClientPhone(taken),
+                is_new=True,
+                client_id=None,
+                created_by=None,
+            )
+        return _admin_client_form_page(
+            request,
+            current_user,
+            form=form,
+            error="Не удалось сохранить телефон. Попробуйте ещё раз.",
+            is_new=True,
+            status_code=400,
+        )
     db.refresh(client)
     return RedirectResponse(url=f"/clients/{client.id}?msg=created", status_code=303)
 
@@ -1365,6 +1445,7 @@ async def admin_client_edit_post(
             for k in (
                 "name",
                 "phone",
+                "phone_normalized",
                 "photo_1",
                 "photo_2",
                 "telegram",
@@ -1418,8 +1499,11 @@ async def admin_client_edit_post(
     is_blacklisted = form["is_blacklisted"] == "1"
 
     err: str | None = None
+    phone_error = _phone_field_error(phone)
     if not name:
         err = "Укажите имя клиента."
+    elif phone_error:
+        err = phone_error
     elif not client_has_any_contact(phone, telegram, vk, instagram, other_contact):
         err = "Нужен хотя бы один контакт: телефон или любая из соцсетей."
     elif is_blacklisted and not blacklist_comment.strip():
@@ -1452,7 +1536,8 @@ async def admin_client_edit_post(
             request,
             current_user,
             form=form,
-            error=err,
+            error=None if phone_error and err == phone_error else err,
+            phone_error=phone_error,
             is_new=False,
             client_id=client.id,
             created_by_display=client.created_by_label,
@@ -1460,7 +1545,19 @@ async def admin_client_edit_post(
         )
 
     client.name = name[:200]
-    client.phone = strip_or_none(phone, 30)
+    try:
+        apply_client_phone(client, phone, db, exclude_id=client.id)
+    except DuplicateClientPhone as exc:
+        db.rollback()
+        return _duplicate_phone_page(
+            request,
+            current_user,
+            form,
+            exc,
+            is_new=False,
+            client_id=client.id,
+            created_by=client.created_by_label,
+        )
     client.telegram = strip_or_none(telegram, 100)
     client.vk = strip_or_none(vk, 120)
     client.instagram = strip_or_none(instagram, 120)
@@ -1524,6 +1621,7 @@ async def admin_client_edit_post(
         (
             "name",
             "phone",
+            "phone_normalized",
             "photo_1",
             "photo_2",
             "telegram",
@@ -1557,7 +1655,37 @@ async def admin_client_edit_post(
         changes=changes,
     )
 
-    db.commit()
+    created_by_label = client.created_by_label
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        taken = None
+        try:
+            normalized = normalize_phone(phone)
+        except InvalidPhoneError:
+            normalized = None
+        if normalized:
+            taken = find_client_by_normalized_phone(db, normalized, exclude_id=client_id)
+        if taken is not None:
+            return _duplicate_phone_page(
+                request,
+                current_user,
+                form,
+                DuplicateClientPhone(taken),
+                is_new=False,
+                client_id=client_id,
+                created_by=created_by_label,
+            )
+        return _admin_client_form_page(
+            request,
+            current_user,
+            form=form,
+            error="Не удалось сохранить телефон. Попробуйте ещё раз.",
+            is_new=False,
+            client_id=client_id,
+            status_code=400,
+        )
     return RedirectResponse(url=f"/clients?updated={client.id}", status_code=303)
 
 
@@ -1578,29 +1706,11 @@ def _client_suggest_items(db: Session, q: str) -> list[dict[str, str | int | boo
     needle = (q or "").strip()
     stmt = select(Client).order_by(Client.name.asc()).limit(30)
     if needle:
-        digits = "".join(ch for ch in needle if ch.isdigit())
-        # Phone search: ignore common formatting symbols, allow searching by last digits.
-        phone_norm = func.replace(
-            func.replace(
-                func.replace(
-                    func.replace(
-                        func.replace(func.replace(func.coalesce(Client.phone, ""), "+", ""), " ", ""),
-                        "-",
-                        "",
-                    ),
-                    "(",
-                    "",
-                ),
-                ")",
-                "",
-            ),
-            "\t",
-            "",
-        )
-        if digits:
-            stmt = stmt.where(or_(Client.name.ilike(f"%{needle}%"), phone_norm.ilike(f"%{digits}%")))
-        else:
-            stmt = stmt.where(Client.name.ilike(f"%{needle}%"))
+        conds = [Client.name.ilike(f"%{needle}%")]
+        phone_digits = phone_search_digits(needle)
+        if phone_digits:
+            conds.append(Client.phone_normalized.like(f"%{phone_digits}%"))
+        stmt = stmt.where(or_(*conds))
     rows = list(db.scalars(stmt).all())
     items: list[dict[str, str | int | bool]] = []
     for c in rows:

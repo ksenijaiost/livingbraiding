@@ -82,6 +82,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.display_time import get_display_timezone
+from app.phone_ru import phone_search_digits
 from app.planned_service_time import planned_start_local_datetime
 from app.forms_parse import parse_bool, parse_float, parse_int
 from app.kit_blank_stock_core import (
@@ -1600,30 +1601,15 @@ def suggest_bookings_for_work_order(db: Session, q: str, *, limit: int = 30) -> 
         stmt = stmt.where(Booking.planned_date >= start_utc, Booking.planned_date < end_utc)
     elif needle:
         digits = "".join(ch for ch in needle if ch.isdigit())
-        phone_norm = func.replace(
-            func.replace(
-                func.replace(
-                    func.replace(
-                        func.replace(func.replace(func.coalesce(Client.phone, ""), "+", ""), " ", ""),
-                        "-",
-                        "",
-                    ),
-                    "(",
-                    "",
-                ),
-                ")",
-                "",
-            ),
-            ".",
-            "",
-        )
         conds: list[Any] = [
             Client.name.ilike(f"%{needle}%"),
         ]
         if digits:
-            conds.append(phone_norm.ilike(f"%{digits}%"))
             # Префикс номера: «41» находит и 41, и 416, пока номер ещё набирают.
             conds.append(cast(Booking.id, String(20)).like(digits + "%"))
+        phone_digits = phone_search_digits(needle)
+        if phone_digits:
+            conds.append(Client.phone_normalized.like(f"%{phone_digits}%"))
         stmt = stmt.join(Client, Client.id == Booking.client_id).where(or_(*conds))
 
     rows = list(db.scalars(stmt).all())

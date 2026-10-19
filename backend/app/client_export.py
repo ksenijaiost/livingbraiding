@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.client_validation import client_age_group_label
+from app.phone_ru import display_phone
 from app.db.models import Client, Visit
 from app.display_time import format_naive_utc_datetime, get_display_timezone
 
@@ -81,7 +82,7 @@ def build_all_clients_csv_bytes(db: Session) -> bytes:
             [
                 _cell(c.id),
                 _cell(c.name),
-                _cell(c.phone),
+                _cell(display_phone(c.phone_normalized, c.phone)),
                 _cell(c.telegram),
                 _cell(c.vk),
                 _cell(c.instagram),

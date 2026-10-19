@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
+from app.phone_ru import display_phone
 from app.db.models import (
     Booking,
     Client,
@@ -37,6 +38,12 @@ from app.product_sales import _apply_kit_delta
 
 CONFIRM_PHRASE_1 = "УДАЛИТЬ НАВСЕГДА"
 CONFIRM_PHRASE_2 = "ТОЧНО-ТОЧНО"
+
+
+def _shown_client_phone(client: object | None) -> str:
+    if client is None:
+        return ""
+    return display_phone(getattr(client, "phone_normalized", None), getattr(client, "phone", None))
 
 
 def release_client_kit_reserves(db: Session, *, client_id: int, changed_by_user_id: int | None) -> None:
@@ -346,7 +353,7 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
         if visit is None:
             return {"ok": False, "error": "Визит не найден."}
         cname = (visit.client.name or "").strip() if visit.client else "—"
-        phone = (visit.client.phone or "").strip() if visit.client else ""
+        phone = _shown_client_phone(visit.client)
         svc = " · ".join(
             (s.service_name or "").strip()
             for s in (visit.services or [])
@@ -371,7 +378,7 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
         if b is None:
             return {"ok": False, "error": "Бронь не найдена."}
         cname = (b.client.name or "").strip() if b.client else "—"
-        phone = (b.client.phone or "").strip() if b.client else ""
+        phone = _shown_client_phone(b.client)
         svc = ""
         if b.planned_service:
             svc = (b.planned_service.name or "").strip()
@@ -391,7 +398,7 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
         if s is None:
             return {"ok": False, "error": "Продажа не найдена."}
         cname = (s.client.name or "").strip() if s.client else "—"
-        phone = (s.client.phone or "").strip() if s.client else ""
+        phone = _shown_client_phone(s.client)
         voided = "да" if s.is_voided else "нет"
         lines = [
             f"Клиент: {cname}" + (f", {phone}" if phone else ""),
@@ -411,7 +418,7 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
         cpart = "—"
         if w.client:
             cpart = (w.client.name or "").strip()
-            ph = (w.client.phone or "").strip()
+            ph = _shown_client_phone(w.client)
             if ph:
                 cpart += f", {ph}"
         elif w.client_id:
@@ -438,7 +445,7 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
         if cons is None:
             return {"ok": False, "error": "Консультация не найдена."}
         cname = (cons.client.name or "").strip() if cons.client else "—"
-        phone = (cons.client.phone or "").strip() if cons.client else ""
+        phone = _shown_client_phone(cons.client)
         master = "—"
         if cons.created_by_user:
             master = (cons.created_by_user.display_name or cons.created_by_user.username or "").strip() or "—"
@@ -482,7 +489,7 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
         c = db.get(Client, eid)
         if c is None:
             return {"ok": False, "error": "Клиент не найден."}
-        phone = (c.phone or "").strip()
+        phone = _shown_client_phone(c)
         lines = [
             f"Имя: {(c.name or '').strip() or '—'}" + (f", тел. {phone}" if phone else ""),
         ]
