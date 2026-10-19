@@ -413,6 +413,25 @@ class ClientNotificationRule(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class BookingStatusNotifyRule(Base):
+    """Сообщение клиенту, когда бронь переводят в выбранный статус."""
+
+    __tablename__ = "booking_status_notify_rules"
+    __table_args__ = (
+        UniqueConstraint("status", name="uq_booking_status_notify_rules_status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # BookingStatus.value. Один статус — одно правило.
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    template: Mapped[str] = mapped_column(Text, nullable=False)
+    attach_memo_before: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class StudioTemplateVariable(Base):
     """Переменные студии для шаблонов уведомлений: встроенные и свои."""
 

@@ -7,7 +7,7 @@
       <a href="/clients"><button type="button" class="secondary">К списку клиентов</button></a>
     </div>
     <p class="muted" style="margin-top:0;">
-      Глобальные настройки напоминаний клиентам о записях. Отправка сообщений будет подключена отдельно.
+      Сообщения клиентам о записи: смена статуса, напоминания и текст после визита.
     </p>
 
     {% if error %}
@@ -34,6 +34,68 @@
       </div>
 
       <h4 style="margin:16px 0 8px; font-size:1rem;">Перед записью</h4>
+      <h5 style="margin:8px 0; font-size:0.95rem;">Информация о брони</h5>
+      <p class="muted" style="font-size:12px; margin:0 0 10px;">
+        Уходит клиенту, когда бронь переводят в выбранный статус. Один статус — одно правило.
+        Повторно не отправляется, пока не изменятся дата или время. Если время записи уже прошло — не уходит.
+        Переменные те же, что у напоминаний.
+      </p>
+      {% if status_rules %}
+        <div class="lb-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="lb-nowrap">Статус</th>
+                <th>Шаблон</th>
+                <th class="lb-nowrap">Вкл.</th>
+                <th class="lb-nowrap">Памятка «до»</th>
+                <th class="lb-nowrap"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in status_rules %}
+                <tr>
+                  <td>
+                    <input type="hidden" name="status_id" value="{{ r.id }}" />
+                    <select name="status_value" required>
+                      {% for opt in r.status_options %}
+                        <option value="{{ opt.value }}" {% if opt.value == r.status %}selected{% endif %}>{{ opt.label }}</option>
+                      {% endfor %}
+                    </select>
+                  </td>
+                  <td>
+                    <textarea name="status_template" rows="5" style="width:100%; min-width:16rem;" required>{{ r.template }}</textarea>
+                  </td>
+                  <td style="text-align:center;">
+                    <input type="checkbox" name="status_enabled_{{ r.id }}" value="1"
+                           {% if r.is_enabled %}checked{% endif %} />
+                  </td>
+                  <td style="text-align:center;">
+                    <input type="checkbox" name="status_memo_{{ r.id }}" value="1"
+                           title="Прикрепить памятку «до»"
+                           {% if r.attach_memo_before %}checked{% endif %} />
+                  </td>
+                  <td class="lb-nowrap">
+                    <button type="submit" class="secondary" formaction="/clients/notifications/status-rules/move"
+                            name="status_rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="this.form.direction.value='up';">↑</button>
+                    <button type="submit" class="secondary" formaction="/clients/notifications/status-rules/move"
+                            name="status_rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="this.form.direction.value='down';">↓</button>
+                    <button type="submit" class="secondary" formaction="/clients/notifications/status-rules/delete"
+                            name="status_rule_id" value="{{ r.id }}" formnovalidate
+                            onclick="return confirm('Удалить это правило?');">Удалить</button>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">Правил по статусам пока нет.</p>
+      {% endif %}
+
+      <h5 style="margin:18px 0 8px; font-size:0.95rem;">Напоминания</h5>
       <p class="muted" style="font-size:12px; margin:0 0 10px;">
         За сколько часов до <code>planned_date</code> брони отправить напоминание (целое число &gt; 0).
       </p>
@@ -152,10 +214,24 @@
     </form>
 
     <div style="display:flex; flex-wrap:wrap; gap:16px; margin-bottom:16px;">
+      {% if status_free %}
+        <form method="post" action="/clients/notifications/status-rules/add" style="margin:0;"
+              onsubmit="this.querySelector('button').disabled=true;">
+          <label class="label-sub">Добавить правило</label>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <select name="status">
+              {% for opt in status_free %}
+                <option value="{{ opt.value }}">{{ opt.label }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit">Добавить правило</button>
+          </div>
+        </form>
+      {% endif %}
       <form method="post" action="/clients/notifications/add" style="margin:0;"
             onsubmit="this.querySelector('button').disabled=true;">
         <input type="hidden" name="kind" value="before_booking" />
-        <label class="label-sub">Добавить перед записью</label>
+        <label class="label-sub">Добавить напоминание</label>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           <input type="number" name="hours" min="1" max="720" step="1" value="24" style="width:5rem;" />
           <span class="muted">ч</span>
@@ -226,7 +302,7 @@
     <div class="card" style="background:#fafafa; margin:0;">
       <p style="margin:0 0 8px; font-weight:600; font-size:13px;">Доступные переменные</p>
       <p class="muted" style="margin:0 0 8px; font-size:12px;">
-        Системные — в шаблонах «перед записью». <code>{{ "{{name}}" }}</code> и переменные студии — ещё и «после».
+        Системные — в информации о брони и в напоминаниях. <code>{{ "{{name}}" }}</code> и переменные студии — ещё и «после».
         Неизвестные <code>{{ "{{…}}" }}</code> остаются как есть.
       </p>
       <ul style="list-style:none; margin:0; padding:0; font-size:13px;">

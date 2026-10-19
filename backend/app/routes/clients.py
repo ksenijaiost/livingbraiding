@@ -78,6 +78,14 @@ from app.admin_chat import (
     send_to_chat,
     unlink_admin_chat,
 )
+from app.booking_status_notify import (
+    add_status_rule,
+    delete_status_rule,
+    ensure_default_status_rules,
+    move_status_rule,
+    save_status_rules_from_form,
+    status_rules_for_ui,
+)
 from app.client_notifications import (
     DEFAULT_AFTER_TEMPLATE,
     DEFAULT_BEFORE_TEMPLATE,
@@ -445,9 +453,12 @@ def _client_notifications_page(
     memo_delete: dict | None = None,
 ):
     # Дефолты только при совсем пустой таблице (первый заход), не после ручной очистки.
-    if ensure_default_rules(db):
+    created_defaults = ensure_default_rules(db)
+    created_defaults = ensure_default_status_rules(db) or created_defaults
+    if created_defaults:
         db.commit()
     rules = rules_for_ui(db)
+    status_ui = status_rules_for_ui(db)
     from app.client_bot_replies import bot_replies_for_ui, ensure_bot_reply_templates
     from app.settings import get_settings
     from app.studio_template_variables import ensure_builtin_studio_variables, variables_for_ui
@@ -467,6 +478,8 @@ def _client_notifications_page(
             current_user=current_user,
             before_rules=rules["before"],
             after_rules=rules["after"],
+            status_rules=status_ui["rules"],
+            status_free=status_ui["free_statuses"],
             services_marker=get_services_marker(db),
             admin_chats=admin_chats_for_ui(db),
             can_manage_admin_chat=is_admin,
@@ -670,6 +683,19 @@ async def admin_client_notifications_save(
             latest_times=after_latest,
             memo_flags=after_memo,
         )
+        status_ids = form.getlist("status_id") if hasattr(form, "getlist") else []
+        status_values = form.getlist("status_value") if hasattr(form, "getlist") else []
+        status_templates = form.getlist("status_template") if hasattr(form, "getlist") else []
+        status_enabled = ["1" if form.get(f"status_enabled_{rid}") else "0" for rid in status_ids]
+        status_memo = ["1" if form.get(f"status_memo_{rid}") else "0" for rid in status_ids]
+        save_status_rules_from_form(
+            db,
+            ids=status_ids,
+            statuses=status_values,
+            templates=status_templates,
+            enabled_flags=status_enabled,
+            memo_flags=status_memo,
+        )
         db.commit()
     except ValueError as e:
         db.rollback()
@@ -823,6 +849,59 @@ async def admin_client_notifications_move(
     form = await request.form()
     try:
         move_rule(db, int(str(form.get("rule_id") or "0")), direction=str(form.get("direction") or ""))
+        db.commit()
+    except (ValueError, TypeError):
+        db.rollback()
+        return RedirectResponse(url="/clients/notifications?err=missing", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=moved", status_code=303)
+
+
+@router.post("/notifications/status-rules/add")
+async def admin_status_notify_add(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        add_status_rule(db, form.get("status"))
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        msg = str(e) or "invalid"
+        return RedirectResponse(url=f"/clients/notifications?err={quote(msg)}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=added", status_code=303)
+
+
+@router.post("/notifications/status-rules/delete")
+async def admin_status_notify_delete(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        delete_status_rule(db, int(str(form.get("status_rule_id") or "0")))
+        db.commit()
+    except (ValueError, TypeError):
+        db.rollback()
+        return RedirectResponse(url="/clients/notifications?err=missing", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=deleted", status_code=303)
+
+
+@router.post("/notifications/status-rules/move")
+async def admin_status_notify_move(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        move_status_rule(
+            db,
+            int(str(form.get("status_rule_id") or "0")),
+            direction=str(form.get("direction") or ""),
+        )
         db.commit()
     except (ValueError, TypeError):
         db.rollback()

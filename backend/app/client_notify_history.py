@@ -117,6 +117,9 @@ def _out_type(row: NotificationOutbox, hours_by_rule: dict[int, float]) -> tuple
             except (TypeError, ValueError):
                 rid = None
         return _hours_label(hours_by_rule.get(int(rid)) if rid is not None else None), mark
+    if event == "client_booking_status":
+        label = str(payload.get("status_label") or "").strip() or "статус"
+        return f"Информация о брони: {label}", mark
     if event == "client_after_booking":
         return "После визита", mark
     if event == "client_care_memo_error":
@@ -145,6 +148,10 @@ def _destination(row: NotificationOutbox) -> str:
 
 
 def _status_label(row: NotificationOutbox, tz_name: str) -> str:
+    if str(row.event_type or "") == "client_booking_status":
+        reason = str(_payload(row).get("skip_reason") or "").strip()
+        if reason:
+            return reason
     status = row.status.value if hasattr(row.status, "value") else str(row.status or "")
     if status == NotificationOutboxStatus.SENT.value:
         when = _fmt_when(row.sent_at, tz_name)
@@ -172,7 +179,9 @@ def _memos_label(row: NotificationOutbox) -> str:
 
 def _out_item(row: NotificationOutbox, tz_name: str, hours_by_rule: dict[int, float]) -> dict:
     type_label, mark = _out_type(row, hours_by_rule)
-    text = (row.body or "").strip() or str(_payload(row).get("text") or "").strip()
+    payload = _payload(row)
+    text = (row.body or "").strip() or str(payload.get("text") or "").strip()
+    channel_label = "—" if str(payload.get("skip_reason") or "").strip() else _channel_label(row.channel)
     at = row.sent_at or row.scheduled_at or row.created_at
     return {
         "kind": "out",
@@ -181,7 +190,7 @@ def _out_item(row: NotificationOutbox, tz_name: str, hours_by_rule: dict[int, fl
         "at_label": _fmt_when(at, tz_name),
         "type_label": type_label,
         "mark": mark,
-        "channel_label": _channel_label(row.channel),
+        "channel_label": channel_label,
         "destination": _destination(row),
         "status_label": _status_label(row, tz_name),
         "text": text,

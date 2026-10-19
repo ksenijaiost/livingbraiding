@@ -33,6 +33,7 @@ from app.booking_notifications import (
 from app.client_status import is_first_non_cancelled_booking
 from app.messenger_inbound import client_reply_badges, mark_client_reply_handled
 from app.client_notify_history import booking_notify_timeline
+import app.booking_status_notify  # noqa: F401 — смена статуса брони ставит уведомление клиенту
 from app.notifications import booking_planned_master_user_ids, capture_booking_notify_snapshot
 from app.client_validation import format_created_by_label, strip_or_none
 from app.consultation_booking import (

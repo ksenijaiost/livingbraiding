@@ -23,6 +23,7 @@ from app.auth import SessionRememberRenewMiddleware
 from app.bootstrap import ensure_initial_techspec_user
 from app.db.session import get_db
 from app.display_time import DisplayTimezoneMiddleware
+import app.booking_status_notify  # noqa: F401 — слушатель смены статуса брони
 from app.notification_worker import start_notification_worker, stop_notification_worker
 from app.payroll_fund import backfill_all_visit_master_accruals_if_missing
 from app.seed import ensure_dev_seed_data, ensure_prod_seed_data
