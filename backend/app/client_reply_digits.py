@@ -294,32 +294,60 @@ def parsed_action_labels(db: Session) -> dict[str, str]:
 def migrate_replace_legacy_reply_hint(connection: Connection) -> dict[str, list[int]]:
     """Заменить точное совпадение старой строки на {{reply_hint}}.
 
+    Для booking_status_notify_rules со статусом ACTIVE — на {{reply_hint_no_confirm}}.
+
     Возвращает id шаблонов, где строка совпала (replaced) и где осталась
     ручная подсказка с цифрами (manual) — для отчёта.
     """
     replaced: list[int] = []
     manual: list[int] = []
-    tables = (
-        ("client_notification_rules", "id", "template"),
-        ("booking_status_notify_rules", "id", "template"),
-    )
-    for table, id_col, tpl_col in tables:
-        try:
-            rows = connection.execute(text(f"SELECT {id_col}, {tpl_col} FROM {table}")).fetchall()
-        except Exception:
-            continue
-        for row_id, template in rows:
-            original = "" if template is None else str(template)
+
+    def _replace_in_rows(
+        rows: list,
+        *,
+        table: str,
+        id_idx: int = 0,
+        tpl_idx: int = 1,
+        status_idx: int | None = None,
+    ) -> None:
+        for row in rows:
+            row_id = int(row[id_idx])
+            original = "" if row[tpl_idx] is None else str(row[tpl_idx])
             if LEGACY_REPLY_HINT_LINE in original:
-                new_text = original.replace(LEGACY_REPLY_HINT_LINE, "{{reply_hint}}")
-                connection.execute(
-                    text(f"UPDATE {table} SET {tpl_col} = :tpl WHERE {id_col} = :rid"),
-                    {"tpl": new_text, "rid": int(row_id)},
+                status = str(row[status_idx]) if status_idx is not None else ""
+                token = (
+                    "{{reply_hint_no_confirm}}"
+                    if status == "ACTIVE"
+                    else "{{reply_hint}}"
                 )
-                replaced.append(int(row_id))
+                new_text = original.replace(LEGACY_REPLY_HINT_LINE, token)
+                connection.execute(
+                    text(f"UPDATE {table} SET template = :tpl WHERE id = :rid"),
+                    {"tpl": new_text, "rid": row_id},
+                )
+                replaced.append(row_id)
                 original = new_text
             if template_has_manual_reply_digits(original):
-                manual.append(int(row_id))
+                manual.append(row_id)
+
+    try:
+        rows = connection.execute(
+            text("SELECT id, template FROM client_notification_rules")
+        ).fetchall()
+        _replace_in_rows(rows, table="client_notification_rules")
+    except Exception:
+        pass
+    try:
+        rows = connection.execute(
+            text("SELECT id, template, status FROM booking_status_notify_rules")
+        ).fetchall()
+        _replace_in_rows(
+            rows,
+            table="booking_status_notify_rules",
+            status_idx=2,
+        )
+    except Exception:
+        pass
     return {"replaced": replaced, "manual": manual}
 
 

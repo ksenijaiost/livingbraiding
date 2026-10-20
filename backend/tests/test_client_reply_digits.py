@@ -24,6 +24,7 @@ from app.db.models import (
     Booking,
     BookingKind,
     BookingStatus,
+    BookingStatusNotifyRule,
     Client,
     ClientNotificationRule,
     ClientNotificationRuleKind,
@@ -210,3 +211,31 @@ def test_migration_replaces_exact_legacy_line(memory_db) -> None:
     assert int(rule.id) in report["replaced"]
     assert "Ответьте: 1 — ок" in custom.template
     assert int(custom.id) in report["manual"]
+
+
+def test_migration_active_status_uses_reply_hint_no_confirm(memory_db) -> None:
+    ensure_default_reply_digits(memory_db)
+    active = BookingStatusNotifyRule(
+        status=BookingStatus.ACTIVE.value,
+        template=f"Подтверждена.\n\n{LEGACY_REPLY_HINT_LINE}",
+        position=0,
+        is_enabled=True,
+    )
+    other = BookingStatusNotifyRule(
+        status=BookingStatus.PENDING_CONFIRMATION.value,
+        template=f"Ожидает.\n\n{LEGACY_REPLY_HINT_LINE}",
+        position=1,
+        is_enabled=True,
+    )
+    memory_db.add_all([active, other])
+    memory_db.commit()
+    report = migrate_replace_legacy_reply_hint(memory_db.connection())
+    memory_db.commit()
+    memory_db.refresh(active)
+    memory_db.refresh(other)
+    assert active.template.endswith("{{reply_hint_no_confirm}}")
+    assert LEGACY_REPLY_HINT_LINE not in active.template
+    assert other.template.endswith("{{reply_hint}}")
+    assert "{{reply_hint_no_confirm}}" not in other.template
+    assert int(active.id) in report["replaced"]
+    assert int(other.id) in report["replaced"]
