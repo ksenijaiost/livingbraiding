@@ -78,7 +78,7 @@ def test_palette_shows_tokens_not_dict_copy(db) -> None:
         assert 'data-copy="{{date}}"' in html
         assert 'data-copy="{{parking}}"' in html
         assert "built-in method" not in html
-        assert "booking_link" not in html
+        assert 'data-copy="{{booking_link}}"' not in html
         assert "Чтобы записаться снова, просто напишите нам здесь" in html
     finally:
         app.dependency_overrides.clear()

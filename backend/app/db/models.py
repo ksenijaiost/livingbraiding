@@ -459,7 +459,7 @@ class StudioTemplateVariable(Base):
 
 
 class ClientBotReplyTemplate(Base):
-    """Редактируемые ответы бота клиенту (1–5, подсказка, нет записи)."""
+    """Редактируемые ответы бота клиенту (подтверждение, перенос и т.д., подсказка)."""
 
     __tablename__ = "client_bot_reply_templates"
 
@@ -467,6 +467,19 @@ class ClientBotReplyTemplate(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class ClientReplyDigitAction(Base):
+    """Цифра ответа клиентки: confirm / reschedule / cancel / contact_admin / directions."""
+
+    __tablename__ = "client_reply_digit_actions"
+
+    action: Mapped[str] = mapped_column(String(32), primary_key=True)
+    digit: Mapped[str] = mapped_column(String(1), nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    hint_label: Mapped[str] = mapped_column(String(80), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class ClientNotificationSend(Base):

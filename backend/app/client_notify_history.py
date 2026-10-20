@@ -19,7 +19,7 @@ from app.display_time import format_naive_utc_datetime
 
 _CHANNEL = {"vk": "VK", "max": "Max", "telegram": "Telegram"}
 
-_PARSED = {
+_PARSED_FALLBACK = {
     "confirm": "1 — подтвердила",
     "reschedule": "2 — просит перенести",
     "cancel": "3 — просит отменить",
@@ -200,8 +200,9 @@ def _out_item(row: NotificationOutbox, tz_name: str, hours_by_rule: dict[int, fl
     }
 
 
-def _in_item(row: ClientInboundMessage, tz_name: str) -> dict:
-    parsed = _PARSED.get((row.parsed_action or "").strip(), "не распознано")
+def _in_item(row: ClientInboundMessage, tz_name: str, parsed_labels: dict[str, str]) -> dict:
+    key = (row.parsed_action or "").strip()
+    parsed = parsed_labels.get(key) or _PARSED_FALLBACK.get(key, "не распознано")
     return {
         "kind": "in",
         "seq": int(row.id or 0),
@@ -221,6 +222,8 @@ def _in_item(row: ClientInboundMessage, tz_name: str) -> dict:
 
 def booking_notify_timeline(db: Session, booking_id: int, *, tz_name: str) -> list[dict]:
     """Сообщения по брони: исходящие (включая «после визита» по визиту) и ответы клиентки."""
+    from app.client_reply_digits import parsed_action_labels
+
     visit_ids = list(
         db.scalars(select(Visit.id).where(Visit.booking_id == int(booking_id))).all()
     )
@@ -243,14 +246,17 @@ def booking_notify_timeline(db: Session, booking_id: int, *, tz_name: str) -> li
         ).all()
     )
     hours = _rule_hours(db, rows)
+    labels = parsed_action_labels(db)
     items = [_out_item(row, tz_name, hours) for row in rows]
-    items.extend(_in_item(row, tz_name) for row in inbound)
+    items.extend(_in_item(row, tz_name, labels) for row in inbound)
     items.sort(key=lambda item: (item["at"] or datetime.min, 0 if item["kind"] == "out" else 1, item["seq"]))
     return items
 
 
 def client_recent_messages(db: Session, client_id: int, *, tz_name: str, limit: int = 10) -> list[dict]:
     """Последние входящие и исходящие клиенту. Новые сверху."""
+    from app.client_reply_digits import parsed_action_labels
+
     lim = max(1, int(limit))
     rows = list(
         db.scalars(
@@ -273,7 +279,8 @@ def client_recent_messages(db: Session, client_id: int, *, tz_name: str, limit: 
         ).all()
     )
     hours = _rule_hours(db, rows)
+    labels = parsed_action_labels(db)
     items = [_out_item(row, tz_name, hours) for row in rows]
-    items.extend(_in_item(row, tz_name) for row in inbound)
+    items.extend(_in_item(row, tz_name, labels) for row in inbound)
     items.sort(key=lambda item: (item["at"] or datetime.min, item["seq"]), reverse=True)
     return items[:lim]

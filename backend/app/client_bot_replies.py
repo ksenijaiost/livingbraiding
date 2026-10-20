@@ -31,16 +31,16 @@ BOT_REPLY_DEFAULTS: dict[str, str] = {
 }
 
 BOT_REPLY_LABELS: tuple[tuple[str, str], ...] = (
-    ("confirm_1", "Подтверждение (1)"),
-    ("reschedule_2", "Перенос (2)"),
-    ("cancel_3", "Отмена (3)"),
-    ("contact_vk", "Связь с админом — VK (4)"),
-    ("contact_telegram", "Связь с админом — Telegram (4)"),
-    ("contact_max", "Связь с админом — Max (4)"),
-    ("directions_5", "Как добраться (5)"),
-    ("hint", "Непонятный ответ"),
+    ("confirm_1", "Подтверждение"),
+    ("reschedule_2", "Перенос"),
+    ("cancel_3", "Отмена"),
+    ("contact_vk", "Связь с админом — VK"),
+    ("contact_telegram", "Связь с админом — Telegram"),
+    ("contact_max", "Связь с админом — Max"),
+    ("directions_5", "Как добраться"),
+    ("hint", "Непонятный ответ (если не используете автоподсказку)"),
     ("no_booking", "Нет активной записи"),
-    ("no_booking_reschedule", "Нет активной записи при переносе (2)"),
+    ("no_booking_reschedule", "Нет активной записи при переносе"),
 )
 
 _CONTACT_KEY = {
@@ -93,8 +93,34 @@ def contact_reply_key(channel: str) -> str:
 
 
 def bot_replies_for_ui(db: Session) -> list[dict[str, str]]:
+    from app.client_reply_digits import (
+        ACTION_CANCEL,
+        ACTION_CONFIRM,
+        ACTION_CONTACT,
+        ACTION_DIRECTIONS,
+        ACTION_RESCHEDULE,
+        digit_for_action,
+        ensure_default_reply_digits,
+    )
+
     ensure_bot_reply_templates(db)
-    return [{"key": key, "label": label, "body": bot_reply_body(db, key)} for key, label in BOT_REPLY_LABELS]
+    ensure_default_reply_digits(db)
+    digit_suffix = {
+        "confirm_1": digit_for_action(db, ACTION_CONFIRM),
+        "reschedule_2": digit_for_action(db, ACTION_RESCHEDULE),
+        "cancel_3": digit_for_action(db, ACTION_CANCEL),
+        "contact_vk": digit_for_action(db, ACTION_CONTACT),
+        "contact_telegram": digit_for_action(db, ACTION_CONTACT),
+        "contact_max": digit_for_action(db, ACTION_CONTACT),
+        "directions_5": digit_for_action(db, ACTION_DIRECTIONS),
+        "no_booking_reschedule": digit_for_action(db, ACTION_RESCHEDULE),
+    }
+    out: list[dict[str, str]] = []
+    for key, label in BOT_REPLY_LABELS:
+        digit = digit_suffix.get(key)
+        shown = f"{label} ({digit})" if digit else label
+        out.append({"key": key, "label": shown, "body": bot_reply_body(db, key)})
+    return out
 
 
 def save_bot_reply_templates(db: Session, values: dict[str, str], *, user_id: int | None) -> None:

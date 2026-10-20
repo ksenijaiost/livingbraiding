@@ -23,7 +23,18 @@ KIND_VIDEO = "video"
 
 # Системные переменные шаблона «до записи» — свои ключи с ними не пересекаются.
 SYSTEM_TEMPLATE_KEYS = frozenset(
-    {"date", "time", "datetime", "date_text", "weekday", "name", "services", "masters"}
+    {
+        "date",
+        "time",
+        "datetime",
+        "date_text",
+        "weekday",
+        "name",
+        "services",
+        "masters",
+        "reply_hint",
+        "reply_hint_no_confirm",
+    }
 )
 
 SYSTEM_TEMPLATE_PALETTE: tuple[tuple[str, str], ...] = (
@@ -35,6 +46,8 @@ SYSTEM_TEMPLATE_PALETTE: tuple[tuple[str, str], ...] = (
     ("name", "имя клиента"),
     ("services", "услуги с новой строки и маркером"),
     ("masters", "мастера через запятую"),
+    ("reply_hint", "подсказка с цифрами ответов (из настроек)"),
+    ("reply_hint_no_confirm", "то же без «подтвердить»"),
 )
 
 # key, название в UI, kind

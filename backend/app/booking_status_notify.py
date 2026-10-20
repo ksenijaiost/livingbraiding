@@ -41,11 +41,11 @@ EVENT_CLIENT_BOOKING_STATUS = "client_booking_status"
 
 DEFAULT_CONFIRMED_TEMPLATE = (
     "Здравствуйте, {{name}}! Ваша запись подтверждена: {{date_text}} в {{time}}, "
-    "{{services}}. Ждём вас по адресу: {{address}}"
+    "{{services}}. Ждём вас по адресу: {{address}}\n\n{{reply_hint_no_confirm}}"
 )
 DEFAULT_STATUS_TEMPLATE = (
     "Здравствуйте, {{name}}! {{date_text}} в {{time}}, {{services}}. "
-    "Ждём вас по адресу: {{address}}"
+    "Ждём вас по адресу: {{address}}\n\n{{reply_hint}}"
 )
 
 SKIP_PAST = "время записи уже прошло"
@@ -103,6 +103,8 @@ def ensure_default_status_rules(db: Session) -> bool:
 
 
 def status_rules_for_ui(db: Session) -> dict[str, Any]:
+    from app.client_reply_digits import template_has_manual_reply_digits
+
     rows = list_status_rules(db)
     used = {_status_value(row.status) for row in rows}
     ui_rows: list[dict[str, Any]] = []
@@ -122,6 +124,7 @@ def status_rules_for_ui(db: Session) -> dict[str, Any]:
                 "attach_memo_before": bool(row.attach_memo_before),
                 "position": int(row.position),
                 "status_options": options,
+                "manual_digits_warning": template_has_manual_reply_digits(row.template),
             }
         )
     free = [item for item in status_choices() if item["value"] not in used]

@@ -451,10 +451,15 @@ def _client_notifications_page(
     info: str | None = None,
     admin_link_code: str | None = None,
     memo_delete: dict | None = None,
+    digit_field_errors: dict[str, str] | None = None,
+    reply_digits_form: list[dict] | None = None,
 ):
     # Дефолты только при совсем пустой таблице (первый заход), не после ручной очистки.
+    from app.client_reply_digits import ensure_default_reply_digits, reply_digits_for_ui
+
     created_defaults = ensure_default_rules(db)
     created_defaults = ensure_default_status_rules(db) or created_defaults
+    created_defaults = ensure_default_reply_digits(db) or created_defaults
     if created_defaults:
         db.commit()
     rules = rules_for_ui(db)
@@ -490,6 +495,8 @@ def _client_notifications_page(
             booking_link_warning=booking_link_still_used(db),
             video_max_mb=get_settings().studio_route_video_max_mb,
             bot_replies=bot_replies_for_ui(db),
+            reply_digits=reply_digits_form if reply_digits_form is not None else reply_digits_for_ui(db),
+            digit_field_errors=digit_field_errors or {},
             care_memos=care_memos_for_ui(db),
             memo_delete=memo_delete,
             error=error,
@@ -537,6 +544,12 @@ def admin_client_notifications(
         info = "Видео удалено."
     elif msg == "bot_replies":
         info = "Тексты ответов бота сохранены."
+    elif msg == "digits_saved":
+        info = "Цифры ответов сохранены."
+    elif msg == "digits_changed":
+        from app.client_reply_digits import DIGITS_CHANGED_WARNING
+
+        info = DIGITS_CHANGED_WARNING
     elif msg == "memo_saved":
         info = "Памятка сохранена."
     elif msg == "memo_deleted":
@@ -1019,6 +1032,62 @@ async def admin_client_notifications_variables_delete(
         db.rollback()
         return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
     return RedirectResponse(url="/clients/notifications?msg=var_deleted", status_code=303)
+
+
+@router.post("/notifications/reply-digits")
+async def admin_client_notifications_reply_digits(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.client_reply_digits import (
+        ACTION_ORDER,
+        ACTION_TITLES,
+        DigitConflictError,
+        DEFAULT_HINT_LABELS,
+        save_reply_digits_from_form,
+    )
+
+    form = await request.form()
+    actions = list(ACTION_ORDER)
+    digits = [form.get(f"digit_{action}") for action in actions]
+    enabled = ["1" if form.get(f"digit_enabled_{action}") else "0" for action in actions]
+    labels = [form.get(f"digit_label_{action}") for action in actions]
+    try:
+        changed = save_reply_digits_from_form(
+            db,
+            actions=actions,
+            digits=digits,
+            enabled_flags=enabled,
+            labels=labels,
+        )
+        db.commit()
+    except DigitConflictError as e:
+        db.rollback()
+        form_rows = []
+        for action, digit, en, label in zip(actions, digits, enabled, labels, strict=True):
+            form_rows.append(
+                {
+                    "action": action,
+                    "title": ACTION_TITLES.get(action, action),
+                    "digit": str(digit or ""),
+                    "is_enabled": str(en) == "1",
+                    "hint_label": str(label or DEFAULT_HINT_LABELS.get(action, "")),
+                }
+            )
+        return _client_notifications_page(
+            request,
+            current_user=current_user,
+            db=db,
+            error=str(e),
+            digit_field_errors=e.field_errors,
+            reply_digits_form=form_rows,
+        )
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    msg = "digits_changed" if changed else "digits_saved"
+    return RedirectResponse(url=f"/clients/notifications?msg={msg}", status_code=303)
 
 
 @router.post("/notifications/bot-replies")

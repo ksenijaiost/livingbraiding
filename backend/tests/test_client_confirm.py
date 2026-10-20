@@ -125,8 +125,10 @@ def test_normalize_reply() -> None:
     assert normalize_client_reply("2") == "2"
     assert normalize_client_reply("4") == "4"
     assert normalize_client_reply("5") == "5"
-    assert normalize_client_reply("6") is None
+    assert normalize_client_reply("6") == "6"
+    assert normalize_client_reply("0") == "0"
     assert normalize_client_reply("привет") is None
+    assert normalize_client_reply("12") is None
 
 
 def test_render_with_services_marker() -> None:

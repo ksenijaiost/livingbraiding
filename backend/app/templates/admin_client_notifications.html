@@ -65,6 +65,11 @@
                   </td>
                   <td>
                     <textarea name="status_template" rows="5" style="width:100%; min-width:16rem;" required>{{ r.template }}</textarea>
+                    {% if r.manual_digits_warning %}
+                      <p class="muted" style="color:#92400e;font-size:12px;margin:4px 0 0;">
+                        В тексте вписаны цифры вручную, лучше использовать <code>{{ "{{reply_hint}}" }}</code>
+                      </p>
+                    {% endif %}
                   </td>
                   <td style="text-align:center;">
                     <input type="checkbox" name="status_enabled_{{ r.id }}" value="1"
@@ -120,6 +125,11 @@
                   </td>
                   <td>
                     <textarea name="before_template" rows="5" style="width:100%; min-width:16rem;" required>{{ r.template }}</textarea>
+                    {% if r.manual_digits_warning %}
+                      <p class="muted" style="color:#92400e;font-size:12px;margin:4px 0 0;">
+                        В тексте вписаны цифры вручную, лучше использовать <code>{{ "{{reply_hint}}" }}</code>
+                      </p>
+                    {% endif %}
                   </td>
                   <td style="text-align:center;">
                     <input type="checkbox" name="before_enabled_{{ r.id }}" value="1"
@@ -319,8 +329,52 @@
     </div>
 
     <h4 style="margin:22px 0 8px; font-size:1rem;">Ответы бота</h4>
+    <h5 style="margin:8px 0; font-size:0.95rem;">Цифры ответов</h5>
     <p class="muted" style="font-size:12px; margin:0 0 10px;">
-      Тексты, которые бот пишет клиенту в ответ на цифры. Можно вставлять переменные студии.
+      Какая цифра какое действие вызывает. Среди включённых цифры не должны совпадать.
+      Подсказка <code>{{ "{{reply_hint}}" }}</code> собирается из включённых строк.
+    </p>
+    <form method="post" action="/clients/notifications/reply-digits" style="margin-bottom:16px;"
+          onsubmit="this.querySelector('button[type=submit]').disabled=true;">
+      <div class="lb-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Действие</th>
+              <th class="lb-nowrap">Цифра</th>
+              <th class="lb-nowrap">Вкл.</th>
+              <th>Подпись в подсказке</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in reply_digits %}
+              <tr>
+                <td>{{ row.title }}</td>
+                <td>
+                  <input name="digit_{{ row.action }}" value="{{ row.digit }}" maxlength="1" style="width:3rem;" required />
+                  {% if digit_field_errors.get(row.action) %}
+                    <p class="error" style="margin:4px 0 0; font-size:12px;">{{ digit_field_errors[row.action] }}</p>
+                  {% endif %}
+                </td>
+                <td style="text-align:center;">
+                  <input type="checkbox" name="digit_enabled_{{ row.action }}" value="1"
+                         {% if row.is_enabled %}checked{% endif %} />
+                </td>
+                <td>
+                  <input name="digit_label_{{ row.action }}" value="{{ row.hint_label }}" maxlength="80" style="width:100%; min-width:12rem;" required />
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div style="margin-top:10px;">
+        <button type="submit">Сохранить цифры</button>
+      </div>
+    </form>
+
+    <p class="muted" style="font-size:12px; margin:0 0 10px;">
+      Тексты, которые бот пишет клиенту после действия. Можно вставлять переменные студии.
     </p>
     <form method="post" action="/clients/notifications/bot-replies" style="margin-bottom:8px;"
           onsubmit="this.querySelector('button[type=submit]').disabled=true;">

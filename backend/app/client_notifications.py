@@ -41,7 +41,7 @@ DEFAULT_BEFORE_TEMPLATE = (
     "Напоминаем: {{date_text}} ({{weekday}}) в {{time}} вы записаны:\n"
     "{{services}}\n"
     "Мастер: {{masters}}\n\n"
-    "Ответьте: 1 — подтвердить, 2 — перенести, 3 — отменить, 4 — написать администратору, 5 — как добраться."
+    "{{reply_hint}}"
 )
 DEFAULT_AFTER_TEMPLATE = (
     "Спасибо, что были у нас, {{name}}! 💛\n"
@@ -201,6 +201,10 @@ def render_client_notify_template(
             "services": _services_block(booking, marker),
             "masters": _masters_csv(booking),
         }
+        if db is not None:
+            from app.client_reply_digits import reply_hint_system_values
+
+            values.update(reply_hint_system_values(db))
         if system_keys is not None:
             values = {k: values[k] for k in system_keys if k in values}
     studio: dict[str, str] = {}
@@ -508,6 +512,8 @@ def save_rules_from_form(
 
 
 def rules_for_ui(db: Session) -> dict[str, list[dict[str, Any]]]:
+    from app.client_reply_digits import template_has_manual_reply_digits
+
     before = list_rules(db, KIND_BEFORE)
     after = list_rules(db, KIND_AFTER)
     return {
@@ -518,6 +524,7 @@ def rules_for_ui(db: Session) -> dict[str, list[dict[str, Any]]]:
                 "template": r.template,
                 "is_enabled": bool(r.is_enabled),
                 "position": int(r.position),
+                "manual_digits_warning": template_has_manual_reply_digits(r.template),
             }
             for r in before
         ],

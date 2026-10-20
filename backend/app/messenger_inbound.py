@@ -1,4 +1,4 @@
-"""Входящие сообщения клиентов: 1–5, выбор брони по последнему напоминанию."""
+"""Входящие сообщения клиентов: цифры из настроек, выбор брони по последнему напоминанию."""
 
 from __future__ import annotations
 
@@ -18,6 +18,17 @@ from app.client_bot_replies import (
     contact_reply_key,
     render_bot_reply,
     vk_community_dialog_url,
+)
+from app.client_reply_digits import (
+    ACTION_CANCEL,
+    ACTION_CONFIRM,
+    ACTION_CONTACT,
+    ACTION_DIRECTIONS,
+    ACTION_RESCHEDULE,
+    LEGACY_REPLY_HINT_LINE,
+    action_for_digit,
+    build_reply_hint,
+    digit_for_action,
 )
 from app.client_notifications import _masters_csv, _services_block, get_services_marker
 from app.consultation_booking import OPEN_BOOKING_STATUSES
@@ -45,7 +56,7 @@ EVENT_BOOKING_CLIENT_RESCHEDULE_REQUEST = "booking_client_reschedule_request"
 EVENT_CLIENT_CONTACT_REQUEST = "client_contact_request"
 EVENT_CLIENT_BOT_REPLY = "client_bot_reply"
 
-MSG_HINT = BOT_REPLY_DEFAULTS["hint"]
+MSG_HINT = LEGACY_REPLY_HINT_LINE
 MSG_NO_BOOKING = BOT_REPLY_DEFAULTS["no_booking"]
 MSG_NO_BOOKING_RESCHEDULE = BOT_REPLY_DEFAULTS["no_booking_reschedule"]
 MSG_ALREADY_CONFIRMED = "Запись уже подтверждена"
@@ -53,20 +64,12 @@ MSG_CONFIRMED = BOT_REPLY_DEFAULTS["confirm_1"]
 MSG_CANCEL_REQUESTED = BOT_REPLY_DEFAULTS["cancel_3"]
 MSG_RESCHEDULE_REQUESTED = BOT_REPLY_DEFAULTS["reschedule_2"]
 
-_REPLY_RE = re.compile(r"^\s*([1-5])\s*[.!]?\s*$")
+_REPLY_RE = re.compile(r"^\s*([0-9])\s*[.!]?\s*$")
 
 _CHANNEL_LABEL = {
     NotificationChannel.VK.value: "VK",
     NotificationChannel.MAX.value: "Max",
     NotificationChannel.TELEGRAM.value: "Telegram",
-}
-
-_PARSED_BY_DIGIT = {
-    "1": "confirm",
-    "2": "reschedule",
-    "3": "cancel",
-    "4": "contact_admin",
-    "5": "directions",
 }
 
 
@@ -161,7 +164,7 @@ def _save_bot_reply_outbox(
 
 
 def normalize_client_reply(text: str | None) -> str | None:
-    """Вернуть '1'..'5' или None."""
+    """Вернуть одну цифру '0'..'9' или None."""
     m = _REPLY_RE.match(text or "")
     if not m:
         return None
@@ -571,8 +574,9 @@ def handle_client_text(
         )
     reply = normalize_client_reply(text)
     ch = channel.strip().lower()
-    parsed = _PARSED_BY_DIGIT.get(reply or "", "unknown")
-    if reply is None:
+    action = action_for_digit(db, reply) if reply is not None else None
+    parsed = action or "unknown"
+    if reply is None or action is None:
         return _log_client_inbound(
             db,
             client_id=int(client.id),
@@ -581,12 +585,12 @@ def handle_client_text(
             messenger_id=messenger_id,
             text=text,
             parsed_action="unknown",
-            answer=render_bot_reply(db, "hint"),
+            answer=build_reply_hint(db),
             reply_key="hint",
         )
 
-    # 4 и 5 не требуют активной брони и к записи не привязываются.
-    if reply == "4":
+    # Связь с админом и «как добраться» не требуют активной брони.
+    if action == ACTION_CONTACT:
         try:
             _enqueue_contact_admin(db, client, channel=ch, messenger_id=int(messenger_id))
         except Exception:
@@ -599,11 +603,11 @@ def handle_client_text(
             channel=ch,
             messenger_id=messenger_id,
             text=text,
-            parsed_action="contact_admin",
+            parsed_action=ACTION_CONTACT,
             answer=render_bot_reply(db, key),
             reply_key=key,
         )
-    if reply == "5":
+    if action == ACTION_DIRECTIONS:
         return _log_client_inbound(
             db,
             client_id=int(client.id),
@@ -611,15 +615,18 @@ def handle_client_text(
             channel=ch,
             messenger_id=messenger_id,
             text=text,
-            parsed_action="directions",
+            parsed_action=ACTION_DIRECTIONS,
             answer=render_bot_reply(db, "directions_5"),
             reply_key="directions_5",
         )
 
     booking = find_booking_for_client_reply(db, client)
     if booking is None:
-        if reply == "2":
+        if action == ACTION_RESCHEDULE:
+            contact_digit = digit_for_action(db, ACTION_CONTACT, only_enabled=True) or "4"
             answer = render_bot_reply(db, "no_booking_reschedule")
+            if "4" in answer and contact_digit != "4":
+                answer = answer.replace("4", contact_digit, 1)
             key = "no_booking_reschedule"
         else:
             answer = render_bot_reply(db, "no_booking")
@@ -639,7 +646,7 @@ def handle_client_text(
     booking = _load_booking_graph(db, booking)
     now = utcnow_naive()
     booking_id = int(booking.id)
-    if reply == "1":
+    if action == ACTION_CONFIRM:
         if booking.client_confirmed_at is not None:
             return _log_client_inbound(
                 db,
@@ -648,7 +655,7 @@ def handle_client_text(
                 channel=ch,
                 messenger_id=messenger_id,
                 text=text,
-                parsed_action="confirm",
+                parsed_action=ACTION_CONFIRM,
                 answer=MSG_ALREADY_CONFIRMED,
                 reply_key="already_confirmed",
             )
@@ -662,11 +669,11 @@ def handle_client_text(
             channel=ch,
             messenger_id=messenger_id,
             text=text,
-            parsed_action="confirm",
+            parsed_action=ACTION_CONFIRM,
             answer=render_bot_reply(db, "confirm_1"),
             reply_key="confirm_1",
         )
-    if reply == "2":
+    if action == ACTION_RESCHEDULE:
         repeat = booking.client_reschedule_requested_at is not None
         booking.client_reschedule_requested_at = now
         booking.client_reschedule_requested_via = ch
@@ -685,12 +692,12 @@ def handle_client_text(
             channel=ch,
             messenger_id=messenger_id,
             text=text,
-            parsed_action="reschedule",
+            parsed_action=ACTION_RESCHEDULE,
             answer=render_bot_reply(db, "reschedule_2"),
             reply_key="reschedule_2",
         )
 
-    # reply == "3" — логика отмены как раньше, текст из настройки.
+    # cancel — логика отмены как раньше, текст из настройки.
     booking.client_cancel_requested_at = now
     booking.client_cancel_requested_via = ch
     db.flush()
@@ -705,7 +712,7 @@ def handle_client_text(
         channel=ch,
         messenger_id=messenger_id,
         text=text,
-        parsed_action="cancel",
+        parsed_action=ACTION_CANCEL,
         answer=render_bot_reply(db, "cancel_3"),
         reply_key="cancel_3",
     )
