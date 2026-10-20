@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.admin_chat import list_admin_chat_targets
+from app.booking_status_notify import EVENT_CLIENT_BOOKING_STATUS
 from app.client_booking_notify import EVENT_CLIENT_BOOKING_REMINDER
 from app.client_bot_replies import (
     BOT_REPLY_DEFAULTS,
@@ -202,13 +203,15 @@ def reply_to_messenger(channel: str, messenger_id: int, text: str) -> None:
 
 
 def find_booking_for_client_reply(db: Session, client: Client) -> Booking | None:
-    """Бронь по последнему client_booking_reminder, начало ещё в будущем."""
+    """Бронь по последнему напоминанию или «Информация о брони», начало ещё в будущем."""
     now = utcnow_naive()
     send = db.scalar(
         select(ClientNotificationSend)
         .where(
             ClientNotificationSend.client_id == int(client.id),
-            ClientNotificationSend.event_type == EVENT_CLIENT_BOOKING_REMINDER,
+            ClientNotificationSend.event_type.in_(
+                (EVENT_CLIENT_BOOKING_REMINDER, EVENT_CLIENT_BOOKING_STATUS)
+            ),
         )
         .order_by(ClientNotificationSend.sent_at.desc(), ClientNotificationSend.id.desc())
         .limit(1)

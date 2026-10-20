@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
+from app.booking_status_notify import EVENT_CLIENT_BOOKING_STATUS
 from app.client_booking_notify import EVENT_CLIENT_BOOKING_REMINDER
 from app.client_bot_replies import render_bot_reply, vk_community_dialog_url
 from app.client_notifications import render_client_notify_template
@@ -223,6 +224,29 @@ def test_replies_2_4_5_via_webhooks(memory_db, monkeypatch) -> None:
     assert any("Напишите нам" in t for t in sent)
     assert any("Как добраться" in t for t in sent)
     assert vk_community_dialog_url(1001) == "https://vk.com/gim555?sel=1001"
+
+
+def test_reply_2_after_status_info_without_reminder(memory_db) -> None:
+    """Ответ «2» на «Информация о брони» без напоминаний находит бронь."""
+    planned = utcnow_naive() + timedelta(hours=20)
+    _user, _client, booking = _seed(memory_db, planned=planned, with_send=False)
+    memory_db.add(
+        ClientNotificationSend(
+            client_id=booking.client_id,
+            booking_id=booking.id,
+            channel="vk",
+            event_type=EVENT_CLIENT_BOOKING_STATUS,
+            target_id=1001,
+            sent_at=utcnow_naive(),
+        )
+    )
+    memory_db.commit()
+    reply = handle_client_text(memory_db, channel="vk", messenger_id=1001, text="2")
+    memory_db.commit()
+    memory_db.refresh(booking)
+    assert reply == MSG_RESCHEDULE_REQUESTED
+    assert booking.client_reschedule_requested_via == "vk"
+    assert booking.client_reschedule_requested_at is not None
 
 
 def test_render_reply_templates_and_after_name(memory_db) -> None:

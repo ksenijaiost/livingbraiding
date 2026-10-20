@@ -659,6 +659,7 @@ def _record_client_send_if_needed(db: Session, row: NotificationOutbox) -> None:
     if row.event_type not in (
         "client_booking_reminder",
         "client_after_booking",
+        "client_booking_status",
     ):
         return
     payload = _parse_payload(row)
