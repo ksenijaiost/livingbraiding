@@ -30,11 +30,13 @@ from app.db.models import (
     BookingStatus,
     BookingStatusNotifyRule,
     Client,
+    ClientNotificationSend,
     NotificationOutbox,
     NotificationOutboxStatus,
     User,
     UserRole,
 )
+from app.time_utils import utcnow_naive
 from app.db.session import get_db
 from app.main import app
 
@@ -170,6 +172,55 @@ def test_no_promo_does_not_block_and_history_labels_skip() -> None:
     assert "Информация о брони: ✔️ подтверждена" in labels
     skip = next(item for item in items if item["status_label"] == SKIP_ALREADY)
     assert skip["channel_label"] == "—"
+
+
+def test_status_history_not_doubled_by_send_journal_or_retoggle() -> None:
+    """История брони — только outbox. ClientNotificationSend и повтор статуса не дублируют."""
+    db = _session()
+    ensure_default_status_rules(db)
+    db.commit()
+    booking = _make(db, when=datetime(2026, 12, 8, 8, 0), chat=88)
+    booking.status = BookingStatus.ACTIVE
+    db.commit()
+
+    pending = [row for row in _rows(db, booking.id) if row.status == NotificationOutboxStatus.PENDING]
+    assert len(pending) == 1
+    out = pending[0]
+    timeline = booking_notify_timeline(db, booking.id, tz_name="Asia/Novosibirsk")
+    status_items = [item for item in timeline if item["type_label"].startswith("Информация о брони")]
+    assert len(status_items) == 1
+
+    # Как после успешной отправки воркером: журнал sends не попадает в таймлайн брони.
+    db.add(
+        ClientNotificationSend(
+            client_id=int(booking.client_id),
+            booking_id=int(booking.id),
+            channel="telegram",
+            event_type=EVENT_CLIENT_BOOKING_STATUS,
+            outbox_id=int(out.id),
+            target_id=88,
+            sent_at=utcnow_naive(),
+        )
+    )
+    db.commit()
+    timeline = booking_notify_timeline(db, booking.id, tz_name="Asia/Novosibirsk")
+    status_items = [item for item in timeline if item["type_label"].startswith("Информация о брони")]
+    assert len(status_items) == 1
+
+    for _ in range(3):
+        booking.status = BookingStatus.PENDING_CONFIRMATION
+        db.commit()
+        booking.status = BookingStatus.ACTIVE
+        db.commit()
+
+    all_rows = _rows(db, booking.id)
+    pending = [row for row in all_rows if row.status == NotificationOutboxStatus.PENDING]
+    skips = [row for row in all_rows if row.error == SKIP_ALREADY]
+    assert len(pending) == 1
+    assert len(skips) == 1
+    timeline = booking_notify_timeline(db, booking.id, tz_name="Asia/Novosibirsk")
+    status_items = [item for item in timeline if item["type_label"].startswith("Информация о брони")]
+    assert len(status_items) == 2
 
 
 def test_memo_before_attached_from_booking(monkeypatch) -> None:
