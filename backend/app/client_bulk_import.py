@@ -36,6 +36,8 @@ _ALLOWED_KEYS = frozenset(
         "vk",
         "instagram",
         "other_contact",
+        "contact_client_id",
+        "contact_relation",
         "birth_day",
         "birth_month",
         "birth_year",
@@ -202,8 +204,17 @@ def import_single_client_row(
         other_contact = strip_or_none(_text(row, "other_contact"), 200)
         if normalized:
             phone_preview = format_phone(normalized)
-        if not client_has_any_contact(phone_raw, telegram, vk, instagram, other_contact):
-            raise ValueError("Нужен хотя бы один контакт: телефон или любая из соцсетей.")
+        contact_client_id_raw = row.get("contact_client_id")
+        contact_relation_raw = row.get("contact_relation")
+        if not client_has_any_contact(
+            phone_raw,
+            telegram,
+            vk,
+            instagram,
+            other_contact,
+            contact_client_id=contact_client_id_raw,
+        ):
+            raise ValueError("Нужен хотя бы один контакт: телефон, соцсеть или контактное лицо.")
         birth_day, birth_month, birth_year = parse_birth_fields(
             _birth_raw(row, "birth_day"),
             _birth_raw(row, "birth_month"),
@@ -238,7 +249,17 @@ def import_single_client_row(
         )
         apply_client_import_marks(client, row)
         try:
+            from app.client_contact import validate_and_apply_contact
+
             apply_client_phone(client, phone_raw, db)
+            validate_and_apply_contact(
+                db,
+                client,
+                contact_client_id_raw=contact_client_id_raw,
+                contact_relation_raw=contact_relation_raw,
+                phone_normalized=client.phone_normalized,
+                is_create=True,
+            )
             db.add(client)
             db.flush()
             db.commit()

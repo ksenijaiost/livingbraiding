@@ -90,8 +90,15 @@ def _client_tel(client: Any) -> str:
     return tel_href(getattr(client, "phone_normalized", None)) or ""
 
 
+def _client_phone_or_via_html(client: Any):
+    from app.client_contact import client_phone_or_via_html
+
+    return client_phone_or_via_html(client)
+
+
 templates.env.globals["format_client_phone"] = _format_client_phone
 templates.env.globals["client_tel"] = _client_tel
+templates.env.globals["client_phone_or_via_html"] = _client_phone_or_via_html
 templates.env.globals["format_price_integer_rub"] = format_price_integer_rub
 templates.env.globals["format_naive_utc_datetime"] = format_naive_utc_datetime
 templates.env.globals["format_planned_service_start_local"] = format_planned_service_start_local

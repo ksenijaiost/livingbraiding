@@ -1617,6 +1617,13 @@ def suggest_bookings_for_work_order(db: Session, q: str, *, limit: int = 30) -> 
         phone_digits = phone_search_digits(needle)
         if phone_digits:
             conds.append(Client.phone_normalized.like(f"%{phone_digits}%"))
+            owner_ids = list(
+                db.scalars(
+                    select(Client.id).where(Client.phone_normalized.like(f"%{phone_digits}%")).limit(200)
+                ).all()
+            )
+            if owner_ids:
+                conds.append(Client.contact_client_id.in_(owner_ids))
         stmt = stmt.join(Client, Client.id == Booking.client_id).where(or_(*conds))
 
     rows = list(db.scalars(stmt).all())
@@ -2927,7 +2934,7 @@ def admin_booking_detail(
         select(Booking)
         .where(Booking.id == booking_id)
         .options(
-            selectinload(Booking.client),
+            selectinload(Booking.client).selectinload(Client.contact_client),
             selectinload(Booking.created_by_user),
             selectinload(Booking.updated_by_user),
             selectinload(Booking.cancelled_by_user),

@@ -19,31 +19,57 @@ router = APIRouter()
 
 
 def _client_suggest_items(db: Session, q: str) -> list[dict[str, str | int | bool]]:
+    from app.client_contact import expand_phone_search_clients, suggest_hint_for_client
+    from sqlalchemy.orm import selectinload
+
     needle = (q or "").strip()
-    stmt = select(Client).order_by(Client.name.asc()).limit(30)
+    stmt = select(Client).options(selectinload(Client.contact_client)).order_by(Client.name.asc()).limit(30)
     if needle:
         conds = [Client.name.ilike(f"%{needle}%")]
         phone_digits = phone_search_digits(needle)
+        owners: list[Client] = []
         if phone_digits:
+            owners = list(
+                db.scalars(
+                    select(Client)
+                    .where(Client.phone_normalized.like(f"%{phone_digits}%"))
+                    .order_by(Client.name.asc())
+                    .limit(30)
+                ).all()
+            )
             conds.append(Client.phone_normalized.like(f"%{phone_digits}%"))
-        stmt = select(Client).where(or_(*conds)).order_by(Client.name.asc()).limit(30)
-    rows = list(db.scalars(stmt).all())
+            if owners:
+                conds.append(Client.contact_client_id.in_([int(o.id) for o in owners]))
+        rows = list(db.scalars(stmt.where(or_(*conds))).all())
+        if phone_digits and owners:
+            rows = expand_phone_search_clients(db, owners)
+            name_rows = list(
+                db.scalars(
+                    select(Client)
+                    .where(Client.name.ilike(f"%{needle}%"))
+                    .options(selectinload(Client.contact_client))
+                    .order_by(Client.name.asc())
+                    .limit(30)
+                ).all()
+            )
+            seen = {int(c.id) for c in rows}
+            for c in name_rows:
+                if int(c.id) not in seen:
+                    rows.append(c)
+                    seen.add(int(c.id))
+            rows = rows[:30]
+    else:
+        rows = list(db.scalars(stmt).all())
     clients: list[dict[str, str | int | bool]] = []
     for c in rows:
-        parts: list[str] = []
-        shown_phone = display_phone(c.phone_normalized, c.phone)
-        if shown_phone:
-            parts.append(shown_phone)
-        if c.telegram:
-            parts.append(f"TG {c.telegram}")
-        if c.vk:
-            parts.append(f"VK {c.vk}")
-        if c.instagram:
-            parts.append(f"IG {c.instagram}")
-        if c.other_contact:
-            parts.append((c.other_contact or "")[:48])
-        hint = " · ".join(parts) if parts else "без контакта"
-        clients.append({"id": c.id, "name": c.name, "hint": hint, "is_draft": not c.is_confirmed})
+        clients.append(
+            {
+                "id": c.id,
+                "name": c.name,
+                "hint": suggest_hint_for_client(c),
+                "is_draft": not c.is_confirmed,
+            }
+        )
     return clients
 
 

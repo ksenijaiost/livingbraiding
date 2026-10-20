@@ -62,6 +62,8 @@ AUDIT_FIELD_LABELS: dict[str, str] = {
     "username": "Логин",
     "display_name": "Имя",
     "phone": "Телефон",
+    "contact_client_id": "Контактное лицо",
+    "contact_relation": "Кем приходится",
     "phone_normalized": "Телефон (нормализованный)",
     "roles": "Роли",
     "notify_enabled": "Уведомления включены",

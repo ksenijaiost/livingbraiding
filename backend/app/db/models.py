@@ -373,15 +373,57 @@ class Client(Base):
     birth_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Snapshot at creation: e.g. "Анна (MASTER)" — set by app from current user display_name + role
     created_by_label: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    # Клиент без своего телефона может ссылаться на контактное лицо (мама и т.п.).
+    contact_client_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clients.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    contact_relation: Mapped[str | None] = mapped_column(String(50), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    contact_client: Mapped["Client | None"] = relationship(
+        "Client",
+        remote_side="Client.id",
+        foreign_keys=[contact_client_id],
+        back_populates="contact_for_clients",
+    )
+    contact_for_clients: Mapped[list["Client"]] = relationship(
+        "Client",
+        foreign_keys=[contact_client_id],
+        back_populates="contact_client",
+    )
 
     thermo_templates: Mapped[list["ClientThermoTemplate"]] = relationship(
         back_populates="client",
         order_by="ClientThermoTemplate.id",
     )
+
+
+class ClientMessengerPending(Base):
+    """Ожидание выбора брони или закреплённая бронь после выбора (ответы контактного лица)."""
+
+    __tablename__ = "client_messenger_pending"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[int] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    messenger_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # await_booking_choice | selected_booking
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    booking_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+
+    client: Mapped["Client"] = relationship(foreign_keys=[client_id])
+    booking: Mapped["Booking | None"] = relationship(foreign_keys=[booking_id])
 
 
 class ClientNotificationRuleKind(str, enum.Enum):

@@ -69,6 +69,13 @@ def client_db_to_form_dict(client: Client) -> dict[str, str]:
         "interested_in_training": "1" if getattr(client, "interested_in_training", False) else "0",
         "is_student": "1" if getattr(client, "is_student", False) else "0",
         "is_model": "1" if getattr(client, "is_model", False) else "0",
+        "contact_client_id": str(client.contact_client_id) if getattr(client, "contact_client_id", None) else "",
+        "contact_relation": getattr(client, "contact_relation", None) or "",
+        "contact_client_name": (
+            (client.contact_client.name or "").strip()
+            if getattr(client, "contact_client", None) is not None
+            else ""
+        ),
     }
 
 
@@ -101,7 +108,11 @@ def client_has_any_contact(
     vk: str | None,
     instagram: str | None,
     other_contact: str | None,
+    *,
+    contact_client_id: object | None = None,
 ) -> bool:
+    if contact_client_id is not None and str(contact_client_id).strip():
+        return True
     return any(strip_or_none(x) for x in (phone, telegram, vk, instagram, other_contact))
 
 

@@ -48,14 +48,10 @@ def _planned_version(booking: Booking) -> str:
 
 
 def _client_channel_targets(client: Client) -> list[tuple[NotificationChannel, int]]:
-    out: list[tuple[NotificationChannel, int]] = []
-    if client.vk_user_id is not None:
-        out.append((NotificationChannel.VK, int(client.vk_user_id)))
-    if client.max_user_id is not None:
-        out.append((NotificationChannel.MAX, int(client.max_user_id)))
-    if client.telegram_chat_id is not None:
-        out.append((NotificationChannel.TELEGRAM, int(client.telegram_chat_id)))
-    return out
+    """Собственные каналы клиента (без контактного лица)."""
+    from app.client_contact import client_own_channel_targets
+
+    return client_own_channel_targets(client)
 
 
 def _dedupe_key(
@@ -99,11 +95,13 @@ def enqueue_client_rule_notifications(
     *,
     now: datetime | None = None,
 ) -> list[NotificationOutbox]:
-    """Поставить outbox-строки по правилу во все каналы клиента."""
+    """Поставить outbox-строки по правилу во все каналы клиента (или контактного лица)."""
+    from app.client_contact import resolve_client_notify_targets_db
+
     _ = now
     if not rule.is_enabled:
         return []
-    targets = _client_channel_targets(client)
+    targets, via_contact = resolve_client_notify_targets_db(db, client)
     if not targets:
         return []
     tz_name = get_display_timezone(db)
@@ -117,6 +115,7 @@ def enqueue_client_rule_notifications(
             marker=marker,
             db=db,
             substitute_system=True,
+            via_contact=via_contact,
         )
         event_type = EVENT_CLIENT_BOOKING_REMINDER
     else:
@@ -130,6 +129,7 @@ def enqueue_client_rule_notifications(
             db=db,
             substitute_system=False,
             system_keys=frozenset({"name"}),
+            via_contact=via_contact,
         )
         event_type = EVENT_CLIENT_AFTER_BOOKING
     wants_video = template_wants_route_video(rule.template)
@@ -159,6 +159,9 @@ def enqueue_client_rule_notifications(
             "booking_id": int(booking.id),
             "rule_id": int(rule.id),
         }
+        if via_contact is not None:
+            payload["via_contact_client_id"] = int(via_contact.id)
+            payload["via_contact_name"] = (via_contact.name or "").strip()
         if wants_video:
             payload["attach_route_video"] = True
         row = NotificationOutbox(
@@ -234,7 +237,9 @@ def enqueue_due_client_notifications(
             client = db.get(Client, int(booking.client_id))
         if client is None:
             continue
-        if not _client_channel_targets(client):
+        from app.client_contact import resolve_client_notify_targets_db
+
+        if not resolve_client_notify_targets_db(db, client)[0]:
             continue
         for rule in rules:
             kind_val = rule.kind.value if hasattr(rule.kind, "value") else str(rule.kind)

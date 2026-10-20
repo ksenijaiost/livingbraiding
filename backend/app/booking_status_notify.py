@@ -373,7 +373,9 @@ def enqueue_booking_status_notification(db: Session, booking: Booking, *, new_st
     if _already_fired(db, int(booking.id), int(rule.id), version):
         _skip(db, booking=booking, client=client, rule=rule, reason=SKIP_ALREADY, version=version)
         return
-    targets = _client_channel_targets(client)
+    from app.client_contact import resolve_client_notify_targets_db
+
+    targets, via_contact = resolve_client_notify_targets_db(db, client)
     if not targets:
         _skip(db, booking=booking, client=client, rule=rule, reason=SKIP_NO_CHANNEL, version=version)
         return
@@ -388,6 +390,7 @@ def enqueue_booking_status_notification(db: Session, booking: Booking, *, new_st
         marker=marker,
         db=db,
         substitute_system=True,
+        via_contact=via_contact,
     )
     wants_video = template_wants_route_video(rule.template)
     memo_ids: list[int] = []
@@ -411,6 +414,9 @@ def enqueue_booking_status_notification(db: Session, booking: Booking, *, new_st
             "status_label": label,
             "planned_version": version,
         }
+        if via_contact is not None:
+            payload["via_contact_client_id"] = int(via_contact.id)
+            payload["via_contact_name"] = (via_contact.name or "").strip()
         if wants_video:
             payload["attach_route_video"] = True
         if memo_ids:

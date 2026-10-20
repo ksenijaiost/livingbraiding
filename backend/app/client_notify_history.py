@@ -137,6 +137,9 @@ def _destination(row: NotificationOutbox) -> str:
     if kind == "admin_chat":
         return "в чат админов"
     if kind == "client":
+        via_name = str(_payload(row).get("via_contact_name") or "").strip()
+        if via_name:
+            return f"отправлено контактному лицу: {via_name}"
         return "клиенту"
     name = ""
     user = row.user

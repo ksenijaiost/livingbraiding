@@ -60,8 +60,11 @@
     {% if error %}
       <p class="error">{{ error }}</p>
     {% endif %}
+    {% if contact_warn %}
+      <p class="muted" style="color:#b45309;">{{ contact_warn }}</p>
+    {% endif %}
 
-    <form method="post" action="{{ form_action }}" enctype="multipart/form-data">
+    <form method="post" action="{{ form_action }}" enctype="multipart/form-data" id="client-form">
       <section class="form-section">
         <h3>Имя</h3>
         <div class="row">
@@ -78,9 +81,18 @@
         <div class="row">
           <div>
             <label class="label-sub">Телефон</label>
-            <input name="phone" maxlength="40" value="{{ form.get('phone', '') }}" placeholder="+7, 8 или 10 цифр" />
+            <input name="phone" id="client_phone" maxlength="40" value="{{ form.get('phone', '') }}" placeholder="+7, 8 или 10 цифр" />
             {% if phone_error %}
               <p class="error" style="margin:6px 0 0;">{{ phone_error }}</p>
+            {% endif %}
+            {% if show_use_as_contact and duplicate_contact_id %}
+              <p style="margin:8px 0 0;">
+                <button type="button" class="btn" id="btn-use-as-contact"
+                  data-contact-id="{{ duplicate_contact_id }}"
+                  data-contact-name="{{ duplicate_contact_name or '' }}">
+                  Создать с этим клиентом как контактным лицом
+                </button>
+              </p>
             {% endif %}
           </div>
           <div>
@@ -102,6 +114,30 @@
           <div>
             <label class="label-sub">Другой контакт</label>
             <input name="other_contact" maxlength="200" value="{{ form.get('other_contact', '') }}" />
+          </div>
+        </div>
+
+        <div id="contact-person-block" style="margin-top:14px; padding-top:12px; border-top:1px solid #e5e7eb;">
+          <h4 style="margin:0 0 8px; font-size:0.95rem;">Контактное лицо</h4>
+          <p class="section-hint" style="margin-top:0;">Если у клиента нет своего телефона — укажите, через кого с ним связываться (например, мама).</p>
+          <input type="hidden" name="contact_client_id" id="contact_client_id" value="{{ form.get('contact_client_id', '') }}" />
+          <div class="row">
+            <div style="flex:1; min-width:14rem;">
+              <label class="label-sub">Клиент <span class="muted" id="contact-person-req" style="display:none;">*</span></label>
+              <input type="text" id="contact_client_search" autocomplete="off"
+                placeholder="Поиск по имени или телефону (от 4 цифр)"
+                value="{{ form.get('contact_client_name', '') }}" />
+              <div id="contact_client_suggest" class="muted" style="font-size:13px; margin-top:4px;"></div>
+              <div id="contact_client_selected" style="margin-top:6px;{% if not form.get('contact_client_id') %}display:none;{% endif %}">
+                <span style="font-weight:600; color:#047857;" id="contact_client_selected_name">{{ form.get('contact_client_name', '') }}</span>
+                <button type="button" class="btn" id="contact_client_clear" style="margin-left:8px; font-size:12px;">Сбросить</button>
+              </div>
+            </div>
+            <div>
+              <label class="label-sub">Кем приходится</label>
+              <input name="contact_relation" id="contact_relation" maxlength="50"
+                value="{{ form.get('contact_relation', '') }}" placeholder="например, мама" />
+            </div>
           </div>
         </div>
       </section>
@@ -241,10 +277,106 @@
       </div>
     </form>
   </div>
+  <script>
+    (function () {
+      var phone = document.getElementById('client_phone');
+      var block = document.getElementById('contact-person-block');
+      var req = document.getElementById('contact-person-req');
+      var hid = document.getElementById('contact_client_id');
+      var search = document.getElementById('contact_client_search');
+      var suggest = document.getElementById('contact_client_suggest');
+      var selectedBox = document.getElementById('contact_client_selected');
+      var selectedName = document.getElementById('contact_client_selected_name');
+      var clearBtn = document.getElementById('contact_client_clear');
+      var relation = document.getElementById('contact_relation');
+      var timer = null;
+
+      function phoneEmpty() {
+        return !(phone && String(phone.value || '').trim());
+      }
+      function syncContactBlock() {
+        if (!block) return;
+        var empty = phoneEmpty();
+        block.style.opacity = empty ? '1' : '0.75';
+        if (req) req.style.display = empty ? 'inline' : 'none';
+        if (!empty && hid) {
+          /* phone filled: keep values for server clear, but UX can leave fields */
+        }
+      }
+      function setContact(id, name) {
+        if (hid) hid.value = id ? String(id) : '';
+        if (selectedName) selectedName.textContent = name || '';
+        if (selectedBox) selectedBox.style.display = id ? 'block' : 'none';
+        if (search && name) search.value = name;
+        if (suggest) suggest.innerHTML = '';
+      }
+      function clearContact() {
+        setContact('', '');
+        if (search) search.value = '';
+        if (relation) relation.value = '';
+      }
+      if (phone) {
+        phone.addEventListener('input', syncContactBlock);
+        phone.addEventListener('change', syncContactBlock);
+      }
+      if (clearBtn) clearBtn.addEventListener('click', clearContact);
+      if (search) {
+        search.addEventListener('input', function () {
+          var q = String(search.value || '').trim();
+          if (timer) clearTimeout(timer);
+          if (q.length < 2) {
+            if (suggest) suggest.innerHTML = '';
+            return;
+          }
+          timer = setTimeout(function () {
+            fetch('/clients/suggest?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+              .then(function (r) { return r.json(); })
+              .then(function (data) {
+                var list = (data && data.clients) || [];
+                if (!suggest) return;
+                if (!list.length) {
+                  suggest.textContent = 'Никого не найдено';
+                  return;
+                }
+                suggest.innerHTML = '';
+                list.slice(0, 12).forEach(function (c) {
+                  var btn = document.createElement('button');
+                  btn.type = 'button';
+                  btn.className = 'btn';
+                  btn.style.display = 'block';
+                  btn.style.margin = '4px 0';
+                  btn.style.textAlign = 'left';
+                  btn.textContent = c.name + (c.hint ? ' — ' + c.hint : '') + (c.is_draft ? ' (черновик)' : '');
+                  btn.addEventListener('click', function () {
+                    setContact(c.id, c.name);
+                  });
+                  suggest.appendChild(btn);
+                });
+              })
+              .catch(function () {
+                if (suggest) suggest.textContent = 'Ошибка поиска';
+              });
+          }, 250);
+        });
+      }
+      var useBtn = document.getElementById('btn-use-as-contact');
+      if (useBtn) {
+        useBtn.addEventListener('click', function () {
+          var id = useBtn.getAttribute('data-contact-id');
+          var name = useBtn.getAttribute('data-contact-name') || '';
+          if (phone) phone.value = '';
+          setContact(id, name);
+          syncContactBlock();
+          if (relation) relation.focus();
+        });
+      }
+      syncContactBlock();
+    })();
+  </script>
   {% if not is_new %}
   <script>
     (function () {
-      var form = document.querySelector('.client-form form');
+      var form = document.getElementById('client-form') || document.querySelector('.client-form form');
       var cb = document.getElementById('is_blacklisted');
       var ack = document.getElementById('blacklist_change_ack');
       if (!form || !cb || !ack) return;

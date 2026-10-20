@@ -501,8 +501,12 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
         s_n = int(db.scalar(select(func.count()).select_from(ProductSale).where(ProductSale.client_id == cid)) or 0)
         w_n = int(db.scalar(select(func.count()).select_from(WorkForInventory).where(WorkForInventory.client_id == cid)) or 0)
         cons_n = int(db.scalar(select(func.count()).select_from(Consultation).where(Consultation.client_id == cid)) or 0)
+        from app.client_contact import count_contact_for_clients
+
+        contact_for_n = count_contact_for_clients(db, cid)
         lines.append(
             f"Связано (будет удалено/отвязано): визитов {v_n}, броней {b_n}, продаж {s_n}, работ {w_n}, консультаций {cons_n}"
+            + (f", контактное лицо для {contact_for_n}" if contact_for_n else "")
         )
         return {"ok": True, "heading": f"Клиент #{eid}", "lines": lines}
 

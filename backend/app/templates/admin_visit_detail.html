@@ -62,6 +62,7 @@
     <h3>Клиент</h3>
     <p>
       <strong><a href="/clients/{{ visit.client_id }}">{{ visit.client.name }}</a></strong>
+      <span class="muted" style="margin-left:8px;">{{ client_phone_or_via_html(visit.client) }}</span>
     </p>
     <p class="muted">
       Свой: {% if visit.client_type.value == 'SELF' %}да{% else %}нет{% endif %}
