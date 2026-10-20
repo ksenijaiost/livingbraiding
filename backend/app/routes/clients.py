@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.datastructures import UploadFile
 from sqlalchemy import case, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_admin_super_assigned, require_role
@@ -25,7 +26,9 @@ from app.client_validation import (
     source_extra_option_for_form,
     strip_or_none,
 )
+from app.client_phone import DuplicateClientPhone, apply_client_phone, find_client_by_normalized_phone
 from app.forms_parse import parse_bool
+from app.phone_ru import InvalidPhoneError, display_phone, normalize_phone, phone_search_digits
 from app.consultation_booking import OPEN_BOOKING_STATUSES
 from app.client_notify_history import client_recent_messages
 from app.db.models import (
@@ -74,6 +77,14 @@ from app.admin_chat import (
     create_admin_chat_link_token,
     send_to_chat,
     unlink_admin_chat,
+)
+from app.booking_status_notify import (
+    add_status_rule,
+    delete_status_rule,
+    ensure_default_status_rules,
+    move_status_rule,
+    save_status_rules_from_form,
+    status_rules_for_ui,
 )
 from app.client_notifications import (
     DEFAULT_AFTER_TEMPLATE,
@@ -126,6 +137,64 @@ _CLIENTS_ADMINS = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER))
 _SUPER_EXPORT = Depends(require_admin_super_assigned())
 
 
+def _client_contact_preview(row: dict, contact_by_id: dict | None = None) -> str | None:
+    shown = display_phone(row.get("phone_normalized"), row.get("phone"))
+    if shown:
+        return shown
+    cid = row.get("contact_client_id")
+    if cid and contact_by_id:
+        contact = contact_by_id.get(int(cid))
+        if contact is not None:
+            from app.client_contact import via_contact_preview
+
+            class _Tmp:
+                contact_relation = row.get("contact_relation")
+                contact_client_id = cid
+
+            preview = via_contact_preview(_Tmp(), contact)  # type: ignore[arg-type]
+            phone = display_phone(contact.phone_normalized, contact.phone)
+            if preview and phone:
+                return f"{preview}, {phone}"
+            if preview:
+                return preview
+    for key in ("telegram", "vk", "instagram", "other_contact"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _phone_field_error(raw: str) -> str | None:
+    if not str(raw or "").strip():
+        return None
+    try:
+        normalize_phone(raw)
+    except InvalidPhoneError as exc:
+        return str(exc)
+    return None
+
+
+def _duplicate_phone_page(request, current_user, form, exc: DuplicateClientPhone, *, is_new: bool, client_id, created_by):
+    message = exc.html()
+    form = dict(form)
+    form["duplicate_contact_client_id"] = str(exc.client_id)
+    form["duplicate_contact_client_name"] = exc.client_name
+    return _admin_client_form_page(
+        request,
+        current_user,
+        form=form,
+        error=message,
+        phone_error=message,
+        is_new=is_new,
+        client_id=client_id,
+        created_by_display=created_by,
+        status_code=400,
+        show_use_as_contact=True,
+        duplicate_contact_id=exc.client_id,
+        duplicate_contact_name=exc.client_name,
+    )
+
+
 def _admin_client_form_page(
     request: Request,
     current_user: AuthUser,
@@ -133,9 +202,14 @@ def _admin_client_form_page(
     form: dict,
     error: str | None,
     is_new: bool,
+    phone_error: str | None = None,
     client_id: int | None = None,
     created_by_display: str | None = None,
     status_code: int = 200,
+    contact_warn: str | None = None,
+    show_use_as_contact: bool = False,
+    duplicate_contact_id: int | None = None,
+    duplicate_contact_name: str | None = None,
 ):
     so = load_client_source_options()
     seo = source_extra_option_for_form(form, so)
@@ -154,6 +228,11 @@ def _admin_client_form_page(
             created_by_label=created_by_display,
             form=form,
             error=error,
+            phone_error=phone_error,
+            contact_warn=contact_warn,
+            show_use_as_contact=show_use_as_contact,
+            duplicate_contact_id=duplicate_contact_id,
+            duplicate_contact_name=duplicate_contact_name,
         ),
         status_code=status_code,
     )
@@ -199,16 +278,25 @@ def admin_clients(
     where = []
     if q_norm:
         like = f"%{q_norm}%"
-        where.append(
-            or_(
-                Client.name.ilike(like),
-                Client.phone.ilike(like),
-                Client.telegram.ilike(like),
-                Client.vk.ilike(like),
-                Client.instagram.ilike(like),
-                Client.other_contact.ilike(like),
+        search_conds = [
+            Client.name.ilike(like),
+            Client.phone.ilike(like),
+            Client.telegram.ilike(like),
+            Client.vk.ilike(like),
+            Client.instagram.ilike(like),
+            Client.other_contact.ilike(like),
+        ]
+        phone_digits = phone_search_digits(q_norm)
+        if phone_digits:
+            search_conds.append(Client.phone_normalized.like(f"%{phone_digits}%"))
+            owner_ids = list(
+                db.scalars(
+                    select(Client.id).where(Client.phone_normalized.like(f"%{phone_digits}%")).limit(200)
+                ).all()
             )
-        )
+            if owner_ids:
+                search_conds.append(Client.contact_client_id.in_(owner_ids))
+        where.append(or_(*search_conds))
     if status_filter is not None:
         matched_ids = filter_client_ids_by_status(db, status_filter)
         if not matched_ids:
@@ -233,18 +321,6 @@ def admin_clients(
     # One row per visit in the join; sum 1 only for real, non-cancelled visits
     visits_count = func.coalesce(func.sum(case((Visit.is_cancelled.is_(False), 1), else_=0)), 0)
 
-    def _nz(col):
-        return func.nullif(func.trim(col), "")
-
-    # Phone first, then first non-empty social (same order as coalesce)
-    contact_preview = func.coalesce(
-        _nz(Client.phone),
-        _nz(Client.telegram),
-        _nz(Client.vk),
-        _nz(Client.instagram),
-        _nz(Client.other_contact),
-    ).label("contact_preview")
-
     has_active_booking = func.coalesce(
         func.max(case((Booking.status.in_(OPEN_BOOKING_STATUSES), 1), else_=0)),
         0,
@@ -260,7 +336,14 @@ def admin_clients(
             Client.interested_in_training.label("interested_in_training"),
             Client.is_student.label("is_student"),
             Client.is_model.label("is_model"),
-            contact_preview,
+            Client.phone.label("phone"),
+            Client.phone_normalized.label("phone_normalized"),
+            Client.telegram.label("telegram"),
+            Client.vk.label("vk"),
+            Client.instagram.label("instagram"),
+            Client.other_contact.label("other_contact"),
+            Client.contact_client_id.label("contact_client_id"),
+            Client.contact_relation.label("contact_relation"),
             visits_count.label("visits_count"),
             has_active_booking,
         )
@@ -277,11 +360,30 @@ def admin_clients(
             Client.interested_in_training,
             Client.is_student,
             Client.is_model,
+            Client.phone,
+            Client.phone_normalized,
+            Client.telegram,
+            Client.vk,
+            Client.instagram,
+            Client.other_contact,
+            Client.contact_client_id,
+            Client.contact_relation,
         )
         .order_by(Client.name.asc())
         .limit(500)
     )
     rows = list(db.execute(stmt).mappings().all())
+    contact_ids = {
+        int(r["contact_client_id"])
+        for r in rows
+        if r.get("contact_client_id") is not None
+    }
+    contact_by_id: dict[int, Client] = {}
+    if contact_ids:
+        contact_by_id = {
+            int(c.id): c
+            for c in db.scalars(select(Client).where(Client.id.in_(contact_ids))).all()
+        }
     acts = load_client_activities(db, [int(r["id"]) for r in rows])
     enriched = []
     for r in rows:
@@ -290,6 +392,7 @@ def admin_clients(
         st = display_status(is_blacklisted=bool(row.get("is_blacklisted")), activity=act)
         row["status"] = st
         row["status_label"] = status_label(st)
+        row["contact_preview"] = _client_contact_preview(row, contact_by_id)
         enriched.append(row)
     created_ok = db.get(Client, created) if created is not None else None
     updated_ok = db.get(Client, updated) if updated is not None else None
@@ -400,11 +503,19 @@ def _client_notifications_page(
     info: str | None = None,
     admin_link_code: str | None = None,
     memo_delete: dict | None = None,
+    digit_field_errors: dict[str, str] | None = None,
+    reply_digits_form: list[dict] | None = None,
 ):
     # Дефолты только при совсем пустой таблице (первый заход), не после ручной очистки.
-    if ensure_default_rules(db):
+    from app.client_reply_digits import ensure_default_reply_digits, reply_digits_for_ui
+
+    created_defaults = ensure_default_rules(db)
+    created_defaults = ensure_default_status_rules(db) or created_defaults
+    created_defaults = ensure_default_reply_digits(db) or created_defaults
+    if created_defaults:
         db.commit()
     rules = rules_for_ui(db)
+    status_ui = status_rules_for_ui(db)
     from app.client_bot_replies import bot_replies_for_ui, ensure_bot_reply_templates
     from app.settings import get_settings
     from app.studio_template_variables import ensure_builtin_studio_variables, variables_for_ui
@@ -424,6 +535,8 @@ def _client_notifications_page(
             current_user=current_user,
             before_rules=rules["before"],
             after_rules=rules["after"],
+            status_rules=status_ui["rules"],
+            status_free=status_ui["free_statuses"],
             services_marker=get_services_marker(db),
             admin_chats=admin_chats_for_ui(db),
             can_manage_admin_chat=is_admin,
@@ -434,6 +547,8 @@ def _client_notifications_page(
             booking_link_warning=booking_link_still_used(db),
             video_max_mb=get_settings().studio_route_video_max_mb,
             bot_replies=bot_replies_for_ui(db),
+            reply_digits=reply_digits_form if reply_digits_form is not None else reply_digits_for_ui(db),
+            digit_field_errors=digit_field_errors or {},
             care_memos=care_memos_for_ui(db),
             memo_delete=memo_delete,
             error=error,
@@ -481,6 +596,12 @@ def admin_client_notifications(
         info = "Видео удалено."
     elif msg == "bot_replies":
         info = "Тексты ответов бота сохранены."
+    elif msg == "digits_saved":
+        info = "Цифры ответов сохранены."
+    elif msg == "digits_changed":
+        from app.client_reply_digits import DIGITS_CHANGED_WARNING
+
+        info = DIGITS_CHANGED_WARNING
     elif msg == "memo_saved":
         info = "Памятка сохранена."
     elif msg == "memo_deleted":
@@ -626,6 +747,19 @@ async def admin_client_notifications_save(
             enabled_flags=after_enabled,
             latest_times=after_latest,
             memo_flags=after_memo,
+        )
+        status_ids = form.getlist("status_id") if hasattr(form, "getlist") else []
+        status_values = form.getlist("status_value") if hasattr(form, "getlist") else []
+        status_templates = form.getlist("status_template") if hasattr(form, "getlist") else []
+        status_enabled = ["1" if form.get(f"status_enabled_{rid}") else "0" for rid in status_ids]
+        status_memo = ["1" if form.get(f"status_memo_{rid}") else "0" for rid in status_ids]
+        save_status_rules_from_form(
+            db,
+            ids=status_ids,
+            statuses=status_values,
+            templates=status_templates,
+            enabled_flags=status_enabled,
+            memo_flags=status_memo,
         )
         db.commit()
     except ValueError as e:
@@ -787,6 +921,59 @@ async def admin_client_notifications_move(
     return RedirectResponse(url="/clients/notifications?msg=moved", status_code=303)
 
 
+@router.post("/notifications/status-rules/add")
+async def admin_status_notify_add(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        add_status_rule(db, form.get("status"))
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        msg = str(e) or "invalid"
+        return RedirectResponse(url=f"/clients/notifications?err={quote(msg)}", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=added", status_code=303)
+
+
+@router.post("/notifications/status-rules/delete")
+async def admin_status_notify_delete(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        delete_status_rule(db, int(str(form.get("status_rule_id") or "0")))
+        db.commit()
+    except (ValueError, TypeError):
+        db.rollback()
+        return RedirectResponse(url="/clients/notifications?err=missing", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=deleted", status_code=303)
+
+
+@router.post("/notifications/status-rules/move")
+async def admin_status_notify_move(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        move_status_rule(
+            db,
+            int(str(form.get("status_rule_id") or "0")),
+            direction=str(form.get("direction") or ""),
+        )
+        db.commit()
+    except (ValueError, TypeError):
+        db.rollback()
+        return RedirectResponse(url="/clients/notifications?err=missing", status_code=303)
+    return RedirectResponse(url="/clients/notifications?msg=moved", status_code=303)
+
+
 @router.post("/notifications/variables/builtin")
 async def admin_client_notifications_variables_builtin(
     request: Request,
@@ -897,6 +1084,62 @@ async def admin_client_notifications_variables_delete(
         db.rollback()
         return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
     return RedirectResponse(url="/clients/notifications?msg=var_deleted", status_code=303)
+
+
+@router.post("/notifications/reply-digits")
+async def admin_client_notifications_reply_digits(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+    db: Session = Depends(get_db),
+):
+    from app.client_reply_digits import (
+        ACTION_ORDER,
+        ACTION_TITLES,
+        DigitConflictError,
+        DEFAULT_HINT_LABELS,
+        save_reply_digits_from_form,
+    )
+
+    form = await request.form()
+    actions = list(ACTION_ORDER)
+    digits = [form.get(f"digit_{action}") for action in actions]
+    enabled = ["1" if form.get(f"digit_enabled_{action}") else "0" for action in actions]
+    labels = [form.get(f"digit_label_{action}") for action in actions]
+    try:
+        changed = save_reply_digits_from_form(
+            db,
+            actions=actions,
+            digits=digits,
+            enabled_flags=enabled,
+            labels=labels,
+        )
+        db.commit()
+    except DigitConflictError as e:
+        db.rollback()
+        form_rows = []
+        for action, digit, en, label in zip(actions, digits, enabled, labels, strict=True):
+            form_rows.append(
+                {
+                    "action": action,
+                    "title": ACTION_TITLES.get(action, action),
+                    "digit": str(digit or ""),
+                    "is_enabled": str(en) == "1",
+                    "hint_label": str(label or DEFAULT_HINT_LABELS.get(action, "")),
+                }
+            )
+        return _client_notifications_page(
+            request,
+            current_user=current_user,
+            db=db,
+            error=str(e),
+            digit_field_errors=e.field_errors,
+            reply_digits_form=form_rows,
+        )
+    except ValueError as e:
+        db.rollback()
+        return RedirectResponse(url=f"/clients/notifications?err={quote(str(e))}", status_code=303)
+    msg = "digits_changed" if changed else "digits_saved"
+    return RedirectResponse(url=f"/clients/notifications?msg={msg}", status_code=303)
 
 
 @router.post("/notifications/bot-replies")
@@ -1095,7 +1338,7 @@ def admin_clients_retention_lost(
             {
                 "id": int(c.id),
                 "name": c.name,
-                "phone": c.phone or "",
+                "phone": display_phone(c.phone_normalized, c.phone),
                 "last_visit": act.last.isoformat() if act.last else "",
                 "visits": act.count,
             }
@@ -1243,10 +1486,17 @@ async def admin_client_new_post(
     comment = str(form.get("comment") or "")
     mark_draft = str(form.get("mark_draft") or "")
 
+    contact_client_id_raw = str(form.get("contact_client_id") or "")
+    contact_relation_raw = str(form.get("contact_relation") or "")
+    phone_error = _phone_field_error(phone)
     if not name:
         err = "Укажите имя клиента."
-    elif not client_has_any_contact(phone, telegram, vk, instagram, other_contact):
-        err = "Нужен хотя бы один контакт: телефон или любая из соцсетей."
+    elif phone_error:
+        err = phone_error
+    elif not client_has_any_contact(
+        phone, telegram, vk, instagram, other_contact, contact_client_id=contact_client_id_raw
+    ):
+        err = "Нужен хотя бы один контакт: телефон, соцсеть или контактное лицо."
 
     bd_raw = str(form.get("birth_day") or "")
     bm_raw = str(form.get("birth_month") or "")
@@ -1270,7 +1520,8 @@ async def admin_client_new_post(
             request,
             current_user,
             form=form,
-            error=err,
+            error=None if phone_error and err == phone_error else err,
+            phone_error=phone_error,
             is_new=True,
             status_code=400,
         )
@@ -1294,9 +1545,10 @@ async def admin_client_new_post(
             status_code=400,
         )
 
+    from app.client_contact import validate_and_apply_contact
+
     client = Client(
         name=name[:200],
-        phone=strip_or_none(phone, 30),
         photo_1=photo_1_url,
         photo_2=photo_2_url,
         telegram=strip_or_none(telegram, 100),
@@ -1320,8 +1572,60 @@ async def admin_client_new_post(
         is_model=parse_bool(form.get("is_model")),
         no_promo=parse_bool(form.get("no_promo")),
     )
-    db.add(client)
-    db.commit()
+    try:
+        apply_client_phone(client, phone, db)
+        validate_and_apply_contact(
+            db,
+            client,
+            contact_client_id_raw=contact_client_id_raw,
+            contact_relation_raw=contact_relation_raw,
+            phone_normalized=client.phone_normalized,
+            is_create=True,
+        )
+        db.add(client)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return _admin_client_form_page(
+            request,
+            current_user,
+            form=form,
+            error=str(exc),
+            is_new=True,
+            status_code=400,
+        )
+    except DuplicateClientPhone as exc:
+        db.rollback()
+        return _duplicate_phone_page(
+            request, current_user, form, exc, is_new=True, client_id=None, created_by=None
+        )
+    except IntegrityError:
+        db.rollback()
+        taken = None
+        try:
+            normalized = normalize_phone(phone)
+        except InvalidPhoneError:
+            normalized = None
+        if normalized:
+            taken = find_client_by_normalized_phone(db, normalized)
+        if taken is not None:
+            return _duplicate_phone_page(
+                request,
+                current_user,
+                form,
+                DuplicateClientPhone(taken),
+                is_new=True,
+                client_id=None,
+                created_by=None,
+            )
+        return _admin_client_form_page(
+            request,
+            current_user,
+            form=form,
+            error="Не удалось сохранить телефон. Попробуйте ещё раз.",
+            is_new=True,
+            status_code=400,
+        )
     db.refresh(client)
     return RedirectResponse(url=f"/clients/{client.id}?msg=created", status_code=303)
 
@@ -1333,10 +1637,26 @@ def admin_client_edit_get(
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    client = db.get(Client, client_id)
+    client = db.scalar(
+        select(Client)
+        .where(Client.id == client_id)
+        .options(selectinload(Client.contact_client))
+    )
     if client is None:
         raise HTTPException(status_code=404, detail="Клиент не найден")
     form = client_db_to_form_dict(client)
+    from app.client_contact import client_has_messenger_channel
+
+    contact_warn = None
+    if (
+        not client.phone_normalized
+        and not client.contact_client_id
+        and not client_has_messenger_channel(client)
+    ):
+        contact_warn = (
+            "У клиента нет телефона и контактного лица. "
+            "Укажите телефон, контактное лицо или привяжите канал уведомлений."
+        )
     return _admin_client_form_page(
         request,
         current_user,
@@ -1345,6 +1665,7 @@ def admin_client_edit_get(
         is_new=False,
         client_id=client.id,
         created_by_display=client.created_by_label,
+        contact_warn=contact_warn,
     )
 
 
@@ -1365,6 +1686,7 @@ async def admin_client_edit_post(
             for k in (
                 "name",
                 "phone",
+                "phone_normalized",
                 "photo_1",
                 "photo_2",
                 "telegram",
@@ -1387,6 +1709,8 @@ async def admin_client_edit_post(
                 "interested_in_training",
                 "is_student",
                 "is_model",
+                "contact_client_id",
+                "contact_relation",
             )
         }
     )
@@ -1416,12 +1740,19 @@ async def admin_client_edit_post(
     comment = str(form.get("comment") or "")
     blacklist_comment = str(form.get("blacklist_comment") or "")
     is_blacklisted = form["is_blacklisted"] == "1"
+    contact_client_id_raw = str(form.get("contact_client_id") or "")
+    contact_relation_raw = str(form.get("contact_relation") or "")
 
     err: str | None = None
+    phone_error = _phone_field_error(phone)
     if not name:
         err = "Укажите имя клиента."
-    elif not client_has_any_contact(phone, telegram, vk, instagram, other_contact):
-        err = "Нужен хотя бы один контакт: телефон или любая из соцсетей."
+    elif phone_error:
+        err = phone_error
+    elif not client_has_any_contact(
+        phone, telegram, vk, instagram, other_contact, contact_client_id=contact_client_id_raw
+    ):
+        err = "Нужен хотя бы один контакт: телефон, соцсеть или контактное лицо."
     elif is_blacklisted and not blacklist_comment.strip():
         err = "Для чёрного списка укажите комментарий с причиной."
     elif bool(getattr(client, "is_blacklisted", False)) != is_blacklisted and not parse_bool(
@@ -1438,6 +1769,7 @@ async def admin_client_edit_post(
     age_group = None
     source_parsed: str | None = None
     is_confirmed = form["is_confirmed"] == "1"
+    contact_warn: str | None = None
 
     if not err:
         try:
@@ -1452,15 +1784,50 @@ async def admin_client_edit_post(
             request,
             current_user,
             form=form,
-            error=err,
+            error=None if phone_error and err == phone_error else err,
+            phone_error=phone_error,
             is_new=False,
             client_id=client.id,
             created_by_display=client.created_by_label,
             status_code=400,
         )
 
+    from app.client_contact import validate_and_apply_contact
+
     client.name = name[:200]
-    client.phone = strip_or_none(phone, 30)
+    try:
+        apply_client_phone(client, phone, db, exclude_id=client.id)
+        contact_warn = validate_and_apply_contact(
+            db,
+            client,
+            contact_client_id_raw=contact_client_id_raw,
+            contact_relation_raw=contact_relation_raw,
+            phone_normalized=client.phone_normalized,
+            is_create=False,
+        )
+    except DuplicateClientPhone as exc:
+        db.rollback()
+        return _duplicate_phone_page(
+            request,
+            current_user,
+            form,
+            exc,
+            is_new=False,
+            client_id=client.id,
+            created_by=client.created_by_label,
+        )
+    except ValueError as exc:
+        db.rollback()
+        return _admin_client_form_page(
+            request,
+            current_user,
+            form=form,
+            error=str(exc),
+            is_new=False,
+            client_id=client.id,
+            created_by_display=client.created_by_label,
+            status_code=400,
+        )
     client.telegram = strip_or_none(telegram, 100)
     client.vk = strip_or_none(vk, 120)
     client.instagram = strip_or_none(instagram, 120)
@@ -1524,6 +1891,7 @@ async def admin_client_edit_post(
         (
             "name",
             "phone",
+            "phone_normalized",
             "photo_1",
             "photo_2",
             "telegram",
@@ -1546,6 +1914,8 @@ async def admin_client_edit_post(
             "interested_in_training",
             "is_student",
             "is_model",
+            "contact_client_id",
+            "contact_relation",
         ),
     )
     write_audit_rows(
@@ -1557,7 +1927,37 @@ async def admin_client_edit_post(
         changes=changes,
     )
 
-    db.commit()
+    created_by_label = client.created_by_label
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        taken = None
+        try:
+            normalized = normalize_phone(phone)
+        except InvalidPhoneError:
+            normalized = None
+        if normalized:
+            taken = find_client_by_normalized_phone(db, normalized, exclude_id=client_id)
+        if taken is not None:
+            return _duplicate_phone_page(
+                request,
+                current_user,
+                form,
+                DuplicateClientPhone(taken),
+                is_new=False,
+                client_id=client_id,
+                created_by=created_by_label,
+            )
+        return _admin_client_form_page(
+            request,
+            current_user,
+            form=form,
+            error="Не удалось сохранить телефон. Попробуйте ещё раз.",
+            is_new=False,
+            client_id=client_id,
+            status_code=400,
+        )
     return RedirectResponse(url=f"/clients?updated={client.id}", status_code=303)
 
 
@@ -1575,39 +1975,55 @@ def _form_to_str_map(form) -> dict[str, str]:
 
 
 def _client_suggest_items(db: Session, q: str) -> list[dict[str, str | int | bool]]:
+    from app.client_contact import expand_phone_search_clients, suggest_hint_for_client
+
     needle = (q or "").strip()
-    stmt = select(Client).order_by(Client.name.asc()).limit(30)
+    stmt = select(Client).options(selectinload(Client.contact_client)).order_by(Client.name.asc()).limit(30)
+    rows: list[Client]
     if needle:
-        digits = "".join(ch for ch in needle if ch.isdigit())
-        # Phone search: ignore common formatting symbols, allow searching by last digits.
-        phone_norm = func.replace(
-            func.replace(
-                func.replace(
-                    func.replace(
-                        func.replace(func.replace(func.coalesce(Client.phone, ""), "+", ""), " ", ""),
-                        "-",
-                        "",
-                    ),
-                    "(",
-                    "",
-                ),
-                ")",
-                "",
-            ),
-            "\t",
-            "",
-        )
-        if digits:
-            stmt = stmt.where(or_(Client.name.ilike(f"%{needle}%"), phone_norm.ilike(f"%{digits}%")))
-        else:
-            stmt = stmt.where(Client.name.ilike(f"%{needle}%"))
-    rows = list(db.scalars(stmt).all())
+        conds = [Client.name.ilike(f"%{needle}%")]
+        phone_digits = phone_search_digits(needle)
+        owners: list[Client] = []
+        if phone_digits:
+            owners = list(
+                db.scalars(
+                    select(Client)
+                    .where(Client.phone_normalized.like(f"%{phone_digits}%"))
+                    .order_by(Client.name.asc())
+                    .limit(30)
+                ).all()
+            )
+            conds.append(Client.phone_normalized.like(f"%{phone_digits}%"))
+            if owners:
+                conds.append(Client.contact_client_id.in_([int(o.id) for o in owners]))
+        rows = list(db.scalars(stmt.where(or_(*conds))).all())
+        if phone_digits and owners:
+            rows = expand_phone_search_clients(db, owners)
+            # merge name matches
+            name_rows = list(
+                db.scalars(
+                    select(Client)
+                    .where(Client.name.ilike(f"%{needle}%"))
+                    .options(selectinload(Client.contact_client))
+                    .order_by(Client.name.asc())
+                    .limit(30)
+                ).all()
+            )
+            seen = {int(c.id) for c in rows}
+            for c in name_rows:
+                if int(c.id) not in seen:
+                    rows.append(c)
+                    seen.add(int(c.id))
+            rows = rows[:30]
+    else:
+        rows = list(db.scalars(stmt).all())
     items: list[dict[str, str | int | bool]] = []
     for c in rows:
         items.append(
             {
                 "id": c.id,
                 "name": c.name,
+                "hint": suggest_hint_for_client(c),
                 "is_draft": (not c.is_confirmed),
             }
         )
@@ -1633,7 +2049,14 @@ def admin_client_detail(
     current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
     db: Session = Depends(get_db),
 ):
-    client = db.get(Client, client_id)
+    client = db.scalar(
+        select(Client)
+        .where(Client.id == client_id)
+        .options(
+            selectinload(Client.contact_client),
+            selectinload(Client.contact_for_clients),
+        )
+    )
     if client is None:
         raise HTTPException(status_code=404, detail="Клиент не найден")
 
@@ -1713,6 +2136,7 @@ def admin_client_detail(
             request,
             current_user=current_user,
             client=client,
+            contact_for_clients=list(client.contact_for_clients or []),
             client_status=client_status,
             client_status_label=status_label(client_status),
             client_status_hint=status_hint(client_status),

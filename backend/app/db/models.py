@@ -338,6 +338,8 @@ class Client(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # «7» + 10 цифр. NULL у клиентов без телефона; уникальность NULL не нарушает.
+    phone_normalized: Mapped[str | None] = mapped_column(String(11), nullable=True, unique=True)
     photo_1: Mapped[str | None] = mapped_column(String(300), nullable=True)
     photo_2: Mapped[str | None] = mapped_column(String(300), nullable=True)
     telegram: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -371,15 +373,57 @@ class Client(Base):
     birth_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Snapshot at creation: e.g. "Анна (MASTER)" — set by app from current user display_name + role
     created_by_label: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    # Клиент без своего телефона может ссылаться на контактное лицо (мама и т.п.).
+    contact_client_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clients.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    contact_relation: Mapped[str | None] = mapped_column(String(50), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+    contact_client: Mapped["Client | None"] = relationship(
+        "Client",
+        remote_side="Client.id",
+        foreign_keys=[contact_client_id],
+        back_populates="contact_for_clients",
+    )
+    contact_for_clients: Mapped[list["Client"]] = relationship(
+        "Client",
+        foreign_keys=[contact_client_id],
+        back_populates="contact_client",
+    )
 
     thermo_templates: Mapped[list["ClientThermoTemplate"]] = relationship(
         back_populates="client",
         order_by="ClientThermoTemplate.id",
     )
+
+
+class ClientMessengerPending(Base):
+    """Ожидание выбора брони или закреплённая бронь после выбора (ответы контактного лица)."""
+
+    __tablename__ = "client_messenger_pending"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[int] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    messenger_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # await_booking_choice | selected_booking
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    booking_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+
+    client: Mapped["Client"] = relationship(foreign_keys=[client_id])
+    booking: Mapped["Booking | None"] = relationship(foreign_keys=[booking_id])
 
 
 class ClientNotificationRuleKind(str, enum.Enum):
@@ -411,6 +455,25 @@ class ClientNotificationRule(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class BookingStatusNotifyRule(Base):
+    """Сообщение клиенту, когда бронь переводят в выбранный статус."""
+
+    __tablename__ = "booking_status_notify_rules"
+    __table_args__ = (
+        UniqueConstraint("status", name="uq_booking_status_notify_rules_status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # BookingStatus.value. Один статус — одно правило.
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    template: Mapped[str] = mapped_column(Text, nullable=False)
+    attach_memo_before: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class StudioTemplateVariable(Base):
     """Переменные студии для шаблонов уведомлений: встроенные и свои."""
 
@@ -438,7 +501,7 @@ class StudioTemplateVariable(Base):
 
 
 class ClientBotReplyTemplate(Base):
-    """Редактируемые ответы бота клиенту (1–5, подсказка, нет записи)."""
+    """Редактируемые ответы бота клиенту (подтверждение, перенос и т.д., подсказка)."""
 
     __tablename__ = "client_bot_reply_templates"
 
@@ -446,6 +509,19 @@ class ClientBotReplyTemplate(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class ClientReplyDigitAction(Base):
+    """Цифра ответа клиентки: confirm / reschedule / cancel / contact_admin / directions."""
+
+    __tablename__ = "client_reply_digit_actions"
+
+    action: Mapped[str] = mapped_column(String(32), primary_key=True)
+    digit: Mapped[str] = mapped_column(String(1), nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    hint_label: Mapped[str] = mapped_column(String(80), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class ClientNotificationSend(Base):
@@ -585,7 +661,7 @@ class ConsultationKind(str, enum.Enum):
 
 
 class CareMemo(Base):
-    """Картинка-памятка, которую можно приложить к сообщению после визита."""
+    """Картинка-памятка: слоты «до» (информация о брони) и «после» (после визита)."""
 
     __tablename__ = "care_memos"
 
@@ -614,7 +690,15 @@ class ServiceCategory(Base):
         default=ConsultationKind.BRAIDING,
         nullable=False,
     )
-    care_memo_id: Mapped[int | None] = mapped_column(ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True)
+    # inherit (=нет у категории) | none | custom (+ care_memo_*_id).
+    care_memo_before_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_before_id: Mapped[int | None] = mapped_column(
+        ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True
+    )
+    care_memo_after_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_after_id: Mapped[int | None] = mapped_column(
+        ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True
+    )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
@@ -674,9 +758,15 @@ class ServiceSubcategory(Base):
     show_material_description: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Расширенный блок термозамещения на шаге 2 визита + шаблоны клиента (без общих полей категории).
     show_thermo_visit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # inherit — памятка категории; custom — своя (в том числе «нет»).
-    care_memo_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
-    care_memo_id: Mapped[int | None] = mapped_column(ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True)
+    # inherit | none | custom — слоты «до» и «после» (см. care_memos).
+    care_memo_before_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_before_id: Mapped[int | None] = mapped_column(
+        ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True
+    )
+    care_memo_after_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_after_id: Mapped[int | None] = mapped_column(
+        ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True
+    )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
@@ -714,9 +804,14 @@ class Service(Base):
     tail_section_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # None — брать из подкатегории show_material_description; True — показывать; False — не показывать.
     material_description_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # inherit — памятка подкатегории (с учётом её наследования); custom — своя.
-    care_memo_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
-    care_memo_id: Mapped[int | None] = mapped_column(ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True)
+    care_memo_before_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_before_id: Mapped[int | None] = mapped_column(
+        ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True
+    )
+    care_memo_after_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_after_id: Mapped[int | None] = mapped_column(
+        ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Розница «Продажа материала»: какие блоки ценообразования показывать (независимые флаги).
     retail_material_kanekalon: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -1034,6 +1129,9 @@ class Booking(Base):
 
     quoted_price_text: Mapped[str | None] = mapped_column(String(120), nullable=True)
     deposit_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Информационно: не влияет на расчёт цен/визитов/ЗП. У старых броней NULL.
+    discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dialog_location: Mapped[str | None] = mapped_column(Text, nullable=True)
     photo_1: Mapped[str | None] = mapped_column(String(300), nullable=True)
     photo_2: Mapped[str | None] = mapped_column(String(300), nullable=True)
     photo_3: Mapped[str | None] = mapped_column(String(300), nullable=True)

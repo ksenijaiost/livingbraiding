@@ -15,6 +15,7 @@ from starlette.datastructures import UploadFile
 
 from app.client_payment import parse_client_payment_kind
 from app.work_products_compute import compute_correction_catalog_pays, compute_correction_extra_costs
+from app.client_phone import apply_client_phone
 from app.client_validation import client_has_any_contact, strip_or_none
 from app.fixed_price_visit import (
     catalog_product_for_visit_service,
@@ -674,7 +675,6 @@ def _resolve_client(db: Session, header: VisitHeaderInput, *, created_by_label: 
             raise ValueError("Для черновика нужен хотя бы один контакт (телефон или соцсеть).")
         client = Client(
             name=header.draft_name.strip()[:200],
-            phone=strip_or_none(header.draft_phone, 30),
             telegram=strip_or_none(header.draft_telegram, 100),
             vk=strip_or_none(header.draft_vk, 120),
             instagram=strip_or_none(header.draft_instagram, 120),
@@ -683,6 +683,7 @@ def _resolve_client(db: Session, header: VisitHeaderInput, *, created_by_label: 
             is_confirmed=False,
             created_by_label=created_by_label,
         )
+        apply_client_phone(client, header.draft_phone, db)
         db.add(client)
         db.flush()
         return client

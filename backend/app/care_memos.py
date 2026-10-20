@@ -1,11 +1,13 @@
-"""Памятки-картинки после визита: файлы, привязка в каталоге, сбор по визиту."""
+"""Памятки-картинки: файлы, слоты «до»/«после» в каталоге, сбор по визиту/брони."""
 
 from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -30,8 +32,20 @@ _ALLOWED = {
     ".png": "image/png",
     ".webp": "image/webp",
 }
+
+MemoKind = Literal["before", "after"]
+MEMO_BEFORE: MemoKind = "before"
+MEMO_AFTER: MemoKind = "after"
+
 MODE_INHERIT = "inherit"
+MODE_NONE = "none"
 MODE_CUSTOM = "custom"
+
+# Значения select в формах каталога.
+SLOT_INHERIT = "__inherit__"
+SLOT_NONE = "__none__"
+
+CatalogEntity = ServiceCategory | ServiceSubcategory | Service
 
 
 class CareMemoInUse(Exception):
@@ -81,36 +95,58 @@ def memo_delete_preview(db: Session, memo_id: int) -> dict[str, object] | None:
     return {"id": int(memo.id), "name": memo.name, "links": links}
 
 
+def _append_usage(
+    out: list[dict[str, str]],
+    *,
+    kind: str,
+    name: str,
+    href: str,
+    slot_label: str,
+) -> None:
+    out.append(
+        {
+            "kind": kind,
+            "name": name,
+            "href": href,
+            "slot": slot_label,
+        }
+    )
+
+
 def memo_usage(db: Session, memo_id: int) -> list[dict[str, str]]:
     mid = int(memo_id)
     out: list[dict[str, str]] = []
-    categories = db.scalars(select(ServiceCategory).where(ServiceCategory.care_memo_id == mid)).all()
-    for cat in categories:
-        out.append(
-            {
-                "kind": "категория",
-                "name": cat.name,
-                "href": f"/admin/catalog/categories/{int(cat.id)}/edit",
-            }
+    for cat in db.scalars(
+        select(ServiceCategory).where(
+            (ServiceCategory.care_memo_before_id == mid) | (ServiceCategory.care_memo_after_id == mid)
         )
-    subs = db.scalars(select(ServiceSubcategory).where(ServiceSubcategory.care_memo_id == mid)).all()
-    for sub in subs:
-        out.append(
-            {
-                "kind": "подкатегория",
-                "name": sub.name,
-                "href": f"/admin/catalog/subcategories/{int(sub.id)}/edit",
-            }
+    ).all():
+        href = f"/admin/catalog/categories/{int(cat.id)}/edit"
+        if cat.care_memo_before_id == mid and (cat.care_memo_before_mode or "") == MODE_CUSTOM:
+            _append_usage(out, kind="категория", name=cat.name, href=href, slot_label="до")
+        if cat.care_memo_after_id == mid and (cat.care_memo_after_mode or "") == MODE_CUSTOM:
+            _append_usage(out, kind="категория", name=cat.name, href=href, slot_label="после")
+    for sub in db.scalars(
+        select(ServiceSubcategory).where(
+            (ServiceSubcategory.care_memo_before_id == mid)
+            | (ServiceSubcategory.care_memo_after_id == mid)
         )
-    services = db.scalars(select(Service).where(Service.care_memo_id == mid)).all()
-    for svc in services:
-        out.append(
-            {
-                "kind": "услуга",
-                "name": svc.name,
-                "href": f"/admin/catalog/services/{int(svc.id)}/edit",
-            }
+    ).all():
+        href = f"/admin/catalog/subcategories/{int(sub.id)}/edit"
+        if sub.care_memo_before_id == mid and (sub.care_memo_before_mode or "") == MODE_CUSTOM:
+            _append_usage(out, kind="подкатегория", name=sub.name, href=href, slot_label="до")
+        if sub.care_memo_after_id == mid and (sub.care_memo_after_mode or "") == MODE_CUSTOM:
+            _append_usage(out, kind="подкатегория", name=sub.name, href=href, slot_label="после")
+    for svc in db.scalars(
+        select(Service).where(
+            (Service.care_memo_before_id == mid) | (Service.care_memo_after_id == mid)
         )
+    ).all():
+        href = f"/admin/catalog/services/{int(svc.id)}/edit"
+        if svc.care_memo_before_id == mid and (svc.care_memo_before_mode or "") == MODE_CUSTOM:
+            _append_usage(out, kind="услуга", name=svc.name, href=href, slot_label="до")
+        if svc.care_memo_after_id == mid and (svc.care_memo_after_mode or "") == MODE_CUSTOM:
+            _append_usage(out, kind="услуга", name=svc.name, href=href, slot_label="после")
     return out
 
 
@@ -246,18 +282,40 @@ async def replace_care_memo_file(db: Session, memo_id: int, upload: object | Non
     return memo
 
 
+def _clear_entity_slot(entity: CatalogEntity, kind: MemoKind, memo_id: int) -> None:
+    mode_attr = f"care_memo_{kind}_mode"
+    id_attr = f"care_memo_{kind}_id"
+    if getattr(entity, id_attr, None) != memo_id:
+        return
+    setattr(entity, id_attr, None)
+    if (getattr(entity, mode_attr, None) or MODE_INHERIT) == MODE_CUSTOM:
+        setattr(entity, mode_attr, MODE_INHERIT)
+
+
 def _clear_links(db: Session, memo_id: int) -> None:
     mid = int(memo_id)
-    for cat in db.scalars(select(ServiceCategory).where(ServiceCategory.care_memo_id == mid)).all():
-        cat.care_memo_id = None
-    for sub in db.scalars(select(ServiceSubcategory).where(ServiceSubcategory.care_memo_id == mid)).all():
-        sub.care_memo_id = None
-        if (sub.care_memo_mode or MODE_INHERIT) == MODE_CUSTOM:
-            sub.care_memo_mode = MODE_INHERIT
-    for svc in db.scalars(select(Service).where(Service.care_memo_id == mid)).all():
-        svc.care_memo_id = None
-        if (svc.care_memo_mode or MODE_INHERIT) == MODE_CUSTOM:
-            svc.care_memo_mode = MODE_INHERIT
+    for cat in db.scalars(
+        select(ServiceCategory).where(
+            (ServiceCategory.care_memo_before_id == mid) | (ServiceCategory.care_memo_after_id == mid)
+        )
+    ).all():
+        _clear_entity_slot(cat, MEMO_BEFORE, mid)
+        _clear_entity_slot(cat, MEMO_AFTER, mid)
+    for sub in db.scalars(
+        select(ServiceSubcategory).where(
+            (ServiceSubcategory.care_memo_before_id == mid)
+            | (ServiceSubcategory.care_memo_after_id == mid)
+        )
+    ).all():
+        _clear_entity_slot(sub, MEMO_BEFORE, mid)
+        _clear_entity_slot(sub, MEMO_AFTER, mid)
+    for svc in db.scalars(
+        select(Service).where(
+            (Service.care_memo_before_id == mid) | (Service.care_memo_after_id == mid)
+        )
+    ).all():
+        _clear_entity_slot(svc, MEMO_BEFORE, mid)
+        _clear_entity_slot(svc, MEMO_AFTER, mid)
 
 
 def delete_care_memo(db: Session, memo_id: int, *, confirmed: bool) -> None:
@@ -275,11 +333,11 @@ def delete_care_memo(db: Session, memo_id: int, *, confirmed: bool) -> None:
 
 
 def parse_care_memo_id(db: Session, raw: object) -> int | None:
-    text = str(raw or "").strip()
-    if not text:
+    text_value = str(raw or "").strip()
+    if not text_value:
         return None
     try:
-        mid = int(text)
+        mid = int(text_value)
     except (TypeError, ValueError) as e:
         raise ValueError("Памятка не найдена.") from e
     if db.get(CareMemo, mid) is None:
@@ -287,19 +345,42 @@ def parse_care_memo_id(db: Session, raw: object) -> int | None:
     return mid
 
 
-def apply_category_memo(db: Session, category: ServiceCategory, raw: object) -> None:
-    category.care_memo_id = parse_care_memo_id(db, raw)
+def parse_memo_slot_choice(db: Session, raw: object) -> tuple[str, int | None]:
+    """Select: __inherit__ | __none__ | <id> → (mode, memo_id)."""
+    text_value = str(raw or "").strip()
+    if not text_value or text_value == SLOT_INHERIT:
+        return MODE_INHERIT, None
+    if text_value == SLOT_NONE:
+        return MODE_NONE, None
+    mid = parse_care_memo_id(db, text_value)
+    if mid is None:
+        return MODE_NONE, None
+    return MODE_CUSTOM, mid
 
 
-def apply_care_memo_choice(db: Session, entity: ServiceSubcategory | Service, mode_raw: object, id_raw: object) -> None:
-    mode = str(mode_raw or MODE_INHERIT).strip().lower()
-    if mode not in (MODE_INHERIT, MODE_CUSTOM):
-        mode = MODE_INHERIT
-    entity.care_memo_mode = mode
-    if mode == MODE_INHERIT:
-        entity.care_memo_id = None
-    else:
-        entity.care_memo_id = parse_care_memo_id(db, id_raw)
+def apply_memo_slot(db: Session, entity: CatalogEntity, kind: MemoKind, raw: object) -> None:
+    mode, mid = parse_memo_slot_choice(db, raw)
+    setattr(entity, f"care_memo_{kind}_mode", mode)
+    setattr(entity, f"care_memo_{kind}_id", mid)
+
+
+def apply_category_memos(db: Session, category: ServiceCategory, before_raw: object, after_raw: object) -> None:
+    apply_memo_slot(db, category, MEMO_BEFORE, before_raw)
+    apply_memo_slot(db, category, MEMO_AFTER, after_raw)
+
+
+def apply_entity_memos(db: Session, entity: ServiceSubcategory | Service, before_raw: object, after_raw: object) -> None:
+    apply_memo_slot(db, entity, MEMO_BEFORE, before_raw)
+    apply_memo_slot(db, entity, MEMO_AFTER, after_raw)
+
+
+def slot_form_value(mode: str | None, memo_id: int | None) -> str:
+    normalized = (mode or MODE_INHERIT).strip().lower()
+    if normalized == MODE_NONE:
+        return SLOT_NONE
+    if normalized == MODE_CUSTOM and memo_id:
+        return str(int(memo_id))
+    return SLOT_INHERIT
 
 
 def _memo_by_id(db: Session, memo_id: int | None) -> CareMemo | None:
@@ -308,40 +389,94 @@ def _memo_by_id(db: Session, memo_id: int | None) -> CareMemo | None:
     return db.get(CareMemo, int(memo_id))
 
 
-def resolve_subcategory_memo(db: Session, sub: ServiceSubcategory | None) -> CareMemo | None:
-    if sub is None:
-        return None
-    if (sub.care_memo_mode or MODE_INHERIT) == MODE_CUSTOM:
-        return _memo_by_id(db, sub.care_memo_id)
-    cat = db.get(ServiceCategory, int(sub.category_id))
+def _entity_slot(entity: CatalogEntity, kind: MemoKind) -> tuple[str, int | None]:
+    mode = getattr(entity, f"care_memo_{kind}_mode", None) or MODE_INHERIT
+    mid = getattr(entity, f"care_memo_{kind}_id", None)
+    return str(mode).strip().lower(), int(mid) if mid else None
+
+
+def resolve_category_memo(db: Session, cat: ServiceCategory | None, kind: MemoKind) -> CareMemo | None:
     if cat is None:
         return None
-    return _memo_by_id(db, cat.care_memo_id)
+    mode, mid = _entity_slot(cat, kind)
+    if mode in (MODE_INHERIT, MODE_NONE):
+        return None
+    if mode == MODE_CUSTOM:
+        return _memo_by_id(db, mid)
+    return None
 
 
-def resolve_care_memo(db: Session, service: Service | None) -> CareMemo | None:
-    """Итоговая памятка услуги: своя, иначе подкатегория, иначе категория."""
+def resolve_subcategory_memo(
+    db: Session, sub: ServiceSubcategory | None, kind: MemoKind = MEMO_AFTER
+) -> CareMemo | None:
+    if sub is None:
+        return None
+    mode, mid = _entity_slot(sub, kind)
+    if mode == MODE_NONE:
+        return None
+    if mode == MODE_CUSTOM:
+        return _memo_by_id(db, mid)
+    cat = db.get(ServiceCategory, int(sub.category_id))
+    return resolve_category_memo(db, cat, kind)
+
+
+def resolve_care_memo(
+    db: Session, service: Service | None, kind: MemoKind = MEMO_AFTER
+) -> CareMemo | None:
+    """Итоговая памятка услуги: свой слот → подкатегория → категория."""
     if service is None:
         return None
-    if (service.care_memo_mode or MODE_INHERIT) == MODE_CUSTOM:
-        return _memo_by_id(db, service.care_memo_id)
+    mode, mid = _entity_slot(service, kind)
+    if mode == MODE_NONE:
+        return None
+    if mode == MODE_CUSTOM:
+        return _memo_by_id(db, mid)
     sub = db.get(ServiceSubcategory, int(service.subcategory_id))
-    return resolve_subcategory_memo(db, sub)
+    return resolve_subcategory_memo(db, sub, kind)
 
 
-def inherit_label_for_subcategory(db: Session, sub: ServiceSubcategory) -> str:
+def inherit_label_for_category(_db: Session, _cat: ServiceCategory, kind: MemoKind) -> str:
+    del kind  # у категории «как у родителя» = нет
+    return "нет"
+
+
+def inherit_label_for_subcategory(db: Session, sub: ServiceSubcategory, kind: MemoKind) -> str:
     cat = db.get(ServiceCategory, int(sub.category_id))
-    memo = _memo_by_id(db, cat.care_memo_id) if cat is not None else None
+    memo = resolve_category_memo(db, cat, kind)
     return memo.name if memo is not None else "нет"
 
 
-def inherit_label_for_service(db: Session, service: Service) -> str:
+def inherit_label_for_service(db: Session, service: Service, kind: MemoKind) -> str:
     sub = db.get(ServiceSubcategory, int(service.subcategory_id))
-    memo = resolve_subcategory_memo(db, sub)
+    memo = resolve_subcategory_memo(db, sub, kind)
     return memo.name if memo is not None else "нет"
 
 
-def resolve_visit_service_memo(db: Session, row: VisitService) -> CareMemo | None:
+def memo_form_context(db: Session, entity: CatalogEntity) -> dict[str, object]:
+    """Контекст двух слотов для шаблонов каталога."""
+    if isinstance(entity, ServiceCategory):
+        before_inherit = inherit_label_for_category(db, entity, MEMO_BEFORE)
+        after_inherit = inherit_label_for_category(db, entity, MEMO_AFTER)
+    elif isinstance(entity, ServiceSubcategory):
+        before_inherit = inherit_label_for_subcategory(db, entity, MEMO_BEFORE)
+        after_inherit = inherit_label_for_subcategory(db, entity, MEMO_AFTER)
+    else:
+        before_inherit = inherit_label_for_service(db, entity, MEMO_BEFORE)
+        after_inherit = inherit_label_for_service(db, entity, MEMO_AFTER)
+    bm, bi = _entity_slot(entity, MEMO_BEFORE)
+    am, ai = _entity_slot(entity, MEMO_AFTER)
+    return {
+        "care_memos": list_care_memos(db),
+        "form_care_memo_before": slot_form_value(bm, bi),
+        "form_care_memo_after": slot_form_value(am, ai),
+        "care_memo_before_inherit_label": before_inherit,
+        "care_memo_after_inherit_label": after_inherit,
+    }
+
+
+def resolve_visit_service_memo(
+    db: Session, row: VisitService, kind: MemoKind = MEMO_AFTER
+) -> CareMemo | None:
     svc = db.get(Service, int(row.service_id)) if row.service_id else None
     if svc is None:
         svc = db.scalar(
@@ -355,7 +490,7 @@ def resolve_visit_service_memo(db: Session, row: VisitService) -> CareMemo | Non
             )
             .limit(1)
         )
-    return resolve_care_memo(db, svc)
+    return resolve_care_memo(db, svc, kind)
 
 
 def _unique_ids(memos: list[CareMemo | None]) -> list[int]:
@@ -372,7 +507,7 @@ def _unique_ids(memos: list[CareMemo | None]) -> list[int]:
     return out
 
 
-def care_memo_ids_for_visit(db: Session, visit: Visit) -> list[int]:
+def care_memo_ids_for_visit(db: Session, visit: Visit, *, kind: MemoKind = MEMO_AFTER) -> list[int]:
     rows = list(
         db.scalars(
             select(VisitService)
@@ -380,10 +515,12 @@ def care_memo_ids_for_visit(db: Session, visit: Visit) -> list[int]:
             .order_by(VisitService.sort_order.asc(), VisitService.id.asc())
         ).all()
     )
-    return _unique_ids([resolve_visit_service_memo(db, row) for row in rows])
+    return _unique_ids([resolve_visit_service_memo(db, row, kind) for row in rows])
 
 
-def care_memo_ids_for_booking(db: Session, booking: Booking) -> list[int]:
+def care_memo_ids_for_booking(
+    db: Session, booking: Booking, *, kind: MemoKind = MEMO_AFTER
+) -> list[int]:
     rows = list(
         db.scalars(
             select(BookingPlannedService)
@@ -393,17 +530,19 @@ def care_memo_ids_for_booking(db: Session, booking: Booking) -> list[int]:
     )
     memos: list[CareMemo | None] = []
     for row in rows:
-        memos.append(resolve_care_memo(db, db.get(Service, int(row.service_id))))
+        memos.append(resolve_care_memo(db, db.get(Service, int(row.service_id)), kind))
     return _unique_ids(memos)
 
 
-def memo_ids_if_enabled(db: Session, rule: object, *, visit: Visit | None = None, booking: Booking | None = None) -> list[int]:
+def memo_ids_if_enabled(
+    db: Session, rule: object, *, visit: Visit | None = None, booking: Booking | None = None
+) -> list[int]:
     if not bool(getattr(rule, "send_care_memo", True)):
         return []
     if visit is not None and visit.id is not None:
-        return care_memo_ids_for_visit(db, visit)
+        return care_memo_ids_for_visit(db, visit, kind=MEMO_AFTER)
     if booking is not None and booking.id is not None:
-        return care_memo_ids_for_booking(db, booking)
+        return care_memo_ids_for_booking(db, booking, kind=MEMO_AFTER)
     return []
 
 
@@ -414,3 +553,94 @@ def memo_names(db: Session, ids: list[int]) -> list[str]:
         if memo is not None:
             names.append(memo.name)
     return names
+
+
+def legacy_after_slot_from_old(
+    *,
+    memo_id: int | None,
+    mode: str | None = None,
+    is_category: bool = False,
+) -> tuple[str, int | None]:
+    """Перенос старой одной ссылки в слот «после»."""
+    if is_category:
+        if memo_id:
+            return MODE_CUSTOM, int(memo_id)
+        return MODE_NONE, None
+    normalized = (mode or MODE_INHERIT).strip().lower()
+    if normalized == MODE_INHERIT:
+        return MODE_INHERIT, None
+    if memo_id:
+        return MODE_CUSTOM, int(memo_id)
+    return MODE_NONE, None
+
+
+def migrate_care_memo_before_after(connection: Connection) -> None:
+    """Заполнить новые слоты из старых care_memo_id / care_memo_mode (колонки ещё есть)."""
+    for rid, mid in connection.execute(text("SELECT id, care_memo_id FROM service_categories")).fetchall():
+        mode, after_id = legacy_after_slot_from_old(memo_id=mid, is_category=True)
+        connection.execute(
+            text(
+                """
+                UPDATE service_categories
+                SET care_memo_before_mode = :bm,
+                    care_memo_before_id = NULL,
+                    care_memo_after_mode = :am,
+                    care_memo_after_id = :aid
+                WHERE id = :rid
+                """
+            ),
+            {"bm": MODE_INHERIT, "am": mode, "aid": after_id, "rid": int(rid)},
+        )
+    for table in ("service_subcategories", "services"):
+        rows = connection.execute(
+            text(f"SELECT id, care_memo_mode, care_memo_id FROM {table}")
+        ).fetchall()
+        for rid, old_mode, mid in rows:
+            mode, after_id = legacy_after_slot_from_old(memo_id=mid, mode=old_mode, is_category=False)
+            connection.execute(
+                text(
+                    f"""
+                    UPDATE {table}
+                    SET care_memo_before_mode = :bm,
+                        care_memo_before_id = NULL,
+                        care_memo_after_mode = :am,
+                        care_memo_after_id = :aid
+                    WHERE id = :rid
+                    """
+                ),
+                {"bm": MODE_INHERIT, "am": mode, "aid": after_id, "rid": int(rid)},
+            )
+
+
+def downgrade_care_memo_before_after(connection: Connection) -> None:
+    """Вернуть старые колонки из слота «после» (новые колонки ещё есть)."""
+    for rid, mode, mid in connection.execute(
+        text("SELECT id, care_memo_after_mode, care_memo_after_id FROM service_categories")
+    ).fetchall():
+        after_id = int(mid) if mid and (mode or "") == MODE_CUSTOM else None
+        connection.execute(
+            text("UPDATE service_categories SET care_memo_id = :mid WHERE id = :rid"),
+            {"mid": after_id, "rid": int(rid)},
+        )
+    for table in ("service_subcategories", "services"):
+        rows = connection.execute(
+            text(f"SELECT id, care_memo_after_mode, care_memo_after_id FROM {table}")
+        ).fetchall()
+        for rid, mode, mid in rows:
+            normalized = (mode or MODE_INHERIT).strip().lower()
+            if normalized == MODE_INHERIT:
+                old_mode, old_id = MODE_INHERIT, None
+            elif normalized == MODE_NONE:
+                old_mode, old_id = MODE_CUSTOM, None
+            else:
+                old_mode, old_id = MODE_CUSTOM, int(mid) if mid else None
+            connection.execute(
+                text(
+                    f"""
+                    UPDATE {table}
+                    SET care_memo_mode = :mode, care_memo_id = :mid
+                    WHERE id = :rid
+                    """
+                ),
+                {"mode": old_mode, "mid": old_id, "rid": int(rid)},
+            )

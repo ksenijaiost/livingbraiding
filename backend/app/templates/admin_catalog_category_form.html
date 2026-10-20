@@ -38,11 +38,25 @@
         </p>
       </div>
       {% if not is_new %}
-        <label style="margin-top: 12px; display:block;">Памятка
-          <select name="care_memo_id">
-            <option value="">нет</option>
+        <label style="margin-top: 12px; display:block;">Памятка до
+          <select name="care_memo_before">
+            <option value="__inherit__" {% if form_care_memo_before == '__inherit__' %}selected{% endif %}>
+              Как у родителя (сейчас: {{ care_memo_before_inherit_label }})
+            </option>
+            <option value="__none__" {% if form_care_memo_before == '__none__' %}selected{% endif %}>Нет</option>
             {% for m in care_memos %}
-              <option value="{{ m.id }}" {% if form_care_memo_id == m.id %}selected{% endif %}>{{ m.name }}</option>
+              <option value="{{ m.id }}" {% if form_care_memo_before == (m.id|string) %}selected{% endif %}>{{ m.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label style="margin-top: 12px; display:block;">Памятка после
+          <select name="care_memo_after">
+            <option value="__inherit__" {% if form_care_memo_after == '__inherit__' %}selected{% endif %}>
+              Как у родителя (сейчас: {{ care_memo_after_inherit_label }})
+            </option>
+            <option value="__none__" {% if form_care_memo_after == '__none__' %}selected{% endif %}>Нет</option>
+            {% for m in care_memos %}
+              <option value="{{ m.id }}" {% if form_care_memo_after == (m.id|string) %}selected{% endif %}>{{ m.name }}</option>
             {% endfor %}
           </select>
         </label>

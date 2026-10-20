@@ -889,8 +889,18 @@ def _ensure_demo_operational_data(db: Session) -> None:
     if not db.scalar(select(Client).limit(1)):
         db.add_all(
             [
-                Client(name="Демо клиент 1", phone="+7 900 000-00-01", is_confirmed=True),
-                Client(name="Демо клиент 2", phone="+7 900 000-00-02", is_confirmed=True),
+                Client(
+                    name="Демо клиент 1",
+                    phone="+7 (900) 000-00-01",
+                    phone_normalized="79000000001",
+                    is_confirmed=True,
+                ),
+                Client(
+                    name="Демо клиент 2",
+                    phone="+7 (900) 000-00-02",
+                    phone_normalized="79000000002",
+                    is_confirmed=True,
+                ),
             ]
         )
         db.flush()

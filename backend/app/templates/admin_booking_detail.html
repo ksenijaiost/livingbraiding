@@ -62,7 +62,9 @@
     {% endif %}
 
     <div class="card lb-card-bg-subtle">
-      <p class="lb-my-6"><strong>Клиент</strong>: <a href="/clients/{{ booking.client.id }}">{{ booking.client.name }}</a>{% if booking_client_is_new %} <span style="color:#2563eb;font-weight:700;font-size:12px;">новый</span>{% endif %}</p>
+      <p class="lb-my-6"><strong>Клиент</strong>: <a href="/clients/{{ booking.client.id }}">{{ booking.client.name }}</a>{% if booking_client_is_new %} <span style="color:#2563eb;font-weight:700;font-size:12px;">новый</span>{% endif %}
+        <span class="muted" style="margin-left:8px;">{{ client_phone_or_via_html(booking.client) }}</span>
+      </p>
       <p class="lb-my-6"><strong>Дата и время записи</strong>: {{ format_naive_utc_datetime(booking.planned_date, display_tz) }} ({{ timezone_label(display_tz) }})</p>
       <p class="lb-my-6"><strong>Тип</strong>: {{ kind_label }}</p>
       <p class="lb-my-6"><strong>Статус</strong>: {{ status_label }}</p>
@@ -385,6 +387,18 @@
     {% endif %}
 
     <h3 class="lb-mt-18">Условия</h3>
+    <p class="lb-my-6"><strong>Скидка</strong>: {{ booking_discount_display(booking.discount_percent) }}</p>
+    <p class="lb-my-6"><strong>Диалог</strong>:
+      {% if booking.dialog_location %}
+        {% if dialog_looks_like_link(booking.dialog_location) %}
+          <a href="{{ dialog_href(booking.dialog_location) }}" target="_blank" rel="noopener">{{ booking.dialog_location }}</a>
+        {% else %}
+          {{ booking.dialog_location }}
+        {% endif %}
+      {% else %}
+        не указано
+      {% endif %}
+    </p>
     <p class="lb-my-6"><strong>Озвученная сумма</strong>: {{ booking.quoted_price_text or "—" }}</p>
     {% set _pmin = (calc_product_min or '') %}
     {% set _pmax = (calc_product_max or '') %}

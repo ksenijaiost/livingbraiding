@@ -236,13 +236,31 @@ def test_send_max_not_configured(monkeypatch) -> None:
 def test_send_max_mocked(monkeypatch) -> None:
     monkeypatch.setenv("MAX_BOT_TOKEN", "tok")
     get_settings.cache_clear()
-    with patch("app.notifications.urllib.request.urlopen") as urlopen:
-        resp = MagicMock()
-        resp.read.return_value = b'{"message":{"mid":"1"}}'
-        resp.__enter__ = MagicMock(return_value=resp)
-        resp.__exit__ = MagicMock(return_value=False)
-        urlopen.return_value = resp
+    seen: dict[str, object] = {}
+
+    class _Client:
+        def __init__(self, **kwargs: object) -> None:
+            seen["verify"] = kwargs.get("verify")
+
+        def __enter__(self) -> "_Client":
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+        def request(self, method: str, url: str, content: bytes | None = None, headers: dict | None = None):
+            seen["url"] = url
+            seen["headers"] = headers
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.content = b'{"message":{"mid":"1"}}'
+            return resp
+
+    with patch("app.max_http.httpx.Client", _Client):
         send_max(42, "Тест Живём Плетём")
-        req = urlopen.call_args[0][0]
-        assert "user_id=42" in req.full_url
-        assert req.get_header("Authorization") == "tok"
+    assert "user_id=42" in str(seen["url"])
+    headers = seen["headers"]
+    assert isinstance(headers, dict)
+    assert headers["Authorization"] == "tok"
+    assert seen["verify"] is not False
+    assert isinstance(seen["verify"], str) and seen["verify"]

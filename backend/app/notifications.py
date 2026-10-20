@@ -13,6 +13,8 @@ import urllib.request
 from datetime import datetime, timedelta
 from typing import Any, Iterable, Sequence
 
+import httpx
+
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -27,6 +29,7 @@ from app.db.models import (
     User,
 )
 from app.display_time import DEFAULT_DISPLAY_TIMEZONE, format_naive_utc_datetime, get_display_timezone
+from app.max_http import max_request
 from app.settings import get_settings
 from app.time_utils import utcnow_naive
 
@@ -493,23 +496,22 @@ def send_max(
     base = (settings.max_api_base or "https://platform-api2.max.ru").rstrip("/")
     url = f"{base}/messages?{qs}"
     body = json.dumps({"text": text}, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=body,
-        method="POST",
-        headers={
-            "Authorization": token,
-            "Content-Type": "application/json; charset=utf-8",
-        },
-    )
     try:
-        with urllib.request.urlopen(req, timeout=MAX_HTTP_TIMEOUT_SEC) as resp:
-            raw = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace") if e.fp else str(e)
-        raise RuntimeError(f"Max HTTP {e.code}: {detail[:500]}") from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Max сеть: {e.reason}") from e
+        status, raw_bytes = max_request(
+            "POST",
+            url,
+            content=body,
+            headers={
+                "Authorization": token,
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            timeout=MAX_HTTP_TIMEOUT_SEC,
+        )
+    except httpx.HTTPError as e:
+        raise RuntimeError(f"Max сеть: {e}") from e
+    raw = raw_bytes.decode("utf-8", errors="replace")
+    if status >= 400:
+        raise RuntimeError(f"Max HTTP {status}: {raw[:500]}")
 
     if not raw.strip():
         return
@@ -657,6 +659,7 @@ def _record_client_send_if_needed(db: Session, row: NotificationOutbox) -> None:
     if row.event_type not in (
         "client_booking_reminder",
         "client_after_booking",
+        "client_booking_status",
     ):
         return
     payload = _parse_payload(row)

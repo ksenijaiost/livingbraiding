@@ -107,7 +107,32 @@
 
     <h3 class="section-title" style="margin-top: 20px;">Данные клиента</h3>
     <table class="kv">
-      <tr><th>Телефон</th><td>{{ client.phone or "—" }}</td></tr>
+      <tr>
+        <th>Телефон</th>
+        <td>
+          {% set tel = client_tel(client) %}
+          {% if tel %}
+            <a href="tel:{{ tel }}">{{ format_client_phone(client) }}</a>
+          {% elif client.contact_client_id %}
+            {{ client_phone_or_via_html(client) }}
+          {% else %}
+            {{ format_client_phone(client) or "—" }}
+          {% endif %}
+        </td>
+      </tr>
+      {% if contact_for_clients %}
+      <tr>
+        <th>Контактное лицо для</th>
+        <td>
+          {% for dep in contact_for_clients %}
+            <div>
+              <a href="/clients/{{ dep.id }}">{{ dep.name }}</a>
+              {% if dep.contact_relation %}<span class="muted">({{ dep.contact_relation }})</span>{% endif %}
+            </div>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endif %}
       <tr>
         <th>Фото</th>
         <td>

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import urllib.request
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -137,7 +138,13 @@ def _mock_http(monkeypatch, *, video_save_error: bool = False):
             body = {"ok": True}
         return _Resp(json.dumps(body).encode())
 
+    def max_request(method, url, *, content=None, headers=None, timeout=8):
+        req = urllib.request.Request(url, data=content, method=method, headers=headers or {})
+        with urlopen(req, timeout=timeout) as resp:
+            return 200, resp.read()
+
     monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("app.max_http.max_request", max_request)
     monkeypatch.setattr("app.route_video_send.time.sleep", lambda sec: sleeps.append(sec))
     settings = _settings()
     monkeypatch.setattr("app.route_video_send.get_settings", lambda: settings)

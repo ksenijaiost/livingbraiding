@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import urllib.request
 import zipfile
 from datetime import datetime
 from types import SimpleNamespace
@@ -14,12 +15,21 @@ from sqlalchemy.orm import sessionmaker
 from app.care_memo_send import deliver_care_memos
 from app.care_memos import (
     CareMemoInUse,
-    apply_care_memo_choice,
-    apply_category_memo,
+    MEMO_AFTER,
+    MEMO_BEFORE,
+    MODE_CUSTOM,
+    MODE_INHERIT,
+    MODE_NONE,
+    SLOT_INHERIT,
+    SLOT_NONE,
+    apply_category_memos,
+    apply_entity_memos,
     care_memo_ids_for_booking,
     care_memo_ids_for_visit,
     create_care_memo,
     delete_care_memo,
+    legacy_after_slot_from_old,
+    migrate_care_memo_before_after,
     parse_memo_name,
     rename_care_memo,
     replace_care_memo_file,
@@ -101,28 +111,43 @@ def _memo(db, name: str = "Уход", filename: str = "a.png") -> CareMemo:
     return row
 
 
+def _after_slot(mode: str, memo) -> tuple[str, int | None]:
+    if mode == MODE_INHERIT:
+        return MODE_INHERIT, None
+    if memo is not None:
+        return MODE_CUSTOM, int(memo.id)
+    return MODE_NONE, None
+
+
 def _catalog(db, *, cat_memo=None, sub_mode="inherit", sub_memo=None, svc_mode="inherit", svc_memo=None):
+    """Старый смысл одной памятки → слот «после» (как миграция)."""
     cat = ServiceCategory(
         name="Косы",
         consultation_kind=ConsultationKind.BRAIDING,
-        care_memo_id=cat_memo.id if cat_memo else None,
+        care_memo_before_mode=MODE_INHERIT,
+        care_memo_after_mode=MODE_CUSTOM if cat_memo else MODE_NONE,
+        care_memo_after_id=cat_memo.id if cat_memo else None,
     )
     db.add(cat)
     db.flush()
+    sub_mode_v, sub_id = _after_slot(sub_mode, sub_memo)
     sub = ServiceSubcategory(
         category_id=cat.id,
         name="Афро",
-        care_memo_mode=sub_mode,
-        care_memo_id=sub_memo.id if sub_memo else None,
+        care_memo_before_mode=MODE_INHERIT,
+        care_memo_after_mode=sub_mode_v,
+        care_memo_after_id=sub_id,
     )
     db.add(sub)
     db.flush()
+    svc_mode_v, svc_id = _after_slot(svc_mode, svc_memo)
     svc = Service(
         subcategory_id=sub.id,
         name="Сенегалки",
         estimated_duration_minutes=60,
-        care_memo_mode=svc_mode,
-        care_memo_id=svc_memo.id if svc_memo else None,
+        care_memo_before_mode=MODE_INHERIT,
+        care_memo_after_mode=svc_mode_v,
+        care_memo_after_id=svc_id,
     )
     db.add(svc)
     db.flush()
@@ -207,25 +232,25 @@ def test_delete_warns_and_resets_links(db, tmp_path, monkeypatch) -> None:
     memo = _memo(db, "Сушка")
     other = _memo(db, "Другая", "b.jpg")
     cat, sub, svc = _catalog(db, cat_memo=memo, sub_mode="custom", sub_memo=memo, svc_mode="custom", svc_memo=other)
-    apply_category_memo(db, cat, str(memo.id))
-    links_preview = None
+    apply_category_memos(db, cat, SLOT_INHERIT, str(memo.id))
     with pytest.raises(CareMemoInUse) as caught:
         delete_care_memo(db, memo.id, confirmed=False)
     links_preview = caught.value.links
     kinds = {item["kind"] for item in links_preview}
     assert "категория" in kinds
     assert "подкатегория" in kinds
+    assert any(item.get("slot") == "после" for item in links_preview)
     assert any(item["href"].endswith("/edit") for item in links_preview)
     assert db.get(CareMemo, memo.id) is not None
 
     delete_care_memo(db, memo.id, confirmed=True)
     db.refresh(cat)
     db.refresh(sub)
-    assert cat.care_memo_id is None
-    assert sub.care_memo_id is None
-    assert sub.care_memo_mode == "inherit"
+    assert cat.care_memo_after_id is None
+    assert sub.care_memo_after_id is None
+    assert sub.care_memo_after_mode == MODE_INHERIT
     assert db.get(CareMemo, other.id) is not None
-    assert svc.care_memo_id == other.id
+    assert svc.care_memo_after_id == other.id
 
 
 def test_inherit_category_subcategory_service(db, tmp_path, monkeypatch) -> None:
@@ -234,20 +259,151 @@ def test_inherit_category_subcategory_service(db, tmp_path, monkeypatch) -> None
     sub_memo = _memo(db, "Подкатегория", "b.png")
     svc_memo = _memo(db, "Услуга", "c.webp")
     _cat, sub, svc = _catalog(db, cat_memo=cat_memo)
-    assert resolve_care_memo(db, svc).id == cat_memo.id
+    assert resolve_care_memo(db, svc, MEMO_AFTER).id == cat_memo.id
 
-    apply_care_memo_choice(db, sub, "custom", str(sub_memo.id))
-    assert resolve_care_memo(db, svc).id == sub_memo.id
+    apply_entity_memos(db, sub, SLOT_INHERIT, str(sub_memo.id))
+    assert resolve_care_memo(db, svc, MEMO_AFTER).id == sub_memo.id
 
-    apply_care_memo_choice(db, svc, "custom", "")
-    assert resolve_care_memo(db, svc) is None
+    apply_entity_memos(db, svc, SLOT_INHERIT, SLOT_NONE)
+    assert resolve_care_memo(db, svc, MEMO_AFTER) is None
 
-    apply_care_memo_choice(db, svc, "custom", str(svc_memo.id))
-    assert resolve_care_memo(db, svc).id == svc_memo.id
+    apply_entity_memos(db, svc, SLOT_INHERIT, str(svc_memo.id))
+    assert resolve_care_memo(db, svc, MEMO_AFTER).id == svc_memo.id
 
-    apply_care_memo_choice(db, svc, "inherit", str(svc_memo.id))
-    assert svc.care_memo_id is None
-    assert resolve_care_memo(db, svc).id == sub_memo.id
+    apply_entity_memos(db, svc, SLOT_INHERIT, SLOT_INHERIT)
+    assert svc.care_memo_after_id is None
+    assert resolve_care_memo(db, svc, MEMO_AFTER).id == sub_memo.id
+
+
+def test_before_after_independent_and_none_blocks_parent(db, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LB_MEDIA_ROOT", str(tmp_path))
+    before_m = _memo(db, "До")
+    after_m = _memo(db, "После", "b.png")
+    cat, sub, svc = _catalog(db)
+    apply_category_memos(db, cat, str(before_m.id), str(after_m.id))
+    assert resolve_care_memo(db, svc, MEMO_BEFORE).id == before_m.id
+    assert resolve_care_memo(db, svc, MEMO_AFTER).id == after_m.id
+    assert care_memo_ids_for_booking(db, _booking_with(db, svc), kind=MEMO_BEFORE) == [before_m.id]
+
+    apply_entity_memos(db, sub, SLOT_INHERIT, SLOT_NONE)
+    assert resolve_care_memo(db, svc, MEMO_AFTER) is None
+    assert resolve_care_memo(db, svc, MEMO_BEFORE).id == before_m.id
+
+    apply_entity_memos(db, sub, SLOT_NONE, SLOT_NONE)
+    assert resolve_care_memo(db, svc, MEMO_BEFORE) is None
+
+
+def test_legacy_after_slot_and_sql_migration(db, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LB_MEDIA_ROOT", str(tmp_path))
+    assert legacy_after_slot_from_old(memo_id=5, is_category=True) == (MODE_CUSTOM, 5)
+    assert legacy_after_slot_from_old(memo_id=None, is_category=True) == (MODE_NONE, None)
+    assert legacy_after_slot_from_old(memo_id=None, mode="inherit") == (MODE_INHERIT, None)
+    assert legacy_after_slot_from_old(memo_id=3, mode="custom") == (MODE_CUSTOM, 3)
+    assert legacy_after_slot_from_old(memo_id=None, mode="custom") == (MODE_NONE, None)
+
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE care_memos (id INTEGER PRIMARY KEY)"))
+        conn.execute(
+            text(
+                """
+                CREATE TABLE service_categories (
+                    id INTEGER PRIMARY KEY,
+                    care_memo_id INTEGER,
+                    care_memo_before_mode VARCHAR(16) DEFAULT 'inherit',
+                    care_memo_before_id INTEGER,
+                    care_memo_after_mode VARCHAR(16) DEFAULT 'inherit',
+                    care_memo_after_id INTEGER
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE service_subcategories (
+                    id INTEGER PRIMARY KEY,
+                    care_memo_mode VARCHAR(16),
+                    care_memo_id INTEGER,
+                    care_memo_before_mode VARCHAR(16) DEFAULT 'inherit',
+                    care_memo_before_id INTEGER,
+                    care_memo_after_mode VARCHAR(16) DEFAULT 'inherit',
+                    care_memo_after_id INTEGER
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE services (
+                    id INTEGER PRIMARY KEY,
+                    care_memo_mode VARCHAR(16),
+                    care_memo_id INTEGER,
+                    care_memo_before_mode VARCHAR(16) DEFAULT 'inherit',
+                    care_memo_before_id INTEGER,
+                    care_memo_after_mode VARCHAR(16) DEFAULT 'inherit',
+                    care_memo_after_id INTEGER
+                )
+                """
+            )
+        )
+        conn.execute(text("INSERT INTO service_categories (id, care_memo_id) VALUES (1, 10)"))
+        conn.execute(
+            text(
+                "INSERT INTO service_subcategories (id, care_memo_mode, care_memo_id) VALUES "
+                "(2, 'custom', 10), (3, 'inherit', NULL), (4, 'custom', NULL)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO services (id, care_memo_mode, care_memo_id) VALUES (5, 'custom', 11)"
+            )
+        )
+        migrate_care_memo_before_after(conn)
+        cat = conn.execute(
+            text(
+                "SELECT care_memo_before_mode, care_memo_after_mode, care_memo_after_id "
+                "FROM service_categories WHERE id=1"
+            )
+        ).one()
+        assert cat == (MODE_INHERIT, MODE_CUSTOM, 10)
+        sub_custom = conn.execute(
+            text("SELECT care_memo_after_mode, care_memo_after_id FROM service_subcategories WHERE id=2")
+        ).one()
+        assert sub_custom == (MODE_CUSTOM, 10)
+        sub_inh = conn.execute(
+            text("SELECT care_memo_after_mode, care_memo_after_id FROM service_subcategories WHERE id=3")
+        ).one()
+        assert sub_inh == (MODE_INHERIT, None)
+        sub_none = conn.execute(
+            text("SELECT care_memo_after_mode, care_memo_after_id FROM service_subcategories WHERE id=4")
+        ).one()
+        assert sub_none == (MODE_NONE, None)
+        svc_row = conn.execute(
+            text("SELECT care_memo_before_mode, care_memo_after_mode, care_memo_after_id FROM services WHERE id=5")
+        ).one()
+        assert svc_row == (MODE_INHERIT, MODE_CUSTOM, 11)
+
+
+def _booking_with(db, svc: Service) -> Booking:
+    user, client = _people(db)
+    booking = Booking(
+        created_by_user_id=user.id,
+        client_id=client.id,
+        planned_date=datetime(2026, 10, 12, 5, 0),
+        kind=BookingKind.VISIT,
+        status=BookingStatus.ACTIVE,
+        masters_scope=VisitMastersScope.VISIT,
+        same_master_shares_all_services=False,
+    )
+    db.add(booking)
+    db.flush()
+    db.add(BookingPlannedService(booking_id=booking.id, service_id=svc.id, sort_order=0))
+    db.flush()
+    return booking
 
 
 def test_unique_memos_on_visit_and_checkbox(db, tmp_path, monkeypatch) -> None:
@@ -259,14 +415,16 @@ def test_unique_memos_on_visit_and_checkbox(db, tmp_path, monkeypatch) -> None:
         subcategory_id=sub.id,
         name="Зизи",
         estimated_duration_minutes=30,
-        care_memo_mode="custom",
-        care_memo_id=own.id,
+        care_memo_before_mode=MODE_INHERIT,
+        care_memo_after_mode=MODE_CUSTOM,
+        care_memo_after_id=own.id,
     )
     third = Service(
         subcategory_id=sub.id,
         name="Повтор",
         estimated_duration_minutes=30,
-        care_memo_mode="inherit",
+        care_memo_before_mode=MODE_INHERIT,
+        care_memo_after_mode=MODE_INHERIT,
     )
     db.add_all([second, third])
     db.flush()
@@ -367,7 +525,13 @@ def _mock_http(monkeypatch):
             body = {"ok": True}
         return _Resp(json.dumps(body).encode())
 
+    def max_request(method, url, *, content=None, headers=None, timeout=8):
+        req = urllib.request.Request(url, data=content, method=method, headers=headers or {})
+        with urlopen(req, timeout=timeout) as resp:
+            return 200, resp.read()
+
     monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("app.max_http.max_request", max_request)
     monkeypatch.setattr("app.care_memo_send.get_settings", _settings)
     monkeypatch.setattr("app.notifications.get_settings", _settings)
     return calls

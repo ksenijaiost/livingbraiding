@@ -41,7 +41,7 @@ DEFAULT_BEFORE_TEMPLATE = (
     "Напоминаем: {{date_text}} ({{weekday}}) в {{time}} вы записаны:\n"
     "{{services}}\n"
     "Мастер: {{masters}}\n\n"
-    "Ответьте: 1 — подтвердить, 2 — перенести, 3 — отменить, 4 — написать администратору, 5 — как добраться."
+    "{{reply_hint}}"
 )
 DEFAULT_AFTER_TEMPLATE = (
     "Спасибо, что были у нас, {{name}}! 💛\n"
@@ -169,16 +169,20 @@ def render_client_notify_template(
     db: Session | None = None,
     substitute_system: bool = True,
     system_keys: frozenset[str] | None = None,
+    via_contact: Client | None = None,
 ) -> str:
     """Подставить переменные. Неизвестные {{...}} оставляет как есть.
 
     substitute_system=False — не подставлять дату/услуги/мастеров.
     system_keys при этом ограничивает системные ключи (для «после» — только name).
     Переменные студии подставляются, если передан db.
+    via_contact — отправка через контактное лицо: {{client_for_line}} и авто-prepend.
     """
+    from app.client_contact import client_for_line
     from app.route_video_send import strip_route_video_placeholder
 
     text = strip_route_video_placeholder(template if template is not None else "")
+    for_line = client_for_line(client, via_contact=via_contact)
     values: dict[str, str] = {}
     use_system = substitute_system or bool(system_keys)
     if use_system:
@@ -200,14 +204,29 @@ def render_client_notify_template(
             "name": (client.name or "").strip(),
             "services": _services_block(booking, marker),
             "masters": _masters_csv(booking),
+            "client_for_line": for_line,
         }
+        if db is not None:
+            from app.client_reply_digits import reply_hint_system_values
+
+            values.update(reply_hint_system_values(db))
         if system_keys is not None:
-            values = {k: values[k] for k in system_keys if k in values}
+            keep = set(system_keys) | {"client_for_line"}
+            values = {k: values[k] for k in keep if k in values}
+    else:
+        values = {"client_for_line": for_line}
+        if system_keys is not None:
+            # after-visit: name + client_for_line
+            values["name"] = (client.name or "").strip()
+            keep = set(system_keys) | {"client_for_line"}
+            values = {k: values.get(k, "") for k in keep}
     studio: dict[str, str] = {}
     if db is not None:
         from app.studio_template_variables import studio_template_values
 
         studio = studio_template_values(db)
+
+    had_client_for = "{{client_for_line}}" in (template or "")
 
     def _repl(m: re.Match[str]) -> str:
         key = m.group(1)
@@ -217,7 +236,10 @@ def render_client_notify_template(
             return studio[key]
         return m.group(0)
 
-    return _VAR_RE.sub(_repl, text)
+    out = _VAR_RE.sub(_repl, text)
+    if for_line and not had_client_for:
+        out = f"{for_line}\n{out}" if out else for_line
+    return out
 
 
 def get_services_marker(db: Session) -> str:
@@ -508,6 +530,8 @@ def save_rules_from_form(
 
 
 def rules_for_ui(db: Session) -> dict[str, list[dict[str, Any]]]:
+    from app.client_reply_digits import template_has_manual_reply_digits
+
     before = list_rules(db, KIND_BEFORE)
     after = list_rules(db, KIND_AFTER)
     return {
@@ -518,6 +542,7 @@ def rules_for_ui(db: Session) -> dict[str, list[dict[str, Any]]]:
                 "template": r.template,
                 "is_enabled": bool(r.is_enabled),
                 "position": int(r.position),
+                "manual_digits_warning": template_has_manual_reply_digits(r.template),
             }
             for r in before
         ],

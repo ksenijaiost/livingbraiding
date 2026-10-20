@@ -19,7 +19,7 @@ from app.display_time import format_naive_utc_datetime
 
 _CHANNEL = {"vk": "VK", "max": "Max", "telegram": "Telegram"}
 
-_PARSED = {
+_PARSED_FALLBACK = {
     "confirm": "1 — подтвердила",
     "reschedule": "2 — просит перенести",
     "cancel": "3 — просит отменить",
@@ -117,6 +117,9 @@ def _out_type(row: NotificationOutbox, hours_by_rule: dict[int, float]) -> tuple
             except (TypeError, ValueError):
                 rid = None
         return _hours_label(hours_by_rule.get(int(rid)) if rid is not None else None), mark
+    if event == "client_booking_status":
+        label = str(payload.get("status_label") or "").strip() or "статус"
+        return f"Информация о брони: {label}", mark
     if event == "client_after_booking":
         return "После визита", mark
     if event == "client_care_memo_error":
@@ -134,6 +137,9 @@ def _destination(row: NotificationOutbox) -> str:
     if kind == "admin_chat":
         return "в чат админов"
     if kind == "client":
+        via_name = str(_payload(row).get("via_contact_name") or "").strip()
+        if via_name:
+            return f"отправлено контактному лицу: {via_name}"
         return "клиенту"
     name = ""
     user = row.user
@@ -145,6 +151,10 @@ def _destination(row: NotificationOutbox) -> str:
 
 
 def _status_label(row: NotificationOutbox, tz_name: str) -> str:
+    if str(row.event_type or "") == "client_booking_status":
+        reason = str(_payload(row).get("skip_reason") or "").strip()
+        if reason:
+            return reason
     status = row.status.value if hasattr(row.status, "value") else str(row.status or "")
     if status == NotificationOutboxStatus.SENT.value:
         when = _fmt_when(row.sent_at, tz_name)
@@ -172,7 +182,9 @@ def _memos_label(row: NotificationOutbox) -> str:
 
 def _out_item(row: NotificationOutbox, tz_name: str, hours_by_rule: dict[int, float]) -> dict:
     type_label, mark = _out_type(row, hours_by_rule)
-    text = (row.body or "").strip() or str(_payload(row).get("text") or "").strip()
+    payload = _payload(row)
+    text = (row.body or "").strip() or str(payload.get("text") or "").strip()
+    channel_label = "—" if str(payload.get("skip_reason") or "").strip() else _channel_label(row.channel)
     at = row.sent_at or row.scheduled_at or row.created_at
     return {
         "kind": "out",
@@ -181,7 +193,7 @@ def _out_item(row: NotificationOutbox, tz_name: str, hours_by_rule: dict[int, fl
         "at_label": _fmt_when(at, tz_name),
         "type_label": type_label,
         "mark": mark,
-        "channel_label": _channel_label(row.channel),
+        "channel_label": channel_label,
         "destination": _destination(row),
         "status_label": _status_label(row, tz_name),
         "text": text,
@@ -191,8 +203,9 @@ def _out_item(row: NotificationOutbox, tz_name: str, hours_by_rule: dict[int, fl
     }
 
 
-def _in_item(row: ClientInboundMessage, tz_name: str) -> dict:
-    parsed = _PARSED.get((row.parsed_action or "").strip(), "не распознано")
+def _in_item(row: ClientInboundMessage, tz_name: str, parsed_labels: dict[str, str]) -> dict:
+    key = (row.parsed_action or "").strip()
+    parsed = parsed_labels.get(key) or _PARSED_FALLBACK.get(key, "не распознано")
     return {
         "kind": "in",
         "seq": int(row.id or 0),
@@ -212,6 +225,8 @@ def _in_item(row: ClientInboundMessage, tz_name: str) -> dict:
 
 def booking_notify_timeline(db: Session, booking_id: int, *, tz_name: str) -> list[dict]:
     """Сообщения по брони: исходящие (включая «после визита» по визиту) и ответы клиентки."""
+    from app.client_reply_digits import parsed_action_labels
+
     visit_ids = list(
         db.scalars(select(Visit.id).where(Visit.booking_id == int(booking_id))).all()
     )
@@ -234,14 +249,17 @@ def booking_notify_timeline(db: Session, booking_id: int, *, tz_name: str) -> li
         ).all()
     )
     hours = _rule_hours(db, rows)
+    labels = parsed_action_labels(db)
     items = [_out_item(row, tz_name, hours) for row in rows]
-    items.extend(_in_item(row, tz_name) for row in inbound)
+    items.extend(_in_item(row, tz_name, labels) for row in inbound)
     items.sort(key=lambda item: (item["at"] or datetime.min, 0 if item["kind"] == "out" else 1, item["seq"]))
     return items
 
 
 def client_recent_messages(db: Session, client_id: int, *, tz_name: str, limit: int = 10) -> list[dict]:
     """Последние входящие и исходящие клиенту. Новые сверху."""
+    from app.client_reply_digits import parsed_action_labels
+
     lim = max(1, int(limit))
     rows = list(
         db.scalars(
@@ -264,7 +282,8 @@ def client_recent_messages(db: Session, client_id: int, *, tz_name: str, limit: 
         ).all()
     )
     hours = _rule_hours(db, rows)
+    labels = parsed_action_labels(db)
     items = [_out_item(row, tz_name, hours) for row in rows]
-    items.extend(_in_item(row, tz_name) for row in inbound)
+    items.extend(_in_item(row, tz_name, labels) for row in inbound)
     items.sort(key=lambda item: (item["at"] or datetime.min, item["seq"]), reverse=True)
     return items[:lim]

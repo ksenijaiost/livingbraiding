@@ -183,7 +183,7 @@ def admin_visit_detail(
     visit = db.scalar(
         select(Visit)
         .options(
-            selectinload(Visit.client),
+            selectinload(Visit.client).selectinload(Client.contact_client),
             selectinload(Visit.services)
             .selectinload(VisitService.masters)
             .selectinload(VisitServiceMaster.master),

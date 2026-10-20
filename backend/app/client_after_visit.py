@@ -96,6 +96,8 @@ def _render_after(
     rule: ClientNotificationRule,
     client: Client,
     booking: Booking | _BareBooking,
+    *,
+    via_contact: Client | None = None,
 ) -> str:
     return render_client_notify_template(
         rule.template,
@@ -106,6 +108,7 @@ def _render_after(
         db=db,
         substitute_system=False,
         system_keys=frozenset({"name"}),
+        via_contact=via_contact,
     )
 
 
@@ -121,6 +124,7 @@ def _insert_after_outbox(
     visit_id: int | None,
     scheduled_at: datetime,
     care_memo_ids: list[int] | None = None,
+    via_contact: Client | None = None,
 ) -> NotificationOutbox | None:
     key = _after_dedupe_key(
         rule_id=int(rule.id),
@@ -144,6 +148,9 @@ def _insert_after_outbox(
         payload["attach_route_video"] = True
     if care_memo_ids:
         payload["care_memo_ids"] = [int(mid) for mid in care_memo_ids]
+    if via_contact is not None:
+        payload["via_contact_client_id"] = int(via_contact.id)
+        payload["via_contact_name"] = (via_contact.name or "").strip()
     row = NotificationOutbox(
         user_id=None,
         client_id=int(client.id),
@@ -184,10 +191,12 @@ def schedule_after_visit_notifications(db: Session, visit: Visit) -> list[Notifi
     """Поставить отправку при создании визита. Повторный вызов и правка визита не дублируют."""
     if visit.is_cancelled or visit.id is None or visit.client_id is None:
         return []
+    from app.client_contact import resolve_client_notify_targets_db
+
     client = db.get(Client, int(visit.client_id))
     if client is None:
         return []
-    targets = _client_channel_targets(client)
+    targets, via_contact = resolve_client_notify_targets_db(db, client)
     if not targets:
         return []
     rules = _enabled_after_rules(db)
@@ -208,7 +217,7 @@ def schedule_after_visit_notifications(db: Session, visit: Visit) -> list[Notifi
     tz_name = get_display_timezone(db)
     created: list[NotificationOutbox] = []
     for rule in rules:
-        text = _render_after(db, rule, client, booking)
+        text = _render_after(db, rule, client, booking, via_contact=via_contact)
         if not (text or "").strip() and not template_wants_route_video(rule.template):
             continue
         scheduled_at = after_visit_scheduled_at(
@@ -233,6 +242,7 @@ def schedule_after_visit_notifications(db: Session, visit: Visit) -> list[Notifi
                 visit_id=int(visit.id),
                 scheduled_at=scheduled_at,
                 care_memo_ids=memo_ids,
+                via_contact=via_contact,
             )
             if row is not None:
                 created.append(row)
@@ -311,10 +321,12 @@ def enqueue_due_after_booking_deadlines(
         )
         if active_visit is not None:
             continue
+        from app.client_contact import resolve_client_notify_targets_db
+
         client = booking.client if booking.client is not None else db.get(Client, int(booking.client_id))
         if client is None:
             continue
-        targets = _client_channel_targets(client)
+        targets, via_contact = resolve_client_notify_targets_db(db, client)
         if not targets:
             continue
         from app.client_notifications import load_booking_for_template
@@ -325,7 +337,7 @@ def enqueue_due_after_booking_deadlines(
             deadline = studio_deadline_utc(day, rule.latest_time, tz_name)
             if now < deadline:
                 continue
-            text = _render_after(db, rule, client, loaded)
+            text = _render_after(db, rule, client, loaded, via_contact=via_contact)
             if not (text or "").strip() and not template_wants_route_video(rule.template):
                 continue
             from app.care_memos import memo_ids_if_enabled
@@ -343,6 +355,7 @@ def enqueue_due_after_booking_deadlines(
                     visit_id=None,
                     scheduled_at=deadline,
                     care_memo_ids=memo_ids,
+                    via_contact=via_contact,
                 )
                 if row is not None:
                     stats["enqueued"] += 1

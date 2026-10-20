@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, TypedDict
 
-from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.client_marks import CLIENT_MARK_IMPORT_KEYS, apply_client_import_marks
@@ -18,7 +18,9 @@ from app.client_validation import (
     parse_client_source,
     strip_or_none,
 )
+from app.client_phone import DuplicateClientPhone, apply_client_phone, find_client_by_normalized_phone
 from app.db.models import Client
+from app.phone_ru import InvalidPhoneError, format_phone, normalize_phone
 from app.time_utils import utcnow_naive
 
 MAX_BULK_JSON_BYTES = 512 * 1024
@@ -34,6 +36,8 @@ _ALLOWED_KEYS = frozenset(
         "vk",
         "instagram",
         "other_contact",
+        "contact_client_id",
+        "contact_relation",
         "birth_day",
         "birth_month",
         "birth_year",
@@ -139,11 +143,31 @@ def _source(row: dict[str, Any]) -> str | None:
         raise ValueError(f"{e} Допустимо: {labels}.") from e
 
 
-def _find_client_id_by_phone(db: Session, phone: str) -> int | None:
-    found = db.scalar(select(Client.id).where(Client.phone == phone).order_by(Client.id.asc()).limit(1))
-    if found is None:
-        return None
-    return int(found)
+def _duplicate_row(
+    *,
+    line: int,
+    name: str,
+    phone: str,
+    existing: Client | None,
+) -> BulkClientRowResult:
+    label = ""
+    client_id = None
+    if existing is not None:
+        client_id = int(existing.id)
+        shown = format_phone(existing.phone_normalized) or existing.phone or phone
+        who = (existing.name or "").strip() or "—"
+        label = f"Клиент с этим номером уже есть: {who}, {shown}"
+    else:
+        label = "Клиент с этим номером уже есть"
+    return {
+        "line": int(line),
+        "name": name,
+        "phone": phone,
+        "status": STATUS_DUPLICATE,
+        "ok": False,
+        "client_id": client_id,
+        "message": label,
+    }
 
 
 def import_single_client_row(
@@ -168,14 +192,29 @@ def import_single_client_row(
         if isinstance(raw_name, (dict, list)) or not name_preview:
             raise ValueError("Укажите имя клиента.")
         name = name_preview[:200]
-        phone = strip_or_none(_text(row, "phone"), 30)
+        phone_raw = _text(row, "phone")
+        phone_preview = phone_raw.strip()
+        try:
+            normalized = normalize_phone(phone_raw)
+        except InvalidPhoneError as exc:
+            raise ValueError(str(exc)) from exc
         telegram = strip_or_none(_text(row, "telegram"), 100)
         vk = strip_or_none(_text(row, "vk"), 120)
         instagram = strip_or_none(_text(row, "instagram"), 120)
         other_contact = strip_or_none(_text(row, "other_contact"), 200)
-        phone_preview = phone or ""
-        if not client_has_any_contact(phone, telegram, vk, instagram, other_contact):
-            raise ValueError("Нужен хотя бы один контакт: телефон или любая из соцсетей.")
+        if normalized:
+            phone_preview = format_phone(normalized)
+        contact_client_id_raw = row.get("contact_client_id")
+        contact_relation_raw = row.get("contact_relation")
+        if not client_has_any_contact(
+            phone_raw,
+            telegram,
+            vk,
+            instagram,
+            other_contact,
+            contact_client_id=contact_client_id_raw,
+        ):
+            raise ValueError("Нужен хотя бы один контакт: телефон, соцсеть или контактное лицо.")
         birth_day, birth_month, birth_year = parse_birth_fields(
             _birth_raw(row, "birth_day"),
             _birth_raw(row, "birth_month"),
@@ -183,20 +222,15 @@ def import_single_client_row(
         )
         age_group = _age_group(row)
         source = _source(row)
-        if phone and (phone in reserved_phones or _find_client_id_by_phone(db, phone) is not None):
-            existing_id = _find_client_id_by_phone(db, phone)
-            return {
-                "line": int(line),
-                "name": name,
-                "phone": phone,
-                "status": STATUS_DUPLICATE,
-                "ok": False,
-                "client_id": existing_id,
-                "message": STATUS_DUPLICATE,
-            }
+        if normalized and (normalized in reserved_phones or find_client_by_normalized_phone(db, normalized) is not None):
+            return _duplicate_row(
+                line=line,
+                name=name,
+                phone=format_phone(normalized),
+                existing=find_client_by_normalized_phone(db, normalized),
+            )
         client = Client(
             name=name,
-            phone=phone,
             telegram=telegram,
             vk=vk,
             instagram=instagram,
@@ -214,15 +248,47 @@ def import_single_client_row(
             updated_at=utcnow_naive(),
         )
         apply_client_import_marks(client, row)
-        db.add(client)
-        db.flush()
-        db.commit()
-        if phone:
-            reserved_phones.add(phone)
+        try:
+            from app.client_contact import validate_and_apply_contact
+
+            apply_client_phone(client, phone_raw, db)
+            validate_and_apply_contact(
+                db,
+                client,
+                contact_client_id_raw=contact_client_id_raw,
+                contact_relation_raw=contact_relation_raw,
+                phone_normalized=client.phone_normalized,
+                is_create=True,
+            )
+            db.add(client)
+            db.flush()
+            db.commit()
+        except DuplicateClientPhone as exc:
+            db.rollback()
+            existing = find_client_by_normalized_phone(db, normalized or "")
+            return _duplicate_row(
+                line=line,
+                name=name,
+                phone=format_phone(normalized) if normalized else phone_preview,
+                existing=existing,
+            )
+        except IntegrityError:
+            db.rollback()
+            existing = find_client_by_normalized_phone(db, normalized) if normalized else None
+            if existing is not None:
+                return _duplicate_row(
+                    line=line,
+                    name=name,
+                    phone=format_phone(normalized) if normalized else phone_preview,
+                    existing=existing,
+                )
+            raise
+        if normalized:
+            reserved_phones.add(normalized)
         return {
             "line": int(line),
             "name": name,
-            "phone": phone or "",
+            "phone": format_phone(normalized) if normalized else "",
             "status": STATUS_CREATED,
             "ok": True,
             "client_id": int(client.id),
