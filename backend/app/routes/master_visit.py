@@ -564,6 +564,9 @@ def master_visit_new_get(
             except Exception:
                 pass
             _prefill_visit_stock_kit_from_booking(db, b, form_prefill)
+            from app.booking_discount_dialog import apply_booking_discount_to_visit_prefill
+
+            apply_booking_discount_to_visit_prefill(form_prefill, b)
 
     return _master_visit_step1_template_response(
         request,

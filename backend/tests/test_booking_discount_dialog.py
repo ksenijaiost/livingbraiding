@@ -8,6 +8,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.booking_discount_dialog import (
+    BOOKING_DISCOUNT_HINT_KEY,
+    apply_booking_discount_to_visit_prefill,
     booking_discount_display,
     dialog_href,
     dialog_looks_like_link,
@@ -89,3 +91,31 @@ def test_edit_optional_when_null_on_legacy_booking() -> None:
     assert "discount_percent" in errs2
     assert "dialog_location" in errs2
     db.close()
+
+
+def test_apply_booking_discount_to_visit_prefill() -> None:
+    class _B:
+        def __init__(self, pct):
+            self.discount_percent = pct
+
+    fp15: dict = {"line_1_service_id": "9"}
+    apply_booking_discount_to_visit_prefill(fp15, _B(15))
+    assert fp15["client_discount_percent"] == "15"
+    assert fp15[BOOKING_DISCOUNT_HINT_KEY] == "15"
+    assert fp15["line_1_client_discount_percent"] == "15"
+
+    fp0: dict = {}
+    apply_booking_discount_to_visit_prefill(fp0, _B(0))
+    assert fp0["client_discount_percent"] == "0"
+    assert fp0[BOOKING_DISCOUNT_HINT_KEY] == "0"
+
+    fp_null: dict = {}
+    apply_booking_discount_to_visit_prefill(fp_null, _B(None))
+    assert "client_discount_percent" not in fp_null
+    assert BOOKING_DISCOUNT_HINT_KEY not in fp_null
+
+    fp_keep: dict = {"client_discount_percent": "20", "line_1_service_id": "3"}
+    apply_booking_discount_to_visit_prefill(fp_keep, _B(15))
+    assert fp_keep["client_discount_percent"] == "20"
+    assert fp_keep[BOOKING_DISCOUNT_HINT_KEY] == "15"
+    assert fp_keep["line_1_client_discount_percent"] == "15"
