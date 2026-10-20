@@ -598,6 +598,40 @@
             <input name="deposit_amount" type="number" min="0" step="1" value="{{ fp.get('deposit_amount','') }}" />
           </div>
         </div>
+        {% set fe = field_errors if field_errors is defined and field_errors else {} %}
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>Размер скидки, %{% if is_new %} *{% endif %}
+              {% if not is_new and booking and booking.discount_percent is none and not fp.get('discount_percent') %}
+                <span class="muted" style="font-weight:normal;">(не указано)</span>
+              {% endif %}
+            </label>
+            <input name="discount_percent" type="number" min="0" max="100" step="1" inputmode="numeric"
+                   value="{{ fp.get('discount_percent','') }}"
+                   {% if is_new %}required{% endif %}
+                   style="{% if fe.get('discount_percent') %}border-color:#b91c1c;{% endif %}" />
+            {% if fe.get('discount_percent') %}
+              <p class="error" style="margin:4px 0 0; font-size:12px; color:#991b1b;">{{ fe.get('discount_percent') }}</p>
+            {% endif %}
+            <p class="muted" style="margin:4px 0 0; font-size:12px;">Если скидки нет, укажите 0</p>
+          </div>
+          <div>
+            <label>Где диалог{% if is_new %} *{% endif %}
+              {% if not is_new and booking and not booking.dialog_location and not fp.get('dialog_location') %}
+                <span class="muted" style="font-weight:normal;">(не указано)</span>
+              {% endif %}
+            </label>
+            <input name="dialog_location" maxlength="2000" value="{{ fp.get('dialog_location','') }}"
+                   {% if is_new %}required{% endif %}
+                   style="width:100%; {% if fe.get('dialog_location') %}border-color:#b91c1c;{% endif %}" />
+            {% if fe.get('dialog_location') %}
+              <p class="error" style="margin:4px 0 0; font-size:12px; color:#991b1b;">{{ fe.get('dialog_location') }}</p>
+            {% endif %}
+            <p class="muted" style="margin:4px 0 0; font-size:12px;">
+              Лучше вставьте ссылку на диалог. Если ссылки нет, напишите, где идёт переписка: VK, Telegram, Max, Instagram, WhatsApp
+            </p>
+          </div>
+        </div>
         <div style="margin-top: 10px;">
           <label>Фото (до 3)</label>
           {% from "partials/photo_slot.html" import photo_slot %}

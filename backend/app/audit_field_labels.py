@@ -97,6 +97,7 @@ AUDIT_FIELD_LABELS: dict[str, str] = {
     "kind": "Тип брони",
     "quoted_price_text": "Ориентировочная цена",
     "deposit_amount": "Депозит",
+    "dialog_location": "Где диалог",
     "planned_service_id": "Основная услуга",
     "planned_product_kind": "Тип продукта",
     "planned_services": "Услуги в брони",
@@ -197,7 +198,7 @@ AUDIT_FIELD_LABELS: dict[str, str] = {
     "composition_json": "Состав (JSON)",
     "stock_price_total": "Складская цена",
     "cost_total": "Себестоимость",
-    "discount_percent": "Скидка (%)",
+    "discount_percent": "Размер скидки, %",
     "author_external": "Автор (внешний)",
     "author_staff_ids": "Авторы (сотрудники)",
     # продажа продукта

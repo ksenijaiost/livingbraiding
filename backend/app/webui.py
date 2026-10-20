@@ -14,6 +14,11 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
 
+from app.booking_discount_dialog import (
+    booking_discount_display,
+    dialog_href,
+    dialog_looks_like_link,
+)
 from app.consultation_booking import booking_kind_label, booking_status_display
 from app.audit_field_labels import audit_field_label, audit_field_is_json
 from app.client_payment import client_payment_kind_label
@@ -95,6 +100,9 @@ templates.env.globals["format_service_catalog_path"] = format_service_catalog_pa
 templates.env.globals["format_types_display"] = format_types_display
 templates.env.globals["timezone_label"] = timezone_label
 templates.env.globals["booking_status_display"] = booking_status_display
+templates.env.globals["booking_discount_display"] = booking_discount_display
+templates.env.globals["dialog_looks_like_link"] = dialog_looks_like_link
+templates.env.globals["dialog_href"] = dialog_href
 templates.env.globals["audit_field_label"] = audit_field_label
 templates.env.globals["audit_field_is_json"] = audit_field_is_json
 templates.env.globals["booking_audit_field_label"] = audit_field_label

@@ -20,7 +20,7 @@ def test_apply_audit_field_labels_hourly_help() -> None:
 
 def test_apply_audit_field_labels_kit_fields() -> None:
     out = apply_audit_field_labels([FieldChange("discount_percent", "10", "15")])
-    assert out[0].field_name == "Скидка (%)"
+    assert out[0].field_name == "Размер скидки, %"
 
 
 def test_audit_field_is_json() -> None:

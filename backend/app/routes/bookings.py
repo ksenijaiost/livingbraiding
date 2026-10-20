@@ -25,6 +25,10 @@ from app.booking_audit_labels import (
 
 _logger = logging.getLogger("livingbraiding.bookings")
 from app.auth import AuthUser, require_role
+from app.booking_discount_dialog import (
+    parse_booking_dialog_location,
+    parse_booking_discount_percent,
+)
 from app.booking_notifications import (
     notify_booking_cancelled,
     notify_booking_created,
@@ -655,6 +659,8 @@ def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, st
         "kind": b.kind.value if b.kind else BookingKind.VISIT.value,
         "quoted_price_text": b.quoted_price_text or "",
         "deposit_amount": "" if b.deposit_amount is None else str(int(b.deposit_amount)),
+        "discount_percent": "" if b.discount_percent is None else str(int(b.discount_percent)),
+        "dialog_location": b.dialog_location or "",
         "comment": b.comment or "",
         "booking_status": b.status.value if b.status else BookingStatus.PENDING_CONFIRMATION.value,
     }
@@ -2387,6 +2393,26 @@ def _masters_for_visit_form(db: Session) -> list[User]:
     return list(db.scalars(select_users_with_role(UserRole.MASTER).order_by(User.display_name.asc(), User.username.asc())).all())
 
 
+def _parse_booking_discount_dialog_fields(
+    fp: dict[str, Any],
+    *,
+    require_discount: bool,
+    require_dialog: bool,
+) -> tuple[int | None, str | None, dict[str, str]]:
+    field_errors: dict[str, str] = {}
+    discount, disc_err = parse_booking_discount_percent(
+        fp.get("discount_percent"), required=require_discount
+    )
+    if disc_err:
+        field_errors["discount_percent"] = disc_err
+    dialog, dialog_err = parse_booking_dialog_location(
+        fp.get("dialog_location"), required=require_dialog
+    )
+    if dialog_err:
+        field_errors["dialog_location"] = dialog_err
+    return discount, dialog, field_errors
+
+
 @router.get("/new", response_class=HTMLResponse)
 def admin_booking_new_get(
     request: Request,
@@ -2530,15 +2556,22 @@ async def admin_booking_new_post(  # noqa: C901
     photo_3_url: str | None = None
 
     err: str | None = None
+    field_errors: dict[str, str] = {}
     client: Client | None = None
     planned_date: datetime | None = None
     deposit_amount: int | None = None
+    discount_percent: int | None = None
+    dialog_location: str | None = None
     planned_service_id: int | None = None
     planned_product_kind: str | None = None
     planned_service_ids: list[int] = []
     planned_service_lines: list[dict[str, Any]] = []
     on_ids: list[int] = []
     consultation_master_id: int | None = None
+
+    discount_percent, dialog_location, field_errors = _parse_booking_discount_dialog_fields(
+        fp, require_discount=True, require_dialog=True
+    )
 
     try:
         client_id = parse_int(client_id_raw, min=1, field_name="client_id")
@@ -2630,13 +2663,16 @@ async def admin_booking_new_post(  # noqa: C901
     service_catalog = list_master_visit_services_catalog(db)
     staff_users = list(db.scalars(select_users_with_any_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)).all())
 
-    if err:
+    if err or field_errors:
+        if field_errors and not err:
+            err = next(iter(field_errors.values()))
         return templates.TemplateResponse(
             "admin_booking_form.html",
             _ctx(
                 request,
                 current_user=current_user,
                 error=err,
+                field_errors=field_errors,
                 is_new=True,
                 booking=None,
                 selected_client=client,
@@ -2677,6 +2713,7 @@ async def admin_booking_new_post(  # noqa: C901
                     request,
                     current_user=current_user,
                     error=avail_err,
+                    field_errors=field_errors,
                     is_new=True,
                     booking=None,
                     selected_client=client,
@@ -2709,6 +2746,7 @@ async def admin_booking_new_post(  # noqa: C901
                     request,
                     current_user=current_user,
                     error=avail_err,
+                    field_errors=field_errors,
                     is_new=True,
                     booking=None,
                     selected_client=client,
@@ -2748,6 +2786,7 @@ async def admin_booking_new_post(  # noqa: C901
                 request,
                 current_user=current_user,
                 error=err,
+                field_errors=field_errors,
                 is_new=True,
                 booking=None,
                 selected_client=client,
@@ -2779,7 +2818,9 @@ async def admin_booking_new_post(  # noqa: C901
             if not photo_2_url and (fp.get("prefill_photo_2") or cons_chk.photo_2):
                 photo_2_url = str(fp.get("prefill_photo_2") or cons_chk.photo_2)
 
-    if err:
+    if err or field_errors:
+        if field_errors and not err:
+            err = next(iter(field_errors.values()))
         cons_id_ctx = consultation_id_val
         cons_comment_ctx = None
         if cons_id_ctx:
@@ -2791,6 +2832,7 @@ async def admin_booking_new_post(  # noqa: C901
                 request,
                 current_user=current_user,
                 error=err,
+                field_errors=field_errors,
                 is_new=True,
                 booking=None,
                 selected_client=client,
@@ -2817,6 +2859,8 @@ async def admin_booking_new_post(  # noqa: C901
         status=BookingStatus.PENDING_CONFIRMATION,
         quoted_price_text=quoted_price_text,
         deposit_amount=deposit_amount,
+        discount_percent=discount_percent,
+        dialog_location=dialog_location,
         photo_1=photo_1_url,
         photo_2=photo_2_url,
         photo_3=photo_3_url,
@@ -3140,9 +3184,12 @@ async def admin_booking_edit_post(
     photo_3_url = getattr(b, "photo_3", None)
 
     err: str | None = None
+    field_errors: dict[str, str] = {}
     client = None
     planned_date = None
     deposit_amount: int | None = None
+    discount_percent: int | None = None
+    dialog_location: str | None = None
     planned_service_id: int | None = None
     planned_product_kind: str | None = None
     planned_service_ids: list[int] = []
@@ -3151,6 +3198,12 @@ async def admin_booking_edit_post(
     consultation_master_id: int | None = None
     tz_name: str | None = None
     new_booking_status: BookingStatus | None = None
+
+    require_discount = b.discount_percent is not None
+    require_dialog = b.dialog_location is not None
+    discount_percent, dialog_location, field_errors = _parse_booking_discount_dialog_fields(
+        fp, require_discount=require_discount, require_dialog=require_dialog
+    )
 
     try:
         client_id = parse_int(client_id_raw, min=1, field_name="client_id")
@@ -3295,13 +3348,16 @@ async def admin_booking_edit_post(
             exclude_booking_id=int(b.id),
         )
 
-    if err:
+    if err or field_errors:
+        if field_errors and not err:
+            err = next(iter(field_errors.values()))
         return templates.TemplateResponse(
             "admin_booking_form.html",
             _ctx(
                 request,
                 current_user=current_user,
                 error=err,
+                field_errors=field_errors,
                 is_new=False,
                 booking=b,
                 selected_client=selected_client,
@@ -3340,6 +3396,8 @@ async def admin_booking_edit_post(
         status=b.status,
         quoted_price_text=b.quoted_price_text,
         deposit_amount=b.deposit_amount,
+        discount_percent=b.discount_percent,
+        dialog_location=b.dialog_location,
         photo_1=getattr(b, "photo_1", None),
         photo_2=getattr(b, "photo_2", None),
         photo_3=getattr(b, "photo_3", None),
@@ -3388,6 +3446,7 @@ async def admin_booking_edit_post(
                 request,
                 current_user=current_user,
                 error=err,
+                field_errors=field_errors,
                 is_new=False,
                 booking=b,
                 selected_client=selected_client,
@@ -3410,6 +3469,8 @@ async def admin_booking_edit_post(
     b.kind = BookingKind(kind_raw)
     b.quoted_price_text = quoted_price_text
     b.deposit_amount = deposit_amount
+    b.discount_percent = discount_percent
+    b.dialog_location = dialog_location
     b.photo_1 = photo_1_url
     b.photo_2 = photo_2_url
     b.photo_3 = photo_3_url
@@ -3476,6 +3537,8 @@ async def admin_booking_edit_post(
         status=b.status,
         quoted_price_text=b.quoted_price_text,
         deposit_amount=b.deposit_amount,
+        discount_percent=b.discount_percent,
+        dialog_location=b.dialog_location,
         photo_1=getattr(b, "photo_1", None),
         photo_2=getattr(b, "photo_2", None),
         photo_3=getattr(b, "photo_3", None),
@@ -3499,6 +3562,8 @@ async def admin_booking_edit_post(
                 "status",
                 "quoted_price_text",
                 "deposit_amount",
+                "discount_percent",
+                "dialog_location",
                 "photo_1",
                 "photo_2",
                 "photo_3",
