@@ -619,7 +619,7 @@ class ConsultationKind(str, enum.Enum):
 
 
 class CareMemo(Base):
-    """Картинка-памятка, которую можно приложить к сообщению после визита."""
+    """Картинка-памятка: слоты «до» (информация о брони) и «после» (после визита)."""
 
     __tablename__ = "care_memos"
 
@@ -648,7 +648,15 @@ class ServiceCategory(Base):
         default=ConsultationKind.BRAIDING,
         nullable=False,
     )
-    care_memo_id: Mapped[int | None] = mapped_column(ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True)
+    # inherit (=нет у категории) | none | custom (+ care_memo_*_id).
+    care_memo_before_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_before_id: Mapped[int | None] = mapped_column(
+        ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True
+    )
+    care_memo_after_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_after_id: Mapped[int | None] = mapped_column(
+        ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True
+    )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
@@ -708,9 +716,15 @@ class ServiceSubcategory(Base):
     show_material_description: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Расширенный блок термозамещения на шаге 2 визита + шаблоны клиента (без общих полей категории).
     show_thermo_visit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # inherit — памятка категории; custom — своя (в том числе «нет»).
-    care_memo_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
-    care_memo_id: Mapped[int | None] = mapped_column(ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True)
+    # inherit | none | custom — слоты «до» и «после» (см. care_memos).
+    care_memo_before_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_before_id: Mapped[int | None] = mapped_column(
+        ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True
+    )
+    care_memo_after_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_after_id: Mapped[int | None] = mapped_column(
+        ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True
+    )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
@@ -748,9 +762,14 @@ class Service(Base):
     tail_section_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # None — брать из подкатегории show_material_description; True — показывать; False — не показывать.
     material_description_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # inherit — памятка подкатегории (с учётом её наследования); custom — своя.
-    care_memo_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
-    care_memo_id: Mapped[int | None] = mapped_column(ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True)
+    care_memo_before_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_before_id: Mapped[int | None] = mapped_column(
+        ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True
+    )
+    care_memo_after_mode: Mapped[str] = mapped_column(String(16), default="inherit", nullable=False)
+    care_memo_after_id: Mapped[int | None] = mapped_column(
+        ForeignKey("care_memos.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Розница «Продажа материала»: какие блоки ценообразования показывать (независимые флаги).
     retail_material_kanekalon: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

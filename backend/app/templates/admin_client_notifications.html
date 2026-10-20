@@ -78,6 +78,7 @@
                   <td style="text-align:center;">
                     <input type="checkbox" name="status_memo_{{ r.id }}" value="1"
                            title="Прикрепить памятку «до»"
+                           aria-label="Прикрепить памятку «до»"
                            {% if r.attach_memo_before %}checked{% endif %} />
                   </td>
                   <td class="lb-nowrap">
@@ -170,7 +171,7 @@
                 <th class="lb-nowrap">Не позже</th>
                 <th>Текст</th>
                 <th class="lb-nowrap">Вкл.</th>
-                <th class="lb-nowrap">Памятка</th>
+                <th class="lb-nowrap">Памятка «после»</th>
                 <th class="lb-nowrap"></th>
               </tr>
             </thead>
@@ -194,7 +195,7 @@
                   </td>
                   <td style="text-align:center;">
                     <input type="checkbox" name="after_memo_{{ r.id }}" value="1"
-                           title="Отправлять памятку"
+                           title="Прикрепить памятку «после»"
                            {% if r.send_care_memo %}checked{% endif %} />
                   </td>
                   <td class="lb-nowrap">
@@ -270,7 +271,7 @@
         <p style="margin:0 0 8px;"><strong>Точно ли хотите удалить?</strong> Памятка «{{ memo_delete.name }}» привязана:</p>
         <ul style="margin:0 0 10px;">
           {% for link in memo_delete.links %}
-            <li>{{ link.kind }}: <a href="{{ link.href }}">{{ link.name }}</a></li>
+            <li>{{ link.kind }} ({{ link.slot }}): <a href="{{ link.href }}">{{ link.name }}</a></li>
           {% endfor %}
         </ul>
         <form method="post" action="/clients/notifications/memos/{{ memo_delete.id }}/delete" style="margin:0;">

@@ -226,7 +226,7 @@ def test_status_history_not_doubled_by_send_journal_or_retoggle() -> None:
 def test_memo_before_attached_from_booking(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.booking_status_notify.care_memo_ids_for_booking",
-        lambda db, booking: [7],
+        lambda db, booking, **_kwargs: [7],
     )
     monkeypatch.setattr(
         "app.booking_status_notify.memo_names",

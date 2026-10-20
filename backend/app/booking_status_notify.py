@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session, selectinload
 from sqlalchemy.orm.attributes import NEVER_SET, NO_VALUE
 
-from app.care_memos import care_memo_ids_for_booking, memo_names
+from app.care_memos import MEMO_BEFORE, care_memo_ids_for_booking, memo_names
 from app.client_booking_notify import _client_channel_targets
 from app.client_notifications import get_services_marker, parse_template, render_client_notify_template
 from app.consultation_booking import booking_status_label
@@ -393,7 +393,7 @@ def enqueue_booking_status_notification(db: Session, booking: Booking, *, new_st
     memo_ids: list[int] = []
     names: list[str] = []
     if bool(rule.attach_memo_before):
-        memo_ids = care_memo_ids_for_booking(db, booking)
+        memo_ids = care_memo_ids_for_booking(db, booking, kind=MEMO_BEFORE)
         names = memo_names(db, memo_ids)
     if not (text or "").strip() and not wants_video and not memo_ids:
         return
