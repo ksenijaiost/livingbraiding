@@ -282,7 +282,7 @@
     {% endif %}
     {% if care_memos %}
       {% for m in care_memos %}
-        <div style="display:flex; gap:12px; align-items:flex-start; margin:0 0 14px; flex-wrap:wrap;">
+        <div id="care-memo-{{ m.id }}" style="display:flex; gap:12px; align-items:flex-start; margin:0 0 14px; flex-wrap:wrap;">
           <img src="{{ m.preview_url }}" alt="" style="width:72px; height:72px; object-fit:cover; border-radius:6px; background:#f3f4f6;" />
           <div style="flex:1; min-width:16rem;">
             <div><strong>{{ m.name }}</strong></div>
@@ -409,7 +409,7 @@
     </form>
 
     {% for v in studio_builtins if v.kind == 'video' %}
-      <div class="card" style="background:#fafafa; margin:0 0 16px;">
+      <div id="route-video" class="card" style="background:#fafafa; margin:0 0 16px;">
         <label class="label-sub">{{ v["title"] }} <code>{{ v["token"] }}</code></label>
         <p class="muted" style="font-size:12px; margin:4px 0 8px;">
           Видео отправляется файлом в чат, ссылка на сайт не показывается. Формат MP4 (H.264), до 50 МБ.

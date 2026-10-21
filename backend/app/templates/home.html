@@ -59,8 +59,18 @@
               <div style="margin-top: 8px; font-size: 12px; color: #9a3412;">
                 В базе есть ссылка, файла на диске нет ({{ techspec_home.media.missing_files|length }}):
                 <ul style="margin: 4px 0 0; padding-left: 1.2rem;">
-                  {% for name in techspec_home.media.missing_files %}
-                    <li><code>{{ name }}</code></li>
+                  {% for item in techspec_home.media.missing_files %}
+                    <li style="margin-bottom: 6px;">
+                      <code>{{ item.name }}</code>
+                      <ul style="margin: 2px 0 0; padding-left: 1.2rem;">
+                        {% for use in item.uses %}
+                          <li>
+                            {{ use.kind }} #{{ use.record_id }}, {{ use.created_at|dt_local }}
+                            — <a href="{{ use.href }}">открыть</a>
+                          </li>
+                        {% endfor %}
+                      </ul>
+                    </li>
                   {% endfor %}
                 </ul>
               </div>

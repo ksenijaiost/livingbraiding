@@ -21,6 +21,7 @@ from starlette.background import BackgroundTask
 
 from app.auth import AuthUser, require_techspec_user
 from app.db.session import get_db
+from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.media_store import (
     MEDIA_MISSING_REPORT_NAME,
     MediaBackupEntry,
@@ -79,20 +80,46 @@ def _safe_arc_basename(member: str) -> str | None:
     return None
 
 
-def _missing_report_bytes(missing: list[str]) -> bytes:
-    lines = ["В базе есть ссылка, файла на диске нет:", *missing, ""]
-    return ("\n".join(lines)).encode("utf-8")
+def format_missing_media_report(items: list[dict], tz_name: str) -> str:
+    lines = ["В базе есть ссылка, файла на диске нет:", ""]
+    for item in items:
+        lines.append(str(item["name"]))
+        for use in item["uses"]:
+            when = format_naive_utc_datetime(use.get("created_at"), tz_name) or "—"
+            lines.append(
+                f"  {use['kind']} #{use['record_id']}, {when}, {use['href']}"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
-def _build_backup_zip(paths: list[Path], missing: list[str] | None = None) -> str:
+def missing_media_files_json(items: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    for item in items:
+        uses = []
+        for use in item["uses"]:
+            created = use.get("created_at")
+            uses.append(
+                {
+                    "kind": use["kind"],
+                    "record_id": use["record_id"],
+                    "href": use["href"],
+                    "created_at": created.isoformat(sep=" ") if created is not None else None,
+                }
+            )
+        out.append({"name": item["name"], "uses": uses})
+    return out
+
+
+def _build_backup_zip(paths: list[Path], missing_report: str | None = None) -> str:
     fd, tmp_path = tempfile.mkstemp(prefix="lb-media-", suffix=".zip")
     os.close(fd)
     try:
         with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for p in paths:
                 zf.write(p, arcname=media_backup_arcname(media_root_dir(), p))
-            if missing:
-                zf.writestr(MEDIA_MISSING_REPORT_NAME, _missing_report_bytes(missing))
+            if missing_report:
+                zf.writestr(MEDIA_MISSING_REPORT_NAME, missing_report.encode("utf-8"))
     except Exception:
         _unlink_quiet(tmp_path)
         raise HTTPException(status_code=500, detail="Не удалось собрать архив.")
@@ -130,7 +157,8 @@ def techspec_media_backup_zip_get(
     root.mkdir(parents=True, exist_ok=True)
     paths = iter_media_backup_paths(root)
     missing = missing_referenced_media_files(db, root)
-    tmp_path = _build_backup_zip(paths, missing)
+    report = format_missing_media_report(missing, get_display_timezone(db)) if missing else None
+    tmp_path = _build_backup_zip(paths, report)
     fname = f"lb-media-backup-{date.today().isoformat()}.zip"
     return FileResponse(
         tmp_path,
@@ -175,7 +203,7 @@ async def techspec_media_backup_zip_post(
                 "ok": True,
                 "new_files": 0,
                 "new_bytes": 0,
-                "missing_files": absent,
+                "missing_files": missing_media_files_json(absent),
                 "message": "Новых файлов нет — манифест актуален. Скачайте свежий manifest.json при необходимости.",
             }
         )
@@ -191,7 +219,8 @@ async def techspec_media_backup_zip_post(
         )
 
     paths = [e.path for e in missing]
-    tmp_path = _build_backup_zip(paths, absent)
+    report = format_missing_media_report(absent, get_display_timezone(db)) if absent else None
+    tmp_path = _build_backup_zip(paths, report)
     fname = f"lb-media-delta-{date.today().isoformat()}.zip"
     return FileResponse(
         tmp_path,

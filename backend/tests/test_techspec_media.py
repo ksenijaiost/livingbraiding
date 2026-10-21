@@ -202,7 +202,7 @@ def test_missing_referenced_media_files(media_root: Path, memory_db) -> None:
     video = _media_name("b", ".mp4")
     memo = "care_memos/" + _media_name("c", ".png")
     draft_photo = _media_name("d", ".webp")
-    memory_db.add(Client(name="Аня", photo_1=f"/media/{present}"))
+    memory_db.add(Client(name="Аня", photo_1=f"/media/{present}", photo_2=f"/media/{draft_photo}"))
     memory_db.add(
         StudioTemplateVariable(
             key="route_video",
@@ -210,6 +210,7 @@ def test_missing_referenced_media_files(media_root: Path, memory_db) -> None:
             is_builtin=True,
             file_path=video,
             file_name="kak-nas-nayti.mp4",
+            updated_at=datetime(2026, 6, 20, 14, 30),
         )
     )
     memory_db.add(
@@ -219,6 +220,7 @@ def test_missing_referenced_media_files(media_root: Path, memory_db) -> None:
             file_name="memo.png",
             mime="image/png",
             size=4,
+            created_at=datetime(2026, 1, 15, 8, 0),
         )
     )
     user = User(username="master", display_name="Мастер", password_hash="x", role=UserRole.MASTER)
@@ -228,6 +230,7 @@ def test_missing_referenced_media_files(media_root: Path, memory_db) -> None:
     memory_db.add(
         VisitDraft(
             created_by_user_id=user.id,
+            created_at=datetime(2026, 3, 2, 10, 0),
             performed_date=datetime(2026, 10, 21, 12, 0),
             client_id=client.id,
             form_json='{"photo_1": "/media/' + draft_photo + '"}',
@@ -236,11 +239,29 @@ def test_missing_referenced_media_files(media_root: Path, memory_db) -> None:
     memory_db.commit()
 
     missing = missing_referenced_media_files(memory_db, media_root)
-    assert video in missing
-    assert memo in missing
-    assert draft_photo in missing
-    assert present not in missing
+    names = [item["name"] for item in missing]
+    assert names == [memo, draft_photo, video]
+    assert present not in names
     assert media_refs_in_text(f"/media/{video}") == [video]
+
+    by_name = {item["name"]: item for item in missing}
+    memo_use = by_name[memo]["uses"][0]
+    assert memo_use["kind"] == "памятка"
+    assert memo_use["href"] == f"/clients/notifications#care-memo-{memo_use['record_id']}"
+    assert memo_use["created_at"] == datetime(2026, 1, 15, 8, 0)
+
+    photo_uses = by_name[draft_photo]["uses"]
+    assert [use["kind"] for use in photo_uses] == ["черновик визита", "фото клиента"]
+    assert photo_uses[0]["created_at"] == datetime(2026, 3, 2, 10, 0)
+    assert photo_uses[0]["href"] == f"/master/visit/draft/{photo_uses[0]['record_id']}"
+    assert photo_uses[1]["record_id"] == client.id
+    assert photo_uses[1]["href"] == f"/clients/{client.id}"
+    assert photo_uses[1]["created_at"] is None
+
+    video_use = by_name[video]["uses"][0]
+    assert video_use["kind"] == "видео маршрута"
+    assert video_use["href"] == "/clients/notifications#route-video"
+    assert video_use["created_at"] == datetime(2026, 6, 20, 14, 30)
 
 
 def test_get_full_backup_zip(media_root: Path, memory_db) -> None:
@@ -287,6 +308,8 @@ def test_get_backup_zip_includes_mp4_and_missing_report(media_root: Path, memory
             assert MEDIA_MISSING_REPORT_NAME in zf.namelist()
             report = zf.read(MEDIA_MISSING_REPORT_NAME).decode("utf-8")
             assert absent in report
+            assert "видео маршрута #" in report
+            assert "/clients/notifications#route-video" in report
     finally:
         app.dependency_overrides.clear()
 

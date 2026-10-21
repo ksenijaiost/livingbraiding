@@ -160,59 +160,146 @@ def media_refs_in_text(raw: str | None) -> list[str]:
     return found
 
 
-def missing_referenced_media_files(db: object, root: Path | None = None) -> list[str]:
+def _missing_use(kind: str, record_id: int, href: str, created_at: datetime | None) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "record_id": int(record_id),
+        "href": href,
+        "created_at": created_at,
+    }
+
+
+def _remember_use(
+    found: dict[str, list[dict[str, Any]]],
+    seen: set[tuple[str, str, int]],
+    rel: str,
+    kind: str,
+    record_id: int,
+    href: str,
+    created_at: datetime | None,
+) -> None:
+    key = (rel, kind, int(record_id))
+    if key in seen:
+        return
+    seen.add(key)
+    found.setdefault(rel, []).append(_missing_use(kind, record_id, href, created_at))
+
+
+def _scan_media_columns(
+    db: object,
+    found: dict[str, list[dict[str, Any]]],
+    seen: set[tuple[str, str, int]],
+    *,
+    model: type,
+    kind: str,
+    href: str,
+    attrs: tuple[str, ...],
+    date_attr: str | None,
+) -> None:
+    from sqlalchemy import or_, select
+
+    columns = [model.id]  # type: ignore[attr-defined]
+    if date_attr:
+        columns.append(getattr(model, date_attr))
+    columns.extend(getattr(model, name) for name in attrs)
+    filters = [getattr(model, name).is_not(None) for name in attrs]
+    for row in db.execute(select(*columns).where(or_(*filters))):  # type: ignore[attr-defined]
+        record_id = int(row.id)
+        created = getattr(row, date_attr) if date_attr else None
+        page = href.format(id=record_id)
+        for name in attrs:
+            for rel in media_refs_in_text(getattr(row, name)):
+                _remember_use(found, seen, rel, kind, record_id, page, created)
+
+
+def _scan_studio_variables(
+    db: object,
+    found: dict[str, list[dict[str, Any]]],
+    seen: set[tuple[str, str, int]],
+) -> None:
+    from sqlalchemy import or_, select
+
+    from app.db.models import StudioTemplateVariable
+
+    stmt = select(
+        StudioTemplateVariable.id,
+        StudioTemplateVariable.kind,
+        StudioTemplateVariable.updated_at,
+        StudioTemplateVariable.file_path,
+        StudioTemplateVariable.value,
+    ).where(
+        or_(
+            StudioTemplateVariable.file_path.is_not(None),
+            StudioTemplateVariable.value.is_not(None),
+        )
+    )
+    for row in db.execute(stmt):  # type: ignore[attr-defined]
+        kind = "видео маршрута" if row.kind == "video" else "переменная студии"
+        href = "/clients/notifications#route-video" if row.kind == "video" else "/clients/notifications"
+        for rel in media_refs_in_text(row.file_path) + media_refs_in_text(row.value):
+            _remember_use(found, seen, rel, kind, int(row.id), href, row.updated_at)
+
+
+def missing_referenced_media_files(db: object, root: Path | None = None) -> list[dict[str, Any]]:
     """
     Файлы, на которые есть ссылка в БД, но которых нет в каталоге загрузок.
-    Фото, памятки, видео маршрута и пути `/media/…` в черновиках.
+    У каждого файла — все места: тип, id, страница и дата создания записи.
+    Список отсортирован по дате (без даты — в конце).
     """
-    from sqlalchemy import select
+    from app.db.models import Booking, CareMemo, Client, Consultation, Kit, Visit, VisitDraft, WorkDraft
 
-    from app.db.models import (
-        Booking,
-        CareMemo,
-        Client,
-        Consultation,
-        Kit,
-        StudioTemplateVariable,
-        Visit,
-        VisitDraft,
-        WorkDraft,
+    found: dict[str, list[dict[str, Any]]] = {}
+    seen: set[tuple[str, str, int]] = set()
+    specs = (
+        (Client, "фото клиента", "/clients/{id}", ("photo_1", "photo_2"), None),
+        (Kit, "фото комплекта", "/kits/{id}", ("photo_1",), "created_at"),
+        (Booking, "фото брони", "/bookings/{id}", ("photo_1", "photo_2", "photo_3"), "created_at"),
+        (
+            Consultation,
+            "фото консультации",
+            "/consultations/{id}",
+            ("photo_1", "photo_2"),
+            "created_at",
+        ),
+        (Visit, "фото визита", "/visits/{id}", ("photo_1", "photo_2", "photo_3"), "created_at"),
+        (CareMemo, "памятка", "/clients/notifications#care-memo-{id}", ("file_path",), "created_at"),
+        (VisitDraft, "черновик визита", "/master/visit/draft/{id}", ("form_json",), "created_at"),
+        (WorkDraft, "черновик работы", "/sales/work/draft/{id}", ("form_json",), "created_at"),
     )
+    for model, kind, href, attrs, date_attr in specs:
+        _scan_media_columns(
+            db,
+            found,
+            seen,
+            model=model,
+            kind=kind,
+            href=href,
+            attrs=attrs,
+            date_attr=date_attr,
+        )
+    _scan_studio_variables(db, found, seen)
 
-    columns = (
-        (Client, "photo_1"),
-        (Client, "photo_2"),
-        (Kit, "photo_1"),
-        (Booking, "photo_1"),
-        (Booking, "photo_2"),
-        (Booking, "photo_3"),
-        (Consultation, "photo_1"),
-        (Consultation, "photo_2"),
-        (Visit, "photo_1"),
-        (Visit, "photo_2"),
-        (Visit, "photo_3"),
-        (CareMemo, "file_path"),
-        (StudioTemplateVariable, "file_path"),
-        (StudioTemplateVariable, "value"),
-        (VisitDraft, "form_json"),
-        (WorkDraft, "form_json"),
-    )
-    refs: set[str] = set()
-    for model, attr in columns:
-        col = getattr(model, attr)
-        for value in db.scalars(select(col).where(col.is_not(None))):  # type: ignore[attr-defined]
-            refs.update(media_refs_in_text(None if value is None else str(value)))
     base = (root or media_root_dir()).resolve()
-    missing: list[str] = []
-    for rel in sorted(refs):
+    missing: list[dict[str, Any]] = []
+    for rel, uses in found.items():
         path = (base / rel).resolve()
         try:
             path.relative_to(base)
         except ValueError:
-            missing.append(rel)
+            on_disk = False
+        else:
+            on_disk = path.is_file()
+        if on_disk:
             continue
-        if not path.is_file():
-            missing.append(rel)
+        uses.sort(key=lambda use: (use["created_at"] is None, use["created_at"] or datetime.min, use["kind"], use["record_id"]))
+        missing.append({"name": rel, "uses": uses})
+    missing.sort(
+        key=lambda item: (
+            item["uses"][0]["created_at"] is None,
+            item["uses"][0]["created_at"] or datetime.min,
+            item["name"],
+        )
+    )
     return missing
 
 
