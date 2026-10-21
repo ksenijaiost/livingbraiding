@@ -16,10 +16,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
+from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from app.auth import AuthUser, require_techspec_user
+from app.db.session import get_db
 from app.media_store import (
+    MEDIA_MISSING_REPORT_NAME,
     MediaBackupEntry,
     build_media_manifest,
     filter_entries_missing_from_manifest,
@@ -28,14 +31,18 @@ from app.media_store import (
     iter_media_backup_paths,
     media_backup_arcname,
     media_root_dir,
+    missing_referenced_media_files,
     parse_media_manifest,
 )
 
 router = APIRouter(prefix="/techspec/media", tags=["techspec-media"])
 
+# Потолок распаковки (по умолчанию 1200 МБ) выше лимита видео маршрута (50 МБ)
+# и лимита картинок (10 МБ). Отдельного отсечения по 10 или 50 МБ здесь нет.
 _MAX_RESTORE_UNCOMPRESSED = int(os.environ.get("LB_MEDIA_RESTORE_MAX_BYTES", str(1200 * 1024 * 1024)))
 _MAX_UPLOAD_ZIP = int(os.environ.get("LB_MEDIA_RESTORE_MAX_ZIP_BYTES", str(1024 * 1024 * 1024)))
 _MAX_RESTORE_FILES = int(os.environ.get("LB_MEDIA_RESTORE_MAX_FILES", "20000"))
+_STORED_NAME_HINT = "<uuid>.jpg|jpeg|png|webp|mp4|mov|webm"
 
 # Служебные файлы в каталоге uploads (не попадают в бэкап; при restore пропускаются).
 _SKIP_RESTORE_BASENAMES = frozenset({".gitkeep", ".ds_store", "thumbs.db", "desktop.ini"})
@@ -72,13 +79,20 @@ def _safe_arc_basename(member: str) -> str | None:
     return None
 
 
-def _build_backup_zip(paths: list[Path]) -> str:
+def _missing_report_bytes(missing: list[str]) -> bytes:
+    lines = ["В базе есть ссылка, файла на диске нет:", *missing, ""]
+    return ("\n".join(lines)).encode("utf-8")
+
+
+def _build_backup_zip(paths: list[Path], missing: list[str] | None = None) -> str:
     fd, tmp_path = tempfile.mkstemp(prefix="lb-media-", suffix=".zip")
     os.close(fd)
     try:
         with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for p in paths:
                 zf.write(p, arcname=media_backup_arcname(media_root_dir(), p))
+            if missing:
+                zf.writestr(MEDIA_MISSING_REPORT_NAME, _missing_report_bytes(missing))
     except Exception:
         _unlink_quiet(tmp_path)
         raise HTTPException(status_code=500, detail="Не удалось собрать архив.")
@@ -109,12 +123,14 @@ def techspec_media_manifest(
 @router.get("/backup.zip")
 def techspec_media_backup_zip_get(
     current_user: Annotated[AuthUser, Depends(require_techspec_user())],
+    db: Annotated[Session, Depends(get_db)],
 ):
-    """Скачать архив загрузок: картинки в корне каталога и care_memos/."""
+    """Скачать архив загрузок: фото, видео, памятки и вложения из каталога."""
     root = media_root_dir().resolve()
     root.mkdir(parents=True, exist_ok=True)
     paths = iter_media_backup_paths(root)
-    tmp_path = _build_backup_zip(paths)
+    missing = missing_referenced_media_files(db, root)
+    tmp_path = _build_backup_zip(paths, missing)
     fname = f"lb-media-backup-{date.today().isoformat()}.zip"
     return FileResponse(
         tmp_path,
@@ -127,6 +143,7 @@ def techspec_media_backup_zip_get(
 @router.post("/backup.zip")
 async def techspec_media_backup_zip_post(
     current_user: Annotated[AuthUser, Depends(require_techspec_user())],
+    db: Annotated[Session, Depends(get_db)],
     manifest: UploadFile = File(..., description="Сохранённый manifest.json — в архив попадут только новые файлы"),
 ):
     """Инкрементальный бэкап: zip только файлов, которых нет в загруженном манифесте."""
@@ -150,6 +167,7 @@ async def techspec_media_backup_zip_post(
     root.mkdir(parents=True, exist_ok=True)
     entries = iter_media_backup_entries(root)
     missing = filter_entries_missing_from_manifest(entries, parsed_manifest)
+    absent = missing_referenced_media_files(db, root)
 
     if not missing:
         return JSONResponse(
@@ -157,6 +175,7 @@ async def techspec_media_backup_zip_post(
                 "ok": True,
                 "new_files": 0,
                 "new_bytes": 0,
+                "missing_files": absent,
                 "message": "Новых файлов нет — манифест актуален. Скачайте свежий manifest.json при необходимости.",
             }
         )
@@ -172,7 +191,7 @@ async def techspec_media_backup_zip_post(
         )
 
     paths = [e.path for e in missing]
-    tmp_path = _build_backup_zip(paths)
+    tmp_path = _build_backup_zip(paths, absent)
     fname = f"lb-media-delta-{date.today().isoformat()}.zip"
     return FileResponse(
         tmp_path,
@@ -192,8 +211,8 @@ async def techspec_media_restore_zip(
     archive: UploadFile = File(..., description="ZIP с файлами в корне (имена как у /media/…)"),
 ):
     """
-    Распаковать ZIP в каталог загрузок: только корневые имена вида <uuid>.jpg|…;
-    существующие файлы с тем же именем перезаписываются.
+    Распаковать ZIP в каталог загрузок: <uuid>.jpg|png|webp|mp4|mov|webm
+    и care_memos/<файл>; существующие файлы с тем же именем перезаписываются.
     """
     if not archive.filename or not str(archive.filename).lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="Ожидается .zip")
@@ -233,13 +252,13 @@ async def techspec_media_restore_zip(
                         status_code=400,
                         detail=f"Недопустимый путь в архиве: {info.filename!r}",
                     )
-                if _should_skip_restore_basename(Path(base).name):
+                if base == MEDIA_MISSING_REPORT_NAME or _should_skip_restore_basename(Path(base).name):
                     skipped += 1
                     continue
                 if not is_stored_media_backup_filename(base):
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Недопустимое имя файла (ожидается <uuid>.jpg|jpeg|png|webp): {base!r}",
+                        detail=f"Недопустимое имя файла (ожидается {_STORED_NAME_HINT}): {base!r}",
                     )
 
                 dest = (root / base).resolve()

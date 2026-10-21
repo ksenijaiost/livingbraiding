@@ -30,13 +30,22 @@ VIDEO_MIME = {
     ".webm": "video/webm",
 }
 
-# Имена как у save_upload_image: <32 hex>.<ext> в корне или в care_memos/ (бэкап — без HEIC).
+# Имена как у save_upload_*: <32 hex>.<ext> в корне или в care_memos/.
+# HEIC на диске не остаётся (конвертируется в JPG). Видео — mp4/mov/webm в корне.
+# Лимит картинок MAX_BYTES (10 МБ) к отбору файлов бэкапа не применяется.
+_BACKUP_EXTS = "jpg|jpeg|png|webp|mp4|mov|webm"
 _BACKUP_STORED_NAME_RE = re.compile(
-    r"^(?:care_memos/)?[a-f0-9]{32}\.(?:jpg|jpeg|png|webp)$",
+    rf"^(?:care_memos/)?[a-f0-9]{{32}}\.(?:{_BACKUP_EXTS})$",
     re.IGNORECASE,
 )
-_BACKUP_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+_MEDIA_REF_RE = re.compile(
+    rf"(?<![a-f0-9])((?:care_memos/)?[a-f0-9]{{32}}\.(?:{_BACKUP_EXTS}))(?![a-z0-9])",
+    re.IGNORECASE,
+)
+_BACKUP_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".webm"}
 CARE_MEMO_BACKUP_DIR = "care_memos"
+# Отчёт «ссылка в БД есть, файла на диске нет» — в корне zip; restore его пропускает.
+MEDIA_MISSING_REPORT_NAME = "lb-media-missing.txt"
 
 
 def is_stored_media_backup_filename(name: str) -> bool:
@@ -135,6 +144,76 @@ def filter_entries_missing_from_manifest(
         if is_stored_media_backup_filename(name):
             known.add(name)
     return [e for e in entries if e.name not in known]
+
+
+def media_refs_in_text(raw: str | None) -> list[str]:
+    """Относительные пути хранилища внутри URL `/media/…`, голого имени или JSON."""
+    text = str(raw or "").replace("\\/", "/").replace("\\", "/")
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in _MEDIA_REF_RE.finditer(text):
+        rel = match.group(1).lower()
+        if rel in seen or not is_stored_media_backup_filename(rel):
+            continue
+        seen.add(rel)
+        found.append(rel)
+    return found
+
+
+def missing_referenced_media_files(db: object, root: Path | None = None) -> list[str]:
+    """
+    Файлы, на которые есть ссылка в БД, но которых нет в каталоге загрузок.
+    Фото, памятки, видео маршрута и пути `/media/…` в черновиках.
+    """
+    from sqlalchemy import select
+
+    from app.db.models import (
+        Booking,
+        CareMemo,
+        Client,
+        Consultation,
+        Kit,
+        StudioTemplateVariable,
+        Visit,
+        VisitDraft,
+        WorkDraft,
+    )
+
+    columns = (
+        (Client, "photo_1"),
+        (Client, "photo_2"),
+        (Kit, "photo_1"),
+        (Booking, "photo_1"),
+        (Booking, "photo_2"),
+        (Booking, "photo_3"),
+        (Consultation, "photo_1"),
+        (Consultation, "photo_2"),
+        (Visit, "photo_1"),
+        (Visit, "photo_2"),
+        (Visit, "photo_3"),
+        (CareMemo, "file_path"),
+        (StudioTemplateVariable, "file_path"),
+        (StudioTemplateVariable, "value"),
+        (VisitDraft, "form_json"),
+        (WorkDraft, "form_json"),
+    )
+    refs: set[str] = set()
+    for model, attr in columns:
+        col = getattr(model, attr)
+        for value in db.scalars(select(col).where(col.is_not(None))):  # type: ignore[attr-defined]
+            refs.update(media_refs_in_text(None if value is None else str(value)))
+    base = (root or media_root_dir()).resolve()
+    missing: list[str] = []
+    for rel in sorted(refs):
+        path = (base / rel).resolve()
+        try:
+            path.relative_to(base)
+        except ValueError:
+            missing.append(rel)
+            continue
+        if not path.is_file():
+            missing.append(rel)
+    return missing
 
 
 def media_backup_stats() -> dict[str, int | str]:
