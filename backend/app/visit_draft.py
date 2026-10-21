@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
 from app.auth import AuthUser
+from app.media_store import note_dropped_media_refs
 from app.client_validation import format_created_by_label
 from app.role_access import role_is_admin_staff
 from app.db.models import (
@@ -286,7 +287,9 @@ def save_visit_draft(
         draft.client_id = client_id
         draft.performed_date = performed_dt
         draft.booking_id = inp.header.booking_id
-        draft.form_json = json.dumps(form_dict, ensure_ascii=False)
+        new_form_json = json.dumps(form_dict, ensure_ascii=False)
+        note_dropped_media_refs(db, draft.form_json, new_form_json)
+        draft.form_json = new_form_json
         draft.preview_json = json.dumps(compute_draft_preview(db, inp), ensure_ascii=False)
         draft.updated_at = now
         draft.updated_by_user_id = int(user_id)

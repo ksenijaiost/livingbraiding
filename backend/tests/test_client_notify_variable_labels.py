@@ -73,6 +73,8 @@ def test_palette_shows_tokens_not_dict_copy(db) -> None:
         html = res.text
         assert "{{address}}" in html
         assert "{{date}}" in html
+        assert "{{services_with_duration}}" in html
+        assert "с длительностью" in html
         assert "{{parking}}" in html
         assert 'data-copy="{{address}}"' in html
         assert 'data-copy="{{date}}"' in html

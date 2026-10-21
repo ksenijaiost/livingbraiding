@@ -30,7 +30,7 @@ from app.db.models import (
     WorkPlan,
 )
 from app.display_time import get_display_timezone
-from app.media_store import media_backup_stats, missing_referenced_media_files
+from app.media_store import media_backup_stats, missing_referenced_media_files, unreferenced_media_stats
 from app.settings import get_settings
 
 _TABLE_DESCRIPTIONS: dict[str, str] = {
@@ -348,6 +348,9 @@ def collect_techspec_home_stats(db: Session) -> dict[str, Any]:
     media = media_backup_stats()
     media["total_size_human"] = _fmt_bytes(int(media.get("total_bytes") or 0))
     media["missing_files"] = missing_referenced_media_files(db)
+    orphans = unreferenced_media_stats(db)
+    media["orphan_count"] = orphans["count"]
+    media["orphan_size_human"] = _fmt_bytes(orphans["total_bytes"])
     counts = {key: _count_rows(db, model, active_only=(key in {"users_active", "catalog_products_active", "services_active"}))
               for key, model in _COUNT_MODELS}
     counts["kits_active"] = int(

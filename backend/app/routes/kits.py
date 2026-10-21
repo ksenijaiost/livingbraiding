@@ -57,7 +57,7 @@ from app.kit_crud import (
     try_fill_kit_admin_stock_price_total_from_composition,
     validate_kit_admin_form,
 )
-from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
+from app.media_store import get_nonempty_upload, note_media_for_release, save_upload_image
 from app.kit_composition import (
     KIT_INVENTORY_PIECE_EXCLUDE_KEYS,
     composition_json_from_lines,
@@ -909,12 +909,12 @@ async def admin_kit_edit_post(
             kit.composition_json = lines_to_json(d.composition_lines)
         try:
             if parse_bool(form.get("clear_photo_1")):
-                delete_media_by_url(getattr(kit, "photo_1", None))
+                note_media_for_release(db, getattr(kit, "photo_1", None))
                 kit.photo_1 = None
             p1 = get_nonempty_upload(form, "photo_1")
             if p1 is not None:
                 new_url = await save_upload_image(p1)
-                delete_media_by_url(getattr(kit, "photo_1", None))
+                note_media_for_release(db, getattr(kit, "photo_1", None))
                 kit.photo_1 = new_url
         except ValueError as exc:
             raise ValueError(str(exc)) from None

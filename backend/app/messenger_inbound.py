@@ -463,7 +463,7 @@ def _build_cancel_request_text(
     tz = get_display_timezone(db)
     marker = get_services_marker(db)
     when = format_naive_utc_datetime(booking.planned_date, tz) or "—"
-    services = _services_block(booking, marker) or "—"
+    services = _services_block(booking, marker, with_duration=True) or "—"
     masters = _masters_csv(booking) or "—"
     via = _channel_label(channel)
     booking_client = (
@@ -565,7 +565,7 @@ def _booking_facts(db: Session, booking: Booking, client: Client) -> str:
     tz = get_display_timezone(db)
     marker = get_services_marker(db)
     when = format_naive_utc_datetime(booking.planned_date, tz) or "—"
-    services = _services_block(booking, marker) or "—"
+    services = _services_block(booking, marker, with_duration=True) or "—"
     masters = _masters_csv(booking) or "—"
     return (
         f"Клиент: {client.name}\n"

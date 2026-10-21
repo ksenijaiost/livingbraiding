@@ -29,7 +29,7 @@
     <form method="post" action="/clients/notifications/save" style="margin-bottom:20px;"
           onsubmit="this.querySelector('button[type=submit]').disabled=true;">
       <div style="margin-bottom:14px;">
-        <label class="label-sub">Маркер списка услуг <span class="muted">(для {{ "{{services}}" }})</span></label>
+        <label class="label-sub">Маркер списка услуг <span class="muted">(для {{ "{{services}}" }} и {{ "{{services_with_duration}}" }})</span></label>
         <input name="services_marker" maxlength="20" value="{{ services_marker }}" style="width:4rem;" />
       </div>
 

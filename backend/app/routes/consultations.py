@@ -53,7 +53,7 @@ from app.planned_services_db import (
 from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_date_form
-from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
+from app.media_store import get_nonempty_upload, note_media_for_release, save_upload_image
 from app.time_utils import utcnow_naive
 from app.webui import templates, ctx as _ctx
 
@@ -301,7 +301,7 @@ async def consultation_new_post(
             status_code=400,
         )
 
-    photo_1, photo_2 = await _save_consultation_photos(form_raw, None, None)
+    photo_1, photo_2 = await _save_consultation_photos(db, form_raw, None, None)
     booking_id_raw = str(fp.get("booking_id") or "").strip()
     source_booking_id: int | None = None
     if booking_id_raw.isdigit():
@@ -500,7 +500,7 @@ async def consultation_edit_post(
         )
 
     photo_1, photo_2 = await _save_consultation_photos(
-        form_raw, c.photo_1, c.photo_2, existing=c
+        db, form_raw, c.photo_1, c.photo_2, existing=c
     )
     c.client_id = client.id
     c.consultation_date = consultation_dt
@@ -606,22 +606,28 @@ def _parse_consultation_form(db, fp, form_raw):
     return err, client, consultation_dt, duration_minutes, service_id, types_data, service_ids
 
 
-async def _save_consultation_photos(form_raw, photo_1: str | None, photo_2: str | None, existing: Consultation | None = None):
+async def _save_consultation_photos(
+    db: Session,
+    form_raw,
+    photo_1: str | None,
+    photo_2: str | None,
+    existing: Consultation | None = None,
+):
     if existing and parse_bool_form(form_raw.get("clear_photo_1")):
-        delete_media_by_url(photo_1)
+        note_media_for_release(db, photo_1)
         photo_1 = None
     if existing and parse_bool_form(form_raw.get("clear_photo_2")):
-        delete_media_by_url(photo_2)
+        note_media_for_release(db, photo_2)
         photo_2 = None
     up1 = get_nonempty_upload(form_raw, "photo_1")
     up2 = get_nonempty_upload(form_raw, "photo_2")
     if up1:
         if photo_1:
-            delete_media_by_url(photo_1)
+            note_media_for_release(db, photo_1)
         photo_1 = await save_upload_image(up1)
     if up2:
         if photo_2:
-            delete_media_by_url(photo_2)
+            note_media_for_release(db, photo_2)
         photo_2 = await save_upload_image(up2)
     return photo_1, photo_2
 

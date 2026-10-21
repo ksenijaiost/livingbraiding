@@ -22,7 +22,7 @@ from app.db.models import (
     VisitService,
 )
 from app.display_time import format_naive_utc_datetime, get_display_timezone
-from app.media_store import MAX_BYTES, media_root_dir
+from app.media_store import MAX_BYTES, media_root_dir, note_media_for_release
 from app.time_utils import utcnow_naive
 
 CARE_SUBDIR = "care_memos"
@@ -278,7 +278,7 @@ async def replace_care_memo_file(db: Session, memo_id: int, upload: object | Non
     memo.updated_at = utcnow_naive()
     db.flush()
     if old != rel:
-        _unlink_rel(old)
+        note_media_for_release(db, old)
     return memo
 
 
@@ -329,7 +329,7 @@ def delete_care_memo(db: Session, memo_id: int, *, confirmed: bool) -> None:
     _clear_links(db, int(memo.id))
     db.delete(memo)
     db.flush()
-    _unlink_rel(rel)
+    note_media_for_release(db, rel)
 
 
 def parse_care_memo_id(db: Session, raw: object) -> int | None:

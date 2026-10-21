@@ -14,6 +14,7 @@ from app.db.models import (
     VisitKitUsage,
     WorkForInventory,
 )
+from app.media_store import note_media_for_release
 from app.time_utils import utcnow_naive
 
 KIT_DELETE_SOURCE_CARD = "kit_card"
@@ -112,6 +113,7 @@ def hard_delete_kit(
     if err:
         raise ValueError(err)
     write_kit_deletion_log(db, kit, actor_user_id=actor_user_id, source=source)
+    note_media_for_release(db, kit.photo_1)
     kid = int(kit.id)
     # Работа, создавшая комплект, остаётся в истории — только отвязываем указатель.
     db.execute(

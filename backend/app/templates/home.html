@@ -50,6 +50,19 @@
           <div>
             <div class="muted" style="font-size: 12px;">Каталог загрузок</div>
             <div style="margin-top: 4px; word-break: break-all;"><code>{{ techspec_home.media.media_root }}</code></div>
+            <div style="margin-top: 8px;">
+              Файлов без ссылок в БД: <strong>{{ techspec_home.media.orphan_count }}</strong>
+              ({{ techspec_home.media.orphan_size_human }})
+            </div>
+            {% if techspec_home.orphans_deleted is not none %}
+              <div class="muted" style="margin-top: 4px; font-size: 12px;">Удалено лишних файлов: {{ techspec_home.orphans_deleted }}</div>
+            {% endif %}
+            {% if techspec_home.media.orphan_count %}
+              <form method="post" action="/techspec/media/orphans" style="margin-top: 8px;"
+                    onsubmit="return confirm('Удалить файлы без ссылок в базе? Файлы моложе часа останутся.');">
+                <button type="submit" class="secondary">Удалить лишние</button>
+              </form>
+            {% endif %}
             {% if techspec_home.media.skipped_other_files %}
               <div class="muted" style="margin-top: 4px; font-size: 12px;">
                 Прочих файлов в каталоге (не в архиве): {{ techspec_home.media.skipped_other_files }}

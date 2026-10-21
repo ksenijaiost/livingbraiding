@@ -147,13 +147,13 @@ def test_render_with_services_marker() -> None:
         masters=[],
     )
     text = render_client_notify_template(
-        "{{services}}",
+        "{{services}}|{{services_with_duration}}",
         booking=booking,  # type: ignore[arg-type]
         client=SimpleNamespace(name="К"),  # type: ignore[arg-type]
         tz_name="Asia/Novosibirsk",
         marker="*",
     )
-    assert text == "* Услуга 2 минуты"
+    assert text == "* Услуга|* Услуга 2 минуты"
 
 
 def test_enqueue_before_after_dedupe(memory_db) -> None:

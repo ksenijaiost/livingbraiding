@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
+from app.media_store import note_media_for_release
 from app.phone_ru import display_phone
 from app.db.models import (
     Booking,
@@ -91,6 +92,7 @@ def purge_visit_hard(db: Session, visit_id: int, *, actor_user_id: int | None) -
         storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, int(vs.id), actor_user_id)
     storno_source_accruals(db, PayrollFundSourceKind.VISIT, visit.id, actor_user_id)
     db.execute(delete(VisitAuditLog).where(VisitAuditLog.visit_id == visit.id))
+    note_media_for_release(db, visit.photo_1, visit.photo_2, visit.photo_3)
     db.delete(visit)
 
 
@@ -121,6 +123,7 @@ def purge_booking_hard(db: Session, booking_id: int, *, actor_user_id: int | Non
     db.execute(update(ProductSale).where(ProductSale.booking_id == bid).values(booking_id=None))
     db.execute(update(WorkForInventory).where(WorkForInventory.booking_id == bid).values(booking_id=None))
     db.flush()
+    note_media_for_release(db, b.photo_1, b.photo_2, b.photo_3)
     db.delete(b)
 
 
@@ -169,6 +172,7 @@ def purge_consultation_hard(db: Session, consultation_id: int, *, actor_user_id:
     )
     cons.source_booking_id = None
     db.flush()
+    note_media_for_release(db, cons.photo_1, cons.photo_2)
     db.delete(cons)
 
 
@@ -227,6 +231,7 @@ def purge_client_hard(db: Session, client_id: int, *, actor_user_id: int | None)
         purge_booking_hard(db, int(bid), actor_user_id=actor_user_id)
 
     release_client_kit_reserves(db, client_id=cid, changed_by_user_id=actor_user_id)
+    note_media_for_release(db, c.photo_1, c.photo_2)
     db.delete(c)
 
 

@@ -112,7 +112,7 @@ from app.telegram_link import (
 from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.audit import diff_fields, write_audit_rows
-from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
+from app.media_store import get_nonempty_upload, note_media_for_release, save_upload_image
 from app.operational_report import list_closed_payroll_periods, resolve_report_dates
 from app.time_utils import utcnow_naive
 from app.ui_visit_display import visit_services_catalog_line
@@ -1855,20 +1855,20 @@ async def admin_client_edit_post(
     clear_p2 = parse_bool(form_raw.get("clear_photo_2"))
     try:
         if clear_p1:
-            delete_media_by_url(getattr(client, "photo_1", None))
+            note_media_for_release(db, getattr(client, "photo_1", None))
             client.photo_1 = None
         if clear_p2:
-            delete_media_by_url(getattr(client, "photo_2", None))
+            note_media_for_release(db, getattr(client, "photo_2", None))
             client.photo_2 = None
         up1 = get_nonempty_upload(form_raw, "photo_1")
         up2 = get_nonempty_upload(form_raw, "photo_2")
         if up1 is not None:
             new_url = await save_upload_image(up1)
-            delete_media_by_url(getattr(client, "photo_1", None))
+            note_media_for_release(db, getattr(client, "photo_1", None))
             client.photo_1 = new_url
         if up2 is not None:
             new_url = await save_upload_image(up2)
-            delete_media_by_url(getattr(client, "photo_2", None))
+            note_media_for_release(db, getattr(client, "photo_2", None))
             client.photo_2 = new_url
     except ValueError as exc:
         return _admin_client_form_page(
