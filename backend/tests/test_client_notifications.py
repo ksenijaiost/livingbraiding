@@ -14,12 +14,14 @@ from app.client_notifications import (
     DEFAULT_SERVICES_MARKER,
     KIND_AFTER,
     KIND_BEFORE,
+    _services_block,
     ensure_default_rules,
     get_services_marker,
     parse_rule_hours,
     render_client_notify_template,
     rules_for_ui,
 )
+from app.messenger_inbound import _booking_facts, _build_cancel_request_text
 from app.db import models as _orm_models  # noqa: F401
 from app.db.base import Base
 from app.db.models import ClientNotificationRule, ClientNotificationRuleKind
@@ -71,6 +73,7 @@ def test_render_all_variables() -> None:
         "{{date}}|{{time}}|{{datetime}}\n"
         "{{date_text}} ({{weekday}})\n"
         "{{services}}\n"
+        "{{services_with_duration}}\n"
         "Мастер: {{masters}}\n"
         "raw={{unknown}}",
         booking=booking,  # type: ignore[arg-type]
@@ -81,10 +84,26 @@ def test_render_all_variables() -> None:
     assert "Добрый день, Катя!" in text
     assert "16.09.2026|12:00|16.09.2026 12:00" in text
     assert "16 сентября (среда)" in text
+    assert "• Электроэпиляция\n• Тонирование" in text
     assert "• Электроэпиляция 1 минута" in text
     assert "• Тонирование" in text
     assert "Мастер: Анна, masha" in text
     assert "raw={{unknown}}" in text
+
+
+def test_staff_notices_keep_service_duration(memory_db) -> None:
+    booking = _booking_stub()
+    client = SimpleNamespace(name="Катя", id=1)
+    booking.id = 7
+    booking.client_id = 1
+    booking.client = client
+    plain = _services_block(booking, "•")
+    assert plain == "• Электроэпиляция\n• Тонирование"
+    assert "минут" not in plain
+    cancel = _build_cancel_request_text(memory_db, booking, client, "vk")  # type: ignore[arg-type]
+    facts = _booking_facts(memory_db, booking, client)  # type: ignore[arg-type]
+    assert "• Электроэпиляция 1 минута" in cancel
+    assert "• Электроэпиляция 1 минута" in facts
 
 
 def test_render_empty_services_masters() -> None:

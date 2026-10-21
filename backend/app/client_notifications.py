@@ -107,7 +107,8 @@ def _master_label(user: User | None, user_id: int) -> str:
     return (user.display_name or user.username or str(user_id)).strip() or str(user_id)
 
 
-def _services_block(booking: Booking, marker: str) -> str:
+def _services_block(booking: Booking, marker: str, *, with_duration: bool = False) -> str:
+    """Строки услуг. Длительность — только для {{services_with_duration}} и служебных текстов сотрудникам."""
     mark = (marker or DEFAULT_SERVICES_MARKER).strip() or DEFAULT_SERVICES_MARKER
     lines: list[str] = []
     planned = sorted(
@@ -119,7 +120,7 @@ def _services_block(booking: Booking, marker: str) -> str:
         name = ((svc.name if svc is not None else "") or "").strip()
         if not name:
             continue
-        if ps.duration_minutes is not None:
+        if with_duration and ps.duration_minutes is not None:
             line = f"{mark} {name} {_minutes_ru(int(ps.duration_minutes))}"
         else:
             line = f"{mark} {name}"
@@ -203,6 +204,7 @@ def render_client_notify_template(
             "weekday": weekday,
             "name": (client.name or "").strip(),
             "services": _services_block(booking, marker),
+            "services_with_duration": _services_block(booking, marker, with_duration=True),
             "masters": _masters_csv(booking),
             "client_for_line": for_line,
         }
