@@ -55,6 +55,16 @@
                 Прочих файлов в каталоге (не в архиве): {{ techspec_home.media.skipped_other_files }}
               </div>
             {% endif %}
+            {% if techspec_home.media.missing_files %}
+              <div style="margin-top: 8px; font-size: 12px; color: #9a3412;">
+                В базе есть ссылка, файла на диске нет ({{ techspec_home.media.missing_files|length }}):
+                <ul style="margin: 4px 0 0; padding-left: 1.2rem;">
+                  {% for name in techspec_home.media.missing_files %}
+                    <li><code>{{ name }}</code></li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% endif %}
           </div>
         </div>
       </div>
