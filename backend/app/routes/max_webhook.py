@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.admin_chat import try_bind_admin_chat_from_text
+from app.admin_chat import classify_admins_text, get_admin_chat_target, try_bind_admin_chat_from_text
 from app.db.session import get_db
 from app.messenger_inbound import process_inbound_message
 from app.notifications import send_max
@@ -33,6 +33,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+MSG_BOT_ADDED = (
+    "Привет! Чтобы подключить этот чат для уведомлений админов, возьмите код в CRM "
+    "(Настройки → чат админов) и отправьте сюда сообщением: /admins КОД. "
+    "Если я не отвечаю, проверьте, что я администратор чата."
+)
+
+_GROUP_CHAT_TYPES = frozenset({"chat", "channel"})
+
 
 def _check_webhook_secret(header_value: str | None) -> JSONResponse | None:
     expected = (get_settings().max_webhook_secret or "").strip()
@@ -40,6 +48,7 @@ def _check_webhook_secret(header_value: str | None) -> JSONResponse | None:
         return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
     got = (header_value or "").strip()
     if got != expected:
+        logger.warning("max webhook bad secret")
         return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
     return None
 
@@ -79,25 +88,93 @@ def _max_user_id_from_update(upd: dict[str, Any]) -> int | None:
     return None
 
 
+def _as_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _message(upd: dict[str, Any]) -> dict[str, Any] | None:
+    message = upd.get("message")
+    return message if isinstance(message, dict) else None
+
+
+def _recipient(upd: dict[str, Any]) -> dict[str, Any]:
+    message = _message(upd)
+    if message and isinstance(message.get("recipient"), dict):
+        return message["recipient"]
+    chat = upd.get("chat")
+    if isinstance(chat, dict):
+        return chat
+    return {}
+
+
 def _chat_id_from_update(upd: dict[str, Any]) -> int | None:
-    if upd.get("chat_id") is not None:
-        try:
-            return int(upd["chat_id"])
-        except (TypeError, ValueError):
-            pass
-    message = upd.get("message") if isinstance(upd.get("message"), dict) else None
-    if message and message.get("chat_id") is not None:
-        try:
-            return int(message["chat_id"])
-        except (TypeError, ValueError):
-            pass
-    chat = upd.get("chat") if isinstance(upd.get("chat"), dict) else None
-    if chat and chat.get("chat_id") is not None:
-        try:
-            return int(chat["chat_id"])
-        except (TypeError, ValueError):
-            pass
+    for value in (
+        upd.get("chat_id"),
+        _recipient(upd).get("chat_id"),
+        (_message(upd) or {}).get("chat_id"),
+    ):
+        parsed = _as_int(value)
+        if parsed is not None:
+            return parsed
     return None
+
+
+def _chat_type_from_update(upd: dict[str, Any]) -> str:
+    recipient = _recipient(upd)
+    for key in ("chat_type", "type"):
+        raw = recipient.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()
+    raw = upd.get("chat_type")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip().lower()
+    if upd.get("is_channel") is True:
+        return "channel"
+    return ""
+
+
+def _chat_title_from_update(upd: dict[str, Any]) -> str | None:
+    candidates: list[object] = [_recipient(upd), upd.get("chat"), upd]
+    for src in candidates:
+        if not isinstance(src, dict):
+            continue
+        for key in ("title", "chat_title", "name"):
+            raw = src.get(key)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()[:200]
+    return None
+
+
+def _is_group_chat(chat_type: str) -> bool:
+    return chat_type.strip().lower() in _GROUP_CHAT_TYPES
+
+
+def _text_preview(text: str | None) -> str:
+    raw = (text or "").replace("\r", " ").replace("\n", " ").strip()
+    return raw[:60] or "-"
+
+
+def _log_update(
+    *,
+    update_type: str,
+    chat_id: int | None,
+    chat_type: str,
+    sender_id: int | None,
+    text: str | None,
+) -> None:
+    logger.info(
+        "max webhook update_type=%s chat_id=%s chat_type=%s sender_id=%s text=%s",
+        update_type or "-",
+        chat_id if chat_id is not None else "-",
+        chat_type or "-",
+        sender_id if sender_id is not None else "-",
+        _text_preview(text),
+    )
 
 
 def _message_text(upd: dict[str, Any]) -> str | None:
@@ -172,17 +249,60 @@ async def max_webhook(
     try:
         upd = _extract_update(payload)
         if upd is None:
+            _log_update(update_type="", chat_id=None, chat_type="", sender_id=None, text=None)
             return JSONResponse({"ok": True})
 
         update_type = str(upd.get("update_type") or "").strip()
         text = _message_text(upd) if update_type == "message_created" else None
         chat_id = _chat_id_from_update(upd)
+        chat_type = _chat_type_from_update(upd)
         max_uid = _max_user_id_from_update(upd)
+        title = _chat_title_from_update(upd)
+        _log_update(
+            update_type=update_type,
+            chat_id=chat_id,
+            chat_type=chat_type,
+            sender_id=max_uid,
+            text=text,
+        )
 
-        # Групповой чат: /admins (chat_id есть и отличается от user dialog — если оба, пробуем admins)
-        if update_type == "message_created" and chat_id is not None and text:
+        if update_type == "bot_added" and chat_id is not None:
+            logger.info(
+                "max webhook bot_added chat_id=%s title=%s",
+                int(chat_id),
+                title or "-",
+            )
+            try:
+                send_max(text=MSG_BOT_ADDED, chat_id=int(chat_id))
+            except Exception:
+                logger.exception("max webhook: bot_added reply failed chat_id=%s", chat_id)
+            return JSONResponse({"ok": True})
+
+        if update_type == "bot_removed" and chat_id is not None:
+            linked = get_admin_chat_target(db, CHANNEL_MAX)
+            if linked is not None and int(linked.chat_id) == int(chat_id):
+                logger.info(
+                    "max webhook bot_removed linked admin chat chat_id=%s title=%s",
+                    int(chat_id),
+                    (linked.title or title or "-"),
+                )
+            else:
+                logger.info("max webhook bot_removed chat_id=%s title=%s", int(chat_id), title or "-")
+            return JSONResponse({"ok": True})
+
+        # Группа/канал: /admins. В диалоге (chat_type=dialog) команду не привязываем.
+        # Если chat_type пустой, но текст — /admins и есть chat_id, тоже считаем группой.
+        admins_kind = classify_admins_text(text)[1] if text else "none"
+        group_admins = _is_group_chat(chat_type) or (
+            not chat_type and chat_id is not None and admins_kind != "none"
+        )
+        if update_type == "message_created" and chat_id is not None and text and group_admins:
             reply = try_bind_admin_chat_from_text(
-                db, channel=CHANNEL_MAX, chat_id=int(chat_id), text=text, title=None
+                db,
+                channel=CHANNEL_MAX,
+                chat_id=int(chat_id),
+                text=text,
+                title=title,
             )
             if reply:
                 try:
@@ -190,6 +310,7 @@ async def max_webhook(
                 except Exception:
                     logger.exception("max webhook: admin chat reply failed")
                 return JSONResponse({"ok": True})
+            return JSONResponse({"ok": True})
 
         code: str | None = None
         if update_type == "bot_started":
@@ -197,6 +318,7 @@ async def max_webhook(
         elif update_type == "message_created":
             code = parse_max_link_code(text=text)
         else:
+            logger.info("max webhook ignored update_type=%s", update_type or "-")
             return JSONResponse({"ok": True})
 
         if code is not None and max_uid is not None:

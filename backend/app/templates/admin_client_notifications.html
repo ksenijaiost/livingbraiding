@@ -491,6 +491,21 @@
       Сюда уходят запросы клиентов на отмену записи. Получите код и напишите в нужной беседе:
       <code>/admins &lt;код&gt;</code> (бот/сообщество должны быть в чате).
     </p>
+    {% set ns = namespace(max_chat=none) %}
+    {% for ch in admin_chats %}
+      {% if ch.channel == 'max' %}{% set ns.max_chat = ch %}{% endif %}
+    {% endfor %}
+    <p style="font-size:13px; margin:8px 0;">
+      <strong>Max:</strong>
+      {% if ns.max_chat and ns.max_chat.connected %}
+        Чат подключён: {{ ns.max_chat.title or ('ID ' ~ ns.max_chat.chat_id) }}{% if ns.max_chat.title and ns.max_chat.chat_id %}, ID {{ ns.max_chat.chat_id }}{% endif %}{% if ns.max_chat.linked_at %}, с {{ ns.max_chat.linked_at|dt_local }}{% endif %}
+      {% else %}
+        Не подключён
+      {% endif %}
+    </p>
+    <p class="muted" style="font-size:12px;">
+      Добавьте бота в чат админом, отправьте <code>/admins КОД</code>. Бот ответит в чате. Затем обновите страницу.
+    </p>
     {% if admin_link_code %}
       <p style="background:#eff6ff;border:1px solid #bfdbfe;padding:10px 12px;border-radius:8px;">
         Код (24 ч): <code style="user-select:all;">{{ admin_link_code }}</code><br />

@@ -143,7 +143,9 @@ def test_subscribe_set_posts_webhook(monkeypatch, capsys) -> None:
     assert calls[1][0] == "POST"
     body = json.loads(calls[1][2] or b"{}")
     assert body["url"] == "https://crm.example.com/webhooks/max"
-    assert body["update_types"] == ["message_created", "bot_started"]
+    from app.scripts.max_subscribe import SUBSCRIBE_UPDATE_TYPES
+
+    assert body["update_types"] == SUBSCRIBE_UPDATE_TYPES
     assert body["secret"] == "sec"
     out = capsys.readouterr().out
     assert "Текущие подписки" in out
