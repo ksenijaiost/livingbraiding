@@ -107,7 +107,7 @@ from app.kit_inlay_visit import (
     service_requires_kit_block,
 )
 from app.list_search import parse_list_id_search
-from app.media_store import delete_media_by_url, get_nonempty_upload, save_upload_image
+from app.media_store import get_nonempty_upload, note_media_for_release, save_upload_image
 from app.time_utils import utcnow_naive
 from app.user_roles import select_users_with_any_role, select_users_with_role
 from app.work_products import _rubber_type_items
@@ -3418,28 +3418,28 @@ async def admin_booking_edit_post(
     # photos: replace/clear
     try:
         if parse_bool(form_raw.get("clear_photo_1")):
-            delete_media_by_url(photo_1_url)
+            note_media_for_release(db, photo_1_url)
             photo_1_url = None
         if parse_bool(form_raw.get("clear_photo_2")):
-            delete_media_by_url(photo_2_url)
+            note_media_for_release(db, photo_2_url)
             photo_2_url = None
         if parse_bool(form_raw.get("clear_photo_3")):
-            delete_media_by_url(photo_3_url)
+            note_media_for_release(db, photo_3_url)
             photo_3_url = None
         up1 = get_nonempty_upload(form_raw, "photo_1")
         up2 = get_nonempty_upload(form_raw, "photo_2")
         up3 = get_nonempty_upload(form_raw, "photo_3")
         if up1 is not None:
             new_url = await save_upload_image(up1)
-            delete_media_by_url(photo_1_url)
+            note_media_for_release(db, photo_1_url)
             photo_1_url = new_url
         if up2 is not None:
             new_url = await save_upload_image(up2)
-            delete_media_by_url(photo_2_url)
+            note_media_for_release(db, photo_2_url)
             photo_2_url = new_url
         if up3 is not None:
             new_url = await save_upload_image(up3)
-            delete_media_by_url(photo_3_url)
+            note_media_for_release(db, photo_3_url)
             photo_3_url = new_url
     except ValueError as exc:
         err = str(exc)

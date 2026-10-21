@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import StudioTemplateVariable
-from app.media_store import delete_media_file, save_upload_video
+from app.media_store import note_media_for_release, save_upload_video
 from app.settings import get_settings
 from app.time_utils import utcnow_naive
 
@@ -301,7 +301,7 @@ async def save_route_video(db: Session, upload: object, *, user_id: int | None) 
     row.updated_by_user_id = user_id
     db.flush()
     if old and old != rel_name:
-        delete_media_file(old)
+        note_media_for_release(db, old)
 
 
 def clear_route_video(db: Session, *, user_id: int | None) -> None:
@@ -315,4 +315,4 @@ def clear_route_video(db: Session, *, user_id: int | None) -> None:
     row.updated_at = utcnow_naive()
     row.updated_by_user_id = user_id
     db.flush()
-    delete_media_file(old)
+    note_media_for_release(db, old)

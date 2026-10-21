@@ -465,7 +465,9 @@ async def admin_visit_edit_post(
         try:
             photo_changed = False
             for photo_field in ("photo_1", "photo_2", "photo_3"):
-                new_url, did = await replace_or_clear_photo(form, getattr(visit, photo_field), photo_field)
+                new_url, did = await replace_or_clear_photo(
+                    form, getattr(visit, photo_field), photo_field, db=db
+                )
                 if did:
                     setattr(visit, photo_field, new_url)
                     photo_changed = True

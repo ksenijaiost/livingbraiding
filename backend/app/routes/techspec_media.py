@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
@@ -26,6 +26,7 @@ from app.media_store import (
     MEDIA_MISSING_REPORT_NAME,
     MediaBackupEntry,
     build_media_manifest,
+    delete_unreferenced_media,
     filter_entries_missing_from_manifest,
     is_stored_media_backup_filename,
     iter_media_backup_entries,
@@ -314,3 +315,13 @@ async def techspec_media_restore_zip(
         _unlink_quiet(tmp_zip)
 
     return JSONResponse({"restored": restored, "skipped": skipped, "by_user": current_user.username})
+
+
+@router.post("/orphans")
+def techspec_delete_orphan_media(
+    db: Session = Depends(get_db),
+    _: AuthUser = Depends(require_techspec_user),
+) -> RedirectResponse:
+    """Удалить файлы без ссылок в БД старше часа. Выгрузка по-прежнему берёт все файлы с диска."""
+    deleted, _freed = delete_unreferenced_media(db)
+    return RedirectResponse(url=f"/?orphans_deleted={deleted}", status_code=303)

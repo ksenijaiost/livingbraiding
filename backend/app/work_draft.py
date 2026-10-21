@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.datastructures import UploadFile
 
 from app.auth import AuthUser
+from app.media_store import note_dropped_media_refs
 from app.db.models import (
     Client,
     User,
@@ -318,6 +319,7 @@ def save_work_draft(
         draft.work_plan_id = work_plan_id
         draft.kind = kind
         draft.scope = scope
+        note_dropped_media_refs(db, draft.form_json, form_json)
         draft.form_json = form_json
         draft.preview_json = preview_json
         draft.updated_at = now

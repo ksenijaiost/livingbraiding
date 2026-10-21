@@ -72,6 +72,7 @@ def _money0(x: float | None) -> float:
 def home(
     request: Request,
     m: str | None = None,
+    orphans_deleted: int | None = None,
     current_user: AuthUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -83,6 +84,7 @@ def home(
 
     if UserRole.TECHSPEC in current_user.roles:
         techspec_home = collect_techspec_home_stats(db)
+        techspec_home["orphans_deleted"] = orphans_deleted
 
     display_tz = get_display_timezone(db)
     tz = ZoneInfo(display_tz)

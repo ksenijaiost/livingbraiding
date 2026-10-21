@@ -1,16 +1,26 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
 
+logger = logging.getLogger(__name__)
+
 MANIFEST_VERSION = 1
+_MEDIA_RELEASE_KEY = "lb_media_release"
+_MEDIA_RELEASE_READY = "lb_media_release_ready"
+# Разовая чистка не трогает файлы, которые могли ещё загружаться.
+ORPHAN_MIN_AGE_SECONDS = 3600
 
 
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
@@ -240,12 +250,7 @@ def _scan_studio_variables(
             _remember_use(found, seen, rel, kind, int(row.id), href, row.updated_at)
 
 
-def missing_referenced_media_files(db: object, root: Path | None = None) -> list[dict[str, Any]]:
-    """
-    Файлы, на которые есть ссылка в БД, но которых нет в каталоге загрузок.
-    У каждого файла — все места: тип, id, страница и дата создания записи.
-    Список отсортирован по дате (без даты — в конце).
-    """
+def _collect_media_uses(db: object) -> dict[str, list[dict[str, Any]]]:
     from app.db.models import Booking, CareMemo, Client, Consultation, Kit, Visit, VisitDraft, WorkDraft
 
     found: dict[str, list[dict[str, Any]]] = {}
@@ -278,7 +283,21 @@ def missing_referenced_media_files(db: object, root: Path | None = None) -> list
             date_attr=date_attr,
         )
     _scan_studio_variables(db, found, seen)
+    return found
 
+
+def referenced_media_rels(db: object) -> set[str]:
+    """Относительные пути файлов, на которые есть ссылка в БД."""
+    return set(_collect_media_uses(db))
+
+
+def missing_referenced_media_files(db: object, root: Path | None = None) -> list[dict[str, Any]]:
+    """
+    Файлы, на которые есть ссылка в БД, но которых нет в каталоге загрузок.
+    У каждого файла — все места: тип, id, страница и дата создания записи.
+    Список отсортирован по дате (без даты — в конце).
+    """
+    found = _collect_media_uses(db)
     base = (root or media_root_dir()).resolve()
     missing: list[dict[str, Any]] = []
     for rel, uses in found.items():
@@ -325,6 +344,120 @@ def media_root_dir() -> Path:
     root = Path(os.environ.get("LB_MEDIA_ROOT") or "data/uploads")
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def note_media_for_release(db: object | None, *raws: object) -> None:
+    """Запомнить файлы: после успешного commit удалить те, на которые не осталось ссылок."""
+    if db is None:
+        return
+    info = getattr(db, "info", None)
+    if not isinstance(info, dict):
+        return
+    bucket: list[str] = info.setdefault(_MEDIA_RELEASE_KEY, [])
+    for raw in raws:
+        for rel in media_refs_in_text(None if raw is None else str(raw)):
+            if rel not in bucket:
+                bucket.append(rel)
+
+
+def note_dropped_media_refs(db: object | None, before: object, after: object) -> None:
+    """Ссылки, которые были в старом тексте и пропали в новом."""
+    old = set(media_refs_in_text(None if before is None else str(before)))
+    new = set(media_refs_in_text(None if after is None else str(after)))
+    note_media_for_release(db, *(old - new))
+
+
+def _unlink_stored_rel(rel: str) -> None:
+    root = media_root_dir().resolve()
+    path = (root / rel).resolve()
+    path.relative_to(root)
+    path.unlink(missing_ok=True)
+
+
+def _plan_media_release(session: Session) -> None:
+    """Пока транзакция ещё открыта: какие из отмеченных файлов уже нигде не числятся."""
+    rels = list(session.info.get(_MEDIA_RELEASE_KEY) or [])
+    if not rels:
+        return
+    try:
+        referenced = referenced_media_rels(session)
+    except Exception:
+        logger.warning("Не удалось проверить ссылки на медиа перед удалением файлов", exc_info=True)
+        session.info[_MEDIA_RELEASE_READY] = []
+        return
+    session.info[_MEDIA_RELEASE_READY] = [rel for rel in rels if rel not in referenced]
+
+
+def _release_noted_media(session: Session) -> None:
+    rels = list(session.info.pop(_MEDIA_RELEASE_READY, []) or [])
+    session.info.pop(_MEDIA_RELEASE_KEY, None)
+    for rel in rels:
+        try:
+            _unlink_stored_rel(rel)
+        except Exception:
+            logger.warning("Не удалось удалить медиафайл %s", rel, exc_info=True)
+
+
+def _drop_noted_media(session: Session) -> None:
+    if session.in_transaction():
+        return
+    session.info.pop(_MEDIA_RELEASE_KEY, None)
+    session.info.pop(_MEDIA_RELEASE_READY, None)
+
+
+event.listen(Session, "before_commit", _plan_media_release)
+event.listen(Session, "after_commit", _release_noted_media)
+event.listen(Session, "after_rollback", _drop_noted_media)
+
+
+def unreferenced_media_files(db: object, root: Path | None = None) -> list[Path]:
+    """Файлы каталога загрузок, на которые нет ссылки в БД. В выгрузку они всё равно входят."""
+    base = (root or media_root_dir()).resolve()
+    referenced = referenced_media_rels(db)
+    found: list[Path] = []
+    for path in iter_media_backup_paths(base):
+        rel = media_backup_arcname(base, path).lower()
+        if rel not in referenced:
+            found.append(path)
+    return found
+
+
+def unreferenced_media_stats(db: object, root: Path | None = None) -> dict[str, int]:
+    files = unreferenced_media_files(db, root)
+    total = 0
+    for path in files:
+        try:
+            total += int(path.stat().st_size)
+        except OSError:
+            continue
+    return {"count": len(files), "total_bytes": total}
+
+
+def _orphan_is_fresh(path: Path, *, now: float | None = None) -> bool:
+    try:
+        age = (now if now is not None else time.time()) - float(path.stat().st_mtime)
+    except OSError:
+        return True
+    return age < ORPHAN_MIN_AGE_SECONDS
+
+
+def delete_unreferenced_media(db: object, root: Path | None = None) -> tuple[int, int]:
+    """Удалить файлы без ссылок старше часа. Возвращает (число, байты). Ошибки диска не пробрасывает."""
+    deleted = 0
+    freed = 0
+    now = time.time()
+    for path in unreferenced_media_files(db, root):
+        if _orphan_is_fresh(path, now=now):
+            continue
+        try:
+            size = int(path.stat().st_size)
+            path.unlink(missing_ok=True)
+        except Exception:
+            logger.warning("Не удалось удалить лишний медиафайл %s", path, exc_info=True)
+            continue
+        deleted += 1
+        freed += size
+    return deleted, freed
 
 
 def _safe_ext(filename: str | None, content_type: str | None) -> str | None:
@@ -518,21 +651,30 @@ def delete_media_file(rel_name: str | None) -> None:
         return
 
 
-async def replace_or_clear_photo(form: object, current: str | None, field: str) -> tuple[str | None, bool]:
-    """Удалить текущее фото (clear_<field>) или заменить файлом. Возвращает (url, изменилось)."""
+async def replace_or_clear_photo(
+    form: object,
+    current: str | None,
+    field: str,
+    *,
+    db: object | None = None,
+) -> tuple[str | None, bool]:
+    """Снять текущее фото (clear_<field>) или заменить файлом. Возвращает (url, изменилось).
+
+    Старый файл удаляется после commit, если на него больше нет ссылок.
+    """
     from app.forms_parse import parse_bool
 
     url = current or None
     changed = False
     if parse_bool(getattr(form, "get", lambda _k, _d=None: None)(f"clear_{field}")):
-        delete_media_by_url(url)
+        note_media_for_release(db, url)
         url = None
         changed = True
     upload = get_nonempty_upload(form, field)
     if upload is not None:
         new_url = await save_upload_image(upload)
         if url:
-            delete_media_by_url(url)
+            note_media_for_release(db, url)
         url = new_url
         changed = True
     return url, changed
