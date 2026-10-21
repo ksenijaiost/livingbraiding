@@ -24,21 +24,49 @@ MSG_ADMIN_CHAT_UNLINKED = "Чат админов отключён"
 MSG_ADMIN_CHAT_INVALID = "Код устарел, запросите новый в CRM"
 MSG_ADMIN_CHAT_TEST = "Тест: чат админов Живём Плетём"
 
-_ADMINS_RE = re.compile(r"(?i)^\s*/admins(?:@\S+)?\s+(\S+)\s*$")
+MSG_ADMINS_USAGE = (
+    "Отправьте команду в виде: /admins КОД. Код берите в CRM (Настройки → чат админов)."
+)
+
+_MENTION_TOKEN = re.compile(r"(?<!\w)@\S+")
+_MARKUP_LINK = re.compile(r"\[[^\]]+\]\((?:max://|https?://)[^)]+\)", re.IGNORECASE)
+_HTML_TAG = re.compile(r"<[^>]+>")
+_ADMINS_LINE = re.compile(r"(?i)^/admins(?:@\S+)?(?:\s+(\S+))?$")
 
 
 def hash_admin_link_token(plain: str) -> str:
     return hashlib.sha256(plain.encode("utf-8")).hexdigest()
 
 
+def normalize_admins_text(text: str | None) -> str:
+    """Убрать упоминания и markup, чтобы /admins находился и с @бота в начале или в конце."""
+    raw = (text or "").replace("\u200b", " ").replace("\ufeff", " ")
+    raw = _HTML_TAG.sub(" ", raw)
+    raw = _MARKUP_LINK.sub(" ", raw)
+    raw = _MENTION_TOKEN.sub(" ", raw)
+    return re.sub(r"\s+", " ", raw).strip()
+
+
+def classify_admins_text(text: str | None) -> tuple[str | None, str]:
+    """(код или None, 'code' | 'missing' | 'none')."""
+    raw = (text or "").strip()
+    if not raw or not re.search(r"(?i)/admins\b", raw):
+        return None, "none"
+    cleaned = normalize_admins_text(raw)
+    match = _ADMINS_LINE.match(cleaned)
+    if match is None:
+        return None, "missing"
+    code = (match.group(1) or "").strip()
+    if not code or code.startswith("@"):
+        return None, "missing"
+    return code, "code"
+
+
 def parse_admins_code(text: str | None) -> str | None:
-    t = (text or "").strip()
-    if not t:
+    code, kind = classify_admins_text(text)
+    if kind != "code":
         return None
-    m = _ADMINS_RE.match(t)
-    if not m:
-        return None
-    return m.group(1).strip() or None
+    return code
 
 
 def create_admin_chat_link_token(db: Session, *, created_by_user_id: int | None) -> str:
@@ -178,10 +206,12 @@ def try_bind_admin_chat_from_text(
     text: str | None,
     title: str | None = None,
 ) -> str | None:
-    """Если текст — /admins <код>, привязать. Возвращает ответное сообщение или None."""
-    code = parse_admins_code(text)
-    if code is None:
+    """Если текст — /admins <код>, привязать. Без кода — подсказка. Иначе None."""
+    code, kind = classify_admins_text(text)
+    if kind == "none":
         return None
+    if kind == "missing" or not code:
+        return MSG_ADMINS_USAGE
     if not consume_admin_chat_link_token(db, code):
         db.commit()
         return MSG_ADMIN_CHAT_INVALID

@@ -205,11 +205,11 @@ $env:LB_TECHSPEC_DISPLAY_NAME="Техспец"
 4. Подписка на webhook из каталога `backend` (тот же бандл CA):
 
 ```bash
-python -m app.scripts.max_subscribe
+python -m app.scripts.max_subscribe --show
 python -m app.scripts.max_subscribe --set https://<ДОМЕН>
 ```
 
-Без аргумента URL берётся из `PUBLIC_BASE_URL`. Подписка: `message_created`, `bot_started`, секрет `MAX_WEBHOOK_SECRET`, адрес `https://<ДОМЕН>/webhooks/max`.
+`--show` печатает текущие подписки и их `update_types`. `--set` пересоздаёт подписку: `message_created`, `bot_added`, `bot_removed`, `bot_started`, `message_callback`. Без URL берётся `PUBLIC_BASE_URL`. Секрет `MAX_WEBHOOK_SECRET`, адрес `https://<ДОМЕН>/webhooks/max`.
 
 5. Мастер жмёт «Подключить» Max на `/me` → диплинк `https://max.ru/<BOT_USERNAME>?start=<код>`.
 
