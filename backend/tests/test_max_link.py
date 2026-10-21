@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,6 +18,7 @@ from app.db.models import (
     BookingMaster,
     BookingStatus,
     Client,
+    ClientNotificationSend,
     NotificationChannel,
     NotificationOutbox,
     TelegramLinkToken,
@@ -24,19 +26,28 @@ from app.db.models import (
     UserRole,
     VisitMastersScope,
 )
+from app.client_booking_notify import EVENT_CLIENT_BOOKING_REMINDER
+from app.messenger_inbound import MSG_CONFIRMED, handle_client_text
 from app.notifications import enqueue_master_booking_notifications, send_max
+from app.time_utils import utcnow_naive
 from app.notify_prefs import apply_notify_prefs_from_legacy_flag
 from app.routes.max_webhook import max_webhook
 from app.settings import get_settings
 from app.telegram_link import (
+    MSG_CLIENT_MAX_TAKEN,
     MSG_LINKED_OK,
     MSG_MAX_TAKEN,
+    ClientChannelTakenError,
     MaxUserTakenError,
+    bind_client_max,
+    bind_client_telegram,
+    bind_client_vk,
     bind_max_user,
+    bind_telegram_chat,
+    bind_vk_user,
     create_max_link_token,
     max_deep_link,
 )
-from datetime import datetime
 
 
 @pytest.fixture()
@@ -264,3 +275,117 @@ def test_send_max_mocked(monkeypatch) -> None:
     assert headers["Authorization"] == "tok"
     assert seen["verify"] is not False
     assert isinstance(seen["verify"], str) and seen["verify"]
+
+
+def test_staff_and_client_may_share_max_and_reply_finds_booking(memory_db) -> None:
+    shared = 424242
+    staff = _seed_user(memory_db, max_user_id=shared)
+    client = Client(name="Катя", phone="+79990001122", is_confirmed=True)
+    memory_db.add(client)
+    memory_db.commit()
+    memory_db.refresh(client)
+
+    bind_client_max(memory_db, client, shared)
+    memory_db.commit()
+    memory_db.refresh(staff)
+    memory_db.refresh(client)
+    assert staff.max_user_id == shared
+    assert client.max_user_id == shared
+
+    planned = utcnow_naive() + timedelta(hours=48)
+    booking = Booking(
+        created_by_user_id=staff.id,
+        client_id=client.id,
+        planned_date=planned,
+        kind=BookingKind.VISIT,
+        status=BookingStatus.PENDING_CONFIRMATION,
+        masters_scope=VisitMastersScope.VISIT,
+        same_master_shares_all_services=False,
+    )
+    memory_db.add(booking)
+    memory_db.commit()
+    memory_db.refresh(booking)
+    memory_db.add(
+        ClientNotificationSend(
+            client_id=client.id,
+            booking_id=booking.id,
+            channel="max",
+            event_type=EVENT_CLIENT_BOOKING_REMINDER,
+            target_id=shared,
+            sent_at=utcnow_naive(),
+        )
+    )
+    memory_db.commit()
+
+    assert handle_client_text(memory_db, channel="max", messenger_id=shared, text="1") == MSG_CONFIRMED
+    memory_db.refresh(booking)
+    assert booking.client_confirmed_at is not None
+    assert booking.client_confirmed_via == "max"
+
+    memory_db.add(BookingMaster(booking_id=booking.id, master_id=staff.id))
+    memory_db.commit()
+    rows = enqueue_master_booking_notifications(memory_db, booking, "booking_created")
+    assert len(rows) == 1
+    assert rows[0].channel == NotificationChannel.MAX
+    assert int(rows[0].user_id) == staff.id
+
+
+def test_shared_account_without_booking_is_not_a_client_reply(memory_db) -> None:
+    shared = 515151
+    _seed_user(memory_db, username="quiet", max_user_id=shared)
+    client = Client(name="Оля", phone="+79990001133", is_confirmed=True, max_user_id=shared)
+    memory_db.add(client)
+    memory_db.commit()
+    assert handle_client_text(memory_db, channel="max", messenger_id=shared, text="1") is None
+
+
+def test_two_clients_cannot_share_max(memory_db) -> None:
+    first = Client(name="Аня", is_confirmed=True, max_user_id=777)
+    second = Client(name="Белла", is_confirmed=True)
+    memory_db.add_all([first, second])
+    memory_db.commit()
+    with pytest.raises(ClientChannelTakenError, match="другому клиенту") as raised:
+        bind_client_max(memory_db, second, 777)
+    assert str(raised.value) == MSG_CLIENT_MAX_TAKEN
+    memory_db.refresh(first)
+    assert first.max_user_id == 777
+    assert second.max_user_id is None
+
+
+def test_staff_may_share_vk_and_telegram_with_client(memory_db) -> None:
+    staff = _seed_user(memory_db, username="channels")
+    staff.vk_user_id = 111
+    staff.telegram_chat_id = 222
+    client = Client(name="Катя", is_confirmed=True)
+    memory_db.add(client)
+    memory_db.commit()
+    bind_client_vk(memory_db, client, 111)
+    bind_client_telegram(memory_db, client, 222)
+    memory_db.commit()
+    memory_db.refresh(staff)
+    memory_db.refresh(client)
+    assert staff.vk_user_id == 111 and client.vk_user_id == 111
+    assert staff.telegram_chat_id == 222 and client.telegram_chat_id == 222
+
+    other = Client(name="Другая", is_confirmed=True)
+    memory_db.add(other)
+    memory_db.commit()
+    with pytest.raises(ClientChannelTakenError, match="другому клиенту"):
+        bind_client_vk(memory_db, other, 111)
+    with pytest.raises(ClientChannelTakenError, match="другому клиенту"):
+        bind_client_telegram(memory_db, other, 222)
+
+    bind_vk_user(memory_db, staff, 111)
+    bind_telegram_chat(memory_db, staff, 222)
+    memory_db.refresh(client)
+    assert client.vk_user_id == 111
+    assert client.telegram_chat_id == 222
+
+
+def test_two_staff_cannot_share_max(memory_db) -> None:
+    _seed_user(memory_db, username="owner_x", max_user_id=9)
+    other = _seed_user(memory_db, username="other_x")
+    with pytest.raises(MaxUserTakenError, match="другой сотруднице"):
+        bind_max_user(memory_db, other, 9)
+    memory_db.refresh(other)
+    assert other.max_user_id is None

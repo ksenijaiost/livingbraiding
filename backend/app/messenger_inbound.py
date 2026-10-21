@@ -695,10 +695,19 @@ def handle_client_text(
     messenger_id: int,
     text: str | None,
 ) -> str | None:
-    """Обработать текст от клиента. Возвращает ответ или None (если не клиент / пусто)."""
-    if find_user_by_channel_id(db, channel, messenger_id) is not None:
-        return None
+    """Обработать текст от клиента. Возвращает ответ или None (если не клиент / пусто).
+
+    Один и тот же аккаунт может быть и у сотрудницы, и у клиентки. Тогда цифры и
+    прочий текст идут в ответ клиентки, только если у неё есть подходящая бронь.
+    Иначе сообщение остаётся поведением сотрудницы: сейчас это игнор.
+    Коды привязки разбираются раньше, в вебхуке, и сюда не попадают.
+    """
+    staff = find_user_by_channel_id(db, channel, messenger_id)
     client = find_client_by_channel_id(db, channel, messenger_id)
+    if staff is not None and (
+        client is None or not suitable_bookings_for_reply_circle(db, client)
+    ):
+        return None
     if client is None:
         return _log_client_inbound(
             db,
