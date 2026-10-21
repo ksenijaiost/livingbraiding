@@ -17,7 +17,7 @@ from app.time_utils import utcnow_naive
 LINK_TOKEN_TTL = timedelta(hours=24)
 MSG_LINKED_OK = "Готово, уведомления подключены"
 MSG_LINK_INVALID = "Ссылка устарела, запросите новую в CRM"
-MSG_MAX_TAKEN = "Этот аккаунт Max уже привязан к другому сотруднику"
+MSG_MAX_TAKEN = "Этот аккаунт Max уже привязан к другой сотруднице"
 MSG_CLIENT_MAX_TAKEN = "Этот аккаунт Max уже привязан к другому клиенту"
 MSG_CLIENT_LINKED_OK = "Готово, уведомления о записях подключены"
 
@@ -291,7 +291,7 @@ def unlink_vk_user(db: Session, user: User) -> None:
 
 
 class MaxUserTakenError(ValueError):
-    """max_user_id уже привязан к другому сотруднику."""
+    """max_user_id уже привязан к другой сотруднице."""
 
 
 def bind_max_user(db: Session, user: User, max_user_id: int) -> None:
@@ -347,9 +347,6 @@ def bind_client_max(db: Session, client: Client, max_user_id: int) -> None:
         select(Client).where(Client.max_user_id == mid, Client.id != int(client.id)).limit(1)
     )
     if other_c is not None:
-        raise ClientChannelTakenError(MSG_CLIENT_MAX_TAKEN)
-    other_u = db.scalar(select(User).where(User.max_user_id == mid).limit(1))
-    if other_u is not None:
         raise ClientChannelTakenError(MSG_CLIENT_MAX_TAKEN)
     client.max_user_id = mid
     db.flush()
