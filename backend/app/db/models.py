@@ -25,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     Time,
+    Index,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -1009,6 +1010,10 @@ class KitReserve(Base):
     """Резерв заготовок по комплекту: несколько строк на один kit (лимит — настройка)."""
 
     __tablename__ = "kit_reserves"
+    __table_args__ = (
+        Index("ix_kit_reserves_kit_id", "kit_id"),
+        Index("ix_kit_reserves_client_kit", "reserved_for_client_id", "kit_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     kit_id: Mapped[int] = mapped_column(Integer, ForeignKey("kits.id", ondelete="CASCADE"), nullable=False)

@@ -992,7 +992,13 @@
       return (k.sku || '') + ' — ' + (k.title || '') + ' (' + part + ')';
     }
     async function fetchKitSuggest(q) {
-      const res = await fetch(visitKitSuggestUrl(q));
+      const url = visitKitSuggestUrl(q);
+      if (window.LbKitSuggest && window.LbKitSuggest.fetchJson) {
+        const data = await window.LbKitSuggest.fetchJson(url);
+        if (!data || data.aborted) return [];
+        return data.kits || [];
+      }
+      const res = await fetch(url);
       if (!res.ok) return [];
       const data = await res.json();
       return data.kits || [];

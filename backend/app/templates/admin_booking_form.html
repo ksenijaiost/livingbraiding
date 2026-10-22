@@ -800,10 +800,16 @@
         if (ul) ul.innerHTML = '';
       }
       async function lineKitSuggest(q, idx, onPick) {
-        var res = await fetch(bookingKitSuggestUrl(q || ''));
-        if (!res.ok) return;
+        var url = bookingKitSuggestUrl(q || '');
         var data = {};
-        try { data = await res.json(); } catch (e) { data = {}; }
+        if (window.LbKitSuggest && window.LbKitSuggest.fetchJson) {
+          data = await window.LbKitSuggest.fetchJson(url);
+        } else {
+          var res = await fetch(url);
+          if (!res.ok) return;
+          try { data = await res.json(); } catch (e) { data = {}; }
+        }
+        if (!data || data.aborted) return;
         var ul = document.querySelector('[data-line-kit-suggest="' + idx + '"]');
         if (!ul) return;
         ul.innerHTML = '';

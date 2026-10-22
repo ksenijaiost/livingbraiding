@@ -1058,10 +1058,16 @@ function initAdminBookingForm() {
     return line;
   }
   async function kitSuggest(q, ulId, onPick) {
-    var res = await fetch(bookingKitSuggestUrl(q || ""));
-    if (!res.ok) return;
+    var url = bookingKitSuggestUrl(q || "");
     var data = {};
-    try { data = await res.json(); } catch (e) { data = {}; }
+    if (window.LbKitSuggest && window.LbKitSuggest.fetchJson) {
+      data = await window.LbKitSuggest.fetchJson(url);
+    } else {
+      var res = await fetch(url);
+      if (!res.ok) return;
+      try { data = await res.json(); } catch (e) { data = {}; }
+    }
+    if (!data || data.aborted) return;
     var ul = byId(ulId);
     if (!ul) return;
     ul.innerHTML = "";

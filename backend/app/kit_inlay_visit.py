@@ -23,6 +23,7 @@ from app.db.models import (
     Client,
     ClientPaymentKind,
     Kit,
+    KitBlankStock,
     KitReserve,
     MaterialPriceCurrent,
     MaterialType,
@@ -1513,7 +1514,29 @@ def _per_key_condition_meta(kit: Kit) -> dict[str, dict[str, Any]]:
     return out
 
 
-def kit_suggest_dict_for_kit(db: Session, k: Kit, *, for_client_id: int | None) -> dict[str, Any]:
+def _reserved_by_key_loaded(kit: Kit, client_id: int) -> dict[str, int]:
+    from app.kit_blank_stock_core import reserve_row_per_key_map
+
+    out: dict[str, int] = {}
+    for r in kit.reserves or []:
+        if int(r.reserved_for_client_id or 0) != int(client_id):
+            continue
+        per_key = reserve_row_per_key_map(r)
+        if per_key is not None:
+            for key, qty in per_key.items():
+                out[key] = out.get(key, 0) + int(qty)
+        else:
+            out["__NULL__"] = out.get("__NULL__", 0) + int(r.pieces_reserved or 0)
+    return out
+
+
+def kit_suggest_dict_for_kit(
+    db: Session,
+    k: Kit,
+    *,
+    for_client_id: int | None,
+    suggest_ctx: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Одна строка подсказки «из наличия» (как в suggest_kits_for_stock)."""
     cid = int(for_client_id) if for_client_id is not None and int(for_client_id) > 0 else None
     res_label = kit_reserved_for_visit_label(k)
@@ -1525,6 +1548,11 @@ def kit_suggest_dict_for_kit(db: Session, k: Kit, *, for_client_id: int | None) 
         for r in k.reserves or []:
             if (r.reserved_for_client_id or 0) == cid:
                 reserved_for_c += int(r.pieces_reserved or 0)
+    stock_by_kit = (suggest_ctx or {}).get("stock_by_kit")
+    if stock_by_kit is None:
+        inventory_keyed = kit_inventory_is_keyed(db, int(k.id))
+    else:
+        inventory_keyed = int(k.id) in stock_by_kit
     out: dict[str, Any] = {
         "id": k.id,
         "sku": k.sku,
@@ -1537,21 +1565,31 @@ def kit_suggest_dict_for_kit(db: Session, k: Kit, *, for_client_id: int | None) 
         "missing_sale_price": not has_price,
         "is_reserved": bool(k.reserves),
         "reserved_for_label": res_label,
-        "inventory_keyed": kit_inventory_is_keyed(db, int(k.id)),
+        "inventory_keyed": inventory_keyed,
         "per_key": [],
         "composition_requires_blank_stock": False,
     }
     comp = parse_composition_totals(k)
-    if comp and int(k.pieces_available or 0) > 0 and not kit_inventory_is_keyed(db, int(k.id)):
+    if comp and int(k.pieces_available or 0) > 0 and not inventory_keyed:
         out["composition_requires_blank_stock"] = True
     csum = sum(max(0, int(v)) for v in comp.values()) if comp else 0
     out["composition_sum"] = int(csum) if csum > 0 else 0
     out["cost_total"] = float(k.cost_total or 0.0)
     if not out["inventory_keyed"]:
         return out
-    sm = blank_stock_qty_map(db, int(k.id))
-    price_map, meta_by_key, label_by_key = load_catalog_kit_maps(db)
-    max_by = max_take_by_key_for_client(db, kit=k, client_id=cid, stock_map=sm)
+    if stock_by_kit is None:
+        sm = blank_stock_qty_map(db, int(k.id))
+        price_map, meta_by_key, label_by_key = load_catalog_kit_maps(db)
+        reserved_by_key = None
+    else:
+        sm = dict(stock_by_kit.get(int(k.id)) or {})
+        price_map = suggest_ctx["price_map"]
+        meta_by_key = suggest_ctx["meta_by_key"]
+        label_by_key = suggest_ctx["label_by_key"]
+        reserved_by_key = _reserved_by_key_loaded(k, cid) if cid is not None else {}
+    max_by = max_take_by_key_for_client(
+        db, kit=k, client_id=cid, stock_map=sm, reserved_by_key=reserved_by_key
+    )
     cond_meta = _per_key_condition_meta(k)
     inv_comp = inventory_qty_by_key_from_kit(k) or comp
     unit_stock = keyed_stock_unit_prices_from_catalog_weights(
@@ -1626,49 +1664,112 @@ def kit_reserve_hint_by_id(db: Session, kit_id: int | None) -> str | None:
     return kit_reserved_for_visit_label(k)
 
 
+# Пустой запрос не сканирует весь склад: короткий список, резервы клиента — первыми.
+EMPTY_SUGGEST_LIMIT = 15
+_SUGGEST_LOAD = (
+    selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
+    selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_user),
+)
+
+
+def _suggest_context(db: Session, kits: list[Kit]) -> dict[str, Any]:
+    """Каталог и остатки по ключам — один раз на весь список, не на каждый комплект."""
+    ids = [int(k.id) for k in kits]
+    price_map, meta_by_key, label_by_key = load_catalog_kit_maps(db)
+    stock_by_kit: dict[int, dict[str, int]] = {}
+    if ids:
+        for row in db.scalars(select(KitBlankStock).where(KitBlankStock.kit_id.in_(ids))).all():
+            stock_by_kit.setdefault(int(row.kit_id), {})[str(row.kit_key)] = int(row.qty or 0)
+    return {
+        "price_map": price_map,
+        "meta_by_key": meta_by_key,
+        "label_by_key": label_by_key,
+        "stock_by_kit": stock_by_kit,
+    }
+
+
+def _load_suggest_kits(db: Session, ids: list[int]) -> list[Kit]:
+    if not ids:
+        return []
+    rows = list(
+        db.scalars(select(Kit).where(Kit.id.in_(ids)).options(*_SUGGEST_LOAD)).all()
+    )
+    order = {kit_id: index for index, kit_id in enumerate(ids)}
+    rows.sort(key=lambda kit: order.get(int(kit.id), 0))
+    return rows
+
+
+def _empty_suggest_ids(db: Session, cid: int | None, limit: int) -> list[int]:
+    reserved_ids: list[int] = []
+    if cid is not None:
+        reserved_ids = [
+            int(kit_id)
+            for kit_id in db.scalars(
+                select(Kit.id)
+                .join(KitReserve, KitReserve.kit_id == Kit.id)
+                .where(
+                    Kit.is_archived.is_(False),
+                    Kit.is_active.is_(True),
+                    KitReserve.reserved_for_client_id == cid,
+                    KitReserve.pieces_reserved > 0,
+                )
+                .distinct()
+                .limit(limit)
+            ).all()
+        ]
+    need = limit - len(reserved_ids)
+    stock_ids: list[int] = []
+    if need > 0:
+        stmt = select(Kit.id).where(
+            Kit.is_archived.is_(False),
+            Kit.is_active.is_(True),
+            Kit.pieces_available > 0,
+        )
+        if reserved_ids:
+            stmt = stmt.where(Kit.id.not_in(reserved_ids))
+        stock_ids = [int(kit_id) for kit_id in db.scalars(stmt.order_by(Kit.sku.asc()).limit(need)).all()]
+    return reserved_ids + stock_ids
+
+
 def suggest_kits_for_stock(
     db: Session, q: str, *, limit: int = 30, for_client_id: int | None = None
 ) -> list[dict[str, Any]]:
     """Подсказки для мастера: комплекты в наличии, фильтр по артикулу или названию.
 
-    Если передан ``for_client_id``, в выборку попадают также комплекты с нулевым свободным
-    остатком, но с активным резервом именно на этого клиента (ручной резерв со склада).
-    Такие позиции сортируются в начало списка (по объёму резерва), при пустом запросе
-    лимит строк чуть увеличивается, чтобы резервы не «вытеснялись» комплектами только из наличия.
+    Пустой запрос не обходит весь склад: сначала резервы клиента, затем короткий
+    список из наличия (не больше EMPTY_SUGGEST_LIMIT). Прайс и остатки по ключам
+    читаются одним запросом на весь ответ.
     """
     needle = (q or "").strip()
     cid = int(for_client_id) if for_client_id is not None and int(for_client_id) > 0 else None
-    stock_clause = Kit.pieces_available > 0
-    if cid is not None:
-        reserve_for_client = exists().where(
-            KitReserve.kit_id == Kit.id,
-            KitReserve.reserved_for_client_id == cid,
-            KitReserve.pieces_reserved > 0,
+    if not needle:
+        ids = _empty_suggest_ids(db, cid, min(limit, EMPTY_SUGGEST_LIMIT))
+        rows = _load_suggest_kits(db, ids)
+    else:
+        stmt = (
+            select(Kit)
+            .where(
+                Kit.is_archived.is_(False),
+                Kit.is_active.is_(True),
+                or_(Kit.sku.ilike(f"%{needle}%"), Kit.title.ilike(f"%{needle}%")),
+                or_(
+                    Kit.pieces_available > 0,
+                    exists().where(
+                        KitReserve.kit_id == Kit.id,
+                        KitReserve.reserved_for_client_id == cid,
+                        KitReserve.pieces_reserved > 0,
+                    )
+                    if cid is not None
+                    else Kit.pieces_available > 0,
+                ),
+            )
+            .options(*_SUGGEST_LOAD)
+            .order_by(Kit.sku.asc())
+            .limit(limit)
         )
-        stock_clause = or_(Kit.pieces_available > 0, reserve_for_client)
-    stmt = (
-        select(Kit)
-        .where(
-            Kit.is_archived.is_(False),
-            Kit.is_active.is_(True),
-            stock_clause,
-        )
-        .options(
-            selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_client),
-            selectinload(Kit.reserves).selectinload(KitReserve.reserved_for_user),
-        )
-    )
-    if needle:
-        stmt = stmt.where(
-            or_(Kit.sku.ilike(f"%{needle}%"), Kit.title.ilike(f"%{needle}%"))
-        )
-    # Пустой запрос + клиент: нужно уместить и «просто в наличии», и «только в резерве» — чуть шире лимит.
-    eff_limit = max(limit, 60) if (cid is not None and not needle) else limit
-    stmt = stmt.order_by(Kit.sku.asc()).limit(eff_limit)
-    rows = list(db.scalars(stmt).all())
-    out: list[dict[str, Any]] = []
-    for k in rows:
-        out.append(kit_suggest_dict_for_kit(db, k, for_client_id=cid))
+        rows = list(db.scalars(stmt).all())
+    ctx = _suggest_context(db, rows)
+    out = [kit_suggest_dict_for_kit(db, k, for_client_id=cid, suggest_ctx=ctx) for k in rows]
     if cid is not None:
         out.sort(
             key=lambda d: (

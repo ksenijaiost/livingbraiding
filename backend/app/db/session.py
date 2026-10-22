@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -45,6 +45,17 @@ def _make_engine():
 
 engine = _make_engine()
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
+
+
+def set_statement_timeout(db: Session, seconds: int = 15) -> None:
+    """Оборвать запрос в PostgreSQL, чтобы одно соединение не висело минутами.
+
+    SET LOCAL действует только до конца текущей транзакции. SQLite пропускаем.
+    """
+    bind = db.get_bind()
+    if bind is None or bind.dialect.name != "postgresql":
+        return
+    db.execute(text(f"SET LOCAL statement_timeout = '{int(seconds)}s'"))
 
 
 def get_db():

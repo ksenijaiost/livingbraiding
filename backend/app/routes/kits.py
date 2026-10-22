@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import UploadFile
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
 from app.audit import diff_fields, write_audit_rows
@@ -25,7 +26,7 @@ from app.db.models import (
     UserRole,
     VisitKitUsage,
 )
-from app.db.session import get_db
+from app.db.session import get_db, set_statement_timeout
 from app.display_time import format_naive_utc_datetime, get_display_timezone, timezone_label
 from app.forms_parse import parse_bool, parse_int
 from app.kit_bulk_import import (
@@ -316,7 +317,13 @@ def master_kits_suggest(
     current_user: AuthUser = Depends(require_role(UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
-    return JSONResponse({"kits": suggest_kits_for_stock(db, q, for_client_id=client_id)})
+    set_statement_timeout(db, 15)
+    try:
+        kits = suggest_kits_for_stock(db, q, for_client_id=client_id)
+    except OperationalError:
+        db.rollback()
+        return JSONResponse({"kits": []}, status_code=503)
+    return JSONResponse({"kits": kits})
 
 
 def _kit_rows_for_list(kits: list[Kit], db: Session, display_tz: str) -> list[dict[str, Any]]:
