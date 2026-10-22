@@ -11,6 +11,7 @@ from app.db.models import NotificationOutboxStatus, UserRole
 from app.db.session import get_db
 from app.display_time import format_naive_utc_datetime, get_display_timezone
 from app.forms_parse import parse_int
+from app.client_notify_history import outbox_subject_flags
 from app.notifications import (
     explain_outbox_error,
     list_recent_notification_outbox,
@@ -30,6 +31,7 @@ def _status_ru(status: NotificationOutboxStatus | str) -> str:
         "sending": "отправка",
         "sent": "отправлено",
         "failed": "ошибка",
+        "cancelled": "отменено",
     }.get(raw, raw)
 
 
@@ -55,12 +57,23 @@ def admin_notification_outbox_page(
     rows_raw = list_recent_notification_outbox(db, limit=50)
     rows = []
     for r in rows_raw:
+        flags = outbox_subject_flags(r)
+        if r.user is not None:
+            who = (r.user.display_name or r.user.username or "").strip() or f"#{r.user_id}"
+        elif r.client is not None:
+            who = (r.client.name or "").strip() or f"#{r.client_id}"
+        elif flags["client_removed"]:
+            who = "клиент удалён"
+        elif r.user_id:
+            who = f"#{r.user_id}"
+        else:
+            who = "—"
         rows.append(
             {
                 "id": int(r.id),
                 "created_at": format_naive_utc_datetime(r.created_at, tz) or "—",
                 "sent_at": format_naive_utc_datetime(r.sent_at, tz) if r.sent_at else "—",
-                "master": (r.user.display_name if r.user else None) or f"#{r.user_id}",
+                "master": who,
                 "channel": r.channel.value if r.channel else "—",
                 "event": _event_ru(r.event_type or ""),
                 "status": _status_ru(r.status),
@@ -70,7 +83,9 @@ def admin_notification_outbox_page(
                     r.error,
                     channel=r.channel.value if r.channel else None,
                 )[:400],
-                "booking_id": r.booking_id,
+                "booking_id": flags["booking_id"],
+                "booking_removed": flags["booking_removed"],
+                "client_removed": flags["client_removed"],
             }
         )
     msg_ru = {

@@ -51,7 +51,7 @@
                 <td>
                   {% if r.booking_id %}
                     <a href="/bookings/{{ r.booking_id }}">#{{ r.booking_id }}</a>
-                  {% else %}—{% endif %}
+                  {% elif r.booking_removed %}бронь удалена{% else %}—{% endif %}
                 </td>
                 <td class="muted" style="font-size:12px; max-width:220px; word-break:break-word;">{{ r.error or '—' }}</td>
                 <td>
