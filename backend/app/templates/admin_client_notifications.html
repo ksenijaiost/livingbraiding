@@ -331,10 +331,29 @@
 
     <h4 style="margin:22px 0 8px; font-size:1rem;">Ответы бота</h4>
     <h5 style="margin:8px 0; font-size:0.95rem;">Цифры ответов</h5>
-    <p class="muted" style="font-size:12px; margin:0 0 10px;">
+    <p class="muted" style="font-size:12px; margin:0 0 8px;">
       Какая цифра какое действие вызывает. Среди включённых цифры не должны совпадать.
-      Подсказка <code>{{ "{{reply_hint}}" }}</code> собирается из включённых строк.
     </p>
+    <ol style="margin:0 0 12px; padding-left:1.4rem; font-size:13px;">
+      <li style="margin:0 0 6px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+        <span><code style="user-select:all;">{{ "{{reply_hint}}" }}</code> — все включённые ответы.</span>
+        <button type="button" class="secondary" style="padding:2px 8px; font-size:12px;"
+                data-copy="{{ '{{reply_hint}}' }}"
+                onclick="navigator.clipboard.writeText(this.getAttribute('data-copy'));">скопировать</button>
+      </li>
+      <li style="margin:0 0 6px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+        <span><code style="user-select:all;">{{ "{{reply_hint_no_confirm}}" }}</code> — без «Подтвердить» (для сообщения «запись подтверждена»).</span>
+        <button type="button" class="secondary" style="padding:2px 8px; font-size:12px;"
+                data-copy="{{ '{{reply_hint_no_confirm}}' }}"
+                onclick="navigator.clipboard.writeText(this.getAttribute('data-copy'));">скопировать</button>
+      </li>
+      <li style="margin:0 0 6px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+        <span><code style="user-select:all;">{{ "{{reply_hint_general}}" }}</code> — только «Написать администратору» и «Как добраться» (для сообщений без брони: после визита, поздравления, рассылки).</span>
+        <button type="button" class="secondary" style="padding:2px 8px; font-size:12px;"
+                data-copy="{{ '{{reply_hint_general}}' }}"
+                onclick="navigator.clipboard.writeText(this.getAttribute('data-copy'));">скопировать</button>
+      </li>
+    </ol>
     <form method="post" action="/clients/notifications/reply-digits" style="margin-bottom:16px;"
           onsubmit="this.querySelector('button[type=submit]').disabled=true;">
       <div class="lb-table-wrap">
@@ -350,7 +369,12 @@
           <tbody>
             {% for row in reply_digits %}
               <tr>
-                <td>{{ row.title }}</td>
+                <td>
+                  {{ row.title }}
+                  {% if row.hint_membership %}
+                    <div class="muted" style="font-size:12px;">{{ row.hint_membership }}</div>
+                  {% endif %}
+                </td>
                 <td>
                   <input name="digit_{{ row.action }}" value="{{ row.digit }}" maxlength="1" style="width:3rem;" required />
                   {% if digit_field_errors.get(row.action) %}

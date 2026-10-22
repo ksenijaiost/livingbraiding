@@ -75,6 +75,10 @@ def test_palette_shows_tokens_not_dict_copy(db) -> None:
         assert "{{date}}" in html
         assert "{{services_with_duration}}" in html
         assert "с длительностью" in html
+        assert "{{reply_hint_general}}" in html
+        assert "подсказка только: написать администратору, как добраться" in html
+        assert "входит в 1, 2, 3" in html
+        assert 'data-copy="{{reply_hint_general}}"' in html
         assert "{{parking}}" in html
         assert 'data-copy="{{address}}"' in html
         assert 'data-copy="{{date}}"' in html

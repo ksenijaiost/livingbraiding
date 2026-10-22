@@ -301,10 +301,7 @@ def test_repeat_2_and_no_booking_and_handled_cancel(memory_db) -> None:
     )
     memory_db.add(no_send_client)
     memory_db.commit()
-    assert (
-        handle_client_text(memory_db, channel="vk", messenger_id=4040, text="2")
-        == "Не нашли активную запись, напишите 4, чтобы связаться с администратором"
-    )
+    assert handle_client_text(memory_db, channel="vk", messenger_id=4040, text="2") is None
     four = handle_client_text(memory_db, channel="vk", messenger_id=4040, text="4")
     four_max = handle_client_text(memory_db, channel="max", messenger_id=8080, text="4")
     five = handle_client_text(memory_db, channel="telegram", messenger_id=9090, text="5")

@@ -107,7 +107,7 @@ def _render_after(
         marker=get_services_marker(db),
         db=db,
         substitute_system=False,
-        system_keys=frozenset({"name"}),
+        system_keys=frozenset({"name", "reply_hint_general"}),
         via_contact=via_contact,
     )
 
