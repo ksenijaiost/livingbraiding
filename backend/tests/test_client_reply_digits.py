@@ -308,16 +308,25 @@ def test_three_reply_hints_follow_enabled_rows(memory_db) -> None:
     assert text == "После, Катя.\n\n{{reply_hint}}"
 
 
-def test_contact_and_directions_without_booking_confirm_ignored(memory_db) -> None:
+def test_contact_and_directions_without_booking(memory_db) -> None:
     ensure_default_reply_digits(memory_db)
     client = Client(name="Катя", is_confirmed=True, vk_user_id=1001)
     memory_db.add(client)
     memory_db.add(AdminChatTarget(channel="vk", chat_id=77, title="admins", linked_at=utcnow_naive()))
     memory_db.commit()
 
-    assert handle_client_text(memory_db, channel="vk", messenger_id=1001, text="1") is None
-    assert handle_client_text(memory_db, channel="vk", messenger_id=1001, text="2") is None
-    assert handle_client_text(memory_db, channel="vk", messenger_id=1001, text="3") is None
+    assert (
+        handle_client_text(memory_db, channel="vk", messenger_id=1001, text="1")
+        == "Не нашли активную запись, свяжитесь с нами"
+    )
+    assert (
+        handle_client_text(memory_db, channel="vk", messenger_id=1001, text="2")
+        == "Не нашли активную запись, напишите 4, чтобы связаться с администратором"
+    )
+    assert (
+        handle_client_text(memory_db, channel="vk", messenger_id=1001, text="3")
+        == "Не нашли активную запись, свяжитесь с нами"
+    )
 
     four = handle_client_text(memory_db, channel="vk", messenger_id=1001, text="4")
     memory_db.commit()
@@ -369,3 +378,37 @@ def test_shared_account_general_digits_without_booking(memory_db) -> None:
 
     five = handle_client_text(memory_db, channel="max", messenger_id=shared, text="5")
     assert five is not None and "Как добраться" in five
+
+
+def test_no_booking_reply_for_client_shared_account_stays_silent(memory_db) -> None:
+    ensure_default_reply_digits(memory_db)
+    client = Client(name="Катя", is_confirmed=True, vk_user_id=1001)
+    shared = 515151
+    staff = User(
+        username="shared",
+        password_hash="x",
+        display_name="Маша",
+        role=UserRole.MASTER,
+        is_active=True,
+        max_user_id=shared,
+    )
+    shared_client = Client(name="Оля", is_confirmed=True, max_user_id=shared)
+    memory_db.add_all([client, staff, shared_client])
+    memory_db.commit()
+
+    assert (
+        handle_client_text(memory_db, channel="vk", messenger_id=1001, text="1")
+        == "Не нашли активную запись, свяжитесь с нами"
+    )
+    assert (
+        handle_client_text(memory_db, channel="vk", messenger_id=1001, text="2")
+        == "Не нашли активную запись, напишите 4, чтобы связаться с администратором"
+    )
+    assert (
+        handle_client_text(memory_db, channel="vk", messenger_id=1001, text="3")
+        == "Не нашли активную запись, свяжитесь с нами"
+    )
+
+    assert handle_client_text(memory_db, channel="max", messenger_id=shared, text="1") is None
+    assert handle_client_text(memory_db, channel="max", messenger_id=shared, text="2") is None
+    assert handle_client_text(memory_db, channel="max", messenger_id=shared, text="3") is None
