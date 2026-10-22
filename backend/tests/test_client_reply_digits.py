@@ -16,11 +16,13 @@ from app.client_reply_digits import (
     build_reply_hint,
     ensure_default_reply_digits,
     migrate_replace_legacy_reply_hint,
+    reply_hint_system_values,
     save_reply_digits_from_form,
 )
 from app.db import models as _orm_models  # noqa: F401
 from app.db.base import Base
 from app.db.models import (
+    AdminChatTarget,
     Booking,
     BookingKind,
     BookingStatus,
@@ -30,11 +32,13 @@ from app.db.models import (
     ClientNotificationRuleKind,
     ClientNotificationSend,
     ClientReplyDigitAction,
+    NotificationOutbox,
     User,
     UserRole,
     VisitMastersScope,
 )
 from app.messenger_inbound import (
+    EVENT_CLIENT_CONTACT_REQUEST,
     MSG_ALREADY_CONFIRMED,
     MSG_CONFIRMED,
     handle_client_text,
@@ -239,3 +243,172 @@ def test_migration_active_status_uses_reply_hint_no_confirm(memory_db) -> None:
     assert "{{reply_hint_no_confirm}}" not in other.template
     assert int(active.id) in report["replaced"]
     assert int(other.id) in report["replaced"]
+
+
+def _save_digits(db, enabled: str) -> None:
+    save_reply_digits_from_form(
+        db,
+        actions=["confirm", "reschedule", "cancel", "contact_admin", "directions"],
+        digits=["1", "2", "3", "4", "5"],
+        enabled_flags=list(enabled),
+        labels=["подтвердить", "перенести", "отменить", "написать администратору", "как добраться"],
+    )
+    db.commit()
+
+
+def test_three_reply_hints_follow_enabled_rows(memory_db) -> None:
+    ensure_default_reply_digits(memory_db)
+    memory_db.commit()
+    values = reply_hint_system_values(memory_db)
+    assert values["reply_hint"] == (
+        "Ответьте: 1 — подтвердить, 2 — перенести, 3 — отменить, "
+        "4 — написать администратору, 5 — как добраться."
+    )
+    assert values["reply_hint_no_confirm"] == (
+        "Ответьте: 2 — перенести, 3 — отменить, 4 — написать администратору, 5 — как добраться."
+    )
+    assert values["reply_hint_general"] == "Ответьте: 4 — написать администратору, 5 — как добраться."
+
+    _save_digits(memory_db, "01110")
+    values = reply_hint_system_values(memory_db)
+    assert "подтвердить" not in values["reply_hint"]
+    assert values["reply_hint"] == values["reply_hint_no_confirm"]
+    assert values["reply_hint_general"] == "Ответьте: 4 — написать администратору."
+    assert "\n" not in values["reply_hint_general"]
+
+    _save_digits(memory_db, "01100")
+    values = reply_hint_system_values(memory_db)
+    assert values["reply_hint_general"] == ""
+    assert "2 — перенести" in values["reply_hint"]
+    assert "4 — написать администратору" not in values["reply_hint"]
+    assert "5 — как добраться" not in values["reply_hint_no_confirm"]
+
+    client = Client(name="Катя", is_confirmed=True)
+    memory_db.add(client)
+    memory_db.commit()
+    booking = type(
+        "B",
+        (),
+        {
+            "planned_date": utcnow_naive(),
+            "planned_services": [],
+            "planned_service": None,
+            "masters": [],
+        },
+    )()
+    text = render_client_notify_template(
+        "После, {{name}}.\n{{reply_hint_general}}\n{{reply_hint}}",
+        booking=booking,  # type: ignore[arg-type]
+        client=client,
+        tz_name="UTC",
+        db=memory_db,
+        substitute_system=False,
+        system_keys=frozenset({"name", "reply_hint_general"}),
+    )
+    assert text == "После, Катя.\n\n{{reply_hint}}"
+
+
+def test_contact_and_directions_without_booking(memory_db) -> None:
+    ensure_default_reply_digits(memory_db)
+    client = Client(name="Катя", is_confirmed=True, vk_user_id=1001)
+    memory_db.add(client)
+    memory_db.add(AdminChatTarget(channel="vk", chat_id=77, title="admins", linked_at=utcnow_naive()))
+    memory_db.commit()
+
+    assert (
+        handle_client_text(memory_db, channel="vk", messenger_id=1001, text="1")
+        == "Не нашли активную запись, свяжитесь с нами"
+    )
+    assert (
+        handle_client_text(memory_db, channel="vk", messenger_id=1001, text="2")
+        == "Не нашли активную запись, напишите 4, чтобы связаться с администратором"
+    )
+    assert (
+        handle_client_text(memory_db, channel="vk", messenger_id=1001, text="3")
+        == "Не нашли активную запись, свяжитесь с нами"
+    )
+
+    four = handle_client_text(memory_db, channel="vk", messenger_id=1001, text="4")
+    memory_db.commit()
+    assert four == "Администратор скоро напишет вам здесь"
+    notices = list(
+        memory_db.scalars(
+            select(NotificationOutbox).where(
+                NotificationOutbox.event_type == EVENT_CLIENT_CONTACT_REQUEST
+            )
+        ).all()
+    )
+    assert len(notices) == 1
+    assert notices[0].booking_id is None
+
+    five = handle_client_text(memory_db, channel="vk", messenger_id=1001, text="5")
+    assert five is not None and "Как добраться" in five
+
+
+def test_shared_account_general_digits_without_booking(memory_db) -> None:
+    ensure_default_reply_digits(memory_db)
+    shared = 515151
+    staff = User(
+        username="shared",
+        password_hash="x",
+        display_name="Маша",
+        role=UserRole.MASTER,
+        is_active=True,
+        max_user_id=shared,
+    )
+    client = Client(name="Оля", is_confirmed=True, max_user_id=shared)
+    memory_db.add_all([staff, client])
+    memory_db.add(AdminChatTarget(channel="max", chat_id=88, title="admins", linked_at=utcnow_naive()))
+    memory_db.commit()
+
+    assert handle_client_text(memory_db, channel="max", messenger_id=shared, text="1") is None
+
+    four = handle_client_text(memory_db, channel="max", messenger_id=shared, text="4")
+    memory_db.commit()
+    assert four == "Напишите нам: {{studio_max}}"
+    notices = list(
+        memory_db.scalars(
+            select(NotificationOutbox).where(
+                NotificationOutbox.event_type == EVENT_CLIENT_CONTACT_REQUEST
+            )
+        ).all()
+    )
+    assert len(notices) == 1
+    assert notices[0].booking_id is None
+
+    five = handle_client_text(memory_db, channel="max", messenger_id=shared, text="5")
+    assert five is not None and "Как добраться" in five
+
+
+def test_no_booking_reply_for_client_shared_account_stays_silent(memory_db) -> None:
+    ensure_default_reply_digits(memory_db)
+    client = Client(name="Катя", is_confirmed=True, vk_user_id=1001)
+    shared = 515151
+    staff = User(
+        username="shared",
+        password_hash="x",
+        display_name="Маша",
+        role=UserRole.MASTER,
+        is_active=True,
+        max_user_id=shared,
+    )
+    shared_client = Client(name="Оля", is_confirmed=True, max_user_id=shared)
+    memory_db.add_all([client, staff, shared_client])
+    memory_db.commit()
+
+    assert (
+        handle_client_text(memory_db, channel="vk", messenger_id=1001, text="1")
+        == "Не нашли активную запись, свяжитесь с нами"
+    )
+    assert (
+        handle_client_text(memory_db, channel="vk", messenger_id=1001, text="2")
+        == "Не нашли активную запись, напишите 4, чтобы связаться с администратором"
+    )
+    assert (
+        handle_client_text(memory_db, channel="vk", messenger_id=1001, text="3")
+        == "Не нашли активную запись, свяжитесь с нами"
+    )
+
+    assert handle_client_text(memory_db, channel="max", messenger_id=shared, text="1") is None
+    assert handle_client_text(memory_db, channel="max", messenger_id=shared, text="2") is None
+    assert handle_client_text(memory_db, channel="max", messenger_id=shared, text="3") is None

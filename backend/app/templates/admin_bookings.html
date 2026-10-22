@@ -67,8 +67,8 @@
     {% if not rows %}
       <p class="muted">{% if search_id is not none %}Бронь №{{ search_id }} не найдена{% if bookings_mine_only %} среди ваших{% endif %}.{% else %}Пока нет броней.{% endif %}</p>
     {% else %}
-      <div class="lb-table-wrap">
-      <table>
+      <div class="lb-table-wrap lb-bookings-scroll">
+      <table class="lb-bookings-table">
         <thead>
           <tr>
             <th>ID</th>
@@ -77,7 +77,7 @@
             <th>Тип</th>
             <th>Мастера</th>
             <th>Детали</th>
-            <th>Статус</th>
+            <th class="lb-col-status">Статус</th>
             {% if can_manage %}
               <th></th>
             {% endif %}
@@ -117,7 +117,7 @@
                   <span class="muted">—</span>
                 {% endif %}
               </td>
-              <td class="lb-nowrap">
+              <td class="lb-col-status">
                 <strong>{{ booking_status_display(b.status) }}</strong>
                 {% if b.client_cancel_requested_at %}<span title="Клиент просит отменить">❗</span>
                 {% elif b.client_reschedule_requested_at %}<span title="Клиент просит перенести">🔀</span>

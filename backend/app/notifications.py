@@ -671,7 +671,7 @@ def _record_client_send_if_needed(db: Session, row: NotificationOutbox) -> None:
     db.add(
         ClientNotificationSend(
             client_id=int(row.client_id),
-            booking_id=int(row.booking_id) if row.booking_id is not None else 0,
+            booking_id=int(row.booking_id) if row.booking_id is not None else None,
             channel=row.channel.value if hasattr(row.channel, "value") else str(row.channel),
             event_type=str(row.event_type),
             rule_id=int(payload["rule_id"]) if payload.get("rule_id") is not None else None,
@@ -869,6 +869,7 @@ def list_recent_notification_outbox(db: Session, *, limit: int = 50) -> list[Not
             select(NotificationOutbox)
             .options(
                 selectinload(NotificationOutbox.user),
+                selectinload(NotificationOutbox.client),
                 selectinload(NotificationOutbox.booking),
             )
             .order_by(NotificationOutbox.id.desc())

@@ -366,10 +366,14 @@ def max_take_by_key_for_client(
     kit: Kit,
     client_id: int | None,
     stock_map: dict[str, int],
+    reserved_by_key: dict[str, int] | None = None,
 ) -> dict[str, int]:
     """Сколько максимум можно списать по ключу: свободно на складе + резерв этого клиента."""
     cid = int(client_id or 0)
-    res_c = sum_reserved_by_key_for_client(db, kit_id=int(kit.id), client_id=cid) if cid > 0 else {}
+    if reserved_by_key is not None:
+        res_c = reserved_by_key
+    else:
+        res_c = sum_reserved_by_key_for_client(db, kit_id=int(kit.id), client_id=cid) if cid > 0 else {}
     out: dict[str, int] = {}
     for k, q in stock_map.items():
         extra = int(res_c.get(k, 0))

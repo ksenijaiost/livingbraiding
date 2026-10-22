@@ -227,6 +227,22 @@
   white-space: normal;
   line-height: 1.35;
 }
+/* Список броней: услуги переносятся, статус не обрезается — лишнее уходит в прокрутку. */
+.lb-bookings-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  min-width: 0;
+}
+.lb-bookings-table .lb-cell-service {
+  max-width: 16rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.lb-bookings-table .lb-col-status {
+  white-space: nowrap;
+  min-width: max-content;
+  width: 1%;
+}
 /* Карточки в .row на узком экране не должны расползаться из‑за min-width */
 @media (max-width: 700px) {
   .row > .card {

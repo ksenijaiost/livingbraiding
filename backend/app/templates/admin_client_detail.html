@@ -215,6 +215,11 @@
               {% endif %}
               {% if item.booking_id %}
                 · <a href="/bookings/{{ item.booking_id }}">бронь #{{ item.booking_id }}</a>
+              {% elif item.booking_removed %}
+                · бронь удалена
+              {% endif %}
+              {% if item.client_removed %}
+                · клиент удалён
               {% endif %}
             </div>
             {% if item.text %}

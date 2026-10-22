@@ -1097,6 +1097,7 @@ async def admin_client_notifications_reply_digits(
         ACTION_TITLES,
         DigitConflictError,
         DEFAULT_HINT_LABELS,
+        HINT_MEMBERSHIP_NOTE,
         save_reply_digits_from_form,
     )
 
@@ -1125,6 +1126,7 @@ async def admin_client_notifications_reply_digits(
                     "digit": str(digit or ""),
                     "is_enabled": str(en) == "1",
                     "hint_label": str(label or DEFAULT_HINT_LABELS.get(action, "")),
+                    "hint_membership": HINT_MEMBERSHIP_NOTE.get(action, ""),
                 }
             )
         return _client_notifications_page(

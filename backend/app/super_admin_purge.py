@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.media_store import note_media_for_release
@@ -12,17 +12,24 @@ from app.phone_ru import display_phone
 from app.db.models import (
     Booking,
     Client,
+    ClientInboundMessage,
+    ClientMessengerPending,
+    ClientNotificationSend,
     Consultation,
     HourlyWorkEntry,
     Kit,
     KitAuditLog,
     KitReserve,
+    NotificationOutbox,
+    NotificationOutboxStatus,
     ProductSale,
     ProductSaleKind,
     SuperAdminPurgeLog,
     Visit,
     VisitAuditLog,
+    VisitDraft,
     VisitKitUsage,
+    WorkDraft,
     WorkForInventory,
     WorkPlan,
     WorkPlanStatus,
@@ -39,6 +46,132 @@ from app.product_sales import _apply_kit_delta
 
 CONFIRM_PHRASE_1 = "УДАЛИТЬ НАВСЕГДА"
 CONFIRM_PHRASE_2 = "ТОЧНО-ТОЧНО"
+
+_UNSENT_OUTBOX = (
+    NotificationOutboxStatus.PENDING,
+    NotificationOutboxStatus.FAILED,
+    NotificationOutboxStatus.SENDING,
+)
+
+
+def _null_column(rows, name: str) -> None:
+    for row in rows:
+        setattr(row, name, None)
+
+
+def _null_booking_refs(db: Session, booking_id: int) -> None:
+    """Снять ссылки на бронь. Уведомления остаются, неотправленные не уходят воркеру."""
+    bid = int(booking_id)
+    outbox = list(db.scalars(select(NotificationOutbox).where(NotificationOutbox.booking_id == bid)).all())
+    for row in outbox:
+        if row.status in _UNSENT_OUTBOX:
+            row.status = NotificationOutboxStatus.CANCELLED
+            if not (row.error or "").strip():
+                row.error = "пропущено: бронь удалена"
+        row.booking_id = None
+    for model in (
+        ClientInboundMessage,
+        ClientNotificationSend,
+        ClientMessengerPending,
+        Visit,
+        VisitDraft,
+        ProductSale,
+        WorkForInventory,
+        WorkDraft,
+        KitReserve,
+    ):
+        _null_column(
+            db.scalars(select(model).where(model.booking_id == bid)).all(),
+            "booking_id",
+        )
+    _null_column(
+        db.scalars(select(Consultation).where(Consultation.source_booking_id == bid)).all(),
+        "source_booking_id",
+    )
+
+
+def _null_visit_refs(db: Session, visit_id: int) -> None:
+    vid = int(visit_id)
+    rows = list(db.scalars(select(NotificationOutbox).where(NotificationOutbox.visit_id == vid)).all())
+    for row in rows:
+        if row.status in _UNSENT_OUTBOX:
+            row.status = NotificationOutboxStatus.CANCELLED
+            if not (row.error or "").strip():
+                row.error = "пропущено: визит удалён"
+        row.visit_id = None
+    _null_column(
+        db.scalars(select(VisitDraft).where(VisitDraft.finalized_visit_id == vid)).all(),
+        "finalized_visit_id",
+    )
+
+
+def _detach_client_notifications(db: Session, client_id: int) -> None:
+    """История отправок остаётся без клиента. Черновики визита без клиента хранить нельзя."""
+    cid = int(client_id)
+    outbox = list(db.scalars(select(NotificationOutbox).where(NotificationOutbox.client_id == cid)).all())
+    for row in outbox:
+        if row.status in _UNSENT_OUTBOX:
+            row.status = NotificationOutboxStatus.CANCELLED
+            if not (row.error or "").strip():
+                row.error = "пропущено: клиент удалён"
+        row.client_id = None
+    _null_column(
+        db.scalars(select(ClientInboundMessage).where(ClientInboundMessage.client_id == cid)).all(),
+        "client_id",
+    )
+    _null_column(
+        db.scalars(select(ClientNotificationSend).where(ClientNotificationSend.client_id == cid)).all(),
+        "client_id",
+    )
+    _null_column(
+        db.scalars(select(WorkDraft).where(WorkDraft.client_id == cid)).all(),
+        "client_id",
+    )
+    drafts = list(db.scalars(select(VisitDraft).where(VisitDraft.client_id == cid)).all())
+    for draft in drafts:
+        db.delete(draft)
+
+
+def notification_detach_counts(
+    db: Session, *, booking_ids: list[int] | None = None, client_id: int | None = None
+) -> tuple[int, int, int]:
+    """Сколько строк очереди, журнала отправок и входящих отвяжется."""
+    bids = [int(x) for x in (booking_ids or []) if int(x) > 0]
+    out_parts = []
+    send_parts = []
+    in_parts = []
+    if bids:
+        out_parts.append(NotificationOutbox.booking_id.in_(bids))
+        send_parts.append(ClientNotificationSend.booking_id.in_(bids))
+        in_parts.append(ClientInboundMessage.booking_id.in_(bids))
+    if client_id is not None:
+        cid = int(client_id)
+        out_parts.append(NotificationOutbox.client_id == cid)
+        send_parts.append(ClientNotificationSend.client_id == cid)
+        in_parts.append(ClientInboundMessage.client_id == cid)
+        visit_ids = [int(x) for x in db.scalars(select(Visit.id).where(Visit.client_id == cid)).all()]
+        if visit_ids:
+            out_parts.append(NotificationOutbox.visit_id.in_(visit_ids))
+
+    def _count(model, parts) -> int:
+        if not parts:
+            return 0
+        return int(db.scalar(select(func.count()).select_from(model).where(or_(*parts))) or 0)
+
+    return (
+        _count(NotificationOutbox, out_parts),
+        _count(ClientNotificationSend, send_parts),
+        _count(ClientInboundMessage, in_parts),
+    )
+
+
+def _notify_detach_line(db: Session, *, booking_ids: list[int] | None = None, client_id: int | None = None) -> str:
+    out_n, send_n, in_n = notification_detach_counts(db, booking_ids=booking_ids, client_id=client_id)
+    total = out_n + send_n + in_n
+    return (
+        f"Уведомления будут отвязаны, не удалены: {total} "
+        f"(очередь {out_n}, отправки {send_n}, входящие {in_n})"
+    )
 
 
 def _shown_client_phone(client: object | None) -> str:
@@ -92,6 +225,7 @@ def purge_visit_hard(db: Session, visit_id: int, *, actor_user_id: int | None) -
         storno_source_accruals(db, PayrollFundSourceKind.VISIT_SERVICE, int(vs.id), actor_user_id)
     storno_source_accruals(db, PayrollFundSourceKind.VISIT, visit.id, actor_user_id)
     db.execute(delete(VisitAuditLog).where(VisitAuditLog.visit_id == visit.id))
+    _null_visit_refs(db, int(visit.id))
     note_media_for_release(db, visit.photo_1, visit.photo_2, visit.photo_3)
     db.delete(visit)
 
@@ -119,9 +253,7 @@ def purge_booking_hard(db: Session, booking_id: int, *, actor_user_id: int | Non
         )
         src_cons.source_booking_id = None
 
-    db.execute(update(Visit).where(Visit.booking_id == bid).values(booking_id=None))
-    db.execute(update(ProductSale).where(ProductSale.booking_id == bid).values(booking_id=None))
-    db.execute(update(WorkForInventory).where(WorkForInventory.booking_id == bid).values(booking_id=None))
+    _null_booking_refs(db, bid)
     db.flush()
     note_media_for_release(db, b.photo_1, b.photo_2, b.photo_3)
     db.delete(b)
@@ -231,6 +363,7 @@ def purge_client_hard(db: Session, client_id: int, *, actor_user_id: int | None)
         purge_booking_hard(db, int(bid), actor_user_id=actor_user_id)
 
     release_client_kit_reserves(db, client_id=cid, changed_by_user_id=actor_user_id)
+    _detach_client_notifications(db, cid)
     note_media_for_release(db, c.photo_1, c.photo_2)
     db.delete(c)
 
@@ -396,6 +529,7 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
             lines.append(f"Запланированная услуга: {svc}")
         if (b.quoted_price_text or "").strip():
             lines.append(f"Ориентир цены: {(b.quoted_price_text or '').strip()}")
+        lines.append(_notify_detach_line(db, booking_ids=[eid]))
         return {"ok": True, "heading": f"Бронь #{eid}", "lines": lines}
 
     if kind == "product_sale":
@@ -513,6 +647,8 @@ def build_purge_preview(db: Session, entity: str, entity_id: int | list[int]) ->
             f"Связано (будет удалено/отвязано): визитов {v_n}, броней {b_n}, продаж {s_n}, работ {w_n}, консультаций {cons_n}"
             + (f", контактное лицо для {contact_for_n}" if contact_for_n else "")
         )
+        booking_ids = [int(x) for x in db.scalars(select(Booking.id).where(Booking.client_id == cid)).all()]
+        lines.append(_notify_detach_line(db, booking_ids=booking_ids, client_id=cid))
         return {"ok": True, "heading": f"Клиент #{eid}", "lines": lines}
 
     if kind == "kit":

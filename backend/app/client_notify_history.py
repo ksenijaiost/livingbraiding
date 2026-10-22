@@ -51,6 +51,37 @@ _EVENT = {
     "booking_cancelled": "Бронь отменена",
 }
 
+_BOOKING_TIED_EVENTS = frozenset(
+    {
+        "client_booking_reminder",
+        "client_after_booking",
+        "client_booking_status",
+        "booking_created",
+        "booking_updated",
+        "booking_cancelled",
+        "booking_reminder",
+        "booking_client_cancel_request",
+        "booking_client_reschedule_request",
+        "staff_assignment_created",
+    }
+)
+
+
+def outbox_subject_flags(row: NotificationOutbox) -> dict[str, bool | int | None]:
+    """Подписи для истории, когда бронь или клиент уже удалены."""
+    payload = _payload(row)
+    booking_id = int(row.booking_id) if row.booking_id else None
+    kind = (row.target_kind or payload.get("target_kind") or "").strip().lower()
+    booking_removed = booking_id is None and (
+        payload.get("booking_id") is not None or str(row.event_type or "") in _BOOKING_TIED_EVENTS
+    )
+    client_removed = row.client_id is None and (kind == "client" or payload.get("client_id") is not None)
+    return {
+        "booking_id": booking_id,
+        "booking_removed": booking_removed,
+        "client_removed": client_removed,
+    }
+
 
 def _payload(row: NotificationOutbox) -> dict:
     try:
@@ -186,6 +217,7 @@ def _out_item(row: NotificationOutbox, tz_name: str, hours_by_rule: dict[int, fl
     text = (row.body or "").strip() or str(payload.get("text") or "").strip()
     channel_label = "—" if str(payload.get("skip_reason") or "").strip() else _channel_label(row.channel)
     at = row.sent_at or row.scheduled_at or row.created_at
+    flags = outbox_subject_flags(row)
     return {
         "kind": "out",
         "seq": int(row.id or 0),
@@ -199,7 +231,9 @@ def _out_item(row: NotificationOutbox, tz_name: str, hours_by_rule: dict[int, fl
         "text": text,
         "parsed_label": "",
         "memos_label": _memos_label(row),
-        "booking_id": int(row.booking_id) if row.booking_id else None,
+        "booking_id": flags["booking_id"],
+        "booking_removed": flags["booking_removed"],
+        "client_removed": flags["client_removed"],
     }
 
 
@@ -220,6 +254,8 @@ def _in_item(row: ClientInboundMessage, tz_name: str, parsed_labels: dict[str, s
         "parsed_label": parsed,
         "memos_label": "",
         "booking_id": int(row.booking_id) if row.booking_id else None,
+        "booking_removed": False,
+        "client_removed": False,
     }
 
 

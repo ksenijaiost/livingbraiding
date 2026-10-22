@@ -1,4 +1,4 @@
-"""Настраиваемые цифры ответов клиентки и переменные {{reply_hint}} / {{reply_hint_no_confirm}}."""
+"""Настраиваемые цифры ответов клиентки и переменные {{reply_hint}} / {{reply_hint_no_confirm}} / {{reply_hint_general}}."""
 
 from __future__ import annotations
 
@@ -47,6 +47,18 @@ DEFAULT_DIGITS: dict[str, str] = {
     ACTION_CANCEL: "3",
     ACTION_CONTACT: "4",
     ACTION_DIRECTIONS: "5",
+}
+
+# {{reply_hint_general}} — только эти действия, если они включены.
+GENERAL_HINT_ACTIONS = frozenset({ACTION_CONTACT, ACTION_DIRECTIONS})
+
+# Подпись под названием действия: в какие подсказки (1/2/3) входит строка.
+HINT_MEMBERSHIP_NOTE: dict[str, str] = {
+    ACTION_CONFIRM: "входит в 1",
+    ACTION_RESCHEDULE: "входит в 1, 2",
+    ACTION_CANCEL: "входит в 1, 2",
+    ACTION_CONTACT: "входит в 1, 2, 3",
+    ACTION_DIRECTIONS: "входит в 1, 2, 3",
 }
 
 # Точная строка из старых шаблонов (с точкой) — её меняет миграция на {{reply_hint}}.
@@ -135,6 +147,7 @@ def reply_digits_for_ui(db: Session) -> list[dict[str, Any]]:
             "is_enabled": bool(row.is_enabled),
             "hint_label": row.hint_label,
             "position": int(row.position),
+            "hint_membership": HINT_MEMBERSHIP_NOTE.get(row.action, ""),
         }
         for row in list_reply_digit_actions(db)
     ]
@@ -248,13 +261,29 @@ def digit_for_action(db: Session, action: str, *, only_enabled: bool = False) ->
     return DEFAULT_DIGITS.get(action)
 
 
-def build_reply_hint(db: Session, *, exclude_confirm: bool = False) -> str:
+def build_reply_hint(
+    db: Session,
+    *,
+    exclude_confirm: bool = False,
+    only_actions: frozenset[str] | None = None,
+) -> str:
+    """Собрать подсказку «Ответьте: …».
+
+    only_actions — узкий набор (для {{reply_hint_general}}). Если после фильтра
+    строк нет, такая подсказка пустая. Полная подсказка в этом случае остаётся
+    фразой «Ответьте сообщением администратору.».
+    """
     parts: list[str] = []
     for row in _enabled_snapshots(db):
-        if exclude_confirm and row["action"] == ACTION_CONFIRM:
+        action = str(row["action"])
+        if exclude_confirm and action == ACTION_CONFIRM:
+            continue
+        if only_actions is not None and action not in only_actions:
             continue
         parts.append(f"{row['digit']} — {row['hint_label']}")
     if not parts:
+        if only_actions is not None:
+            return ""
         return "Ответьте сообщением администратору."
     return "Ответьте: " + ", ".join(parts) + "."
 
@@ -272,6 +301,7 @@ def reply_hint_system_values(db: Session) -> dict[str, str]:
     return {
         "reply_hint": build_reply_hint(db, exclude_confirm=False),
         "reply_hint_no_confirm": build_reply_hint(db, exclude_confirm=True),
+        "reply_hint_general": build_reply_hint(db, only_actions=GENERAL_HINT_ACTIONS),
     }
 
 

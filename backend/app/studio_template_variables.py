@@ -35,6 +35,7 @@ SYSTEM_TEMPLATE_KEYS = frozenset(
         "masters",
         "reply_hint",
         "reply_hint_no_confirm",
+        "reply_hint_general",
         "client_for_line",
     }
 )
@@ -51,6 +52,7 @@ SYSTEM_TEMPLATE_PALETTE: tuple[tuple[str, str], ...] = (
     ("masters", "мастера через запятую"),
     ("reply_hint", "подсказка с цифрами ответов (из настроек)"),
     ("reply_hint_no_confirm", "то же без «подтвердить»"),
+    ("reply_hint_general", "подсказка только: написать администратору, как добраться"),
     ("client_for_line", "«Запись для: имя» при отправке через контактное лицо"),
 )
 

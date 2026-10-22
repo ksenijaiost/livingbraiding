@@ -266,7 +266,13 @@
       const cidEl = document.getElementById('existing_client_id');
       const cid = cidEl && (cidEl.value || '').trim();
       if (cid && /^\d+$/.test(cid)) params.set('client_id', cid);
-      const res = await fetch('/master/kits/suggest?' + params.toString());
+      const url = '/master/kits/suggest?' + params.toString();
+      if (window.LbKitSuggest && window.LbKitSuggest.fetchJson) {
+        const data = await window.LbKitSuggest.fetchJson(url);
+        if (!data || data.aborted) return [];
+        return data.kits || [];
+      }
+      const res = await fetch(url);
       if (!res.ok) return [];
       const data = await res.json();
       return data.kits || [];

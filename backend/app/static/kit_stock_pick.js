@@ -4,6 +4,43 @@
 (function (global) {
   "use strict";
 
+  var suggestCurrent = null;
+  var suggestCache = Object.create(null);
+
+  function fetchJson(url, opts) {
+    var force = !!(opts && opts.force);
+    if (!force && Object.prototype.hasOwnProperty.call(suggestCache, url)) {
+      return Promise.resolve(suggestCache[url]);
+    }
+    if (!force && suggestCurrent && suggestCurrent.url === url) {
+      return suggestCurrent.promise;
+    }
+    if (suggestCurrent) {
+      suggestCurrent.controller.abort();
+      suggestCurrent = null;
+    }
+    var controller = new AbortController();
+    var promise = fetch(url, { signal: controller.signal, credentials: "same-origin" })
+      .then(function (res) {
+        if (!res.ok) return { kits: [], failed: true };
+        return res.json();
+      })
+      .then(function (data) {
+        var payload = data && typeof data === "object" ? data : { kits: [] };
+        if (!force && !payload.failed && !payload.aborted) suggestCache[url] = payload;
+        return payload;
+      })
+      .catch(function (err) {
+        if (err && err.name === "AbortError") return { kits: [], aborted: true };
+        return { kits: [] };
+      })
+      .finally(function () {
+        if (suggestCurrent && suggestCurrent.controller === controller) suggestCurrent = null;
+      });
+    suggestCurrent = { url: url, controller: controller, promise: promise };
+    return promise;
+  }
+
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
@@ -377,14 +414,8 @@
       var q = qEl ? String(qEl.value || "").trim() : "";
       var url = typeof suggestUrl === "function" ? suggestUrl(q) : suggestUrl;
       if (!url) return;
-      var res = await fetch(url);
-      if (!res.ok) return;
-      var data = {};
-      try {
-        data = await res.json();
-      } catch (e) {
-        data = {};
-      }
+      var data = await fetchJson(url);
+      if (!data || data.aborted) return;
       var ul = rowEl.querySelector(".lb-kit-suggest-list, .vsk-suggest-list");
       if (!ul) return;
       ul.innerHTML = "";
@@ -414,7 +445,16 @@
         timer = setTimeout(doSuggest, 350);
       });
     }
-    if (findBtn) findBtn.addEventListener("click", doSuggest);
+    if (findBtn) {
+      findBtn.addEventListener("click", function () {
+        var qElClick = rowEl.querySelector(".lb-kit-search-q, .vsk-search-q");
+        var qClick = qElClick ? String(qElClick.value || "").trim() : "";
+        var urlClick = typeof suggestUrl === "function" ? suggestUrl(qClick) : suggestUrl;
+        if (!urlClick) return;
+        delete suggestCache[urlClick];
+        doSuggest();
+      });
+    }
     // Старый HTML (галочка без радио) — заменить блок выбора на новый до обработчиков.
     var afterMigrate = rowEl.querySelector("[data-lb-kit-pick-after-selected]");
     if (afterMigrate && !rowEl.querySelector(".lb-kit-mode-radio")) {
@@ -560,6 +600,7 @@
     renumberRows(wrapEl);
   }
 
+  global.LbKitSuggest = { fetchJson: fetchJson };
   global.LbKitStockPick = {
     esc: esc,
     conditionLabel: conditionLabel,

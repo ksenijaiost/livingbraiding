@@ -25,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     Time,
+    Index,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -530,8 +531,8 @@ class ClientNotificationSend(Base):
     __tablename__ = "client_notification_sends"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), nullable=False, index=True)
-    booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id"), nullable=False, index=True)
+    client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True, index=True)
+    booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True, index=True)
     channel: Mapped[str] = mapped_column(String(16), nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     rule_id: Mapped[int | None] = mapped_column(ForeignKey("client_notification_rules.id"), nullable=True)
@@ -1009,6 +1010,10 @@ class KitReserve(Base):
     """Резерв заготовок по комплекту: несколько строк на один kit (лимит — настройка)."""
 
     __tablename__ = "kit_reserves"
+    __table_args__ = (
+        Index("ix_kit_reserves_kit_id", "kit_id"),
+        Index("ix_kit_reserves_client_kit", "reserved_for_client_id", "kit_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     kit_id: Mapped[int] = mapped_column(Integer, ForeignKey("kits.id", ondelete="CASCADE"), nullable=False)
