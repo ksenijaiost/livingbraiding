@@ -23,7 +23,8 @@ roles: [techspec]
 - [Моя карточка](/me)
 - [Технические данные](/techspec/data)
 - [SQL](/techspec/sql)
-- [Очередь уведомлений](/admin/notification-outbox) — доставка VK / Max / Telegram (сотрудники и клиенты)
+- [Очередь уведомлений](/admin/notification-outbox) — доставка VK / Max / Telegram (сотрудники, клиенты, чат админов и общий чат)
+- [Управление уведомлениями](/studio/notifications) — просмотр чатов и галочек. Менять их может суперадминистратор
 
 ## Частые сценарии
 
