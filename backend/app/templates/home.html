@@ -22,8 +22,20 @@
             </div>
             <div style="margin-top: 8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
               <a href="/techspec/media/manifest.json"><button type="button" class="secondary">Скачать manifest.json</button></a>
-              <a href="/techspec/media/backup.zip"><button type="button" class="secondary">Скачать всё (backup.zip)</button></a>
+              {% if (techspec_home.media.part_count or 1) <= 1 %}
+                <a href="/techspec/media/backup.zip?part=1"><button type="button" class="secondary">Скачать всё (backup.zip)</button></a>
+              {% else %}
+                <button type="button" class="secondary" id="techspec-media-download-all-btn" data-parts="{{ techspec_home.media.part_count }}">Скачать все части ({{ techspec_home.media.part_count }})</button>
+              {% endif %}
             </div>
+            {% if (techspec_home.media.part_count or 1) > 1 %}
+              <div id="techspec-media-download-all-status" class="muted" style="margin-top: 8px; font-size: 12px;"></div>
+              <div style="margin-top: 8px; display:flex; flex-wrap:wrap; gap:8px;">
+                {% for p in techspec_home.media.parts %}
+                  <a href="/techspec/media/backup.zip?part={{ p.part }}"><button type="button" class="secondary">Часть {{ p.part }} ({{ p.file_count }} ф., {{ p.size_human }})</button></a>
+                {% endfor %}
+              </div>
+            {% endif %}
             <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb;">
               <div class="muted" style="font-size: 12px; margin-bottom: 6px;">Только новые (загрузите сохранённый manifest.json)</div>
               <form id="techspec-media-delta-form" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0;">
@@ -33,9 +45,9 @@
               <div id="techspec-media-delta-status" class="muted" style="margin-top: 8px; font-size: 12px;"></div>
             </div>
             <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb;">
-              <div class="muted" style="font-size: 12px; margin-bottom: 6px;">Восстановить на сервер (zip-часть)</div>
+              <div class="muted" style="font-size: 12px; margin-bottom: 6px;">Восстановить на сервер (zip-части)</div>
               <form id="techspec-media-restore-form" method="post" action="/techspec/media/restore" enctype="multipart/form-data" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0;">
-                <input type="file" name="archive" accept=".zip,application/zip" style="max-width: 18rem; padding: 8px;" />
+                <input type="file" name="archive" accept=".zip,application/zip" multiple style="max-width: 18rem; padding: 8px;" />
                 <button type="submit" class="secondary">Сохранить</button>
               </form>
               <a href="/techspec/data" style="margin-top: 8px; display: inline-block;"><button type="button" class="secondary">Технические данные</button></a>
@@ -310,6 +322,68 @@
         return (n / (1024 * 1024)).toFixed(1) + ' МБ';
       }
 
+      function filenameFromDisposition(disp, fallback) {
+        var star = /filename\*=(?:UTF-8''|utf-8'')([^;]+)/i.exec(disp || '');
+        if (star) {
+          try { return decodeURIComponent(star[1].trim()); } catch (e) { return star[1].trim(); }
+        }
+        var quoted = /filename="([^"]+)"/.exec(disp || '');
+        if (quoted) return quoted[1];
+        var plain = /filename=([^;]+)/.exec(disp || '');
+        if (plain) return plain[1].trim();
+        return fallback;
+      }
+
+      function saveBlob(blob, filename) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+      }
+
+      var downloadAllBtn = document.getElementById('techspec-media-download-all-btn');
+      var downloadAllStatus = document.getElementById('techspec-media-download-all-status');
+      if (downloadAllBtn && downloadAllStatus) {
+        downloadAllBtn.addEventListener('click', function () {
+          var total = parseInt(downloadAllBtn.getAttribute('data-parts') || '1', 10) || 1;
+          downloadAllBtn.disabled = true;
+          function next(k) {
+            if (k > total) {
+              downloadAllBtn.disabled = false;
+              downloadAllStatus.className = 'ok';
+              downloadAllStatus.textContent = 'Скачаны все части (' + total + ').';
+              return;
+            }
+            downloadAllStatus.className = 'muted';
+            downloadAllStatus.textContent = 'Скачивание части ' + k + ' из ' + total + '…';
+            fetch('/techspec/media/backup.zip?part=' + k)
+              .then(function (res) {
+                if (!res.ok) {
+                  downloadAllBtn.disabled = false;
+                  downloadAllStatus.className = 'error';
+                  downloadAllStatus.textContent = 'Не удалось скачать часть ' + k + ' из ' + total + '.';
+                  return;
+                }
+                var fname = filenameFromDisposition(res.headers.get('Content-Disposition') || '', 'lb-media-backup-part' + k + '.zip');
+                return res.blob().then(function (blob) {
+                  saveBlob(blob, fname);
+                  next(k + 1);
+                });
+              })
+              .catch(function () {
+                downloadAllBtn.disabled = false;
+                downloadAllStatus.className = 'error';
+                downloadAllStatus.textContent = 'Не удалось скачать часть ' + k + ' из ' + total + '.';
+              });
+          }
+          next(1);
+        });
+      }
+
       var deltaForm = document.getElementById('techspec-media-delta-form');
       var deltaStatus = document.getElementById('techspec-media-delta-status');
       if (deltaForm && deltaStatus) {
@@ -322,63 +396,65 @@
             return;
           }
           var submitBtn = deltaForm.querySelector('button[type="submit"]');
-          deltaStatus.className = 'muted';
-          deltaStatus.textContent = 'Формирование архива…';
-          if (submitBtn) submitBtn.disabled = true;
-          var xhr = new XMLHttpRequest();
-          xhr.open('POST', '/techspec/media/backup.zip');
-          xhr.responseType = 'blob';
-          xhr.addEventListener('load', function () {
-            if (submitBtn) submitBtn.disabled = false;
-            if (xhr.status >= 200 && xhr.status < 300) {
-              var ct = (xhr.getResponseHeader('Content-Type') || '').toLowerCase();
-              if (ct.indexOf('application/json') >= 0) {
-                xhr.response.text().then(function (text) {
-                  try {
-                    var data = JSON.parse(text);
-                    deltaStatus.className = 'ok';
-                    deltaStatus.textContent = data.message || 'Новых файлов нет.';
-                  } catch (err) {
-                    deltaStatus.className = 'error';
-                    deltaStatus.textContent = 'Неожиданный ответ сервера.';
-                  }
-                });
-                return;
-              }
-              var disp = xhr.getResponseHeader('Content-Disposition') || '';
-              var fname = 'lb-media-delta.zip';
-              var m = /filename="([^"]+)"/.exec(disp);
-              if (m) fname = m[1];
-              var url = URL.createObjectURL(xhr.response);
-              var a = document.createElement('a');
-              a.href = url;
-              a.download = fname;
-              document.body.appendChild(a);
-              a.click();
-              a.remove();
-              URL.revokeObjectURL(url);
-              var nf = xhr.getResponseHeader('X-LB-Media-New-Files') || '?';
-              var nb = parseInt(xhr.getResponseHeader('X-LB-Media-New-Bytes') || '0', 10) || 0;
-              deltaStatus.className = 'ok';
-              deltaStatus.textContent = 'Скачан архив: ' + nf + ' новых файлов (' + fmtBytes(nb) + '). Сохраните свежий manifest.json.';
-              return;
-            }
-            xhr.response.text().then(function (text) {
-              var detail = 'HTTP ' + xhr.status;
-              try {
-                var data = JSON.parse(text);
-                if (data && data.detail) detail = data.detail;
-              } catch (err) { /* keep HTTP status */ }
-              deltaStatus.className = 'error';
-              deltaStatus.textContent = detail;
-            });
-          });
-          xhr.addEventListener('error', function () {
+          var manifestFile = fileInput.files[0];
+          function manifestBody() {
+            var fd = new FormData();
+            fd.append('manifest', manifestFile, manifestFile.name);
+            return fd;
+          }
+          function fail(message) {
             if (submitBtn) submitBtn.disabled = false;
             deltaStatus.className = 'error';
-            deltaStatus.textContent = 'Не удалось скачать дельта-архив.';
-          });
-          xhr.send(new FormData(deltaForm));
+            deltaStatus.textContent = message;
+          }
+          function pullPart(partNum, totalParts) {
+            deltaStatus.className = 'muted';
+            deltaStatus.textContent = 'Скачивание дельта-архива: часть ' + partNum + (totalParts ? (' из ' + totalParts) : '') + '…';
+            fetch('/techspec/media/backup.zip?part=' + partNum, { method: 'POST', body: manifestBody() })
+              .then(function (res) {
+                var ct = (res.headers.get('Content-Type') || '').toLowerCase();
+                if (res.ok && ct.indexOf('application/json') >= 0) {
+                  return res.json().then(function (data) {
+                    if (submitBtn) submitBtn.disabled = false;
+                    deltaStatus.className = 'ok';
+                    deltaStatus.textContent = (data && data.message) || 'Новых файлов нет.';
+                  });
+                }
+                if (!res.ok) {
+                  return res.text().then(function (text) {
+                    var detail = 'HTTP ' + res.status;
+                    try {
+                      var data = JSON.parse(text);
+                      if (data && data.detail) detail = String(data.detail);
+                    } catch (err) { /* keep HTTP status */ }
+                    fail(detail);
+                  });
+                }
+                var total = parseInt(res.headers.get('X-LB-Media-Total-Parts') || '1', 10) || 1;
+                var nf = res.headers.get('X-LB-Media-New-Files') || '?';
+                var nb = parseInt(res.headers.get('X-LB-Media-New-Bytes') || '0', 10) || 0;
+                var fname = filenameFromDisposition(res.headers.get('Content-Disposition') || '', 'lb-media-delta-part' + partNum + '.zip');
+                return res.blob().then(function (blob) {
+                  saveBlob(blob, fname);
+                  if (partNum < total) {
+                    pullPart(partNum + 1, total);
+                    return;
+                  }
+                  if (submitBtn) submitBtn.disabled = false;
+                  deltaStatus.className = 'ok';
+                  if (total > 1) {
+                    deltaStatus.textContent = 'Скачаны все части дельта-архива (' + total + '). Новых файлов: ' + nf + ' (' + fmtBytes(nb) + '). Сохраните свежий manifest.json.';
+                  } else {
+                    deltaStatus.textContent = 'Скачан архив: ' + nf + ' новых файлов (' + fmtBytes(nb) + '). Сохраните свежий manifest.json.';
+                  }
+                });
+              })
+              .catch(function () {
+                fail('Не удалось скачать дельта-архив.');
+              });
+          }
+          if (submitBtn) submitBtn.disabled = true;
+          pullPart(1, 0);
         });
       }
 
@@ -392,10 +468,6 @@
           if (progressBar) progressBar.style.width = Math.max(0, Math.min(100, pct)) + '%';
           if (label) restoreStatus.textContent = label;
         }
-        function hideProgress() {
-          if (progressWrap) progressWrap.style.display = 'none';
-          if (progressBar) progressBar.style.width = '0%';
-        }
         restoreForm.addEventListener('submit', function (e) {
           e.preventDefault();
           var fileInput = restoreForm.querySelector('input[type="file"][name="archive"]');
@@ -404,51 +476,67 @@
             restoreStatus.textContent = 'Выберите .zip архив.';
             return;
           }
+          var files = Array.from(fileInput.files).sort(function (a, b) {
+            return a.name.localeCompare(b.name, undefined, { numeric: true });
+          });
           var submitBtn = restoreForm.querySelector('button[type="submit"]');
+          var restoredSum = 0;
+          var skippedSum = 0;
           restoreStatus.className = 'muted';
-          setProgress(0, 'Загрузка архива…');
           if (submitBtn) submitBtn.disabled = true;
-          var xhr = new XMLHttpRequest();
-          xhr.open('POST', '/techspec/media/restore');
-          xhr.responseType = 'json';
-          xhr.upload.addEventListener('progress', function (ev) {
-            if (ev.lengthComputable && ev.total > 0) {
-              var pct = Math.round((ev.loaded / ev.total) * 100);
-              setProgress(pct, 'Загрузка архива: ' + pct + '% (' + fmtBytes(ev.loaded) + ' из ' + fmtBytes(ev.total) + ')');
-            } else {
-              setProgress(0, 'Загрузка архива: ' + fmtBytes(ev.loaded) + '…');
-            }
-          });
-          xhr.upload.addEventListener('load', function () {
-            setProgress(100, 'Распаковка на сервере…');
-          });
-          xhr.addEventListener('load', function () {
-            hideProgress();
+
+          function stopWithError(index, file, detail) {
             if (submitBtn) submitBtn.disabled = false;
-            var data = xhr.response;
-            if (xhr.status >= 200 && xhr.status < 300) {
+            restoreStatus.className = 'error';
+            restoreStatus.textContent = 'Ошибка на архиве ' + (index + 1) + ' из ' + files.length + ' (' + file.name + '): ' + detail + '. Успешно загружено архивов до неё: ' + index + '.';
+          }
+
+          function uploadAt(index) {
+            if (index >= files.length) {
+              if (submitBtn) submitBtn.disabled = false;
               restoreStatus.className = 'ok';
-              restoreStatus.textContent = 'Сохранено: ' + (data.restored || 0) + ', пропущено: ' + (data.skipped || 0) + '.';
+              setProgress(100, 'Готово! Загружено архивов: ' + files.length + ', восстановлено файлов: ' + restoredSum + ' (пропущено: ' + skippedSum + ').');
               restoreForm.reset();
               return;
             }
-            var detail = data && data.detail ? data.detail : ('HTTP ' + xhr.status);
-            restoreStatus.className = 'error';
-            restoreStatus.textContent = detail;
-          });
-          xhr.addEventListener('error', function () {
-            hideProgress();
-            if (submitBtn) submitBtn.disabled = false;
-            restoreStatus.className = 'error';
-            restoreStatus.textContent = 'Не удалось восстановить архив.';
-          });
-          xhr.addEventListener('abort', function () {
-            hideProgress();
-            if (submitBtn) submitBtn.disabled = false;
-            restoreStatus.className = 'error';
-            restoreStatus.textContent = 'Загрузка прервана.';
-          });
-          xhr.send(new FormData(restoreForm));
+            var file = files[index];
+            var n = index + 1;
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', '/techspec/media/restore');
+            xhr.responseType = 'json';
+            xhr.upload.addEventListener('progress', function (ev) {
+              if (ev.lengthComputable && ev.total > 0) {
+                var pct = Math.round((ev.loaded / ev.total) * 100);
+                setProgress(pct, 'Архив ' + n + ' из ' + files.length + ' (' + file.name + '): ' + pct + '% (' + fmtBytes(ev.loaded) + ' из ' + fmtBytes(ev.total) + ')');
+              } else {
+                setProgress(0, 'Архив ' + n + ' из ' + files.length + ' (' + file.name + '): ' + fmtBytes(ev.loaded) + '…');
+              }
+            });
+            xhr.upload.addEventListener('load', function () {
+              setProgress(100, 'Архив ' + n + ' из ' + files.length + ' (' + file.name + '): распаковка на сервере…');
+            });
+            xhr.addEventListener('load', function () {
+              var data = xhr.response;
+              if (xhr.status >= 200 && xhr.status < 300) {
+                restoredSum += (data && data.restored) || 0;
+                skippedSum += (data && data.skipped) || 0;
+                uploadAt(index + 1);
+                return;
+              }
+              var detail = data && data.detail ? data.detail : ('HTTP ' + xhr.status);
+              stopWithError(index, file, detail);
+            });
+            xhr.addEventListener('error', function () {
+              stopWithError(index, file, 'не удалось отправить архив');
+            });
+            xhr.addEventListener('abort', function () {
+              stopWithError(index, file, 'загрузка прервана');
+            });
+            var fd = new FormData();
+            fd.append('archive', file, file.name);
+            xhr.send(fd);
+          }
+          uploadAt(0);
         });
       }
 
