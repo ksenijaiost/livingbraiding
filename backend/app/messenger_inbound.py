@@ -712,9 +712,78 @@ def handle_client_text(
     «Написать администратору» и «как добраться» срабатывают и без брони,
     в том числе с общего аккаунта.
     Коды привязки разбираются раньше, в вебхуке, и сюда не попадают.
+    Номер телефона и просьба привязаться обрабатываются здесь, в том числе
+    если пишет сотрудница, которая ещё не привязала свою клиентскую карточку.
     """
+    from app.client_phone import find_client_by_normalized_phone
+    from app.telegram_link import (
+        MSG_ASK_CLIENT_PHONE,
+        MSG_CLIENT_ALREADY_LINKED,
+        extract_phone_for_client_bind,
+        is_explicit_client_bind_word,
+        try_bind_client_by_phone,
+    )
+
+    phone = extract_phone_for_client_bind(text)
+    if phone:
+        answer = try_bind_client_by_phone(
+            db,
+            channel=channel,
+            messenger_id=int(messenger_id),
+            phone_normalized=phone,
+        )
+        found = find_client_by_normalized_phone(db, phone)
+        return _log_client_inbound(
+            db,
+            client_id=int(found.id) if found is not None else None,
+            booking_id=None,
+            channel=channel,
+            messenger_id=messenger_id,
+            text=text,
+            parsed_action="bind_phone",
+            answer=answer,
+            reply_key=None,
+        )
+
     staff = find_user_by_channel_id(db, channel, messenger_id)
     client = find_client_by_channel_id(db, channel, messenger_id)
+    if client is None and staff is None and (text or "").strip():
+        return _log_client_inbound(
+            db,
+            client_id=None,
+            booking_id=None,
+            channel=channel,
+            messenger_id=messenger_id,
+            text=text,
+            parsed_action="bind_ask",
+            answer=MSG_ASK_CLIENT_PHONE,
+            reply_key=None,
+        )
+    if client is None and staff is not None and is_explicit_client_bind_word(text):
+        return _log_client_inbound(
+            db,
+            client_id=None,
+            booking_id=None,
+            channel=channel,
+            messenger_id=messenger_id,
+            text=text,
+            parsed_action="bind_ask",
+            answer=MSG_ASK_CLIENT_PHONE,
+            reply_key=None,
+        )
+    if client is not None and is_explicit_client_bind_word(text):
+        return _log_client_inbound(
+            db,
+            client_id=int(client.id),
+            booking_id=None,
+            channel=channel,
+            messenger_id=messenger_id,
+            text=text,
+            parsed_action="bind_ask",
+            answer=MSG_CLIENT_ALREADY_LINKED,
+            reply_key=None,
+        )
+
     preview = normalize_client_reply(text)
     preview_action = action_for_digit(db, preview) if preview is not None else None
     if staff is not None and (

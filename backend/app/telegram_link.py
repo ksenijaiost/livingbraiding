@@ -10,7 +10,9 @@ from datetime import timedelta
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.client_phone import find_client_by_normalized_phone
 from app.db.models import Client, NotificationChannel, TelegramLinkToken, User
+from app.phone_ru import InvalidPhoneError, normalize_phone
 from app.settings import get_settings
 from app.time_utils import utcnow_naive
 
@@ -20,6 +22,40 @@ MSG_LINK_INVALID = "Ссылка устарела, запросите новую
 MSG_MAX_TAKEN = "Этот аккаунт Max уже привязан к другой сотруднице"
 MSG_CLIENT_MAX_TAKEN = "Этот аккаунт Max уже привязан к другому клиенту"
 MSG_CLIENT_LINKED_OK = "Готово, уведомления о записях подключены"
+MSG_CLIENT_PHONE_NOT_FOUND = (
+    "Не нашли клиента с таким номером телефона. Проверьте номер или обратитесь к администратору."
+)
+MSG_ASK_CLIENT_PHONE = (
+    "Здравствуйте! Чтобы подключить уведомления о записях, "
+    "отправьте в ответ свой номер телефона (например, 89001234567)."
+)
+MSG_CLIENT_ALREADY_LINKED = "Уведомления о записях уже подключены."
+
+# Без похожих символов (0/o, 1/l/i). Всегда строчные, с хотя бы одной буквой.
+_LINK_CODE_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
+_LINK_CODE_LETTERS = "abcdefghjkmnpqrstuvwxyz"
+_BARE_LINK_CODE_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+_BIND_TEXT_PREFIXES = (
+    "подключить уведомления",
+    "добрый день",
+    "/start",
+    "привязка",
+    "уведомления",
+    "подключить",
+    "здравствуйте",
+    "привет",
+    "начать",
+)
+_BIND_GREETINGS = {
+    "/start",
+    "начать",
+    "привязка",
+    "уведомления",
+    "подключить",
+    "подключить уведомления",
+    "привет",
+    "здравствуйте",
+}
 
 CHANNEL_TELEGRAM = NotificationChannel.TELEGRAM.value
 CHANNEL_VK = NotificationChannel.VK.value
@@ -31,6 +67,14 @@ _MAX_PRIVYAZKA_RE = re.compile(r"(?i)^\s*привязка\s+(\S+)\s*$")
 
 def hash_link_token(plain: str) -> str:
     return hashlib.sha256(plain.encode("utf-8")).hexdigest()
+
+
+def generate_link_code() -> str:
+    """6 символов, всегда есть буква, чтобы код не совпал с цифрой ответа или телефоном."""
+    while True:
+        chars = [secrets.choice(_LINK_CODE_ALPHABET) for _ in range(6)]
+        if any(ch in _LINK_CODE_LETTERS for ch in chars):
+            return "".join(chars)
 
 
 # Обратная совместимость
@@ -84,7 +128,7 @@ def create_link_token(
         )
         .values(used_at=now)
     )
-    plain = secrets.token_urlsafe(24)
+    plain = generate_link_code()
     row = TelegramLinkToken(
         user_id=int(user_id),
         client_id=None,
@@ -134,7 +178,7 @@ def create_client_link_token(db: Session, client_id: int, *, channel: str) -> tu
         )
         .values(used_at=now)
     )
-    plain = secrets.token_urlsafe(24)
+    plain = generate_link_code()
     db.add(
         TelegramLinkToken(
             user_id=None,
@@ -150,6 +194,21 @@ def create_client_link_token(db: Session, client_id: int, *, channel: str) -> tu
     return plain, _deep_link_for_channel(ch, plain)
 
 
+def _find_unused_link_row(
+    db: Session,
+    plain: str,
+    *,
+    channel: str | None,
+) -> TelegramLinkToken | None:
+    stmt = select(TelegramLinkToken).where(
+        TelegramLinkToken.token_hash == hash_link_token(plain),
+        TelegramLinkToken.used_at.is_(None),
+    )
+    if channel:
+        stmt = stmt.where(TelegramLinkToken.channel == channel.strip().lower())
+    return db.scalar(stmt)
+
+
 def _load_valid_link_row(
     db: Session,
     plain_token: str,
@@ -160,13 +219,11 @@ def _load_valid_link_row(
     if not plain:
         return None
     now = utcnow_naive()
-    stmt = select(TelegramLinkToken).where(
-        TelegramLinkToken.token_hash == hash_link_token(plain),
-        TelegramLinkToken.used_at.is_(None),
-    )
-    if channel:
-        stmt = stmt.where(TelegramLinkToken.channel == channel.strip().lower())
-    row = db.scalar(stmt)
+    row = _find_unused_link_row(db, plain, channel=channel)
+    if row is None:
+        lowered = plain.lower()
+        if lowered != plain:
+            row = _find_unused_link_row(db, lowered, channel=channel)
     if row is None:
         return None
     if row.expires_at < now:
@@ -352,6 +409,74 @@ def bind_client_max(db: Session, client: Client, max_user_id: int) -> None:
     db.flush()
 
 
+def _bind_phrase(text: str | None) -> str:
+    raw = (text or "").strip().lower().replace("ё", "е")
+    raw = re.sub(r"[^\w\s/]+", " ", raw, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", raw).strip()
+
+
+def is_client_bind_greeting_or_command(text: str | None) -> bool:
+    """Команда или приветствие без телефона и без кода: /start, «Привет», «Привязка» и т.п."""
+    return _bind_phrase(text) in _BIND_GREETINGS
+
+
+def is_explicit_client_bind_word(text: str | None) -> bool:
+    """«привязка» или «уведомления» без номера и без кода."""
+    return _bind_phrase(text) in {"привязка", "уведомления"}
+
+
+def extract_phone_for_client_bind(text: str | None) -> str | None:
+    """Номер из сообщения, если после приветствия/команды остались только цифры телефона."""
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    lowered = raw.lower().replace("ё", "е")
+    rest = raw
+    for prefix in _BIND_TEXT_PREFIXES:
+        if lowered.startswith(prefix):
+            rest = raw[len(prefix) :]
+            rest = re.sub(r"^[\s,;:!?.\-—]+", "", rest)
+            break
+    rest = rest.strip()
+    if not rest or re.search(r"[^\d\s+\-()]", rest):
+        return None
+    try:
+        normalized = normalize_phone(rest)
+    except InvalidPhoneError:
+        return None
+    if normalized and len(normalized) == 11 and normalized.startswith("7"):
+        return normalized
+    return None
+
+
+def try_bind_client_by_phone(
+    db: Session,
+    *,
+    channel: str,
+    messenger_id: int,
+    phone_normalized: str,
+) -> str:
+    """Привязать канал клиента по номеру. Возвращает текст ответа бота."""
+    client = find_client_by_normalized_phone(db, phone_normalized)
+    if client is None:
+        return MSG_CLIENT_PHONE_NOT_FOUND
+    ch = (channel or "").strip().lower()
+    try:
+        if ch == CHANNEL_VK:
+            bind_client_vk(db, client, int(messenger_id))
+        elif ch == CHANNEL_MAX:
+            bind_client_max(db, client, int(messenger_id))
+        elif ch == CHANNEL_TELEGRAM:
+            bind_client_telegram(db, client, int(messenger_id))
+        else:
+            raise ValueError(f"Неизвестный канал привязки: {channel}")
+        db.commit()
+    except ClientChannelTakenError as exc:
+        db.rollback()
+        return str(exc)
+    return MSG_CLIENT_LINKED_OK
+
+
 def parse_telegram_start_code(text: str | None) -> str | None:
     """Извлечь код из «/start <код>» или «/start@bot <код>». Bare /start → None."""
     t = (text or "").strip()
@@ -376,15 +501,15 @@ def parse_vk_link_code(
         if s:
             return s.split()[0].strip() or None
     t = (text or "").strip()
-    if not t:
+    if not t or extract_phone_for_client_bind(t):
         return None
     m = _VK_PRIVYAZKA_RE.match(t)
     if m:
-        return m.group(1).strip() or None
-    # Голый код без пробелов (как token_urlsafe)
-    if " " not in t and "\n" not in t and len(t) >= 16:
-        return t
-    return None
+        arg = m.group(1).strip()
+        if arg and extract_phone_for_client_bind(arg) is None:
+            return arg
+        return None
+    return _bare_link_code(t)
 
 
 def parse_max_link_code(text: str | None = None, *, payload: str | None = None) -> str | None:
@@ -397,9 +522,25 @@ def parse_max_link_code(text: str | None = None, *, payload: str | None = None) 
         return None
     if t.startswith("/start"):
         return parse_telegram_start_code(t)
+    if extract_phone_for_client_bind(t):
+        return None
     m = _MAX_PRIVYAZKA_RE.match(t)
     if m:
-        return m.group(1).strip() or None
-    if " " not in t and "\n" not in t and len(t) >= 16:
-        return t
-    return None
+        arg = m.group(1).strip()
+        if arg and extract_phone_for_client_bind(arg) is None:
+            return arg
+        return None
+    return _bare_link_code(t)
+
+
+def _bare_link_code(text: str) -> str | None:
+    """Голый код 6–64 символа: латиница, цифры, _ и -, с хотя бы одной буквой, не телефон."""
+    if " " in text or "\n" in text:
+        return None
+    if _BARE_LINK_CODE_RE.fullmatch(text) is None:
+        return None
+    if not re.search(r"[A-Za-z]", text):
+        return None
+    if extract_phone_for_client_bind(text):
+        return None
+    return text

@@ -151,6 +151,16 @@ async def vk_webhook(request: Request, db: Session = Depends(get_db)) -> Respons
             code = parse_vk_link_code(None, ref=ref, payload=None)
             if from_id is not None and from_id > 0 and code:
                 _try_bind_and_reply(db, from_id=from_id, code=code)
+            elif from_id is not None and from_id > 0:
+                from app.messenger_inbound import find_client_by_channel_id, find_user_by_channel_id
+
+                if (
+                    find_client_by_channel_id(db, CHANNEL_VK, int(from_id)) is None
+                    and find_user_by_channel_id(db, CHANNEL_VK, int(from_id)) is None
+                ):
+                    process_inbound_message(
+                        db, channel=CHANNEL_VK, messenger_id=int(from_id), text="Начать"
+                    )
     except Exception:
         logger.exception("vk webhook: handler error type=%s", event_type)
         try:

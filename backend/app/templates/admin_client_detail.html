@@ -167,6 +167,9 @@
             <div>Telegram: {% if client.telegram_chat_id %}ID {{ client.telegram_chat_id }}{% else %}не привязан{% endif %}</div>
           </div>
           {% if show_admin_actions %}
+            <p class="muted" style="font-size:12px; margin:8px 0 0;">
+              Клиент может просто написать свой номер телефона нашему боту в VK, Max или Telegram — канал привяжется автоматически. Либо создайте одноразовую ссылку:
+            </p>
             <form method="post" action="/clients/{{ client.id }}/channel-link" style="margin:10px 0 0;"
                   onsubmit="this.querySelector('button').disabled=true;">
               <label class="label-sub">Ссылка для привязки</label>

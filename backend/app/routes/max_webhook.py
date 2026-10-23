@@ -333,6 +333,18 @@ async def max_webhook(
             _try_bind(db, max_uid=max_uid, code=code)
             return JSONResponse({"ok": True})
 
+        if update_type == "bot_started" and max_uid is not None:
+            from app.messenger_inbound import find_client_by_channel_id, find_user_by_channel_id
+
+            if (
+                find_client_by_channel_id(db, CHANNEL_MAX, int(max_uid)) is None
+                and find_user_by_channel_id(db, CHANNEL_MAX, int(max_uid)) is None
+            ):
+                process_inbound_message(
+                    db, channel=CHANNEL_MAX, messenger_id=int(max_uid), text="/start"
+                )
+            return JSONResponse({"ok": True})
+
         if update_type == "message_created" and max_uid is not None and text:
             process_inbound_message(db, channel=CHANNEL_MAX, messenger_id=int(max_uid), text=text)
     except Exception:
