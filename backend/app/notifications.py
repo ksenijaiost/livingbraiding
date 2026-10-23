@@ -360,8 +360,21 @@ def enqueue_master_booking_notifications(
         master_ids = booking_planned_master_user_ids(booking)
     else:
         master_ids = sorted({int(x) for x in master_user_ids if int(x) > 0})
-    if not master_ids:
+    from app.internal_notify_prefs import BOOKING_EVENT_PREF, enqueue_pref_chats, wants_internal_notify
+
+    pref_key = BOOKING_EVENT_PREF.get(event_type)
+    dm_on = True if pref_key is None else wants_internal_notify(db, pref_key, "dm")
+    chat_on = bool(
+        pref_key
+        and (
+            wants_internal_notify(db, pref_key, "admin")
+            or wants_internal_notify(db, pref_key, "general")
+        )
+    )
+    if not master_ids and not chat_on:
         return []
+    if not dm_on:
+        master_ids = []
 
     allowed_channels = (
         set(channels)
@@ -437,7 +450,31 @@ def enqueue_master_booking_notifications(
                 continue
             created.append(row)
 
+    if pref_key and chat_on:
+        names = _booking_master_names_csv(db, booking)
+        chat_text = f"{text}\nМастера: {names}\nБронь: /bookings/{int(booking.id)}"
+        created.extend(
+            enqueue_pref_chats(
+                db,
+                event_key=pref_key,
+                text=chat_text,
+                event_type=event_type,
+                dedupe_for=lambda kind, ch, _version=version: (
+                    f"{event_type}:{int(booking.id)}:{kind}:{ch}:{_version}"
+                ),
+                booking_id=int(booking.id),
+                client_id=None,
+            )
+        )
     return created
+
+
+def _booking_master_names_csv(db: Session, booking: Booking) -> str:
+    ids = booking_planned_master_user_ids(booking)
+    if not ids:
+        return "—"
+    names = [_master_display_name(db.get(User, uid), uid) for uid in ids]
+    return ", ".join(names)
 
 
 def send_telegram(chat_id: int, text: str) -> None:
@@ -639,12 +676,12 @@ def _send_outbox_row(row: NotificationOutbox) -> None:
     if row.channel == NotificationChannel.TELEGRAM:
         send_telegram(target_id, text)
     elif row.channel == NotificationChannel.VK:
-        if kind == "admin_chat":
+        if kind in ("admin_chat", "general_chat"):
             send_vk(text=text, peer_id=target_id)
         else:
             send_vk(target_id, text)
     elif row.channel == NotificationChannel.MAX:
-        if kind == "admin_chat":
+        if kind in ("admin_chat", "general_chat"):
             send_max(text=text, chat_id=target_id)
         else:
             send_max(target_id, text)

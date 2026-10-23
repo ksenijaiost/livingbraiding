@@ -71,13 +71,6 @@ from app.client_status import (
     status_hint,
     status_label,
 )
-from app.admin_chat import (
-    MSG_ADMIN_CHAT_TEST,
-    admin_chats_for_ui,
-    create_admin_chat_link_token,
-    send_to_chat,
-    unlink_admin_chat,
-)
 from app.booking_status_notify import (
     add_status_rule,
     delete_status_rule,
@@ -501,7 +494,6 @@ def _client_notifications_page(
     db: Session,
     error: str | None = None,
     info: str | None = None,
-    admin_link_code: str | None = None,
     memo_delete: dict | None = None,
     digit_field_errors: dict[str, str] | None = None,
     reply_digits_form: list[dict] | None = None,
@@ -527,7 +519,6 @@ def _client_notifications_page(
     var_ui = variables_for_ui(db)
     from app.care_memos import care_memos_for_ui
 
-    is_admin = current_user.role in (UserRole.ADMIN, UserRole.ADMIN_SUPER)
     return templates.TemplateResponse(
         "admin_client_notifications.html",
         _ctx(
@@ -538,9 +529,6 @@ def _client_notifications_page(
             status_rules=status_ui["rules"],
             status_free=status_ui["free_statuses"],
             services_marker=get_services_marker(db),
-            admin_chats=admin_chats_for_ui(db),
-            can_manage_admin_chat=is_admin,
-            admin_link_code=admin_link_code,
             studio_builtins=var_ui["builtins"],
             studio_custom=var_ui["custom"],
             template_palette=var_ui["palette"],
@@ -606,30 +594,8 @@ def admin_client_notifications(
         info = "Памятка сохранена."
     elif msg == "memo_deleted":
         info = "Памятка удалена."
-    elif msg == "admin_code":
-        info = "Код для чата админов создан (24 часа)."
-    elif msg == "admin_unlinked":
-        info = "Чат админов отключён."
-    elif msg == "admin_test_ok":
-        info = "Тестовое сообщение в чат админов отправлено."
-    elif err == "admin_forbidden":
-        error = "Привязка чата админов доступна только администратору."
-    elif err == "admin_test_fail":
-        error = "Не удалось отправить тест в чат админов."
-    elif err == "admin_missing":
-        error = "Чат админов для этого канала не подключён."
-    # произвольное сообщение из query (валидация)
-    if err and err not in (
-        "invalid",
-        "marker",
-        "missing",
-        "limit",
-        "admin_forbidden",
-        "admin_test_fail",
-        "admin_missing",
-    ) and error is None:
+    if err and err not in ("invalid", "marker", "missing", "limit") and error is None:
         error = err
-    admin_link_code = request.cookies.get("lb_admin_chat_code")
     memo_delete = None
     if memo_confirm:
         from app.care_memos import memo_delete_preview
@@ -641,68 +607,29 @@ def admin_client_notifications(
         db=db,
         error=error,
         info=info,
-        admin_link_code=admin_link_code,
         memo_delete=memo_delete,
     )
-    if admin_link_code:
-        resp.delete_cookie("lb_admin_chat_code", path="/")
     return resp
+
+
+@router.get("/mailings", response_class=HTMLResponse)
+def admin_client_mailings(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
+):
+    return templates.TemplateResponse(
+        "admin_client_mailings.html",
+        _ctx(request, current_user=current_user, help_page_id="clients_mailings"),
+    )
 
 
 @router.post("/notifications/admin-chat/code")
-def admin_client_notifications_admin_code(
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
-    db: Session = Depends(get_db),
-):
-    plain = create_admin_chat_link_token(db, created_by_user_id=current_user.id)
-    db.commit()
-    resp = RedirectResponse(url="/clients/notifications?msg=admin_code", status_code=303)
-    resp.set_cookie(
-        "lb_admin_chat_code",
-        plain,
-        max_age=15 * 60,
-        httponly=True,
-        samesite="lax",
-        path="/",
-    )
-    return resp
-
-
 @router.post("/notifications/admin-chat/unlink")
-async def admin_client_notifications_admin_unlink(
-    request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
-    db: Session = Depends(get_db),
-):
-    form = await request.form()
-    channel = str(form.get("channel") or "").strip().lower()
-    try:
-        unlink_admin_chat(db, channel, notify=True)
-        db.commit()
-    except Exception:
-        db.rollback()
-        return RedirectResponse(url="/clients/notifications?err=admin_missing", status_code=303)
-    return RedirectResponse(url="/clients/notifications?msg=admin_unlinked", status_code=303)
-
-
 @router.post("/notifications/admin-chat/test")
-async def admin_client_notifications_admin_test(
-    request: Request,
-    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER)),
-    db: Session = Depends(get_db),
+def admin_client_notifications_admin_chat_legacy(
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN, UserRole.ADMIN_SUPER, UserRole.MASTER)),
 ):
-    form = await request.form()
-    channel = str(form.get("channel") or "").strip().lower()
-    from app.admin_chat import get_admin_chat_target
-
-    row = get_admin_chat_target(db, channel)
-    if row is None:
-        return RedirectResponse(url="/clients/notifications?err=admin_missing", status_code=303)
-    try:
-        send_to_chat(channel, int(row.chat_id), MSG_ADMIN_CHAT_TEST)
-    except Exception:
-        return RedirectResponse(url="/clients/notifications?err=admin_test_fail", status_code=303)
-    return RedirectResponse(url="/clients/notifications?msg=admin_test_ok", status_code=303)
+    return RedirectResponse(url="/studio/notifications", status_code=303)
 
 
 @router.post("/notifications/save")

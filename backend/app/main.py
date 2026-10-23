@@ -137,6 +137,8 @@ from app.routes.max_webhook import router as max_webhook_router  # noqa: E402
 app.include_router(max_webhook_router)
 from app.routes.notification_outbox import router as notification_outbox_router  # noqa: E402
 app.include_router(notification_outbox_router)
+from app.routes.studio_notifications import router as studio_notifications_router  # noqa: E402
+app.include_router(studio_notifications_router)
 from app.routes.master_visit import router as master_visit_router  # noqa: E402
 app.include_router(master_visit_router)
 from app.routes.master_clients import router as master_clients_router  # noqa: E402

@@ -26,7 +26,7 @@ roles: [master]
 ## Основные разделы
 
 - [Моя карточка](/me) — каналы VK / Max / Telegram и типы уведомлений
-- [Клиенты](/clients), [Статистика клиентов](/clients/stats), [Уведомления и рассылки](/clients/notifications)
+- [Клиенты](/clients), [Статистика клиентов](/clients/stats), [Уведомления](/clients/notifications)
 - [Визиты](/visits), [Консультации](/consultations), [Брони](/bookings)
 - [Моя работа](/master/mywork), [Новый визит](/master/visit/new)
 - [Комплекты](/kits) — склад

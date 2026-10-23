@@ -9,7 +9,13 @@ from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.admin_chat import classify_admins_text, get_admin_chat_target, try_bind_admin_chat_from_text
+from app.admin_chat import (
+    CHAT_KIND_ADMIN,
+    CHAT_KIND_GENERAL,
+    classify_chat_link_text,
+    get_admin_chat_target,
+    try_bind_admin_chat_from_text,
+)
 from app.db.session import get_db
 from app.messenger_inbound import process_inbound_message
 from app.notifications import send_max
@@ -279,7 +285,9 @@ async def max_webhook(
             return JSONResponse({"ok": True})
 
         if update_type == "bot_removed" and chat_id is not None:
-            linked = get_admin_chat_target(db, CHANNEL_MAX)
+            linked = get_admin_chat_target(
+                db, CHANNEL_MAX, chat_kind=CHAT_KIND_ADMIN
+            ) or get_admin_chat_target(db, CHANNEL_MAX, chat_kind=CHAT_KIND_GENERAL)
             if linked is not None and int(linked.chat_id) == int(chat_id):
                 logger.info(
                     "max webhook bot_removed linked admin chat chat_id=%s title=%s",
@@ -290,9 +298,9 @@ async def max_webhook(
                 logger.info("max webhook bot_removed chat_id=%s title=%s", int(chat_id), title or "-")
             return JSONResponse({"ok": True})
 
-        # Группа/канал: /admins. В диалоге (chat_type=dialog) команду не привязываем.
-        # Если chat_type пустой, но текст — /admins и есть chat_id, тоже считаем группой.
-        admins_kind = classify_admins_text(text)[1] if text else "none"
+        # Группа/канал: /admins и /general. В диалоге (chat_type=dialog) команду не привязываем.
+        # Если chat_type пустой, но текст — команда и есть chat_id, тоже считаем группой.
+        admins_kind = classify_chat_link_text(text)[2] if text else "none"
         group_admins = _is_group_chat(chat_type) or (
             not chat_type and chat_id is not None and admins_kind != "none"
         )

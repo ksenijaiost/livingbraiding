@@ -24,6 +24,7 @@ from app.db.models import (
 from app.display_time import DEFAULT_DISPLAY_TIMEZONE, format_naive_utc_datetime, get_display_timezone
 from app.notifications import (
     _booking_kind_label,
+    _booking_master_names_csv,
     _ensure_booking_loaded,
     _service_label,
     booking_planned_master_user_ids,
@@ -294,6 +295,41 @@ def reminder_is_due(
     return True
 
 
+def _enqueue_chat_booking_reminders(
+    db: Session, booking: Booking, *, now: datetime
+) -> list[NotificationOutbox]:
+    from app.internal_notify_prefs import enqueue_pref_chats
+
+    tz_name = get_display_timezone(db)
+    names = _booking_master_names_csv(db, booking)
+    time_version = _booking_time_version(booking)
+    created: list[NotificationOutbox] = []
+    for minutes_before in DEFAULT_REMINDER_MINUTES:
+        if booking.planned_date is None or not reminder_is_due(
+            planned_date=booking.planned_date,
+            minutes_before=int(minutes_before),
+            now=now,
+        ):
+            continue
+        text = build_booking_reminder_message(
+            booking, minutes_before=int(minutes_before), tz_name=tz_name
+        )
+        text = f"{text}\nМастера: {names}"
+        created.extend(
+            enqueue_pref_chats(
+                db,
+                event_key="booking_reminder",
+                text=text,
+                event_type=EVENT_BOOKING_REMINDER,
+                dedupe_for=lambda kind, ch, mb=int(minutes_before), tv=time_version: (
+                    f"br_chat:{kind}:{int(booking.id)}:{ch}:{tv}:{mb}"
+                ),
+                booking_id=int(booking.id),
+            )
+        )
+    return created
+
+
 def enqueue_due_booking_reminders(
     db: Session,
     *,
@@ -303,7 +339,13 @@ def enqueue_due_booking_reminders(
     """Найти due-напоминания и поставить в outbox. Вызывается из воркера."""
     from app.notify_prefs import user_wants_booking_notifications
 
+    from app.internal_notify_prefs import wants_internal_notify
+
     now = now or utcnow_naive()
+    dm_on = wants_internal_notify(db, "booking_reminder", "dm")
+    chat_on = wants_internal_notify(db, "booking_reminder", "admin") or wants_internal_notify(
+        db, "booking_reminder", "general"
+    )
     max_horizon = timedelta(hours=MAX_REMINDER_HOURS)
     # planned в будущем, но не дальше макс. горизонта (+ небольшой запас под окно).
     upper = now + max_horizon + REMINDER_LATENESS_WINDOW
@@ -332,6 +374,12 @@ def enqueue_due_booking_reminders(
 
     for booking in bookings:
         stats["checked"] += 1
+        if chat_on:
+            chat_rows = _enqueue_chat_booking_reminders(db, booking, now=now)
+            if chat_rows:
+                stats["enqueued"] += len(chat_rows)
+        if not dm_on:
+            continue
         master_ids = booking_planned_master_user_ids(booking)
         if not master_ids:
             continue

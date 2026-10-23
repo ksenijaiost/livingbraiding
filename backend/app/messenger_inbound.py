@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.admin_chat import list_admin_chat_targets
 from app.booking_status_notify import EVENT_CLIENT_BOOKING_STATUS
 from app.client_booking_notify import EVENT_CLIENT_BOOKING_REMINDER
 from app.client_bot_replies import (
@@ -60,6 +59,7 @@ logger = logging.getLogger(__name__)
 
 EVENT_BOOKING_CLIENT_CANCEL_REQUEST = "booking_client_cancel_request"
 EVENT_BOOKING_CLIENT_RESCHEDULE_REQUEST = "booking_client_reschedule_request"
+EVENT_BOOKING_CLIENT_CONFIRMED = "booking_client_confirmed"
 EVENT_CLIENT_CONTACT_REQUEST = "client_contact_request"
 EVENT_CLIENT_BOT_REPLY = "client_bot_reply"
 
@@ -483,32 +483,31 @@ def _build_cancel_request_text(
     )
 
 
-def _enqueue_cancel_request_notices(
+def _enqueue_master_dms(
     db: Session,
     booking: Booking,
-    client: Client,
     *,
-    channel: str,
-    sender: Client | None = None,
+    text: str,
+    event_type: str,
+    dedupe_prefix: str,
 ) -> None:
-    text = _build_cancel_request_text(db, booking, client, channel, sender=sender or client)
-    # мастерам брони
     from app.booking_reminders import _user_channel_targets
 
-    master_ids = booking_planned_master_user_ids(booking)
-    for uid in master_ids:
+    for uid in booking_planned_master_user_ids(booking):
         user = db.get(User, uid)
         if user is None:
             continue
         for ch, target_id in _user_channel_targets(user):
-            key = f"bccr:{int(booking.id)}:{uid}:{ch.value}"
+            key = f"{dedupe_prefix}:{uid}:{ch.value}"
+            if len(key) > 200:
+                key = key[:200]
             if db.scalar(select(NotificationOutbox.id).where(NotificationOutbox.dedupe_key == key).limit(1)):
                 continue
             payload = {
                 "text": text,
                 "target_id": target_id,
                 "target_kind": "user",
-                "event_type": EVENT_BOOKING_CLIENT_CANCEL_REQUEST,
+                "event_type": event_type,
                 "booking_id": int(booking.id),
             }
             db.add(
@@ -518,7 +517,7 @@ def _enqueue_cancel_request_notices(
                     target_kind="user",
                     booking_id=int(booking.id),
                     channel=ch,
-                    event_type=EVENT_BOOKING_CLIENT_CANCEL_REQUEST,
+                    event_type=event_type,
                     payload_json=json.dumps(payload, ensure_ascii=False),
                     body=text,
                     status=NotificationOutboxStatus.PENDING,
@@ -527,38 +526,38 @@ def _enqueue_cancel_request_notices(
                     created_at=utcnow_naive(),
                 )
             )
-    # чаты админов
-    for ch, row in list_admin_chat_targets(db).items():
-        if row is None:
-            continue
-        key = f"bccr_admin:{int(booking.id)}:{ch}"
-        if db.scalar(select(NotificationOutbox.id).where(NotificationOutbox.dedupe_key == key).limit(1)):
-            continue
-        channel_enum = NotificationChannel(ch)
-        payload = {
-            "text": text,
-            "target_id": int(row.chat_id),
-            "target_kind": "admin_chat",
-            "event_type": EVENT_BOOKING_CLIENT_CANCEL_REQUEST,
-            "booking_id": int(booking.id),
-        }
-        db.add(
-            NotificationOutbox(
-                user_id=None,
-                client_id=None,
-                target_kind="admin_chat",
-                booking_id=int(booking.id),
-                channel=channel_enum,
-                event_type=EVENT_BOOKING_CLIENT_CANCEL_REQUEST,
-                payload_json=json.dumps(payload, ensure_ascii=False),
-                body=text,
-                status=NotificationOutboxStatus.PENDING,
-                dedupe_key=key,
-                attempt_count=0,
-                created_at=utcnow_naive(),
-            )
+
+
+def _enqueue_cancel_request_notices(
+    db: Session,
+    booking: Booking,
+    client: Client,
+    *,
+    channel: str,
+    sender: Client | None = None,
+) -> None:
+    from app.internal_notify_prefs import enqueue_pref_chats, wants_internal_notify
+
+    text = _build_cancel_request_text(db, booking, client, channel, sender=sender or client)
+    if wants_internal_notify(db, "client_cancel", "dm"):
+        _enqueue_master_dms(
+            db,
+            booking,
+            text=text,
+            event_type=EVENT_BOOKING_CLIENT_CANCEL_REQUEST,
+            dedupe_prefix=f"bccr:{int(booking.id)}",
         )
-    db.flush()
+    enqueue_pref_chats(
+        db,
+        event_key="client_cancel",
+        text=text,
+        event_type=EVENT_BOOKING_CLIENT_CANCEL_REQUEST,
+        dedupe_for=lambda kind, ch: (
+            f"bccr_admin:{int(booking.id)}:{ch}" if kind == "admin" else f"bccr_general:{int(booking.id)}:{ch}"
+        ),
+        booking_id=int(booking.id),
+        client_id=None,
+    )
 
 
 def _booking_facts(db: Session, booking: Booking, client: Client) -> str:
@@ -592,51 +591,6 @@ def _load_booking_graph(db: Session, booking: Booking) -> Booking:
     return loaded or booking
 
 
-def _enqueue_admin_chats(
-    db: Session,
-    *,
-    text: str,
-    event_type: str,
-    dedupe_prefix: str,
-    booking_id: int | None,
-    client_id: int | None,
-) -> None:
-    for ch, row in list_admin_chat_targets(db).items():
-        if row is None:
-            continue
-        key = f"{dedupe_prefix}:{ch}"
-        if len(key) > 200:
-            key = key[:200]
-        if db.scalar(select(NotificationOutbox.id).where(NotificationOutbox.dedupe_key == key).limit(1)):
-            continue
-        channel_enum = NotificationChannel(ch)
-        payload = {
-            "text": text,
-            "target_id": int(row.chat_id),
-            "target_kind": "admin_chat",
-            "event_type": event_type,
-            "booking_id": int(booking_id) if booking_id else None,
-            "client_id": int(client_id) if client_id else None,
-        }
-        db.add(
-            NotificationOutbox(
-                user_id=None,
-                client_id=int(client_id) if client_id else None,
-                target_kind="admin_chat",
-                booking_id=int(booking_id) if booking_id else None,
-                channel=channel_enum,
-                event_type=event_type,
-                payload_json=json.dumps(payload, ensure_ascii=False),
-                body=text,
-                status=NotificationOutboxStatus.PENDING,
-                dedupe_key=key,
-                attempt_count=0,
-                created_at=utcnow_naive(),
-            )
-        )
-    db.flush()
-
-
 def _enqueue_reschedule_admin(
     db: Session, booking: Booking, client: Client, *, channel: str, sender: Client | None = None
 ) -> None:
@@ -652,13 +606,30 @@ def _enqueue_reschedule_admin(
         f"Канал ответа: {via}"
         f"{_contact_reply_suffix(who, booking)}"
     )
-    _enqueue_admin_chats(
+    from app.internal_notify_prefs import enqueue_pref_chats, wants_internal_notify
+
+    stamp = (
+        booking.client_reschedule_requested_at.strftime("%Y%m%d%H%M%S%f")
+        if booking.client_reschedule_requested_at
+        else "0"
+    )
+    if wants_internal_notify(db, "client_reschedule", "dm"):
+        _enqueue_master_dms(
+            db,
+            booking,
+            text=text,
+            event_type=EVENT_BOOKING_CLIENT_RESCHEDULE_REQUEST,
+            dedupe_prefix=f"bcrs_dm:{int(booking.id)}:{stamp}",
+        )
+    enqueue_pref_chats(
         db,
+        event_key="client_reschedule",
         text=text,
         event_type=EVENT_BOOKING_CLIENT_RESCHEDULE_REQUEST,
-        dedupe_prefix=(
-            f"bcrs_admin:{int(booking.id)}:"
-            f"{booking.client_reschedule_requested_at.strftime('%Y%m%d%H%M%S%f') if booking.client_reschedule_requested_at else '0'}"
+        dedupe_for=lambda kind, ch, _stamp=stamp: (
+            f"bcrs_admin:{int(booking.id)}:{_stamp}:{ch}"
+            if kind == "admin"
+            else f"bcrs_general:{int(booking.id)}:{_stamp}:{ch}"
         ),
         booking_id=int(booking.id),
         client_id=int(client.id),
@@ -677,13 +648,51 @@ def _enqueue_contact_admin(db: Session, client: Client, *, channel: str, messeng
         dialog = vk_community_dialog_url(int(client.vk_user_id))
         if dialog:
             lines.append(f"Диалог VK: {dialog}")
+    from app.internal_notify_prefs import enqueue_pref_chats
+
     stamp = utcnow_naive().strftime("%Y%m%d%H%M%S%f")
-    _enqueue_admin_chats(
+    text = "\n".join(lines)
+    enqueue_pref_chats(
         db,
-        text="\n".join(lines),
+        event_key="client_contact",
+        text=text,
         event_type=EVENT_CLIENT_CONTACT_REQUEST,
-        dedupe_prefix=f"bccnt:{int(client.id)}:{int(messenger_id)}:{stamp}",
+        dedupe_for=lambda kind, ch: f"bccnt:{kind}:{int(client.id)}:{int(messenger_id)}:{stamp}:{ch}",
         booking_id=None,
+        client_id=int(client.id),
+    )
+
+
+def _enqueue_confirm_notices(
+    db: Session, booking: Booking, client: Client, *, channel: str, sender: Client | None = None
+) -> None:
+    from app.internal_notify_prefs import enqueue_pref_chats, wants_internal_notify
+
+    via = _channel_label(channel)
+    who = sender or client
+    booking_client = booking.client if booking.client is not None else db.get(Client, int(booking.client_id))
+    facts_client = booking_client or client
+    text = (
+        "Клиентка подтвердила запись\n"
+        + _booking_facts(db, booking, facts_client)
+        + f"\nКанал ответа: {via}"
+        + _contact_reply_suffix(who, booking)
+    )
+    if wants_internal_notify(db, "client_confirm", "dm"):
+        _enqueue_master_dms(
+            db,
+            booking,
+            text=text,
+            event_type=EVENT_BOOKING_CLIENT_CONFIRMED,
+            dedupe_prefix=f"bccf:{int(booking.id)}",
+        )
+    enqueue_pref_chats(
+        db,
+        event_key="client_confirm",
+        text=text,
+        event_type=EVENT_BOOKING_CLIENT_CONFIRMED,
+        dedupe_for=lambda kind, ch: f"bccf_{kind}:{int(booking.id)}:{ch}",
+        booking_id=int(booking.id),
         client_id=int(client.id),
     )
 
@@ -915,6 +924,10 @@ def handle_client_text(
         booking.client_confirmed_at = now
         booking.client_confirmed_via = ch
         db.flush()
+        try:
+            _enqueue_confirm_notices(db, booking, client, channel=ch, sender=client)
+        except Exception:
+            logger.exception("messenger_inbound: confirm notify enqueue failed booking=%s", booking.id)
         return _log_client_inbound(
             db,
             client_id=int(client.id),

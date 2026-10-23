@@ -131,6 +131,10 @@ def notify_staff_assigned_on_create(
         unique_ids = sorted({int(x) for x in user_ids if int(x) > 0})
         if not unique_ids:
             return []
+        from app.internal_notify_prefs import STAFF_ENTITY_PREF, enqueue_pref_chats, wants_internal_notify
+
+        pref_key = STAFF_ENTITY_PREF.get(entity_type)
+        dm_on = True if pref_key is None else wants_internal_notify(db, pref_key, "dm")
         tz_name = get_display_timezone(db)
         text = build_staff_assignment_message(
             entity_type=entity_type,
@@ -142,78 +146,110 @@ def notify_staff_assigned_on_create(
             tz_name=tz_name,
         )
         created: list[NotificationOutbox] = []
+        names: list[str] = []
         for uid in unique_ids:
             user = db.get(User, uid)
-            if user is None:
-                continue
-            targets = _user_channel_targets(user)
-            if not targets:
-                continue
-            for channel, target_id in targets:
-                if not user_wants_staff_assignment(user, entity_type, channel):
-                    continue
-                key = _dedupe_key(entity_type, int(entity_id), uid, channel)
-                exists = db.scalar(
-                    select(NotificationOutbox.id).where(NotificationOutbox.dedupe_key == key).limit(1)
+            if user is not None:
+                names.append((user.display_name or user.username or str(uid)).strip() or str(uid))
+        if dm_on:
+            created.extend(
+                _enqueue_staff_dms(
+                    db,
+                    entity_type=entity_type,
+                    entity_id=int(entity_id),
+                    unique_ids=unique_ids,
+                    text=text,
                 )
-                if exists is not None:
-                    continue
-                payload = {
-                    "text": text,
-                    "target_id": target_id,
-                    "event_type": EVENT_STAFF_ASSIGNMENT_CREATED,
-                    "entity_type": entity_type,
-                    "entity_id": int(entity_id),
-                }
-                row = NotificationOutbox(
-                    user_id=uid,
-                    booking_id=None,
-                    channel=channel,
-                    event_type=EVENT_STAFF_ASSIGNMENT_CREATED,
-                    payload_json=json.dumps(payload, ensure_ascii=False),
-                    status=NotificationOutboxStatus.PENDING,
-                    error=None,
-                    dedupe_key=key,
-                    attempt_count=0,
-                    created_at=utcnow_naive(),
-                    sent_at=None,
-                )
-                try:
-                    with db.begin_nested():
-                        db.add(row)
-                        db.flush()
-                except IntegrityError:
-                    continue
-                created.append(row)
-        if not created:
-            return []
-        db.commit()
-        ids = [int(r.id) for r in created if r.id is not None]
-        try:
-            process_outbox(db, limit=max(len(ids), 1), only_ids=ids)
-            db.commit()
-        except Exception:
-            logger.exception(
-                "staff assignment notify: process_outbox failed entity=%s id=%s",
-                entity_type,
-                entity_id,
             )
+        if pref_key and (
+            wants_internal_notify(db, pref_key, "admin") or wants_internal_notify(db, pref_key, "general")
+        ):
+            chat_text = text + "\nСотрудники: " + (", ".join(names) or "—")
+            created.extend(
+                enqueue_pref_chats(
+                    db,
+                    event_key=pref_key,
+                    text=chat_text,
+                    event_type=EVENT_STAFF_ASSIGNMENT_CREATED,
+                    dedupe_for=lambda kind, ch: f"{entity_type}_chat:{kind}:{int(entity_id)}:{ch}",
+                    booking_id=None,
+                    client_id=None,
+                )
+            )
+        if created:
+            db.commit()
             try:
-                db.rollback()
+                process_outbox(db, limit=max(len(created), 1), only_ids=[int(r.id) for r in created if r.id])
+                db.commit()
             except Exception:
-                pass
+                logger.exception("staff assignment notify: process_outbox failed")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
         return created
     except Exception:
-        logger.exception(
-            "staff assignment notify: enqueue failed entity=%s id=%s",
-            entity_type,
-            entity_id,
-        )
+        logger.exception("staff assignment notify failed entity=%s id=%s", entity_type, entity_id)
         try:
             db.rollback()
         except Exception:
             pass
         return []
+
+
+def _enqueue_staff_dms(
+    db: Session,
+    *,
+    entity_type: str,
+    entity_id: int,
+    unique_ids: Sequence[int],
+    text: str,
+) -> list[NotificationOutbox]:
+    created: list[NotificationOutbox] = []
+    for uid in unique_ids:
+        user = db.get(User, uid)
+        if user is None:
+            continue
+        targets = _user_channel_targets(user)
+        if not targets:
+            continue
+        for channel, target_id in targets:
+            if not user_wants_staff_assignment(user, entity_type, channel):
+                continue
+            key = _dedupe_key(entity_type, int(entity_id), uid, channel)
+            exists = db.scalar(
+                select(NotificationOutbox.id).where(NotificationOutbox.dedupe_key == key).limit(1)
+            )
+            if exists is not None:
+                continue
+            payload = {
+                "text": text,
+                "target_id": target_id,
+                "event_type": EVENT_STAFF_ASSIGNMENT_CREATED,
+                "entity_type": entity_type,
+                "entity_id": int(entity_id),
+            }
+            row = NotificationOutbox(
+                user_id=uid,
+                booking_id=None,
+                channel=channel,
+                event_type=EVENT_STAFF_ASSIGNMENT_CREATED,
+                payload_json=json.dumps(payload, ensure_ascii=False),
+                status=NotificationOutboxStatus.PENDING,
+                error=None,
+                dedupe_key=key,
+                attempt_count=0,
+                created_at=utcnow_naive(),
+                sent_at=None,
+            )
+            try:
+                with db.begin_nested():
+                    db.add(row)
+                    db.flush()
+            except IntegrityError:
+                continue
+            created.append(row)
+    return created
 
 
 def collect_visit_participant_user_ids(db: Session, visit_id: int) -> list[int]:

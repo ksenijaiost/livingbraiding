@@ -122,7 +122,7 @@ async def vk_webhook(request: Request, db: Session = Depends(get_db)) -> Respons
     try:
         if event_type == "message_new":
             from_id, text, ref, pl, peer_id = _extract_message_fields(payload.get("object"))
-            # Беседа админов
+            # Беседа: /admins или /general
             if peer_id is not None and peer_id >= VK_CHAT_PEER_OFFSET:
                 reply = try_bind_admin_chat_from_text(
                     db, channel=CHANNEL_VK, chat_id=int(peer_id), text=text, title=None
