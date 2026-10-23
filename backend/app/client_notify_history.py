@@ -192,6 +192,9 @@ def _status_label(row: NotificationOutbox, tz_name: str) -> str:
         return f"отправлено ({when})" if when else "отправлено"
     if status == NotificationOutboxStatus.FAILED.value:
         err = (row.error or "").strip() or "без текста"
+        event = str(row.event_type or "")
+        if event in {"client_route_video_error", "client_care_memo_error"}:
+            return f"ошибка: {err}"
         return f"ошибка: {err} (попыток: {int(row.attempt_count or 0)})"
     if status == NotificationOutboxStatus.CANCELLED.value:
         return "отменено"

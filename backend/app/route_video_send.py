@@ -26,8 +26,8 @@ ROUTE_VIDEO_KEY = "route_video"
 EVENT_ROUTE_VIDEO_ERROR = "client_route_video_error"
 ROUTE_VIDEO_ERROR_TEXT = "Видео „Как нас найти“ — ошибка"
 _ROUTE_VIDEO_RE = re.compile(r"\{\{\s*route_video\s*\}\}")
-_MAX_NOT_READY_TRIES = 5
-_NOT_READY_PAUSE_SEC = 1.0
+_MAX_NOT_READY_TRIES = 8
+_NOT_READY_PAUSE_SEC = 1.5
 
 
 def template_wants_route_video(template: str | None) -> bool:
@@ -213,14 +213,20 @@ def _max_video_token(db: Session, row: StudioTemplateVariable) -> str:
     meta = _read_json(
         f"{base}/uploads?type=video",
         method="POST",
+        data=b"",
         headers={"Authorization": token},
         use_max_ca=True,
     )
+    meta_token = _find_token(meta)
     url = meta.get("url") if isinstance(meta, dict) else None
     if not isinstance(url, str) or not url:
+        if meta_token:
+            row.max_video_token = meta_token
+            db.flush()
+            return meta_token
         raise RuntimeError("Max не вернул адрес загрузки видео")
-    uploaded = _post_file(url, "data", row, use_max_ca=True)
-    got = _find_token(uploaded)
+    uploaded_token = _post_video_file(url, row)
+    got = uploaded_token or meta_token
     if not got:
         raise RuntimeError("Max не вернул token видео")
     row.max_video_token = got
@@ -289,6 +295,58 @@ def _telegram_send_video(db: Session, chat_id: int, row: StudioTemplateVariable)
     if file_id:
         row.telegram_video_file_id = file_id
         db.flush()
+
+
+def _post_video_file(url: str, row: StudioTemplateVariable) -> str:
+    """POST файла видео. Ответ загрузчика может быть не JSON — тогда токен берут из meta."""
+    import httpx
+
+    from app.max_http import max_request
+
+    raw, content_type = _multipart(
+        {},
+        "data",
+        row.file_name or "route.mp4",
+        _video_bytes(row),
+        _video_mime(row),
+    )
+    try:
+        status, raw_bytes = max_request(
+            "POST",
+            url,
+            content=raw,
+            headers={"Content-Type": content_type},
+            timeout=20,
+        )
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"сеть: {exc}") from exc
+    if status >= 400:
+        detail = raw_bytes.decode("utf-8", errors="replace")[:300]
+        raise RuntimeError(f"HTTP {status}: {detail}")
+    text = raw_bytes.decode("utf-8", errors="replace")
+    headers = getattr(max_request, "last_headers", None) or {}
+    return _token_from_upload_body(text, headers)
+
+
+def _token_from_upload_body(text: str, headers: dict) -> str:
+    parsed: Any = None
+    if text.strip():
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+    if parsed is not None:
+        found = _find_token(parsed)
+        if found:
+            return found
+    if isinstance(headers, dict):
+        for key, value in headers.items():
+            if str(key).lower() in {"token", "x-token", "x-upload-token"} and str(value).strip():
+                return str(value).strip()
+    match = re.search(r"""["']?token["']?\s*[:=]\s*["']([^"'<\s]+)""", text, re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return ""
 
 
 def _post_file(
