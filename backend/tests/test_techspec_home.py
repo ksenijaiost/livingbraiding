@@ -27,6 +27,8 @@ def test_media_backup_stats_counts_only_stored_files(tmp_path, monkeypatch) -> N
     assert stats["file_count"] == 2
     assert stats["total_bytes"] == 300
     assert stats["skipped_other_files"] == 2
+    assert stats["part_count"] == 1
+    assert stats["parts"][0]["file_count"] == 2
     assert Path(str(stats["media_root"])).resolve() == root.resolve()
 
 
@@ -72,6 +74,8 @@ def test_collect_techspec_home_stats_counts(memory_db) -> None:
         assert isinstance(counts[key], int)
         assert counts[key] >= 0
     assert "total_size_human" in stats["media"]
+    assert "part_max_human" in stats["media"]
+    assert stats["media"]["part_count"] >= 1
 
 
 def test_collect_db_table_stats_has_users_table(memory_db) -> None:

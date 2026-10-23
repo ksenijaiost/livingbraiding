@@ -16,6 +16,7 @@ from app.main import app
 from app.media_store import (
     MAX_BYTES,
     MEDIA_MISSING_REPORT_NAME,
+    MediaBackupEntry,
     build_media_manifest,
     filter_entries_missing_from_manifest,
     is_stored_media_backup_filename,
@@ -24,6 +25,7 @@ from app.media_store import (
     media_refs_in_text,
     missing_referenced_media_files,
     parse_media_manifest,
+    split_media_entries_into_parts,
 )
 from app.routes.techspec_media import _MAX_RESTORE_UNCOMPRESSED
 
@@ -333,5 +335,171 @@ def test_restore_accepts_mp4_and_skips_missing_report(media_root: Path) -> None:
         assert body["skipped"] == 1
         assert (media_root / video).read_bytes() == b"video-bytes"
         assert not (media_root / MEDIA_MISSING_REPORT_NAME).exists()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def _entry(name: str, size: int) -> MediaBackupEntry:
+    return MediaBackupEntry(name=name, size=size, mtime=0, path=Path(name))
+
+
+def test_split_media_entries_into_parts_respects_limit() -> None:
+    parts = split_media_entries_into_parts(
+        [_entry("a", 10), _entry("b", 10), _entry("c", 10), _entry("d", 25)],
+        max_part_bytes=25,
+    )
+    assert [[item.name for item in part] for part in parts] == [["a", "b"], ["c"], ["d"]]
+
+    huge = split_media_entries_into_parts([_entry("big", 100), _entry("small", 5)], max_part_bytes=20)
+    assert [[item.name for item in part] for part in huge] == [["big"], ["small"]]
+    assert split_media_entries_into_parts([], max_part_bytes=10) == [[]]
+
+
+def _zip_payload(content: bytes) -> tuple[set[str], list[zipfile.ZipInfo]]:
+    with zipfile.ZipFile(io.BytesIO(content), "r") as zf:
+        return set(zf.namelist()), list(zf.infolist())
+
+
+def test_get_backup_zip_parts_cover_files_and_report_is_in_first(media_root: Path, memory_db, monkeypatch) -> None:
+    monkeypatch.setattr("app.media_store.MEDIA_BACKUP_PART_MAX_BYTES", 8)
+    a = media_root / _media_name("a", ".jpg")
+    b = media_root / _media_name("b", ".jpg")
+    c = media_root / _media_name("c", ".jpg")
+    a.write_bytes(b"1234")
+    b.write_bytes(b"5678")
+    c.write_bytes(b"90ab")
+    absent = _media_name("9", ".mp4")
+    memory_db.add(
+        StudioTemplateVariable(
+            key="route_video",
+            kind="video",
+            is_builtin=True,
+            file_path=absent,
+        )
+    )
+    memory_db.commit()
+
+    app.dependency_overrides[get_current_user] = _techspec_user
+    _use_db(memory_db)
+    try:
+        client = TestClient(app)
+        first = client.get("/techspec/media/backup.zip?part=1")
+        second = client.get("/techspec/media/backup.zip?part=2")
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.headers["x-lb-media-part"] == "1"
+        assert second.headers["x-lb-media-part"] == "2"
+        assert first.headers["x-lb-media-total-parts"] == "2"
+        assert second.headers["x-lb-media-total-parts"] == "2"
+        assert "part1-of-2" in first.headers["content-disposition"]
+        assert "part2-of-2" in second.headers["content-disposition"]
+
+        names1, infos1 = _zip_payload(first.content)
+        names2, infos2 = _zip_payload(second.content)
+        assert all(info.compress_type == zipfile.ZIP_STORED for info in infos1 + infos2)
+        assert MEDIA_MISSING_REPORT_NAME in names1
+        assert MEDIA_MISSING_REPORT_NAME not in names2
+        files1 = names1 - {MEDIA_MISSING_REPORT_NAME}
+        assert files1.isdisjoint(names2)
+        assert files1 | names2 == {a.name, b.name, c.name}
+        with zipfile.ZipFile(io.BytesIO(first.content), "r") as zf:
+            assert absent in zf.read(MEDIA_MISSING_REPORT_NAME).decode("utf-8")
+
+        missing_part = client.get("/techspec/media/backup.zip?part=3")
+        assert missing_part.status_code == 404
+        assert client.get("/techspec/media/backup.zip?part=0").status_code == 404
+
+        whole = client.get("/techspec/media/backup.zip")
+        assert whole.status_code == 200
+        assert "x-lb-media-part" not in whole.headers
+        whole_names, _infos = _zip_payload(whole.content)
+        assert whole_names == {a.name, b.name, c.name, MEDIA_MISSING_REPORT_NAME}
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_post_backup_delta_parts(media_root: Path, memory_db, monkeypatch) -> None:
+    monkeypatch.setattr("app.media_store.MEDIA_BACKUP_PART_MAX_BYTES", 8)
+    old = media_root / _media_name("a", ".jpg")
+    b = media_root / _media_name("b", ".jpg")
+    c = media_root / _media_name("c", ".jpg")
+    d = media_root / _media_name("d", ".jpg")
+    for path, payload in ((old, b"old1"), (b, b"newb"), (c, b"newc"), (d, b"newd")):
+        path.write_bytes(payload)
+    stale = {"files": [{"name": old.name, "size": 4, "mtime": 1}]}
+    absent = _media_name("9", ".mp4")
+    memory_db.add(
+        StudioTemplateVariable(
+            key="route_video",
+            kind="video",
+            is_builtin=True,
+            file_path=absent,
+        )
+    )
+    memory_db.commit()
+
+    app.dependency_overrides[get_current_user] = _techspec_user
+    _use_db(memory_db)
+    try:
+        client = TestClient(app)
+        files = {"manifest": ("manifest.json", json.dumps(stale), "application/json")}
+        first = client.post("/techspec/media/backup.zip?part=1", files=files)
+        second = client.post("/techspec/media/backup.zip?part=2", files=files)
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.headers["x-lb-media-part"] == "1"
+        assert second.headers["x-lb-media-part"] == "2"
+        assert first.headers["x-lb-media-total-parts"] == "2"
+        assert first.headers["x-lb-media-new-files"] == "3"
+        assert int(first.headers["x-lb-media-new-bytes"]) == 12
+        names1, _ = _zip_payload(first.content)
+        names2, _ = _zip_payload(second.content)
+        assert MEDIA_MISSING_REPORT_NAME in names1
+        assert MEDIA_MISSING_REPORT_NAME not in names2
+        files1 = names1 - {MEDIA_MISSING_REPORT_NAME}
+        assert files1.isdisjoint(names2)
+        assert files1 | names2 == {b.name, c.name, d.name}
+        assert client.post("/techspec/media/backup.zip?part=3", files=files).status_code == 404
+
+        implicit = client.post("/techspec/media/backup.zip", files=files)
+        assert implicit.status_code == 200
+        assert implicit.headers["x-lb-media-part"] == "1"
+        assert implicit.headers["x-lb-media-total-parts"] == "2"
+        implicit_names, _ = _zip_payload(implicit.content)
+        assert implicit_names == names1
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_restore_parts_in_sequence_restores_full_set(media_root: Path, memory_db, monkeypatch) -> None:
+    monkeypatch.setattr("app.media_store.MEDIA_BACKUP_PART_MAX_BYTES", 8)
+    a = media_root / _media_name("a", ".jpg")
+    b = media_root / _media_name("b", ".jpg")
+    c = media_root / _media_name("c", ".jpg")
+    a.write_bytes(b"1234")
+    b.write_bytes(b"5678")
+    c.write_bytes(b"90ab")
+
+    app.dependency_overrides[get_current_user] = _techspec_user
+    _use_db(memory_db)
+    try:
+        client = TestClient(app)
+        part1 = client.get("/techspec/media/backup.zip?part=1").content
+        part2 = client.get("/techspec/media/backup.zip?part=2").content
+        for path in (a, b, c):
+            path.unlink()
+
+        restored = 0
+        for index, content in enumerate((part1, part2), start=1):
+            res = client.post(
+                "/techspec/media/restore",
+                files={"archive": (f"lb-media-backup-part{index}.zip", content, "application/zip")},
+            )
+            assert res.status_code == 200
+            restored += int(res.json()["restored"])
+        assert restored == 3
+        assert a.read_bytes() == b"1234"
+        assert b.read_bytes() == b"5678"
+        assert c.read_bytes() == b"90ab"
     finally:
         app.dependency_overrides.clear()

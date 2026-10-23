@@ -30,11 +30,11 @@ from app.media_store import (
     filter_entries_missing_from_manifest,
     is_stored_media_backup_filename,
     iter_media_backup_entries,
-    iter_media_backup_paths,
     media_backup_arcname,
     media_root_dir,
     missing_referenced_media_files,
     parse_media_manifest,
+    split_media_entries_into_parts,
 )
 
 router = APIRouter(prefix="/techspec/media", tags=["techspec-media"])
@@ -116,7 +116,8 @@ def _build_backup_zip(paths: list[Path], missing_report: str | None = None) -> s
     fd, tmp_path = tempfile.mkstemp(prefix="lb-media-", suffix=".zip")
     os.close(fd)
     try:
-        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        # JPG/PNG/WEBP и MP4/MOV уже сжаты: повторный deflate только грузит CPU.
+        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_STORED) as zf:
             for p in paths:
                 zf.write(p, arcname=media_backup_arcname(media_root_dir(), p))
             if missing_report:
@@ -129,6 +130,34 @@ def _build_backup_zip(paths: list[Path], missing_report: str | None = None) -> s
 
 def _estimate_zip_bytes(entries: list[MediaBackupEntry]) -> int:
     return sum(e.size for e in entries)
+
+
+def _backup_part_filename(prefix: str, part: int, total: int) -> str:
+    day = date.today().isoformat()
+    if total <= 1:
+        return f"{prefix}-{day}.zip"
+    return f"{prefix}-{day}-part{part}-of-{total}.zip"
+
+
+def _part_response(
+    tmp_path: str,
+    fname: str,
+    *,
+    part: int | None,
+    total: int,
+    extra_headers: dict[str, str] | None = None,
+) -> FileResponse:
+    headers = dict(extra_headers or {})
+    if part is not None:
+        headers["X-LB-Media-Part"] = str(part)
+        headers["X-LB-Media-Total-Parts"] = str(total)
+    return FileResponse(
+        tmp_path,
+        filename=fname,
+        media_type="application/zip",
+        headers=headers,
+        background=BackgroundTask(_unlink_quiet, tmp_path),
+    )
 
 
 @router.get("/manifest.json")
@@ -152,27 +181,35 @@ def techspec_media_manifest(
 def techspec_media_backup_zip_get(
     current_user: Annotated[AuthUser, Depends(require_techspec_user())],
     db: Annotated[Session, Depends(get_db)],
+    part: int | None = None,
 ):
-    """Скачать архив загрузок: фото, видео, памятки и вложения из каталога."""
+    """Скачать архив загрузок целиком или одну часть около 300 МБ."""
     root = media_root_dir().resolve()
     root.mkdir(parents=True, exist_ok=True)
-    paths = iter_media_backup_paths(root)
-    missing = missing_referenced_media_files(db, root)
-    report = format_missing_media_report(missing, get_display_timezone(db)) if missing else None
-    tmp_path = _build_backup_zip(paths, report)
-    fname = f"lb-media-backup-{date.today().isoformat()}.zip"
-    return FileResponse(
-        tmp_path,
-        filename=fname,
-        media_type="application/zip",
-        background=BackgroundTask(_unlink_quiet, tmp_path),
-    )
+    entries = iter_media_backup_entries(root)
+    chunks = split_media_entries_into_parts(entries)
+    absent = missing_referenced_media_files(db, root)
+    report = format_missing_media_report(absent, get_display_timezone(db)) if absent else None
+    if part is None:
+        paths = [e.path for e in entries]
+        tmp_path = _build_backup_zip(paths, report)
+        fname = _backup_part_filename("lb-media-backup", 1, 1)
+        return _part_response(tmp_path, fname, part=None, total=len(chunks))
+
+    if part < 1 or part > len(chunks):
+        raise HTTPException(status_code=404, detail="Часть архива не найдена.")
+    chunk = chunks[part - 1]
+    paths = [e.path for e in chunk]
+    tmp_path = _build_backup_zip(paths, report if part == 1 else None)
+    fname = _backup_part_filename("lb-media-backup", part, len(chunks))
+    return _part_response(tmp_path, fname, part=part, total=len(chunks))
 
 
 @router.post("/backup.zip")
 async def techspec_media_backup_zip_post(
     current_user: Annotated[AuthUser, Depends(require_techspec_user())],
     db: Annotated[Session, Depends(get_db)],
+    part: int | None = None,
     manifest: UploadFile = File(..., description="Сохранённый manifest.json — в архив попадут только новые файлы"),
 ):
     """Инкрементальный бэкап: zip только файлов, которых нет в загруженном манифесте."""
@@ -209,8 +246,9 @@ async def techspec_media_backup_zip_post(
             }
         )
 
+    chunks = split_media_entries_into_parts(missing)
     est_bytes = _estimate_zip_bytes(missing)
-    if est_bytes > _MAX_UPLOAD_ZIP:
+    if part is None and len(chunks) == 1 and est_bytes > _MAX_UPLOAD_ZIP:
         raise HTTPException(
             status_code=400,
             detail=(
@@ -218,20 +256,26 @@ async def techspec_media_backup_zip_post(
                 "Скачайте полный backup.zip или обновите манифест после промежуточной синхронизации."
             ),
         )
+    serve_part = 1 if part is None else part
+    if part is not None and (part < 1 or part > len(chunks)):
+        raise HTTPException(status_code=404, detail="Часть архива не найдена.")
+    # Без ?part и с несколькими томами отдаём первую часть: клиент докачает 2..N.
+    expose_part = part is not None or len(chunks) > 1
 
-    paths = [e.path for e in missing]
-    report = format_missing_media_report(absent, get_display_timezone(db)) if absent else None
+    chunk = chunks[serve_part - 1]
+    paths = [e.path for e in chunk]
+    report = format_missing_media_report(absent, get_display_timezone(db)) if absent and serve_part == 1 else None
     tmp_path = _build_backup_zip(paths, report)
-    fname = f"lb-media-delta-{date.today().isoformat()}.zip"
-    return FileResponse(
+    fname = _backup_part_filename("lb-media-delta", serve_part, len(chunks))
+    return _part_response(
         tmp_path,
-        filename=fname,
-        media_type="application/zip",
-        headers={
+        fname,
+        part=serve_part if expose_part else None,
+        total=len(chunks),
+        extra_headers={
             "X-LB-Media-New-Files": str(len(missing)),
             "X-LB-Media-New-Bytes": str(est_bytes),
         },
-        background=BackgroundTask(_unlink_quiet, tmp_path),
     )
 
 

@@ -56,6 +56,8 @@ _BACKUP_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".webm
 CARE_MEMO_BACKUP_DIR = "care_memos"
 # Отчёт «ссылка в БД есть, файла на диске нет» — в корне zip; restore его пропускает.
 MEDIA_MISSING_REPORT_NAME = "lb-media-missing.txt"
+# Одна часть полного или дельта-архива. Крупный файл не режется и уходит своей частью.
+MEDIA_BACKUP_PART_MAX_BYTES = int(os.environ.get("LB_MEDIA_BACKUP_PART_MAX_BYTES", str(300 * 1024 * 1024)))
 
 
 def is_stored_media_backup_filename(name: str) -> bool:
@@ -102,6 +104,33 @@ def iter_media_backup_entries(root: Path) -> list[MediaBackupEntry]:
             )
         )
     return out
+
+
+def split_media_entries_into_parts(
+    entries: list[MediaBackupEntry],
+    max_part_bytes: int | None = None,
+) -> list[list[MediaBackupEntry]]:
+    """Разбить уже отсортированный список файлов на части около max_part_bytes.
+
+    Пустой список даёт одну пустую часть. Файл крупнее лимита не теряется:
+    он открывает свою часть, если текущая ещё пуста.
+    """
+    limit = MEDIA_BACKUP_PART_MAX_BYTES if max_part_bytes is None else int(max_part_bytes)
+    if not entries:
+        return [[]]
+    chunks: list[list[MediaBackupEntry]] = []
+    current: list[MediaBackupEntry] = []
+    current_bytes = 0
+    for entry in entries:
+        if current and current_bytes + entry.size > limit:
+            chunks.append(current)
+            current = []
+            current_bytes = 0
+        current.append(entry)
+        current_bytes += entry.size
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def build_media_manifest(root: Path) -> dict[str, Any]:
@@ -322,20 +351,26 @@ def missing_referenced_media_files(db: object, root: Path | None = None) -> list
     return missing
 
 
-def media_backup_stats() -> dict[str, int | str]:
+def media_backup_stats() -> dict[str, Any]:
     """Статистика файлов, попадающих в /techspec/media/backup.zip."""
     root = media_root_dir().resolve()
     root.mkdir(parents=True, exist_ok=True)
-    files = iter_media_backup_paths(root)
+    entries = iter_media_backup_entries(root)
     other_files = sum(
         1 for p in root.iterdir() if p.is_file() and not is_stored_media_backup_filename(p.name)
     )
-    total_bytes = sum(int(p.stat().st_size) for p in files)
+    chunks = split_media_entries_into_parts(entries)
+    parts = [
+        {"part": idx, "file_count": len(chunk), "total_bytes": sum(e.size for e in chunk)}
+        for idx, chunk in enumerate(chunks, start=1)
+    ]
     return {
-        "file_count": len(files),
-        "total_bytes": total_bytes,
+        "file_count": len(entries),
+        "total_bytes": sum(e.size for e in entries),
         "skipped_other_files": other_files,
         "media_root": str(root),
+        "parts": parts,
+        "part_count": len(chunks),
     }
 
 
