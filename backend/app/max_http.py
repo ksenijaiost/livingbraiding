@@ -115,4 +115,5 @@ def max_request(
     bundle = max_ca_bundle_path()
     with httpx.Client(verify=bundle, timeout=timeout) as client:
         response = client.request(method, url, content=content, headers=headers)
+    max_request.last_headers = {str(key).lower(): value for key, value in response.headers.items()}
     return response.status_code, response.content

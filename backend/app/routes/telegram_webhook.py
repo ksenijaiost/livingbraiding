@@ -69,7 +69,7 @@ async def telegram_webhook(
         chat_type = str(chat.get("type") or "").strip().lower()
         title = chat.get("title") if isinstance(chat.get("title"), str) else None
 
-        # Группа: привязка чата админов
+        # Группа: /admins или /general
         if chat_type in ("group", "supergroup"):
             reply = try_bind_admin_chat_from_text(
                 db,

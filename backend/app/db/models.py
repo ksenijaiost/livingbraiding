@@ -121,7 +121,7 @@ class Setting(Base):
     __tablename__ = "settings"
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
-    value: Mapped[str] = mapped_column(String(500), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
@@ -282,6 +282,7 @@ class NotificationOutboxTargetKind(str, enum.Enum):
     USER = "user"
     CLIENT = "client"
     ADMIN_CHAT = "admin_chat"
+    GENERAL_CHAT = "general_chat"
 
 
 class NotificationOutbox(Base):
@@ -295,7 +296,7 @@ class NotificationOutbox(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True, index=True)
-    # user | client | admin_chat
+    # user | client | admin_chat | general_chat
     target_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     booking_id: Mapped[int | None] = mapped_column(ForeignKey("bookings.id"), nullable=True, index=True)
     # «После визита»: визит, из которого поставлена отправка (пусто, если ушло по брони до сохранения).
@@ -558,12 +559,15 @@ class ClientInboundMessage(Base):
 
 
 class AdminChatTarget(Base):
-    """Общий чат админов по каналу (один chat_id на канал)."""
+    """Общий чат студии по виду и каналу (admin / general, один chat_id на пару)."""
 
     __tablename__ = "admin_chat_targets"
-    __table_args__ = (UniqueConstraint("channel", name="uq_admin_chat_targets_channel"),)
+    __table_args__ = (
+        UniqueConstraint("chat_kind", "channel", name="uq_admin_chat_targets_kind_channel"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_kind: Mapped[str] = mapped_column(String(16), nullable=False, server_default="admin", default="admin")
     channel: Mapped[str] = mapped_column(String(16), nullable=False)
     chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     title: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -571,12 +575,13 @@ class AdminChatTarget(Base):
 
 
 class AdminChatLinkToken(Base):
-    """Одноразовый код привязки чата админов (/admins <код>)."""
+    """Одноразовый код привязки чата (/admins или /general)."""
 
     __tablename__ = "admin_chat_link_tokens"
     __table_args__ = (UniqueConstraint("token_hash", name="uq_admin_chat_link_tokens_hash"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_kind: Mapped[str] = mapped_column(String(16), nullable=False, server_default="admin", default="admin")
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

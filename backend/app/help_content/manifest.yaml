@@ -93,8 +93,16 @@ pages:
     roles:
     - admin_super
     file: clients_bulk_import.md
+  clients_mailings:
+    title: Рассылки
+    roles:
+    - master
+    - admin
+    - admin_senior
+    - admin_super
+    file: clients_mailings.md
   clients_notifications:
-    title: Уведомления и рассылки
+    title: Уведомления
     roles:
     - master
     - admin
@@ -372,6 +380,16 @@ pages:
     roles:
     - admin_super
     file: staff_list.md
+  studio_notifications:
+    title: Управление уведомлениями
+    roles:
+    - master
+    - helper
+    - admin
+    - admin_senior
+    - admin_super
+    - techspec
+    file: studio_notifications.md
   studio_expenses:
     title: Расходы студии
     roles:

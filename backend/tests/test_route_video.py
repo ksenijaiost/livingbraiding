@@ -277,7 +277,7 @@ def test_video_attaches_on_each_channel(db, tmp_path, monkeypatch) -> None:
     assert "https://max.example/uploads?type=video" in joined
     assert '"type": "video"' in joined
     assert "sendVideo" in joined
-    assert sleeps == [1.0]
+    assert sleeps == [1.5]
     db.refresh(row)
     assert row.vk_video_attachment == "video-5_9"
     assert row.max_video_token == "vtok"
@@ -305,6 +305,123 @@ def test_video_attaches_on_each_channel(db, tmp_path, monkeypatch) -> None:
     mx_joined = "\n".join(calls)
     assert "/uploads" not in mx_joined
     assert "vtok" in mx_joined
+
+
+def _mock_max_upload(monkeypatch, *, file_body: bytes, meta_token: str | None):
+    uploads: list[bytes | None] = []
+
+    def max_request(method, url, *, content=None, headers=None, timeout=8):
+        if "/uploads" in url and "type=video" in url:
+            uploads.append(content)
+            meta = {"url": "https://upload.example/max-video"}
+            if meta_token:
+                meta["token"] = meta_token
+            return 200, json.dumps(meta).encode()
+        if url.startswith("https://upload.example/max-video"):
+            return 200, file_body
+        if "/messages" in url:
+            return 200, json.dumps({"message": {"body": {"mid": "1"}}}).encode()
+        return 200, b"{}"
+
+    monkeypatch.setattr("app.max_http.max_request", max_request)
+    monkeypatch.setattr("app.route_video_send.time.sleep", lambda sec: None)
+    monkeypatch.setattr("app.route_video_send.get_settings", _settings)
+    monkeypatch.setattr("app.care_memo_send.get_settings", _settings)
+    monkeypatch.setattr("app.notifications.send_max", lambda *a, **k: None)
+    return uploads
+
+
+def test_max_video_upload_accepts_non_json_body(db, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LB_MEDIA_ROOT", str(tmp_path))
+    uploads = _mock_max_upload(
+        monkeypatch,
+        file_body=b"<retval>1</retval>",
+        meta_token="vtok",
+    )
+    row = _video(db, tmp_path)
+    _, client, booking = _people(db)
+    out = _outbox(db, client, booking, NotificationChannel.MAX)
+    stats = process_outbox(db, only_ids=[out.id])
+    assert stats["sent"] == 1
+    assert uploads == [b""]
+    db.refresh(row)
+    assert row.max_video_token == "vtok"
+
+
+def test_max_video_token_from_upload_json(db, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LB_MEDIA_ROOT", str(tmp_path))
+    _mock_max_upload(
+        monkeypatch,
+        file_body=json.dumps({"token": "from-file"}).encode(),
+        meta_token=None,
+    )
+    row = _video(db, tmp_path)
+    _, client, booking = _people(db)
+    out = _outbox(db, client, booking, NotificationChannel.MAX, n=2)
+    stats = process_outbox(db, only_ids=[out.id])
+    assert stats["sent"] == 1
+    db.refresh(row)
+    assert row.max_video_token == "from-file"
+
+
+def test_attachment_error_history_hides_fake_attempt_count(db) -> None:
+    _, client, booking = _people(db)
+    now = datetime(2026, 10, 12, 8, 0)
+    db.add_all(
+        [
+            NotificationOutbox(
+                client_id=client.id,
+                target_kind="client",
+                booking_id=booking.id,
+                channel=NotificationChannel.MAX,
+                event_type="client_route_video_error",
+                payload_json='{"text":"Видео „Как нас найти“ — ошибка","target_kind":"client"}',
+                body="Видео „Как нас найти“ — ошибка",
+                status=NotificationOutboxStatus.FAILED,
+                error="некорректный JSON",
+                dedupe_key="rv-err",
+                attempt_count=99,
+                created_at=now,
+            ),
+            NotificationOutbox(
+                client_id=client.id,
+                target_kind="client",
+                booking_id=booking.id,
+                channel=NotificationChannel.MAX,
+                event_type="client_care_memo_error",
+                payload_json='{"text":"Памятка — ошибка","target_kind":"client"}',
+                body="Памятка — ошибка",
+                status=NotificationOutboxStatus.FAILED,
+                error="нет токена картинки",
+                dedupe_key="memo-err",
+                attempt_count=99,
+                created_at=now,
+            ),
+            NotificationOutbox(
+                client_id=client.id,
+                target_kind="client",
+                booking_id=booking.id,
+                channel=NotificationChannel.VK,
+                event_type="client_booking_reminder",
+                payload_json='{"text":"напомнить","target_kind":"client"}',
+                body="напомнить",
+                status=NotificationOutboxStatus.FAILED,
+                error="сеть",
+                dedupe_key="remind-err",
+                attempt_count=3,
+                created_at=now,
+            ),
+        ]
+    )
+    db.flush()
+    labels = [
+        item["status_label"]
+        for item in booking_notify_timeline(db, int(booking.id), tz_name="UTC")
+    ]
+    assert "ошибка: некорректный JSON" in labels
+    assert "ошибка: нет токена картинки" in labels
+    assert all("попыток: 99" not in label for label in labels)
+    assert any("ошибка: сеть (попыток: 3)" in label for label in labels)
 
 
 def test_vk_falls_back_to_doc(db, tmp_path, monkeypatch) -> None:

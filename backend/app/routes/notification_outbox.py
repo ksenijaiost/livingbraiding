@@ -58,7 +58,12 @@ def admin_notification_outbox_page(
     rows = []
     for r in rows_raw:
         flags = outbox_subject_flags(r)
-        if r.user is not None:
+        kind = (r.target_kind or "").strip().lower()
+        if kind == "admin_chat":
+            who = "Чат админов"
+        elif kind == "general_chat":
+            who = "Общий чат"
+        elif r.user is not None:
             who = (r.user.display_name or r.user.username or "").strip() or f"#{r.user_id}"
         elif r.client is not None:
             who = (r.client.name or "").strip() or f"#{r.client_id}"

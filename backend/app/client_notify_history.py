@@ -138,6 +138,8 @@ def _out_type(row: NotificationOutbox, hours_by_rule: dict[int, float]) -> tuple
     mark = ""
     if kind == "admin_chat":
         mark = "в чат админов"
+    elif kind == "general_chat":
+        mark = "в общий чат"
     elif kind == "user":
         mark = "мастеру"
     if event == "client_booking_reminder":
@@ -166,7 +168,9 @@ def _out_type(row: NotificationOutbox, hours_by_rule: dict[int, float]) -> tuple
 def _destination(row: NotificationOutbox) -> str:
     kind = (row.target_kind or "").strip().lower()
     if kind == "admin_chat":
-        return "в чат админов"
+        return "Чат админов"
+    if kind == "general_chat":
+        return "Общий чат"
     if kind == "client":
         via_name = str(_payload(row).get("via_contact_name") or "").strip()
         if via_name:
@@ -192,6 +196,9 @@ def _status_label(row: NotificationOutbox, tz_name: str) -> str:
         return f"отправлено ({when})" if when else "отправлено"
     if status == NotificationOutboxStatus.FAILED.value:
         err = (row.error or "").strip() or "без текста"
+        event = str(row.event_type or "")
+        if event in {"client_route_video_error", "client_care_memo_error"}:
+            return f"ошибка: {err}"
         return f"ошибка: {err} (попыток: {int(row.attempt_count or 0)})"
     if status == NotificationOutboxStatus.CANCELLED.value:
         return "отменено"

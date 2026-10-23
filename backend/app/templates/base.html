@@ -276,6 +276,7 @@
                 <summary>Студия</summary>
                 <div class="dd">
                   <a href="/me">Моя карточка</a>
+                  <a href="/studio/notifications">Управление уведомлениями</a>
                 </div>
               </details>
             {% elif current_user.role.value == "HELPER" %}
@@ -292,6 +293,7 @@
                 <summary>Студия</summary>
                 <div class="dd">
                   <a href="/me">Моя карточка</a>
+                  <a href="/studio/notifications">Управление уведомлениями</a>
                 </div>
               </details>
             {% else %}
@@ -301,7 +303,8 @@
                 <div class="dd">
                   <a href="/clients">Список</a>
                   <a href="/clients/stats">Статистика</a>
-                  <a href="/clients/notifications">Уведомления и рассылки</a>
+                  <a href="/clients/notifications">Уведомления</a>
+                  <a href="/clients/mailings">Рассылки</a>
                 </div>
               </details>
 
@@ -366,6 +369,7 @@
                 <summary>Студия</summary>
                 <div class="dd">
                   <a href="/me">Моя карточка</a>
+                  <a href="/studio/notifications">Управление уведомлениями</a>
                   <a href="/masters-schedule">График всех мастеров</a>
                   {% if current_user.role.value == "MASTER" %}
                     <a href="/master/schedule">Управление графиком</a>
@@ -441,6 +445,7 @@
           <details>
             <summary><strong>Студия</strong></summary>
             <a class="md-link" href="/me" onclick="window.lbToggleMobileNav(false)">Моя карточка</a>
+            <a class="md-link" href="/studio/notifications" onclick="window.lbToggleMobileNav(false)">Управление уведомлениями</a>
           </details>
         {% elif current_user.role.value == "HELPER" %}
           <details>
@@ -452,13 +457,15 @@
           <details>
             <summary><strong>Студия</strong></summary>
             <a class="md-link" href="/me" onclick="window.lbToggleMobileNav(false)">Моя карточка</a>
+            <a class="md-link" href="/studio/notifications" onclick="window.lbToggleMobileNav(false)">Управление уведомлениями</a>
           </details>
         {% else %}
           <details>
             <summary><strong>Клиенты</strong></summary>
             <a class="md-link" href="/clients" onclick="window.lbToggleMobileNav(false)">Список</a>
             <a class="md-link" href="/clients/stats" onclick="window.lbToggleMobileNav(false)">Статистика</a>
-            <a class="md-link" href="/clients/notifications" onclick="window.lbToggleMobileNav(false)">Уведомления и рассылки</a>
+            <a class="md-link" href="/clients/notifications" onclick="window.lbToggleMobileNav(false)">Уведомления</a>
+            <a class="md-link" href="/clients/mailings" onclick="window.lbToggleMobileNav(false)">Рассылки</a>
           </details>
 
           <details>
@@ -511,6 +518,7 @@
           <details>
             <summary><strong>Студия</strong></summary>
             <a class="md-link" href="/me" onclick="window.lbToggleMobileNav(false)">Моя карточка</a>
+            <a class="md-link" href="/studio/notifications" onclick="window.lbToggleMobileNav(false)">Управление уведомлениями</a>
             <a class="md-link" href="/masters-schedule" onclick="window.lbToggleMobileNav(false)">График всех мастеров</a>
             {% if current_user.role.value == "MASTER" %}
               <a class="md-link" href="/master/schedule" onclick="window.lbToggleMobileNav(false)">Управление графиком</a>
