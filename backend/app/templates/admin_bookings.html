@@ -68,7 +68,7 @@
       <p class="muted">{% if search_id is not none %}Бронь №{{ search_id }} не найдена{% if bookings_mine_only %} среди ваших{% endif %}.{% else %}Пока нет броней.{% endif %}</p>
     {% else %}
       <div class="lb-table-wrap lb-bookings-scroll">
-      <table class="lb-bookings-table">
+      <table class="lb-bookings-table{% if can_manage %} lb-bookings-table-manage{% endif %}">
         <colgroup>
           <col class="lb-b-id" />
           <col class="lb-b-date" />
