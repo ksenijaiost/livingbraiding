@@ -227,21 +227,57 @@
   white-space: normal;
   line-height: 1.35;
 }
-/* Список броней: услуги переносятся, статус не обрезается — лишнее уходит в прокрутку. */
+/* Список броней: «Тип» и «Мастера» по содержимому, статус не сжимается, остаток — у «Деталей». */
 .lb-bookings-scroll {
   overflow-x: auto;
   max-width: 100%;
   min-width: 0;
 }
+.lb-bookings-table .lb-b-kind,
+.lb-bookings-table .lb-b-status,
+.lb-bookings-table .lb-col-kind,
+.lb-bookings-table .lb-col-status {
+  width: 1%;
+}
+.lb-bookings-table .lb-b-masters,
+.lb-bookings-table .lb-col-masters {
+  width: 8.5rem;
+  max-width: 8.5rem;
+}
 .lb-bookings-table .lb-cell-service {
-  max-width: 16rem;
+  max-width: none;
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.lb-bookings-table .lb-col-status {
+.lb-bookings-table .lb-col-kind,
+.lb-bookings-table .lb-status-line {
   white-space: nowrap;
-  min-width: max-content;
-  width: 1%;
+}
+.lb-bookings-table .lb-masters-list {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.35em;
+  row-gap: 1px;
+  max-width: 8.5rem;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.lb-bookings-table .lb-master-name {
+  white-space: nowrap;
+}
+.lb-bookings-table .lb-master-name:not(:last-child)::after {
+  content: ",";
+}
+.lb-bookings-table .lb-col-status {
+  min-width: 15.2rem;
+  white-space: normal;
+}
+.lb-bookings-table .lb-status-reason {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 /* Карточки в .row на узком экране не должны расползаться из‑за min-width */
 @media (max-width: 700px) {

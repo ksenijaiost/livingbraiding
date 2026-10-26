@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block help_page_id %}notification_outbox{% endblock %}
 {% block content %}
-  <div class="card" style="max-width: 1100px;">
+  <div class="card" style="max-width: 1200px;">
     <p class="lb-top-links" style="margin-top:0;">
       <a href="/admin/settings">← Настройки</a>
       {% if current_user.role.value == 'TECHSPEC' %}
@@ -11,8 +11,16 @@
     </p>
     <h2 style="margin-top:0;">Очередь уведомлений</h2>
     <p class="muted" style="margin-top:-6px;">
-      Последние 50 записей outbox (VK / Telegram). Автоповтор — фоновый воркер; CLI — запасной.
+      Последние 50 записей outbox (VK / Max / Telegram). Автоповтор — фоновый воркер; CLI — запасной.
     </p>
+    <ul class="muted" style="font-size:13px; margin: 0 0 14px; padding-left: 1.2rem;">
+      <li><strong>ожидает</strong> — в очереди, отправки ещё не было</li>
+      <li><strong>отправка</strong> — воркер отправляет сейчас</li>
+      <li><strong>отправлено</strong> — мессенджер принял сообщение</li>
+      <li><strong>ошибка доставки</strong> — отправка сорвалась. Причина в колонке «Ошибка», у такой строки есть «Повторить»</li>
+      <li><strong>не отправлено</strong> — в очередь не ставили: нет канала, время записи уже прошло, правило выключено или такое сообщение уже уходило. Это не сбой. У «нет канала» в колонке «Канал» стоит telegram — это заглушка, канала не было</li>
+      <li><strong>отменено</strong> — сообщение уже стояло в очереди и его сняли: отменили визит или удалили запись</li>
+    </ul>
 
     {% if msg %}
       <div class="ok" style="margin-bottom:12px;">{{ msg }}</div>
@@ -28,14 +36,14 @@
             <tr>
               <th>ID</th>
               <th>Создано</th>
-              <th>Мастер</th>
+              <th>Получатель</th>
               <th>Канал</th>
-              <th>Событие</th>
+              <th>Тип</th>
               <th>Статус</th>
               <th>Попытки</th>
-              <th>Бронь</th>
+              <th>Событие</th>
               <th>Ошибка</th>
-              <th></th>
+              <th>Повтор</th>
             </tr>
           </thead>
           <tbody>
@@ -43,15 +51,21 @@
               <tr>
                 <td>{{ r.id }}</td>
                 <td class="muted" style="font-size:12px; white-space:nowrap;">{{ r.created_at }}</td>
-                <td>{{ r.master }}</td>
+                <td>
+                  {% if r.recipient_mark %}<span class="muted" style="font-size:11px;">{{ r.recipient_mark }}</span> {% endif %}
+                  {% if r.recipient_href %}<a href="{{ r.recipient_href }}">{{ r.recipient }}</a>{% else %}{{ r.recipient }}{% endif %}
+                </td>
                 <td>{{ r.channel }}</td>
                 <td>{{ r.event }}</td>
                 <td>{{ r.status }}</td>
                 <td>{{ r.attempts }}</td>
-                <td>
-                  {% if r.booking_id %}
-                    <a href="/bookings/{{ r.booking_id }}">#{{ r.booking_id }}</a>
-                  {% elif r.booking_removed %}бронь удалена{% else %}—{% endif %}
+                <td style="white-space:nowrap;">
+                  {% if r.subjects %}
+                    {% for link in r.subjects %}
+                      {% if not loop.first %} · {% endif %}
+                      {% if link.href %}<a href="{{ link.href }}">{{ link.label }}</a>{% else %}{{ link.label }}{% endif %}
+                    {% endfor %}
+                  {% else %}—{% endif %}
                 </td>
                 <td class="muted" style="font-size:12px; max-width:220px; word-break:break-word;">{{ r.error or '—' }}</td>
                 <td>
