@@ -227,57 +227,84 @@
   white-space: normal;
   line-height: 1.35;
 }
-/* Список броней: «Тип» и «Мастера» по содержимому, статус не сжимается, остаток — у «Деталей». */
+/* Список броней: вся таблица в ширину экрана, текст переносится внутри колонок. */
 .lb-bookings-scroll {
-  overflow-x: auto;
+  overflow-x: visible;
   max-width: 100%;
   min-width: 0;
 }
-.lb-bookings-table .lb-b-kind,
-.lb-bookings-table .lb-b-status,
+.lb-bookings-scroll.lb-table-wrap > .lb-bookings-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+.lb-bookings-table .lb-b-id { width: 6%; }
+.lb-bookings-table .lb-b-date { width: 12%; }
+.lb-bookings-table .lb-b-client { width: 18%; }
+.lb-bookings-table .lb-b-kind { width: 11%; }
+.lb-bookings-table .lb-b-masters { width: 13%; }
+.lb-bookings-table .lb-b-details { width: 24%; }
+.lb-bookings-table .lb-b-status { width: 16%; }
+.lb-bookings-table-manage .lb-b-id { width: 6%; }
+.lb-bookings-table-manage .lb-b-date { width: 11%; }
+.lb-bookings-table-manage .lb-b-client { width: 16%; }
+.lb-bookings-table-manage .lb-b-kind { width: 9%; }
+.lb-bookings-table-manage .lb-b-masters { width: 12%; }
+.lb-bookings-table-manage .lb-b-details { width: 20%; }
+.lb-bookings-table-manage .lb-b-status { width: 15%; }
+.lb-bookings-table-manage .lb-b-actions { width: 11%; }
+.lb-bookings-table th,
+.lb-bookings-table td,
+.lb-bookings-table td.lb-nowrap {
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.lb-bookings-table .lb-cell-name,
+.lb-bookings-table .lb-cell-service,
+.lb-bookings-table .lb-col-masters,
 .lb-bookings-table .lb-col-kind,
 .lb-bookings-table .lb-col-status {
-  width: 1%;
-}
-.lb-bookings-table .lb-b-masters,
-.lb-bookings-table .lb-col-masters {
-  width: 8.5rem;
-  max-width: 8.5rem;
-}
-.lb-bookings-table .lb-cell-service {
   max-width: none;
+  min-width: 0;
+  width: auto;
+}
+.lb-bookings-table .lb-cell-service,
+.lb-bookings-table .lb-status-line,
+.lb-bookings-table .lb-status-reason {
   white-space: normal;
   overflow-wrap: anywhere;
-}
-.lb-bookings-table .lb-col-kind,
-.lb-bookings-table .lb-status-line {
-  white-space: nowrap;
 }
 .lb-bookings-table .lb-masters-list {
   display: flex;
   flex-wrap: wrap;
   column-gap: 0.35em;
   row-gap: 1px;
-  max-width: 8.5rem;
+  max-width: 100%;
   font-size: 13px;
   line-height: 1.35;
 }
 .lb-bookings-table .lb-master-name {
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 .lb-bookings-table .lb-master-name:not(:last-child)::after {
   content: ",";
-}
-.lb-bookings-table .lb-col-status {
-  min-width: 15.2rem;
-  white-space: normal;
 }
 .lb-bookings-table .lb-status-reason {
   margin-top: 2px;
   font-size: 12px;
   font-weight: 400;
   line-height: 1.35;
-  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .lb-bookings-scroll {
+    overflow-x: auto;
+  }
+  .lb-bookings-scroll.lb-table-wrap > .lb-bookings-table {
+    width: 40rem;
+    min-width: 40rem;
+  }
 }
 /* Карточки в .row на узком экране не должны расползаться из‑за min-width */
 @media (max-width: 700px) {
