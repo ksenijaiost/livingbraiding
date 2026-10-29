@@ -97,7 +97,7 @@ AUDIT_FIELD_LABELS: dict[str, str] = {
     # бронь
     "planned_date": "Дата и время",
     "kind": "Тип брони",
-    "quoted_price_text": "Ориентировочная цена",
+    "quoted_price_text": "Сумма, озвученная клиенту",
     "deposit_amount": "Депозит",
     "dialog_location": "Где диалог",
     "planned_service_id": "Основная услуга",

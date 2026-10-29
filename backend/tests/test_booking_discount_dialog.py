@@ -1,4 +1,4 @@
-"""3.36: скидка % и «где диалог» у брони."""
+"""3.36 / 3.53: скидка %, «где диалог» и озвученная сумма у брони."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from app.booking_discount_dialog import (
     dialog_looks_like_link,
     parse_booking_dialog_location,
     parse_booking_discount_percent,
+    parse_booking_quoted_price_text,
 )
 from app.db import models as _orm_models  # noqa: F401
 from app.db.base import Base
@@ -41,6 +42,16 @@ def test_parse_dialog_required_and_strip() -> None:
     val, err = parse_booking_dialog_location("  https://t.me/x  ", required=True)
     assert err is None
     assert val == "https://t.me/x"
+
+
+def test_parse_quoted_price_required_and_strip() -> None:
+    assert parse_booking_quoted_price_text("", required=True)[1]
+    assert parse_booking_quoted_price_text("   ", required=True)[1]
+    assert parse_booking_quoted_price_text("", required=False) == (None, None)
+    val, err = parse_booking_quoted_price_text("  3500–4000  ", required=True)
+    assert err is None
+    assert val == "3500–4000"
+    assert parse_booking_quoted_price_text("x" * 121, required=True)[1]
 
 
 def test_display_helpers() -> None:
@@ -72,24 +83,29 @@ def test_edit_optional_when_null_on_legacy_booking() -> None:
         same_master_shares_all_services=False,
         discount_percent=None,
         dialog_location=None,
+        quoted_price_text=None,
     )
     db.add(b)
     db.flush()
-    disc, dialog, errs = _parse_booking_discount_dialog_fields(
-        {"discount_percent": "", "dialog_location": ""},
+    disc, dialog, quoted, errs = _parse_booking_discount_dialog_fields(
+        {"discount_percent": "", "dialog_location": "", "quoted_price_text": ""},
         require_discount=b.discount_percent is not None,
         require_dialog=b.dialog_location is not None,
+        require_quoted=b.quoted_price_text is not None,
     )
     assert errs == {}
     assert disc is None
     assert dialog is None
-    _disc2, _dialog2, errs2 = _parse_booking_discount_dialog_fields(
-        {"discount_percent": "", "dialog_location": ""},
+    assert quoted is None
+    _disc2, _dialog2, _quoted2, errs2 = _parse_booking_discount_dialog_fields(
+        {"discount_percent": "", "dialog_location": "", "quoted_price_text": ""},
         require_discount=True,
         require_dialog=True,
+        require_quoted=True,
     )
     assert "discount_percent" in errs2
     assert "dialog_location" in errs2
+    assert "quoted_price_text" in errs2
     db.close()
 
 

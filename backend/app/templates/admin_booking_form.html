@@ -581,6 +581,7 @@
 
       <div class="card" style="margin-top: 14px; background:#f8fafc;">
         <h3 style="margin-top:0;">Условия</h3>
+        {% set fe = field_errors if field_errors is defined and field_errors else {} %}
         <div class="row">
           <div>
             <div id="lbBookingPricePreview" style="margin-bottom:10px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff;">
@@ -590,15 +591,24 @@
               </div>
               <div id="lbBookingPricePreviewLines" style="margin-top:8px; font-size:13px;"></div>
             </div>
-            <label>Сумма, озвученная клиенту</label>
-            <input name="quoted_price_text" maxlength="120" value="{{ fp.get('quoted_price_text','') }}" placeholder="Напр.: 3500 или 3500–4000" />
+            <label>Сумма, озвученная клиенту{% if is_new %} *{% endif %}
+              {% if not is_new and booking and not booking.quoted_price_text and not fp.get('quoted_price_text') %}
+                <span class="muted" style="font-weight:normal;">(не указано)</span>
+              {% endif %}
+            </label>
+            <input name="quoted_price_text" maxlength="120" value="{{ fp.get('quoted_price_text','') }}"
+                   placeholder="Напр.: 3500 или 3500–4000"
+                   {% if is_new %}required{% endif %}
+                   style="{% if fe.get('quoted_price_text') %}border-color:#b91c1c;{% endif %}" />
+            {% if fe.get('quoted_price_text') %}
+              <p class="error" style="margin:4px 0 0; font-size:12px; color:#991b1b;">{{ fe.get('quoted_price_text') }}</p>
+            {% endif %}
           </div>
           <div>
             <label>Предоплата, ₽</label>
             <input name="deposit_amount" type="number" min="0" step="1" value="{{ fp.get('deposit_amount','') }}" />
           </div>
         </div>
-        {% set fe = field_errors if field_errors is defined and field_errors else {} %}
         <div class="row" style="margin-top:10px;">
           <div>
             <label>Размер скидки, %{% if is_new %} *{% endif %}

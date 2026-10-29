@@ -28,6 +28,7 @@ from app.auth import AuthUser, require_role
 from app.booking_discount_dialog import (
     parse_booking_dialog_location,
     parse_booking_discount_percent,
+    parse_booking_quoted_price_text,
 )
 from app.booking_notifications import (
     notify_booking_cancelled,
@@ -2405,7 +2406,8 @@ def _parse_booking_discount_dialog_fields(
     *,
     require_discount: bool,
     require_dialog: bool,
-) -> tuple[int | None, str | None, dict[str, str]]:
+    require_quoted: bool,
+) -> tuple[int | None, str | None, str | None, dict[str, str]]:
     field_errors: dict[str, str] = {}
     discount, disc_err = parse_booking_discount_percent(
         fp.get("discount_percent"), required=require_discount
@@ -2417,7 +2419,12 @@ def _parse_booking_discount_dialog_fields(
     )
     if dialog_err:
         field_errors["dialog_location"] = dialog_err
-    return discount, dialog, field_errors
+    quoted, quoted_err = parse_booking_quoted_price_text(
+        fp.get("quoted_price_text"), required=require_quoted
+    )
+    if quoted_err:
+        field_errors["quoted_price_text"] = quoted_err
+    return discount, dialog, quoted, field_errors
 
 
 @router.get("/new", response_class=HTMLResponse)
@@ -2555,7 +2562,6 @@ async def admin_booking_new_post(  # noqa: C901
         fp.pop("visit_order_master_ids", None)
     client_id_raw = str(fp.get("client_id") or "").strip()
     kind_raw = str(fp.get("kind") or "").strip() or BookingKind.VISIT.value
-    quoted_price_text = strip_or_none(str(fp.get("quoted_price_text") or ""), 120)
     deposit_raw = str(fp.get("deposit_amount") or "").strip()
     comment = strip_or_none(str(fp.get("comment") or "")) or None
     photo_1_url: str | None = None
@@ -2569,6 +2575,7 @@ async def admin_booking_new_post(  # noqa: C901
     deposit_amount: int | None = None
     discount_percent: int | None = None
     dialog_location: str | None = None
+    quoted_price_text: str | None = None
     planned_service_id: int | None = None
     planned_product_kind: str | None = None
     planned_service_ids: list[int] = []
@@ -2576,8 +2583,10 @@ async def admin_booking_new_post(  # noqa: C901
     on_ids: list[int] = []
     consultation_master_id: int | None = None
 
-    discount_percent, dialog_location, field_errors = _parse_booking_discount_dialog_fields(
-        fp, require_discount=True, require_dialog=True
+    discount_percent, dialog_location, quoted_price_text, field_errors = (
+        _parse_booking_discount_dialog_fields(
+            fp, require_discount=True, require_dialog=True, require_quoted=True
+        )
     )
 
     try:
@@ -3183,7 +3192,6 @@ async def admin_booking_edit_post(
 
     client_id_raw = str(fp.get("client_id") or "").strip()
     kind_raw = str(fp.get("kind") or "").strip() or BookingKind.VISIT.value
-    quoted_price_text = strip_or_none(str(fp.get("quoted_price_text") or ""), 120)
     deposit_raw = str(fp.get("deposit_amount") or "").strip()
     comment = strip_or_none(str(fp.get("comment") or "")) or None
     photo_1_url = getattr(b, "photo_1", None)
@@ -3197,6 +3205,7 @@ async def admin_booking_edit_post(
     deposit_amount: int | None = None
     discount_percent: int | None = None
     dialog_location: str | None = None
+    quoted_price_text: str | None = None
     planned_service_id: int | None = None
     planned_product_kind: str | None = None
     planned_service_ids: list[int] = []
@@ -3208,8 +3217,14 @@ async def admin_booking_edit_post(
 
     require_discount = b.discount_percent is not None
     require_dialog = b.dialog_location is not None
-    discount_percent, dialog_location, field_errors = _parse_booking_discount_dialog_fields(
-        fp, require_discount=require_discount, require_dialog=require_dialog
+    require_quoted = b.quoted_price_text is not None
+    discount_percent, dialog_location, quoted_price_text, field_errors = (
+        _parse_booking_discount_dialog_fields(
+            fp,
+            require_discount=require_discount,
+            require_dialog=require_dialog,
+            require_quoted=require_quoted,
+        )
     )
 
     try:

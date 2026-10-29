@@ -1,4 +1,4 @@
-"""Информационные поля брони: скидка % и «где диалог» (без влияния на расчёты)."""
+"""Информационные поля брони: скидка %, «где диалог», озвученная сумма (без влияния на расчёты)."""
 
 from __future__ import annotations
 
@@ -44,6 +44,19 @@ def parse_booking_dialog_location(
     if not text:
         if required:
             return None, "Укажите, где диалог."
+        return None, None
+    if len(text) > max_len:
+        return None, f"Текст не длиннее {max_len} символов."
+    return text, None
+
+
+def parse_booking_quoted_price_text(
+    raw: object, *, required: bool, max_len: int = 120
+) -> tuple[str | None, str | None]:
+    text = str(raw or "").strip()
+    if not text:
+        if required:
+            return None, "Укажите сумму, озвученную клиенту."
         return None, None
     if len(text) > max_len:
         return None, f"Текст не длиннее {max_len} символов."
