@@ -87,6 +87,7 @@ def test_create_client_without_visit(db) -> None:
     assert client_display_status(db, client) == ClientStatus.NEVER
     assert "79990001122" in reserved
 
+    # 3.38: без телефона нужен привязанный канал или контактное лицо — одной ссылки на соцсеть мало.
     no_phone = import_single_client_row(
         db,
         {"name": "Мария", "telegram": "@maria"},
@@ -94,13 +95,22 @@ def test_create_client_without_visit(db) -> None:
         changed_by_user_id=7,
         line=2,
     )
-    assert no_phone["status"] == STATUS_CREATED
-    again = import_single_client_row(
+    assert no_phone["status"] == STATUS_ERROR
+    assert "контактное лицо" in no_phone["message"].lower()
+    with_phone = import_single_client_row(
         db,
-        {"name": "Мария", "vk": "vk.com/maria"},
+        {"name": "Мария", "telegram": "@maria", "phone": "79990003344"},
         reserved_phones=reserved,
         changed_by_user_id=7,
         line=3,
+    )
+    assert with_phone["status"] == STATUS_CREATED
+    again = import_single_client_row(
+        db,
+        {"name": "Мария", "vk": "vk.com/maria", "phone": "79990005566"},
+        reserved_phones=reserved,
+        changed_by_user_id=7,
+        line=4,
     )
     assert again["status"] == STATUS_CREATED
     assert db.scalar(select(func.count()).select_from(Client)) == 3
@@ -179,7 +189,7 @@ def test_unknown_key_and_bad_birth_do_not_block_next_row(db) -> None:
     assert bad_month["status"] == STATUS_ERROR
     ok = import_single_client_row(
         db,
-        {"name": "Нормальная", "telegram": "@ok"},
+        {"name": "Нормальная", "telegram": "@ok", "phone": "79995554433"},
         reserved_phones=reserved,
         changed_by_user_id=1,
         line=4,

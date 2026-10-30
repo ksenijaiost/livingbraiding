@@ -59,9 +59,16 @@ def test_kit_studio_profit_amount_in_stock_is_minus_masters() -> None:
         master_total=1450.0,
         amount_from_client=None,
     ) == -1450.0
-    # Даже если случайно указана сумма — считаем по ней (редкий кейс)
+    # 1.30: для «в наличие» сумма с клиента игнорируется — студия = −ЗП мастеров
     assert kit_studio_profit_amount(
         scope=WorkScope.IN_STOCK,
+        cost_total=1600.0,
+        master_total=1450.0,
+        amount_from_client=8750.0,
+    ) == -1450.0
+    # а для «на заказ» та же сумма учитывается
+    assert kit_studio_profit_amount(
+        scope=WorkScope.CUSTOM_ORDER,
         cost_total=1600.0,
         master_total=1450.0,
         amount_from_client=8750.0,

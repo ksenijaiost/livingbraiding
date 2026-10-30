@@ -409,8 +409,15 @@ def test_work_edit_save_kit_integration(memory_db) -> None:
 
     m1, m2 = _seed_two_masters_and_catalog(memory_db)
     work, kit = _seed_kit_work(memory_db, m1, m2)
+    # Работа «на заказ» требует клиента (иначе ValueError «выберите клиента»).
+    client = Client(name="Оксана")
+    memory_db.add(client)
+    memory_db.flush()
+    work.client_id = client.id
+    memory_db.flush()
 
     fields = {
+        "client_id": str(client.id),
         "amount_from_client": "",
         "comment": work.comment or "",
         "kanekalon_grams": "0",
@@ -458,4 +465,12 @@ def test_work_edit_save_kit_integration(memory_db) -> None:
     assert profits[m2.id] == pytest.approx(500.0)
     details = json.loads(work.details_json or "{}")
     assert details["kit"]["lines"][0]["by_staff"][str(m1.id)] == 8
-    assert blank_stock_qty_map(memory_db, int(kit.id)).get("DE_THERMO_CURL") == 27
+    # «На заказ»: комплект резервируется под клиента, свободный остаток заготовок уходит в резерв.
+    assert blank_stock_qty_map(memory_db, int(kit.id)).get("DE_THERMO_CURL") == 0
+    reserved = memory_db.scalar(
+        select(KitReserve).where(
+            KitReserve.kit_id == int(kit.id),
+            KitReserve.reserved_for_client_id == client.id,
+        )
+    )
+    assert reserved is not None

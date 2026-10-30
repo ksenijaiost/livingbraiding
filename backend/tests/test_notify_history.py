@@ -318,7 +318,8 @@ def test_inbound_logged_on_each_channel(memory_db, monkeypatch) -> None:
     assert {row.channel for row in by_channel} == {"vk", "max", "telegram"}
     assert all(row.parsed_action == "directions" and row.booking_id is None for row in by_channel)
     unknown = [row for row in rows if row.external_user_id == 424242]
-    assert len(unknown) == 1 and unknown[0].client_id is None and unknown[0].parsed_action == "unknown"
+    # Неизвестному отправителю бот просит телефон для привязки (bind_ask), а не молча «unknown».
+    assert len(unknown) == 1 and unknown[0].client_id is None and unknown[0].parsed_action == "bind_ask"
     assert all(row.external_user_id != 7777 for row in rows)
     assert all(row.external_user_id != 50 for row in rows)
 
