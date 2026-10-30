@@ -51,8 +51,10 @@ Install deps:
 ```bash
 py -m venv ..\.venv
 ..\.venv\Scripts\python -m ensurepip --upgrade
-..\.venv\Scripts\python -m pip install -r requirements.txt
+..\.venv\Scripts\python -m pip install -r requirements-dev.txt
 ```
+
+`requirements.txt` — зависимости приложения (их ставит прод), `requirements-dev.txt` — они же + pytest и ruff для локальной разработки.
 
 Enable dev seed (optional):
 
@@ -127,6 +129,12 @@ Run tests:
 
 ```bash
 ..\.venv\Scripts\python -m pytest
+```
+
+Lint (ruff, без автоисправлений):
+
+```bash
+..\.venv\Scripts\python -m ruff check app tests alembic
 ```
 
 Validate questionnaire JSON examples:
