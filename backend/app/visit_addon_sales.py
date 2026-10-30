@@ -11,16 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.db.models import User, UserRole
 from app.forms_parse import parse_bool, parse_float
+from app.money_utils import money_q2
 from app.sale_percent_options import DEFAULT_SALE_PERCENTS, list_sale_percents
 from app.user_roles import select_users_with_any_role
 
 ADDON_SALE_SELLER_COMMENT = "Процент с доп. продажи"
 ADDON_SALE_STUDIO_COMMENT = "Доп. продажа в фонд студии"
 _SELLER_ROLES = (UserRole.MASTER, UserRole.ADMIN, UserRole.ADMIN_SUPER)
-
-
-def money_q2(x: float) -> float:
-    return round(float(x), 2)
 
 
 @dataclass

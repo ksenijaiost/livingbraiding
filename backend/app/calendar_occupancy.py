@@ -27,6 +27,7 @@ from app.display_time import get_display_timezone
 from app.planned_service_time import planned_start_local_datetime
 from app.master_schedule import master_unavailable_for_day
 from app.master_time_blocks import COLOR_TIME_BLOCK, list_time_blocks_for_masters_on_day
+from app.time_utils import utc_naive_to_local
 from app.ui_service_display import booking_service_labels_from_booking, format_service_catalog_path
 from app.user_roles import select_users_with_role
 
@@ -117,14 +118,6 @@ class BlockOccupancySegment:
             "comment": self.comment,
             "color": self.color,
         }
-
-
-def _utc_naive_to_local(dt: datetime, tz_name: str) -> datetime:
-    if dt.tzinfo is None:
-        utc_dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-    else:
-        utc_dt = dt.astimezone(ZoneInfo("UTC"))
-    return utc_dt.astimezone(ZoneInfo(tz_name)).replace(tzinfo=None)
 
 
 def _minutes_on_day(local_dt: datetime, day: date) -> int:
@@ -259,7 +252,7 @@ def build_occupancy_for_day(
             dur_override = 0
         if b.kind == BookingKind.CONSULTATION:
             dur = dur_override or CONSULTATION_DEFAULT_DURATION_MINUTES
-            start_local = _utc_naive_to_local(b.planned_date, tz_name)
+            start_local = utc_naive_to_local(b.planned_date, tz_name)
             start_m = _minutes_on_day(start_local, day)
             end_m = start_m + dur
             for mid in booking_master_ids:
@@ -305,9 +298,9 @@ def build_occupancy_for_day(
                         ps.planned_start_time,
                         booking_planned_date=b.planned_date,
                         tz_name=tz_name,
-                    ) or _utc_naive_to_local(b.planned_date, tz_name)
+                    ) or utc_naive_to_local(b.planned_date, tz_name)
                 else:
-                    start_local = _utc_naive_to_local(b.planned_date, tz_name)
+                    start_local = utc_naive_to_local(b.planned_date, tz_name)
                 start_m = _minutes_on_day(start_local, day)
                 end_m = start_m + dur
                 masters_rows = list(ps.masters or [])
@@ -353,7 +346,7 @@ def build_occupancy_for_day(
         dur = dur_override if dur_override > 0 else int(svc.estimated_duration_minutes or 0)
         if dur <= 0:
             continue
-        start_local = _utc_naive_to_local(b.planned_date, tz_name)
+        start_local = utc_naive_to_local(b.planned_date, tz_name)
         start_m = _minutes_on_day(start_local, day)
         end_m = start_m + dur
         for mid in booking_master_ids:
@@ -389,9 +382,9 @@ def build_occupancy_for_day(
     if exclude_work_plan_id:
         wp_stmt = wp_stmt.where(WorkPlan.id != exclude_work_plan_id)
     for wp in db.scalars(wp_stmt).all():
-        start_local = _utc_naive_to_local(wp.planned_date, tz_name)
+        start_local = utc_naive_to_local(wp.planned_date, tz_name)
         start_m = _minutes_on_day(start_local, day)
-        end_local = _utc_naive_to_local(planned_end_utc(wp), tz_name)
+        end_local = utc_naive_to_local(planned_end_utc(wp), tz_name)
         end_m = _minutes_on_day(end_local, day)
         if end_m <= grid_start or start_m >= grid_end:
             continue

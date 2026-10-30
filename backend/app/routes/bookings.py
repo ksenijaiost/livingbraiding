@@ -8,8 +8,6 @@ from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote, urlencode
-from zoneinfo import ZoneInfo
-
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import UploadFile
@@ -109,7 +107,7 @@ from app.kit_inlay_visit import (
 )
 from app.list_search import parse_list_id_search
 from app.media_store import get_nonempty_upload, note_media_for_release, save_upload_image
-from app.time_utils import utcnow_naive
+from app.time_utils import local_naive_to_utc_naive, utc_naive_to_local, utcnow_naive
 from app.user_roles import select_users_with_any_role, select_users_with_role
 from app.work_products import _rubber_type_items
 from app.work_plan import is_master_available_for_booking
@@ -614,21 +612,6 @@ def _refresh_sale_order_master_ids_in_fp(db: Session, *, booking_id: int, fp: di
         fp.pop("visit_order_use_masters", None)
 
 
-def _utc_naive_to_local(dt: datetime | None, tz_name: str) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        utc_dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-    else:
-        utc_dt = dt.astimezone(ZoneInfo("UTC"))
-    return utc_dt.astimezone(ZoneInfo(tz_name)).replace(tzinfo=None)
-
-
-def _local_naive_to_utc_naive(dt: datetime, tz_name: str) -> datetime:
-    local_dt = dt.replace(tzinfo=ZoneInfo(tz_name))
-    return local_dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-
-
 def _parse_planned_booking_datetime(fp: dict[str, str], tz_name: str) -> datetime:
     date_raw = str(fp.get("planned_date") or "").strip()
     time_raw = str(fp.get("planned_time") or "").strip()
@@ -647,12 +630,12 @@ def _parse_planned_booking_datetime(fp: dict[str, str], tz_name: str) -> datetim
     if h < 0 or h > 23 or m < 0 or m > 59:
         raise ValueError("planned_time invalid")
     d = d.replace(hour=h, minute=m)
-    return _local_naive_to_utc_naive(d, tz_name).replace(second=0, microsecond=0)
+    return local_naive_to_utc_naive(d, tz_name).replace(second=0, microsecond=0)
 
 
 def _booking_form_prefill_from_db(db: Session, b: Booking) -> tuple[dict[str, str], list[int]]:
     tz = get_display_timezone(db)
-    local_dt = _utc_naive_to_local(b.planned_date, tz) if b.planned_date else None
+    local_dt = utc_naive_to_local(b.planned_date, tz) if b.planned_date else None
     fp: dict[str, str] = {
         "client_id": str(b.client_id),
         "planned_date": local_dt.date().isoformat() if local_dt else "",
@@ -1229,7 +1212,7 @@ def _booking_local_day_from_fp(fp: dict[str, str], *, planned_date_utc: datetime
     try:
         return date.fromisoformat(raw)
     except Exception:
-        local_dt = _utc_naive_to_local(planned_date_utc, tz_name) if planned_date_utc else None
+        local_dt = utc_naive_to_local(planned_date_utc, tz_name) if planned_date_utc else None
         return local_dt.date() if local_dt else date.today()
 
 
@@ -1325,7 +1308,7 @@ def _sync_booking_planned_services_with_lines(
             local_day=local_day,
             duration_minutes=line_dur if line_dur > 0 else 1,
         )
-        start_utc = _local_naive_to_utc_naive(start_local, tz_name).replace(second=0, microsecond=0)
+        start_utc = local_naive_to_utc_naive(start_local, tz_name).replace(second=0, microsecond=0)
         ps = BookingPlannedService(
             booking_id=booking_id,
             service_id=sid,
@@ -1340,7 +1323,7 @@ def _sync_booking_planned_services_with_lines(
             if db.get(User, mid) is None:
                 continue
             mid_start_local = per_master_local.get(mid, start_local)
-            mid_start_utc = _local_naive_to_utc_naive(mid_start_local, tz_name).replace(second=0, microsecond=0)
+            mid_start_utc = local_naive_to_utc_naive(mid_start_local, tz_name).replace(second=0, microsecond=0)
             db.add(
                 BookingPlannedServiceMaster(
                     booking_planned_service_id=ps.id,
@@ -1495,7 +1478,7 @@ def _prefill_visit_stock_kit_from_booking(db: Session, b: Booking, form_prefill:
 def _booking_work_new_query_params(db: Session, b: Booking, details: dict[str, Any]) -> dict[str, str]:
     q: dict[str, str] = {"booking_id": str(b.id), "client_id": str(b.client_id)}
     tz = get_display_timezone(db)
-    local = _utc_naive_to_local(b.planned_date, tz) if b.planned_date else None
+    local = utc_naive_to_local(b.planned_date, tz) if b.planned_date else None
     if local:
         q["performed_date"] = local.date().isoformat()
     parts: list[str] = [f"бронь #{b.id}"]
@@ -1604,8 +1587,8 @@ def suggest_bookings_for_work_order(db: Session, q: str, *, limit: int = 30) -> 
     )
     day = _parse_booking_suggest_date(needle)
     if day is not None:
-        start_utc = _local_naive_to_utc_naive(datetime.combine(day, time.min), tz)
-        end_utc = _local_naive_to_utc_naive(datetime.combine(day + timedelta(days=1), time.min), tz)
+        start_utc = local_naive_to_utc_naive(datetime.combine(day, time.min), tz)
+        end_utc = local_naive_to_utc_naive(datetime.combine(day + timedelta(days=1), time.min), tz)
         stmt = stmt.where(Booking.planned_date >= start_utc, Booking.planned_date < end_utc)
     elif needle:
         digits = "".join(ch for ch in needle if ch.isdigit())

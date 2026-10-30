@@ -3,10 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import date, datetime
+from datetime import date
 from typing import Any
-from zoneinfo import ZoneInfo
-
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
@@ -71,6 +69,7 @@ from app.thermo_visit import collect_thermo_prefill_from_form
 from app.form_validation_log import log_user_validation_error
 from app.hourly_work import list_masters_for_hourly_work_form
 from app.user_roles import select_users_with_role
+from app.time_utils import utc_naive_to_local
 from app.webui import templates, ctx as _ctx
 from app.work_products import _zakaz_subcategory_services_map
 
@@ -99,16 +98,6 @@ def _log_visit_form_error(
         context="visit",
         extra=extra,
     )
-
-
-def _utc_naive_to_local(dt: datetime | None, tz_name: str) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        utc_dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-    else:
-        utc_dt = dt.astimezone(ZoneInfo("UTC"))
-    return utc_dt.astimezone(ZoneInfo(tz_name)).replace(tzinfo=None)
 
 
 def _masters_for_visit_form(db: Session) -> list[User]:
@@ -471,7 +460,7 @@ def _load_draft_form_context(
     fp = form_dict_from_json(draft.form_json)
     if not fp.get("performed_date") and draft.performed_date:
         tz = get_display_timezone(db)
-        local_dt = _utc_naive_to_local(draft.performed_date, tz)
+        local_dt = utc_naive_to_local(draft.performed_date, tz)
         if local_dt:
             fp["performed_date"] = local_dt.date().isoformat()
     fp.setdefault("existing_client_id", str(draft.client_id))
@@ -549,7 +538,7 @@ def master_visit_new_get(
                 form_prefill["service_id"] = str(b.planned_service_id)
             form_prefill["booking_id"] = str(b.id)
             tz = get_display_timezone(db)
-            local_dt = _utc_naive_to_local(b.planned_date, tz) if b.planned_date else None
+            local_dt = utc_naive_to_local(b.planned_date, tz) if b.planned_date else None
             if local_dt:
                 default_date = local_dt.date().isoformat()
             amt = _amount_hint_from_booking(b)

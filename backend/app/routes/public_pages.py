@@ -40,6 +40,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.display_time import get_display_timezone
+from app.money_utils import money_or_zero
 from app.time_utils import utcnow_naive
 from app.payroll_fund import (
     build_home_payroll_period_ctx,
@@ -59,13 +60,6 @@ from app.webui import templates, ctx as _ctx
 
 
 router = APIRouter()
-
-
-def _money0(x: float | None) -> float:
-    if x is None:
-        return 0.0
-    v = float(x)
-    return 0.0 if abs(v) < 0.0005 else v
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -132,10 +126,10 @@ def home(
         )
 
         payroll_home = {
-            "personal_balance": _money0(employee_fund_balance(db, current_user.id)),
-            "paid_net": _money0(employee_payout_total_net(db, current_user.id)),
+            "personal_balance": money_or_zero(employee_fund_balance(db, current_user.id)),
+            "paid_net": money_or_zero(employee_payout_total_net(db, current_user.id)),
             "show_studio": show_studio,
-            "studio_balance": _money0(studio_fund_balance(db)) if show_studio else None,
+            "studio_balance": money_or_zero(studio_fund_balance(db)) if show_studio else None,
             "display_tz": display_tz,
         }
 

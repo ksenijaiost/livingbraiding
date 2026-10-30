@@ -4,15 +4,13 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
-
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import HourlyWorkEntry, WorkForInventory, WorkKind, WorkPlan, WorkPlanStatus, WorkPlanType, User, UserRole
 from app.display_time import get_display_timezone
 from app.master_schedule import TimeRangeMinutes, _interval_overlaps, is_master_available_for_interval
-from app.time_utils import utcnow_naive
+from app.time_utils import local_naive_to_utc_naive, utc_naive_to_local, utcnow_naive
 from app.forms_parse import parse_bool
 from app.user_roles import select_users_with_any_role
 
@@ -90,19 +88,6 @@ def work_plan_is_open(plan: WorkPlan) -> bool:
     return plan.status == WorkPlanStatus.PLANNED
 
 
-def _utc_naive_to_local(dt: datetime, tz_name: str) -> datetime:
-    if dt.tzinfo is None:
-        utc_dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-    else:
-        utc_dt = dt.astimezone(ZoneInfo("UTC"))
-    return utc_dt.astimezone(ZoneInfo(tz_name)).replace(tzinfo=None)
-
-
-def _local_naive_to_utc_naive(dt: datetime, tz_name: str) -> datetime:
-    local = dt.replace(tzinfo=ZoneInfo(tz_name))
-    return local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-
-
 def parse_planned_datetime(local_day: date, time_raw: str, tz_name: str) -> datetime:
     parts = (time_raw or "").strip().replace(".", ":").split(":")
     if len(parts) < 2:
@@ -112,11 +97,11 @@ def parse_planned_datetime(local_day: date, time_raw: str, tz_name: str) -> date
     if hh < 0 or hh > 23 or mm < 0 or mm > 59:
         raise ValueError("Некорректное время.")
     local_dt = datetime.combine(local_day, time(hh, mm))
-    return _local_naive_to_utc_naive(local_dt, tz_name).replace(second=0, microsecond=0)
+    return local_naive_to_utc_naive(local_dt, tz_name).replace(second=0, microsecond=0)
 
 
 def planned_local_datetime(plan: WorkPlan, tz_name: str) -> datetime:
-    return _utc_naive_to_local(plan.planned_date, tz_name)
+    return utc_naive_to_local(plan.planned_date, tz_name)
 
 
 def planned_end_utc(plan: WorkPlan) -> datetime:
@@ -124,7 +109,7 @@ def planned_end_utc(plan: WorkPlan) -> datetime:
 
 
 def planned_end_local(plan: WorkPlan, tz_name: str) -> datetime:
-    return _utc_naive_to_local(planned_end_utc(plan), tz_name)
+    return utc_naive_to_local(planned_end_utc(plan), tz_name)
 
 
 def parse_duration_minutes(duration_h: int, duration_m: int) -> int:
@@ -297,7 +282,7 @@ def validate_work_plan_interval(
     exclude_plan_id: int | None = None,
 ) -> str | None:
     tz = get_display_timezone(db)
-    start_local = _utc_naive_to_local(start_utc, tz)
+    start_local = utc_naive_to_local(start_utc, tz)
     end_local = start_local + timedelta(minutes=max(1, int(duration_minutes)))
     if not is_master_available_for_work_plan(
         db,

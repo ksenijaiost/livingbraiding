@@ -46,6 +46,7 @@ from app.display_time import format_naive_utc_datetime
 from app.display_time import get_display_timezone
 from app.forms_parse import parse_date_iso
 from app.hourly_work import duration_display
+from app.money_utils import money_or_zero
 from app.payroll_fund import sum_ledger_amounts_by_source, visit_ids_visible_to_master_clause, sum_work_master_payroll_by_work_id, sum_work_studio_payroll_by_work_id
 from app.ui_service_display import (
     booking_service_labels_from_booking,
@@ -54,13 +55,6 @@ from app.ui_service_display import (
 
 
 router = APIRouter()
-
-
-def _money0(x: float | None) -> float:
-    if x is None:
-        return 0.0
-    v = float(x)
-    return 0.0 if abs(v) < 0.0005 else v
 
 
 def _day_bounds_utc(d: date) -> tuple[datetime, datetime]:
@@ -104,7 +98,7 @@ def _sum_ledger(
     raw = sum_ledger_amounts_by_source(
         db, side=side, source_kind=source_kind, source_ids=source_ids, user_id=user_id
     )
-    return {k: _money0(v) for k, v in raw.items()}
+    return {k: money_or_zero(v) for k, v in raw.items()}
 
 
 @router.get("/api/calendar/day")
@@ -554,14 +548,14 @@ def api_calendar_day(
         },
         "visits": {
             "count": len(visit_items),
-            "payout_sum": _money0(sum(i["payout_sum"] for i in visit_items)),
-            "studio_sum": _money0(sum(i["studio_sum"] for i in visit_items)) if is_super else 0.0,
+            "payout_sum": money_or_zero(sum(i["payout_sum"] for i in visit_items)),
+            "studio_sum": money_or_zero(sum(i["studio_sum"] for i in visit_items)) if is_super else 0.0,
             "items": visit_items,
         },
         "works": {
             "count": len(work_items),
-            "payout_sum": _money0(sum(i["payout_sum"] for i in work_items)),
-            "studio_sum": _money0(sum(i["studio_sum"] for i in work_items)) if is_super else 0.0,
+            "payout_sum": money_or_zero(sum(i["payout_sum"] for i in work_items)),
+            "studio_sum": money_or_zero(sum(i["studio_sum"] for i in work_items)) if is_super else 0.0,
             "items": work_items,
         },
         "drafts": {

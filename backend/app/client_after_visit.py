@@ -33,7 +33,7 @@ from app.db.models import (
     Visit,
 )
 from app.display_time import get_display_timezone
-from app.time_utils import utcnow_naive
+from app.time_utils import utc_naive_to_local, utcnow_naive
 
 
 class _BareBooking:
@@ -41,11 +41,6 @@ class _BareBooking:
         self.planned_date = None
         self.planned_services: list = []
         self.masters: list = []
-
-
-def _utc_naive_to_local(dt: datetime, tz_name: str) -> datetime:
-    utc_dt = dt.replace(tzinfo=ZoneInfo("UTC")) if dt.tzinfo is None else dt.astimezone(ZoneInfo("UTC"))
-    return utc_dt.astimezone(ZoneInfo(tz_name)).replace(tzinfo=None)
 
 
 def studio_deadline_utc(day: date, latest: time, tz_name: str) -> datetime:
@@ -293,7 +288,7 @@ def enqueue_due_after_booking_deadlines(
         return stats
 
     tz_name = get_display_timezone(db)
-    local_now = _utc_naive_to_local(now, tz_name)
+    local_now = utc_naive_to_local(now, tz_name)
     day = local_now.date()
     day_start = studio_deadline_utc(day, time(0, 0), tz_name)
     day_end = studio_deadline_utc(day + timedelta(days=1), time(0, 0), tz_name)

@@ -9,6 +9,7 @@ from typing import Any, Sequence
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.money_utils import money_q2
 from app.sale_percent_options import stored_sale_percent
 from app.time_utils import utcnow_naive
 
@@ -64,10 +65,6 @@ from app.work_rate_keys import (
 )
 
 _REVERSIBLE_ENTRY_KINDS = (PayrollFundEntryKind.ACCRUAL, PayrollFundEntryKind.EXPENSE)
-
-
-def money_q2(x: float) -> float:
-    return round(float(x), 2)
 
 
 def visit_ids_visible_to_master_clause(master_id: int):
