@@ -7,7 +7,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -24,8 +24,12 @@ from app.fixed_price_visit import (
     normalize_fixed_price_qty,
     unit_economics,
 )
+from app.amortization_levels import (
+    amortization_choices,
+    parse_amortization_input,
+    resolve_amortization_amount,
+)
 from app.db.models import (
-    AmortizationLevel,
     Client,
     ClientPaymentKind,
     MixComplexity,
@@ -54,7 +58,6 @@ from app.hourly_help import (
     validate_hourly_help_rows,
 )
 from app.kit_inlay_visit import (
-    AMORTIZATION_LEVEL_RUBLES,
     KitInlayFormInput,
     StockKitLineInput,
     _apply_stock_kit_usage,
@@ -137,7 +140,7 @@ class VisitServiceLineInput:
     mix_source: MixSource | None
     mix_complexity: MixComplexity | None
     mix_bonus_master_id: int | None
-    amortization_level: AmortizationLevel | None
+    amortization_level: str | None
     kit_kind: str
     stock_kit_lines: list[StockKitLineInput] = field(default_factory=list)
     kit_paid_separately: bool = False
@@ -173,6 +176,8 @@ class VisitServiceLineInput:
     visit_service_id: int | None = None
     client_payment_kind: ClientPaymentKind = ClientPaymentKind.CASH
     fixed_price_qty: int | None = None
+    previous_amortization_level: str | None = None
+    previous_amortization_amount: float | None = None
 
 
 def effective_amount_from_client(line: VisitServiceLineInput) -> float:
@@ -237,7 +242,7 @@ class VisitServiceLineComputed:
     materials_cost_total: float
     addons_total: float
     addons_details_json: str | None
-    amortization_level: AmortizationLevel | None
+    amortization_level: str | None
     amortization_amount: float
     studio_fund_amount: float
     cost_total: float
@@ -466,9 +471,12 @@ def compute_visit_service_line(
     if mix_bonus_master_id:
         _validate_mix_bonus_master(db, mix_bonus_master_id)
 
-    amort_amount = 0.0
-    if line.amortization_level is not None:
-        amort_amount = float(AMORTIZATION_LEVEL_RUBLES.get(line.amortization_level.value, 0.0))
+    amort_amount = resolve_amortization_amount(
+        db,
+        line.amortization_level,
+        previous_code=line.previous_amortization_level,
+        previous_amount=line.previous_amortization_amount,
+    )
 
     cost_total = mat_cost + kit_cost_total + addons + mix_cost + amort_amount
     base_amount_from_client = float(line.amount_from_client or 0) + addon_client
@@ -1117,7 +1125,31 @@ def _prefix_g(form: Any, prefix: str, *, allow_unprefixed_fallback: bool = True)
     return g
 
 
-def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitServiceLineInput:
+def _parse_amortization_level_from_form(
+    raw: str,
+    *,
+    db: Session | None,
+    allowed_amort_codes: Sequence[str] | None = None,
+) -> str | None:
+    text = (raw or "").strip()
+    if allowed_amort_codes is not None:
+        return parse_amortization_input(text, allowed_amort_codes)
+    if db is not None:
+        choices = amortization_choices(db, current_code=text)
+        return parse_amortization_input(text, [c.code for c in choices])
+    if not text or text.upper() in ("NONE", "NO", "0"):
+        return None
+    return text
+
+
+def _parse_line_from_form(
+    form: Any,
+    idx: int,
+    *,
+    db: Session | None = None,
+    allowed_amort_codes: Sequence[str] | None = None,
+    q_prefix: str = "",
+) -> VisitServiceLineInput:
     prefix = f"line_{idx}_"
     g = _prefix_g(form, prefix, allow_unprefixed_fallback=(idx == 0))
     g_int = lambda name, default=0: int(parse_float(g(name, "").strip() or "0", default=default, field_name=name)) if g(name, "").strip() else default
@@ -1146,14 +1178,11 @@ def _parse_line_from_form(form: Any, idx: int, *, q_prefix: str = "") -> VisitSe
                 comp = MixComplexity(comp_raw)
             except ValueError:
                 comp = None
-    amort_raw = g("amortization_level", "") or "MIN"
-    if str(amort_raw).strip().upper() in ("NONE", "NO", "0"):
-        amort = None
-    else:
-        try:
-            amort = AmortizationLevel(amort_raw)
-        except ValueError:
-            amort = AmortizationLevel.MIN
+    amort = _parse_amortization_level_from_form(
+        g("amortization_level", ""),
+        db=db,
+        allowed_amort_codes=allowed_amort_codes,
+    )
 
     stock_lines = _parse_stock_kit_lines_from_form(
         _LineFormAdapter(form, prefix),
@@ -1465,7 +1494,7 @@ def parse_multi_service_visit_form(
         booking_id=booking_id,
     )
 
-    lines = [_parse_line_from_form(form, i) for i in indices]
+    lines = [_parse_line_from_form(form, i, db=db) for i in indices]
     from app.visit_addon_sales import apply_addon_sales_to_lines, parse_addon_sales_from_form
 
     addon_sales = parse_addon_sales_from_form(form, service_count=len(lines), db=db)
@@ -1769,6 +1798,11 @@ def update_visit_with_services(
                 db.delete(vsm)
             db.flush()
 
+            prev_level = vs.amortization_level
+            if hasattr(prev_level, "value"):
+                prev_level = getattr(prev_level, "value")
+            line.previous_amortization_level = str(prev_level).strip() if prev_level else None
+            line.previous_amortization_amount = float(vs.amortization_amount or 0)
             computed = compute_visit_service_line(
                 db,
                 line,

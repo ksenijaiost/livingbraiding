@@ -171,6 +171,56 @@
             <button type="submit" name="action" value="save">Сохранить</button>
           </form>
         </div>
+
+        <div class="card lb-card-info lb-mt-16" style="max-width: 36rem;">
+          <div style="font-weight:600; margin-bottom:10px;">Амортизация</div>
+          <p class="muted lb-font-12" style="margin:-4px 0 10px;">Варианты в форме визита. Уже сохранённый визит хранит свою сумму.</p>
+          {% if amortization_saved %}
+            <div class="card lb-card-ok lb-mb-12">Сохранено.</div>
+          {% endif %}
+          {% if amortization_error %}
+            <div class="error lb-mb-12">{{ amortization_error }}</div>
+          {% endif %}
+          {% for row in amortization_levels %}
+            <form method="post" action="/admin/settings/amortization" class="lb-stack-8 lb-mb-12" style="padding-bottom:10px; border-bottom:1px solid #e2e8f0;">
+              <input type="hidden" name="id" value="{{ row.id }}" />
+              <div>
+                <label>Название</label>
+                <input name="name" maxlength="120" required value="{{ row.name }}" style="width:100%;" />
+              </div>
+              <div class="lb-row-center-gap">
+                <div>
+                  <label>Сумма (₽)</label>
+                  <input name="amount" type="number" step="1" min="0" required value="{{ row.amount|int }}" class="lb-input-narrow" />
+                </div>
+              </div>
+              <div>
+                <label>Описание</label>
+                <input name="description" maxlength="2000" value="{{ row.description or '' }}" style="width:100%;" placeholder="Подсказка мастеру в скобках" />
+              </div>
+              <div class="lb-row-center-gap">
+                <button type="submit" name="action" value="save">Сохранить</button>
+                <button type="submit" name="action" value="delete" class="secondary">Удалить</button>
+              </div>
+            </form>
+          {% endfor %}
+          <form method="post" action="/admin/settings/amortization" class="lb-stack-8">
+            <div style="font-weight:600; margin-bottom:4px;">Добавить</div>
+            <div>
+              <label>Название</label>
+              <input name="name" maxlength="120" required placeholder="Например: Средняя+" style="width:100%;" />
+            </div>
+            <div>
+              <label>Сумма (₽)</label>
+              <input name="amount" type="number" step="1" min="0" required placeholder="0" class="lb-input-narrow" />
+            </div>
+            <div>
+              <label>Описание</label>
+              <input name="description" maxlength="2000" style="width:100%;" placeholder="Необязательно" />
+            </div>
+            <button type="submit" name="action" value="save">Сохранить</button>
+          </form>
+        </div>
       </div>
     </details>
 
