@@ -31,3 +31,7 @@ CONSULTATION_PAY_AMOUNT_THRESHOLD = "consultation_pay_amount_threshold"
 
 # Доступные проценты с продажи (value_json: JSON-список целых, напр. [10, 15])
 SALE_PERCENT_OPTIONS = "sale_percent_options"
+
+# Последний выбор в авторасчёте прайса услуг
+PRICE_AUTOCALC_BASE_LEVEL = "price_autocalc_base_level"
+PRICE_AUTOCALC_DISCOUNTS = "price_autocalc_discounts"

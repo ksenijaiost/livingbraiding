@@ -4,57 +4,41 @@
   <div class="card lb-card-max-920">
     <p><a href="/admin/catalog">← Управление прайсом</a></p>
     <h2 class="lb-mt-0">Авторасчёт прайса услуг</h2>
-    <p class="muted">Расчёт меняет поля «от» и «до» у выбранного уровня. Пустые значения источника (NULL) пропускаются и не перезаписываются. Процент можно больше 100 (например 120 — повышение на 20%).</p>
+    <p class="muted">
+      Считаем остальные уровни от выбранной базы со скидкой %. Цены базового уровня не меняются.
+      Пустое поле скидки — этот уровень не пересчитывается. Если у базы цена не задана (пусто), соответствующее поле цели не трогаем.
+    </p>
 
     {% if error %}
       <div class="error lb-mb-12">{{ error }}</div>
     {% endif %}
     {% if msg == "done" %}
       <div class="card lb-card-ok lb-mb-12">
-        Готово: выбрано услуг — <strong>{{ selected_count or 0 }}</strong>, обновлено — <strong>{{ updated_count or 0 }}</strong>.
+        {{ done_message or ("Готово: выбрано " ~ (selected_count or 0) ~ ", обновлено " ~ (updated_count or 0) ~ ".") }}
       </div>
     {% endif %}
 
     <form method="post" action="/admin/catalog/price-autocalc" data-lb-autocalc-form>
       <div class="lb-mb-12">
-        <div class="lb-strong-head lb-mb-6">1) Уровень, кому считаем</div>
-        <label class="lb-inline-center-gap lb-mb-6">
-          <input type="radio" name="target_level" value="JUNIOR" {% if fp.target_level == 'JUNIOR' %}checked{% endif %} />
-          <span>{{ ru_master_level('JUNIOR') }}</span>
-        </label>
-        <label class="lb-inline-center-gap lb-mb-6">
-          <input type="radio" name="target_level" value="MIDDLE" {% if fp.target_level == 'MIDDLE' %}checked{% endif %} />
-          <span>{{ ru_master_level('MIDDLE') }}</span>
-        </label>
-        <label class="lb-inline-center-gap">
-          <input type="radio" name="target_level" value="SENIOR" {% if fp.target_level == 'SENIOR' %}checked{% endif %} />
-          <span>{{ ru_master_level('SENIOR') }}</span>
-        </label>
+        <div class="lb-strong-head lb-mb-6">1) От какого уровня считаем (база)</div>
+        {% for code in price_levels %}
+          <label class="lb-inline-center-gap {% if not loop.last %}lb-mb-6{% endif %}">
+            <input type="radio" name="base_level" value="{{ code }}"
+                   {% if fp.base_level == code %}checked{% endif %} data-lb-base-level />
+            <span>{{ level_labels[code] }}</span>
+          </label>
+        {% endfor %}
+        <p class="muted lb-font-12" style="margin:8px 0 0;">Цены базового уровня не меняются.</p>
       </div>
 
       <div class="lb-mb-12">
-        <div class="lb-strong-head lb-mb-6">2) Уровень, от кого считаем</div>
-        <label class="lb-inline-center-gap lb-mb-6">
-          <input type="radio" name="source_level" value="JUNIOR" {% if fp.source_level == 'JUNIOR' %}checked{% endif %} />
-          <span>{{ ru_master_level('JUNIOR') }}</span>
-        </label>
-        <label class="lb-inline-center-gap lb-mb-6">
-          <input type="radio" name="source_level" value="MIDDLE" {% if fp.source_level == 'MIDDLE' %}checked{% endif %} />
-          <span>{{ ru_master_level('MIDDLE') }}</span>
-        </label>
-        <label class="lb-inline-center-gap">
-          <input type="radio" name="source_level" value="SENIOR" {% if fp.source_level == 'SENIOR' %}checked{% endif %} />
-          <span>{{ ru_master_level('SENIOR') }}</span>
-        </label>
-      </div>
-
-      <div class="lb-mb-16">
-        <div class="lb-strong-head lb-mb-6">3) Процент</div>
-        <input name="percent" type="number" min="0" step="0.01" value="{{ fp.percent }}" required />
+        <div class="lb-strong-head lb-mb-6">2) Скидка для остальных уровней</div>
+        <div data-lb-discount-fields></div>
+        <p class="muted lb-font-12" style="margin:8px 0 0;" data-lb-autocalc-example></p>
       </div>
 
       <div class="lb-mb-12">
-        <div class="lb-strong-head lb-mb-6">4) Выбор позиций</div>
+        <div class="lb-strong-head lb-mb-6">3) Выбор позиций</div>
         <label class="lb-inline-center-gap lb-mb-6">
           <input type="radio" name="scope_mode" value="all" {% if fp.scope_mode == 'all' %}checked{% endif %} />
           <span>Все услуги</span>
@@ -126,6 +110,11 @@
     (function () {
       var form = document.querySelector("form[data-lb-autocalc-form]");
       if (!form) return;
+      var levelLabels = {{ level_labels | tojson }};
+      var levelOrder = {{ price_levels | tojson }};
+      var initialDiscounts = {{ fp.discounts | tojson }};
+      var discountWrap = form.querySelector("[data-lb-discount-fields]");
+      var exampleEl = form.querySelector("[data-lb-autocalc-example]");
       var modeRadios = Array.from(form.querySelectorAll('input[name="scope_mode"]'));
       var catWrap = form.querySelector("[data-lb-scope-category]");
       var subWrap = form.querySelector("[data-lb-scope-subcategory]");
@@ -134,6 +123,75 @@
       var subSelect = form.querySelector("[data-lb-subcategory-select]");
       var allSvcBtn = form.querySelector("[data-lb-services-select-all]");
       var clrSvcBtn = form.querySelector("[data-lb-services-clear-all]");
+      var EXAMPLE_BASE = 3000;
+
+      function activeBase() {
+        var cur = form.querySelector('input[name="base_level"]:checked');
+        return cur ? cur.value : "SENIOR";
+      }
+
+      function readDiscountValues() {
+        var out = {};
+        Array.from(form.querySelectorAll("[data-lb-discount-input]")).forEach(function (inp) {
+          out[String(inp.getAttribute("data-level") || "")] = String(inp.value || "");
+        });
+        return out;
+      }
+
+      function parseDiscount(raw) {
+        var s = String(raw || "").trim().replace(",", ".");
+        if (!s) return null;
+        var n = Number(s);
+        if (!isFinite(n) || n < 0 || n > 100) return null;
+        return n;
+      }
+
+      function formatRub(n) {
+        return String(Math.round(n));
+      }
+
+      function rebuildDiscountFields() {
+        if (!discountWrap) return;
+        var base = activeBase();
+        var kept = Object.assign({}, initialDiscounts || {}, readDiscountValues());
+        var html = "";
+        levelOrder.forEach(function (code) {
+          if (code === base) return;
+          var val = kept[code] != null ? kept[code] : "";
+          html += '<div class="lb-row-center-gap lb-mb-8">' +
+            '<label style="min-width:10rem;">' + (levelLabels[code] || code) + '</label>' +
+            '<input type="number" name="discount_' + code + '" min="0" max="100" step="1" ' +
+            'value="' + String(val).replace(/"/g, "&quot;") + '" class="lb-input-narrow" ' +
+            'data-lb-discount-input data-level="' + code + '" />' +
+            '<span class="muted">%</span>' +
+            '</div>';
+        });
+        discountWrap.innerHTML = html;
+        Array.from(discountWrap.querySelectorAll("[data-lb-discount-input]")).forEach(function (inp) {
+          inp.addEventListener("input", updateExample);
+        });
+        updateExample();
+      }
+
+      function updateExample() {
+        if (!exampleEl) return;
+        var base = activeBase();
+        var baseName = levelLabels[base] || base;
+        var parts = [];
+        levelOrder.forEach(function (code) {
+          if (code === base) return;
+          var inp = form.querySelector('input[data-lb-discount-input][data-level="' + code + '"]');
+          var d = parseDiscount(inp ? inp.value : "");
+          if (d == null) return;
+          var price = Math.round(EXAMPLE_BASE * (100 - d) / 100);
+          parts.push((levelLabels[code] || code) + " " + formatRub(price) + " ₽");
+        });
+        if (!parts.length) {
+          exampleEl.textContent = "Пример: " + formatRub(EXAMPLE_BASE) + " ₽ (база: " + baseName + ") → укажите скидку для уровня.";
+          return;
+        }
+        exampleEl.textContent = "Пример: " + formatRub(EXAMPLE_BASE) + " ₽ (база: " + baseName + ") → " + parts.join(", ");
+      }
 
       function activeMode() {
         var cur = form.querySelector('input[name="scope_mode"]:checked');
@@ -163,6 +221,9 @@
         if (svcWrap) svcWrap.style.display = mode === "services" ? "" : "none";
       }
 
+      Array.from(form.querySelectorAll("[data-lb-base-level]")).forEach(function (r) {
+        r.addEventListener("change", rebuildDiscountFields);
+      });
       if (catSelect) catSelect.addEventListener("change", syncSubcategoryByCategory);
       modeRadios.forEach(function (r) { r.addEventListener("change", syncModeUI); });
       if (allSvcBtn) {
@@ -175,6 +236,14 @@
           Array.from(form.querySelectorAll('input[name="service_ids"]')).forEach(function (cb) { cb.checked = false; });
         });
       }
+      form.addEventListener("submit", function (ev) {
+        var base = activeBase();
+        var baseName = levelLabels[base] || base;
+        var ok = window.confirm("Пересчитать цены от уровня " + baseName + "? Его цены не изменятся.");
+        if (!ok) ev.preventDefault();
+      });
+
+      rebuildDiscountFields();
       syncSubcategoryByCategory();
       syncModeUI();
     })();

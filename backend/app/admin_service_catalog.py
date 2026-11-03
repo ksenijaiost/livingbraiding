@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from urllib.parse import quote
 from datetime import datetime
 from types import SimpleNamespace
@@ -29,22 +30,28 @@ from app.db.models import (
     ServiceSubcategory,
     ServiceSubcategoryAuditLog,
     UserRole,
+    WorkRate,
 )
 from app.db.session import get_db
 from app.price_ordering import price_sort_key, service_sort_price
+from app.ru_labels import ru_master_level
 from app.time_utils import utcnow_naive
 from app.webui import ctx as _ctx
 from app.webui import templates
+from app.work_rate_keys import PRICE_AUTOCALC_BASE_LEVEL, PRICE_AUTOCALC_DISCOUNTS
 
 router = APIRouter(prefix="/admin/catalog", tags=["admin-catalog"])
 
 _CATALOG_EDITOR = Depends(require_role(UserRole.ADMIN_SENIOR, UserRole.ADMIN_SUPER))
 _PRODUCT_CATALOG_ONLY_CATEGORIES = {"Заказ", "Продажа материала", "Работа по фикс цене"}
+_PRICE_LEVELS: tuple[str, ...] = ("JUNIOR", "MIDDLE", "SENIOR")
 _PRICE_LEVEL_FIELDS: dict[str, tuple[str, str]] = {
     "JUNIOR": ("price_junior_from", "price_junior_to"),
     "MIDDLE": ("price_middle_from", "price_middle_to"),
     "SENIOR": ("price_senior_from", "price_senior_to"),
 }
+_DEFAULT_AUTOCALC_BASE = "SENIOR"
+_DEFAULT_AUTOCALC_DISCOUNTS: dict[str, float] = {"MIDDLE": 20.0, "JUNIOR": 40.0}
 
 
 def _parse_estimated_duration(raw: object) -> int:
@@ -78,16 +85,17 @@ def _parse_optional_short_name(raw: str | None, *, max_len: int) -> str | None:
     return s[:max_len]
 
 
-def _parse_autocalc_percent(raw: object | None, *, max_pct: float = 10_000.0) -> float:
+def _parse_autocalc_discount(raw: object | None) -> float | None:
+    """Пусто → None (уровень не пересчитываем). Иначе скидка 0..100 от базы."""
     if raw is None:
-        raise ValueError("pct missing")
+        return None
     t = str(raw).strip()
     if not t:
-        raise ValueError("pct empty")
+        return None
     v = float(t.replace(",", "."))
-    if v < 0 or v > float(max_pct):
-        raise ValueError("pct range")
-    return v
+    if v < 0 or v > 100:
+        raise ValueError("discount range")
+    return float(v)
 
 
 def _round_rubles(v: float) -> float:
@@ -96,14 +104,102 @@ def _round_rubles(v: float) -> float:
     return float(int(v - 0.5))
 
 
-def _autocalc_price(
-    source: float | None,
-    *,
-    pct: float,
-) -> float | None:
-    if source is None:
+def _autocalc_discounted_price(base: float | None, *, discount_pct: float) -> float | None:
+    if base is None:
         return None
-    return _round_rubles(float(source) * float(pct) / 100.0)
+    return _round_rubles(float(base) * (100.0 - float(discount_pct)) / 100.0)
+
+
+def _load_autocalc_prefs(db: Session) -> tuple[str, dict[str, float]]:
+    base = _DEFAULT_AUTOCALC_BASE
+    discounts = dict(_DEFAULT_AUTOCALC_DISCOUNTS)
+    base_row = db.scalar(select(WorkRate).where(WorkRate.key == PRICE_AUTOCALC_BASE_LEVEL))
+    if base_row and (base_row.value_json or "").strip():
+        try:
+            raw = json.loads(base_row.value_json)
+            code = str(raw or "").strip().upper()
+            if code in _PRICE_LEVEL_FIELDS:
+                base = code
+        except (TypeError, ValueError):
+            pass
+    disc_row = db.scalar(select(WorkRate).where(WorkRate.key == PRICE_AUTOCALC_DISCOUNTS))
+    if disc_row and (disc_row.value_json or "").strip():
+        try:
+            raw = json.loads(disc_row.value_json)
+        except (TypeError, ValueError):
+            raw = None
+        if isinstance(raw, dict):
+            parsed: dict[str, float] = {}
+            for level, val in raw.items():
+                code = str(level or "").strip().upper()
+                if code not in _PRICE_LEVEL_FIELDS or code == base:
+                    continue
+                try:
+                    d = float(val)
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= d <= 100:
+                    parsed[code] = d
+            discounts = parsed
+    return base, discounts
+
+
+def _upsert_work_rate_json(db: Session, *, key: str, value: object, user_id: int) -> None:
+    payload = json.dumps(value, ensure_ascii=False)
+    now = utcnow_naive()
+    row = db.scalar(select(WorkRate).where(WorkRate.key == key))
+    if row is None:
+        db.add(
+            WorkRate(
+                key=key,
+                value_json=payload,
+                is_active=True,
+                updated_at=now,
+                updated_by_user_id=user_id,
+            )
+        )
+        return
+    row.value_json = payload
+    row.is_active = True
+    row.updated_at = now
+    row.updated_by_user_id = user_id
+
+
+def _save_autocalc_prefs(
+    db: Session,
+    *,
+    base_level: str,
+    discounts: dict[str, float],
+    user_id: int,
+) -> None:
+    clean = {
+        code: float(val)
+        for code, val in discounts.items()
+        if code in _PRICE_LEVEL_FIELDS and code != base_level and 0 <= float(val) <= 100
+    }
+    _upsert_work_rate_json(db, key=PRICE_AUTOCALC_BASE_LEVEL, value=base_level, user_id=user_id)
+    _upsert_work_rate_json(db, key=PRICE_AUTOCALC_DISCOUNTS, value=clean, user_id=user_id)
+
+
+def _autocalc_done_message(
+    *,
+    selected: int,
+    updated: int,
+    base_level: str,
+    discounts: dict[str, float],
+) -> str:
+    bits: list[str] = []
+    for code in _PRICE_LEVELS:
+        if code not in discounts:
+            continue
+        d = discounts[code]
+        shown = str(int(d)) if float(d) == int(d) else str(d).rstrip("0").rstrip(".")
+        bits.append(f"{ru_master_level(code)} −{shown}%")
+    tail = ", ".join(bits) if bits else "без скидок"
+    return (
+        f"Готово: выбрано {int(selected)}, обновлено {int(updated)}. "
+        f"От {ru_master_level(base_level)}: {tail}."
+    )
 
 
 def _allowed_service_scope_rows(db: Session) -> list[tuple[ServiceCategory, ServiceSubcategory, Service]]:
@@ -190,13 +286,16 @@ def _autocalc_apply_for_services(
     db: Session,
     *,
     services: list[Service],
-    source_level: str,
-    target_level: str,
-    pct: float,
+    base_level: str,
+    discounts: dict[str, float],
     changed_by_user_id: int,
 ) -> int:
-    source_from, source_to = _PRICE_LEVEL_FIELDS[source_level]
-    target_from, target_to = _PRICE_LEVEL_FIELDS[target_level]
+    base_from, base_to = _PRICE_LEVEL_FIELDS[base_level]
+    targets = {
+        code: float(val)
+        for code, val in discounts.items()
+        if code in _PRICE_LEVEL_FIELDS and code != base_level
+    }
     updated_count = 0
     for svc in services:
         before = SimpleNamespace(
@@ -208,16 +307,18 @@ def _autocalc_apply_for_services(
             price_senior_to=svc.price_senior_to,
         )
         changed = False
-        src_from_val = getattr(svc, source_from)
-        src_to_val = getattr(svc, source_to)
-        new_from = _autocalc_price(src_from_val, pct=pct)
-        new_to = _autocalc_price(src_to_val, pct=pct)
-        if new_from is not None and getattr(svc, target_from) != new_from:
-            setattr(svc, target_from, new_from)
-            changed = True
-        if new_to is not None and getattr(svc, target_to) != new_to:
-            setattr(svc, target_to, new_to)
-            changed = True
+        src_from_val = getattr(svc, base_from)
+        src_to_val = getattr(svc, base_to)
+        for level, discount_pct in targets.items():
+            target_from, target_to = _PRICE_LEVEL_FIELDS[level]
+            new_from = _autocalc_discounted_price(src_from_val, discount_pct=discount_pct)
+            new_to = _autocalc_discounted_price(src_to_val, discount_pct=discount_pct)
+            if new_from is not None and getattr(svc, target_from) != new_from:
+                setattr(svc, target_from, new_from)
+                changed = True
+            if new_to is not None and getattr(svc, target_to) != new_to:
+                setattr(svc, target_to, new_to)
+                changed = True
         if not changed:
             continue
         svc.updated_at = utcnow_naive()
@@ -245,6 +346,14 @@ def _autocalc_apply_for_services(
     return updated_count
 
 
+def _fmt_discount_input(v: float | None) -> str:
+    if v is None:
+        return ""
+    if float(v) == int(v):
+        return str(int(v))
+    return str(v).rstrip("0").rstrip(".")
+
+
 def _render_price_autocalc_page(
     request: Request,
     *,
@@ -254,11 +363,28 @@ def _render_price_autocalc_page(
     msg: str | None = None,
     selected_count: int | None = None,
     updated_count: int | None = None,
+    done_message: str | None = None,
     fp: dict[str, Any] | None = None,
     status_code: int = 200,
 ):
     options = _autocalc_scope_options(db)
+    saved_base, saved_discounts = _load_autocalc_prefs(db)
     data = fp or {}
+    base_level = str(data.get("base_level") or saved_base or _DEFAULT_AUTOCALC_BASE).strip().upper()
+    if base_level not in _PRICE_LEVEL_FIELDS:
+        base_level = _DEFAULT_AUTOCALC_BASE
+    discount_inputs: dict[str, str] = {}
+    for code in _PRICE_LEVELS:
+        key = f"discount_{code}"
+        if key in data:
+            discount_inputs[code] = str(data.get(key) or "")
+        elif code == base_level:
+            discount_inputs[code] = ""
+        elif code in saved_discounts:
+            discount_inputs[code] = _fmt_discount_input(saved_discounts.get(code))
+        else:
+            discount_inputs[code] = ""
+    level_labels = {code: ru_master_level(code) for code in _PRICE_LEVELS}
     return templates.TemplateResponse(
         "admin_catalog_price_autocalc.html",
         _ctx(
@@ -268,15 +394,17 @@ def _render_price_autocalc_page(
             msg=msg,
             selected_count=selected_count,
             updated_count=updated_count,
+            done_message=done_message,
             scope_options=options,
+            level_labels=level_labels,
+            price_levels=list(_PRICE_LEVELS),
             fp={
                 "scope_mode": data.get("scope_mode") or "all",
                 "category_id": str(data.get("category_id") or ""),
                 "subcategory_id": str(data.get("subcategory_id") or ""),
                 "service_ids": [int(x) for x in (data.get("service_ids") or []) if int(x) > 0],
-                "target_level": str(data.get("target_level") or "JUNIOR"),
-                "source_level": str(data.get("source_level") or "MIDDLE"),
-                "percent": str(data.get("percent") or "60"),
+                "base_level": base_level,
+                "discounts": discount_inputs,
             },
         ),
         status_code=status_code,
@@ -389,6 +517,15 @@ def catalog_price_autocalc_form(
     current_user: AuthUser = _CATALOG_EDITOR,
     db: Session = Depends(get_db),
 ):
+    done_message = None
+    if msg == "done":
+        base_level, discounts = _load_autocalc_prefs(db)
+        done_message = _autocalc_done_message(
+            selected=int(selected or 0),
+            updated=int(updated or 0),
+            base_level=base_level,
+            discounts=discounts,
+        )
     return _render_price_autocalc_page(
         request,
         current_user=current_user,
@@ -396,6 +533,7 @@ def catalog_price_autocalc_form(
         msg=msg,
         selected_count=selected,
         updated_count=updated,
+        done_message=done_message,
     )
 
 
@@ -410,45 +548,50 @@ async def catalog_price_autocalc_apply(
     category_raw = str(form.get("category_id") or "").strip()
     subcategory_raw = str(form.get("subcategory_id") or "").strip()
     service_ids_raw = form.getlist("service_ids")
-    target_level = str(form.get("target_level") or "").strip().upper()
-    source_level = str(form.get("source_level") or "").strip().upper()
-    percent_raw = str(form.get("percent") or "").strip()
-    fp = {
+    base_level = str(form.get("base_level") or "").strip().upper()
+    fp: dict[str, Any] = {
         "scope_mode": scope_mode,
         "category_id": category_raw,
         "subcategory_id": subcategory_raw,
         "service_ids": [int(x) for x in service_ids_raw if str(x).strip().isdigit()],
-        "target_level": target_level,
-        "source_level": source_level,
-        "percent": percent_raw,
+        "base_level": base_level,
     }
+    for code in _PRICE_LEVELS:
+        fp[f"discount_{code}"] = str(form.get(f"discount_{code}") or "")
 
-    if target_level not in _PRICE_LEVEL_FIELDS:
+    if base_level not in _PRICE_LEVEL_FIELDS:
         return _render_price_autocalc_page(
             request,
             current_user=current_user,
             db=db,
-            error="Выберите уровень, кому считаем.",
+            error="Выберите базовый уровень.",
             fp=fp,
             status_code=400,
         )
-    if source_level not in _PRICE_LEVEL_FIELDS:
-        return _render_price_autocalc_page(
-            request,
-            current_user=current_user,
-            db=db,
-            error="Выберите уровень, от кого считаем.",
-            fp=fp,
-            status_code=400,
-        )
+
+    discounts: dict[str, float] = {}
     try:
-        pct = _parse_autocalc_percent(percent_raw)
+        for code in _PRICE_LEVELS:
+            if code == base_level:
+                continue
+            parsed = _parse_autocalc_discount(form.get(f"discount_{code}"))
+            if parsed is not None:
+                discounts[code] = parsed
     except ValueError:
         return _render_price_autocalc_page(
             request,
             current_user=current_user,
             db=db,
-            error="Процент: неотрицательное число (можно больше 100 для повышения цены).",
+            error="Скидка: число от 0 до 100. Пустое поле — уровень не пересчитывается.",
+            fp=fp,
+            status_code=400,
+        )
+    if not discounts:
+        return _render_price_autocalc_page(
+            request,
+            current_user=current_user,
+            db=db,
+            error="Укажите скидку хотя бы для одного уровня.",
             fp=fp,
             status_code=400,
         )
@@ -488,10 +631,15 @@ async def catalog_price_autocalc_apply(
     updated_count = _autocalc_apply_for_services(
         db,
         services=services,
-        source_level=source_level,
-        target_level=target_level,
-        pct=pct,
+        base_level=base_level,
+        discounts=discounts,
         changed_by_user_id=current_user.id,
+    )
+    _save_autocalc_prefs(
+        db,
+        base_level=base_level,
+        discounts=discounts,
+        user_id=int(current_user.id),
     )
     db.commit()
     return RedirectResponse(
