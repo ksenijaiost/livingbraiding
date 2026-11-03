@@ -3,14 +3,19 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
-from sqlalchemy import create_engine
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.admin_service_catalog import (
     _autocalc_apply_for_services,
-    _parse_autocalc_percent,
+    _load_autocalc_prefs,
+    _parse_autocalc_discount,
     _resolve_autocalc_service_ids,
+    _save_autocalc_prefs,
 )
+from app.auth import AuthUser, get_current_user
 from app.db import models as _orm_models  # noqa: F401
 from app.db.base import Base
 from app.db.models import (
@@ -20,16 +25,73 @@ from app.db.models import (
     ServiceSubcategory,
     User,
     UserRole,
+    UserRoleAssignment,
+    WorkRate,
 )
+from app.db.session import get_db
+from app.main import app
+from app.work_rate_keys import PRICE_AUTOCALC_BASE_LEVEL, PRICE_AUTOCALC_DISCOUNTS
 
 
 @pytest.fixture()
 def memory_db():
-    engine = create_engine("sqlite:///:memory:")
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)
     with SessionLocal() as db:
         yield db
+
+
+def _auth(user: User) -> AuthUser:
+    return AuthUser(
+        id=int(user.id),
+        username=user.username,
+        display_name=user.display_name or user.username,
+        role=user.role,
+        roles=(user.role,),
+        master_level=user.master_level,
+    )
+
+
+def _seed_user(db, *, username: str, role: UserRole) -> User:
+    u = User(
+        username=username,
+        display_name=username,
+        password_hash="x",
+        role=role,
+        is_active=True,
+    )
+    db.add(u)
+    db.flush()
+    db.add(UserRoleAssignment(user_id=u.id, role=role))
+    db.commit()
+    db.refresh(u)
+    return u
+
+
+def _client_for(db, user: User) -> TestClient:
+    auth = _auth(user)
+
+    def _override_user():
+        return auth
+
+    def _override_db():
+        try:
+            yield db
+        finally:
+            pass
+
+    app.dependency_overrides[get_current_user] = _override_user
+    app.dependency_overrides[get_db] = _override_db
+    return TestClient(app)
+
+
+def _clear_overrides() -> None:
+    app.dependency_overrides.clear()
 
 
 def _seed_scope_data(db):
@@ -100,21 +162,21 @@ def test_resolve_scope_subcategory_and_services(memory_db):
         )
 
 
-def test_parse_autocalc_percent_allows_above_100() -> None:
-    assert _parse_autocalc_percent("120") == 120.0
-    assert _parse_autocalc_percent("50") == 50.0
+def test_parse_autocalc_discount_range() -> None:
+    assert _parse_autocalc_discount("") is None
+    assert _parse_autocalc_discount("  ") is None
+    assert _parse_autocalc_discount("20") == 20.0
+    assert _parse_autocalc_discount("0") == 0.0
+    assert _parse_autocalc_discount("100") == 100.0
+    with pytest.raises(ValueError):
+        _parse_autocalc_discount("101")
+    with pytest.raises(ValueError):
+        _parse_autocalc_discount("-1")
 
 
-def test_apply_autocalc_rounding_and_null_skip(memory_db):
-    u = User(
-        username="super",
-        display_name="Super",
-        password_hash="x",
-        role=UserRole.ADMIN_SUPER,
-        is_active=True,
-    )
+def test_apply_from_senior_discounts(memory_db):
+    u = _seed_user(memory_db, username="super", role=UserRole.ADMIN_SUPER)
     db = memory_db
-    db.add(u)
     cat = ServiceCategory(name="Услуги", is_active=True)
     db.add(cat)
     db.flush()
@@ -125,10 +187,12 @@ def test_apply_autocalc_rounding_and_null_skip(memory_db):
         subcategory_id=sub.id,
         name="Тест",
         is_active=True,
-        price_junior_from=10.0,
-        price_junior_to=20.0,
-        price_middle_from=335.0,
-        price_middle_to=None,
+        price_senior_from=3000.0,
+        price_senior_to=4000.0,
+        price_middle_from=1.0,
+        price_middle_to=2.0,
+        price_junior_from=3.0,
+        price_junior_to=4.0,
     )
     db.add(svc)
     db.commit()
@@ -136,20 +200,221 @@ def test_apply_autocalc_rounding_and_null_skip(memory_db):
     updated = _autocalc_apply_for_services(
         db,
         services=[svc],
-        source_level="MIDDLE",
-        target_level="JUNIOR",
-        pct=50.0,
+        base_level="SENIOR",
+        discounts={"MIDDLE": 20.0, "JUNIOR": 40.0},
         changed_by_user_id=int(u.id),
     )
     db.commit()
     db.refresh(svc)
 
     assert updated == 1
-    assert svc.price_junior_from == 168.0
-    assert svc.price_junior_to == 20.0
-    assert svc.updated_by_user_id == u.id
-    assert isinstance(svc.updated_at, datetime)
+    assert svc.price_senior_from == 3000.0
+    assert svc.price_senior_to == 4000.0
+    assert svc.price_middle_from == 2400.0
+    assert svc.price_middle_to == 3200.0
+    assert svc.price_junior_from == 1800.0
+    assert svc.price_junior_to == 2400.0
     logs = list(db.query(ServiceAuditLog).filter(ServiceAuditLog.service_id == svc.id).all())
     assert logs
-    assert any(l.field_name == "Цена — младший (от)" for l in logs)
 
+
+def test_apply_from_middle_leaves_middle(memory_db):
+    u = _seed_user(memory_db, username="super2", role=UserRole.ADMIN_SUPER)
+    db = memory_db
+    cat = ServiceCategory(name="Услуги", is_active=True)
+    db.add(cat)
+    db.flush()
+    sub = ServiceSubcategory(category_id=cat.id, name="Под", is_active=True)
+    db.add(sub)
+    db.flush()
+    svc = Service(
+        subcategory_id=sub.id,
+        name="Тест",
+        is_active=True,
+        price_middle_from=2000.0,
+        price_middle_to=3000.0,
+        price_senior_from=10.0,
+        price_senior_to=20.0,
+        price_junior_from=30.0,
+        price_junior_to=40.0,
+    )
+    db.add(svc)
+    db.commit()
+
+    _autocalc_apply_for_services(
+        db,
+        services=[svc],
+        base_level="MIDDLE",
+        discounts={"SENIOR": 0.0, "JUNIOR": 50.0},
+        changed_by_user_id=int(u.id),
+    )
+    db.commit()
+    db.refresh(svc)
+    assert svc.price_middle_from == 2000.0
+    assert svc.price_middle_to == 3000.0
+    assert svc.price_senior_from == 2000.0
+    assert svc.price_senior_to == 3000.0
+    assert svc.price_junior_from == 1000.0
+    assert svc.price_junior_to == 1500.0
+
+
+def test_null_base_does_not_overwrite_target(memory_db):
+    u = _seed_user(memory_db, username="super3", role=UserRole.ADMIN_SUPER)
+    db = memory_db
+    cat = ServiceCategory(name="Услуги", is_active=True)
+    db.add(cat)
+    db.flush()
+    sub = ServiceSubcategory(category_id=cat.id, name="Под", is_active=True)
+    db.add(sub)
+    db.flush()
+    svc = Service(
+        subcategory_id=sub.id,
+        name="Тест",
+        is_active=True,
+        price_senior_from=3000.0,
+        price_senior_to=None,
+        price_junior_from=111.0,
+        price_junior_to=222.0,
+    )
+    db.add(svc)
+    db.commit()
+
+    updated = _autocalc_apply_for_services(
+        db,
+        services=[svc],
+        base_level="SENIOR",
+        discounts={"JUNIOR": 40.0},
+        changed_by_user_id=int(u.id),
+    )
+    db.commit()
+    db.refresh(svc)
+    assert updated == 1
+    assert svc.price_junior_from == 1800.0
+    assert svc.price_junior_to == 222.0
+
+
+def test_empty_discount_level_not_changed(memory_db):
+    u = _seed_user(memory_db, username="super4", role=UserRole.ADMIN_SUPER)
+    db = memory_db
+    cat = ServiceCategory(name="Услуги", is_active=True)
+    db.add(cat)
+    db.flush()
+    sub = ServiceSubcategory(category_id=cat.id, name="Под", is_active=True)
+    db.add(sub)
+    db.flush()
+    svc = Service(
+        subcategory_id=sub.id,
+        name="Тест",
+        is_active=True,
+        price_senior_from=3000.0,
+        price_senior_to=4000.0,
+        price_middle_from=111.0,
+        price_middle_to=222.0,
+        price_junior_from=333.0,
+        price_junior_to=444.0,
+    )
+    db.add(svc)
+    db.commit()
+
+    _autocalc_apply_for_services(
+        db,
+        services=[svc],
+        base_level="SENIOR",
+        discounts={"JUNIOR": 40.0},
+        changed_by_user_id=int(u.id),
+    )
+    db.commit()
+    db.refresh(svc)
+    assert svc.price_middle_from == 111.0
+    assert svc.price_middle_to == 222.0
+    assert svc.price_junior_from == 1800.0
+    assert svc.price_junior_to == 2400.0
+
+
+def test_prefs_saved_and_loaded(memory_db):
+    u = _seed_user(memory_db, username="super5", role=UserRole.ADMIN_SUPER)
+    db = memory_db
+    base, discounts = _load_autocalc_prefs(db)
+    assert base == "SENIOR"
+    assert discounts == {"MIDDLE": 20.0, "JUNIOR": 40.0}
+
+    _save_autocalc_prefs(
+        db,
+        base_level="MIDDLE",
+        discounts={"JUNIOR": 15.0, "SENIOR": 5.0},
+        user_id=int(u.id),
+    )
+    db.commit()
+    base2, discounts2 = _load_autocalc_prefs(db)
+    assert base2 == "MIDDLE"
+    assert discounts2 == {"JUNIOR": 15.0, "SENIOR": 5.0}
+    assert db.scalar(select(WorkRate).where(WorkRate.key == PRICE_AUTOCALC_BASE_LEVEL)) is not None
+    assert db.scalar(select(WorkRate).where(WorkRate.key == PRICE_AUTOCALC_DISCOUNTS)) is not None
+
+
+def test_http_apply_and_forbidden(memory_db):
+    db = memory_db
+    admin = _seed_user(db, username="senior", role=UserRole.ADMIN_SENIOR)
+    cat = ServiceCategory(name="Услуги", is_active=True)
+    db.add(cat)
+    db.flush()
+    sub = ServiceSubcategory(category_id=cat.id, name="Под", is_active=True)
+    db.add(sub)
+    db.flush()
+    svc = Service(
+        subcategory_id=sub.id,
+        name="Услуга",
+        is_active=True,
+        price_senior_from=3000.0,
+        price_senior_to=4000.0,
+    )
+    db.add(svc)
+    db.commit()
+
+    client = _client_for(db, admin)
+    try:
+        r = client.get("/admin/catalog/price-autocalc")
+        assert r.status_code == 200
+        assert "От какого уровня считаем" in r.text
+        assert "Скидка для остальных уровней" in r.text
+
+        r = client.post(
+            "/admin/catalog/price-autocalc",
+            data={
+                "base_level": "SENIOR",
+                "discount_MIDDLE": "20",
+                "discount_JUNIOR": "40",
+                "scope_mode": "all",
+            },
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
+        assert "msg=done" in r.headers.get("location", "")
+        db.refresh(svc)
+        assert svc.price_middle_from == 2400.0
+        assert svc.price_junior_from == 1800.0
+        base, discounts = _load_autocalc_prefs(db)
+        assert base == "SENIOR"
+        assert discounts["MIDDLE"] == 20.0
+        assert discounts["JUNIOR"] == 40.0
+
+        r2 = client.get(r.headers["location"])
+        assert r2.status_code == 200
+        assert "Готово:" in r2.text
+        assert "−20%" in r2.text or "−20%" in r2.text.replace("−", "-")
+    finally:
+        _clear_overrides()
+
+    master = _seed_user(db, username="master_x", role=UserRole.MASTER)
+    client_m = _client_for(db, master)
+    try:
+        r = client_m.get("/admin/catalog/price-autocalc", follow_redirects=False)
+        assert r.status_code == 403
+        r = client_m.post(
+            "/admin/catalog/price-autocalc",
+            data={"base_level": "SENIOR", "discount_JUNIOR": "10", "scope_mode": "all"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 403
+    finally:
+        _clear_overrides()
