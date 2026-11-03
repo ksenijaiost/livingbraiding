@@ -89,9 +89,11 @@ class MixComplexity(str, enum.Enum):
 
 
 class AmortizationLevel(str, enum.Enum):
-    MIN = "MIN"  # 100 ₽
-    MID = "MID"  # 200 ₽
-    MAX = "MAX"  # 500 ₽
+    """Стартовые коды уровней (исторические снимки в визитах). Список — в amortization_levels."""
+
+    MIN = "MIN"
+    MID = "MID"
+    MAX = "MAX"
 
 
 class KitBlanksCondition(str, enum.Enum):
@@ -1666,6 +1668,24 @@ class WorkRate(Base):
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
 
 
+class AmortizationLevelOption(Base):
+    """Варианты амортизации в форме визита (настройки студии)."""
+
+    __tablename__ = "amortization_levels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by_user_id])
+
+
 class PayrollPeriod(Base):
     """Периоды начисления/закрытия (каркас; проводки будут позже)."""
 
@@ -1858,7 +1878,7 @@ class Visit(Base):
     addons_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     addons_details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    amortization_level: Mapped[AmortizationLevel | None] = mapped_column(Enum(AmortizationLevel), nullable=True)
+    amortization_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
     amortization_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     studio_fund_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
@@ -2132,6 +2152,23 @@ class WorkRateAuditLog(Base):
     changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
 
 
+class AmortizationLevelAuditLog(Base):
+    __tablename__ = "amortization_level_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    amortization_level_id: Mapped[int | None] = mapped_column(
+        ForeignKey("amortization_levels.id", ondelete="SET NULL"), nullable=True
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    amortization_level: Mapped["AmortizationLevelOption | None"] = relationship()
+    changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
+
+
 class ServiceCategoryAuditLog(Base):
     __tablename__ = "service_category_audit_logs"
 
@@ -2287,7 +2324,7 @@ class VisitService(Base):
     materials_cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     addons_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     addons_details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    amortization_level: Mapped[AmortizationLevel | None] = mapped_column(Enum(AmortizationLevel), nullable=True)
+    amortization_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
     amortization_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     studio_fund_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     cost_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
