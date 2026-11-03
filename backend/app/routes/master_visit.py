@@ -33,8 +33,12 @@ from app.display_time import get_display_timezone
 from app.planned_service_time import planned_start_local_datetime
 from app.forms_parse import parse_int
 from app.media_store import get_nonempty_upload, save_upload_image
+from app.amortization_levels import (
+    amortization_choices,
+    amortization_rubles_map,
+    choices_for_template,
+)
 from app.kit_inlay_visit import (
-    AMORTIZATION_LEVEL_RUBLES,
     collect_questionnaire_prefill_from_form,
     get_salon_cut_pct,
     kit_reserve_hint_by_id,
@@ -333,6 +337,17 @@ def _master_visit_step1_template_response(
         {"id": int(u.id), "name": (u.display_name or u.username or "").strip() or f"#{u.id}"}
         for u in seller_users(db)
     ]
+    amort_current = (form_prefill.get("amortization_level") or "").strip() or None
+    amort_amount_raw = (form_prefill.get("amortization_amount") or "").strip()
+    try:
+        amort_current_amount = float(amort_amount_raw) if amort_amount_raw else None
+    except ValueError:
+        amort_current_amount = None
+    amort_choices = amortization_choices(db, amort_current, current_amount=amort_current_amount)
+    amort_rubles = amortization_rubles_map(db)
+    for ch in amort_choices:
+        amort_rubles.setdefault(ch.code, float(ch.amount))
+    amort_default = amort_choices[0].code if amort_choices else "MIN"
     return templates.TemplateResponse(
         "master_visit_step1.html",
         _ctx(
@@ -354,8 +369,11 @@ def _master_visit_step1_template_response(
             salon_cut_pct=salon_cut_pct,
             material_price_per_gram_json=json.dumps(material_price_per_gram, ensure_ascii=False),
             mix_complexity_rates_json=json.dumps(mix_rates_meta_json_dict(db), ensure_ascii=False),
-            amortization_rubles=AMORTIZATION_LEVEL_RUBLES,
-            amortization_rubles_json=json.dumps(AMORTIZATION_LEVEL_RUBLES, ensure_ascii=False),
+            amortization_levels=choices_for_template(amort_choices),
+            amortization_levels_json=json.dumps(choices_for_template(amort_choices), ensure_ascii=False),
+            amortization_rubles=amort_rubles,
+            amortization_rubles_json=json.dumps(amort_rubles, ensure_ascii=False),
+            amortization_default_code=amort_default,
             correction_catalog_json=json.dumps(
                 _zakaz_subcategory_services_map(db, "Коррекция комплекта"),
                 ensure_ascii=False,

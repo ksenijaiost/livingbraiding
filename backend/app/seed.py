@@ -129,6 +129,10 @@ def ensure_prod_seed_data(db: Session) -> None:
 
     Does NOT create demo users/clients/visits/sales/etc.
     """
+    from app.amortization_levels import ensure_default_amortization_levels
+
+    ensure_default_amortization_levels(db)
+
     # Settings
     salon = db.get(Setting, SALON_CUT_PCT)
     if not salon:

@@ -269,7 +269,9 @@ def _apply_service_line_to_fp(
     if vs.correction_master_id:
         _set(fp, f"{p}own_corr_master_id", vs.correction_master_id)
     if vs.amortization_level:
-        _set(fp, f"{p}amortization_level", vs.amortization_level.value)
+        _lvl = vs.amortization_level.value if hasattr(vs.amortization_level, "value") else vs.amortization_level
+        _set(fp, f"{p}amortization_level", _lvl)
+        _set(fp, f"{p}amortization_amount", vs.amortization_amount or 0)
     elif idx == 0:
         fp["amortization_level"] = "NONE"
     if vs.kit_paid_separately:
@@ -295,7 +297,9 @@ def _apply_service_line_to_fp(
         if vs.correction_master_id:
             _set(fp, "own_corr_master_id", vs.correction_master_id)
         if vs.amortization_level:
-            _set(fp, "amortization_level", vs.amortization_level.value)
+            _lvl0 = vs.amortization_level.value if hasattr(vs.amortization_level, "value") else vs.amortization_level
+            _set(fp, "amortization_level", _lvl0)
+            _set(fp, "amortization_amount", vs.amortization_amount or 0)
 
     _remember_visit_addon_prefill(fp, vs, service_no=idx + 1)
 

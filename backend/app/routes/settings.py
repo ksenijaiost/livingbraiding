@@ -26,6 +26,14 @@ from app.db.session import get_db
 from app.display_time import ALLOWED_TIMEZONES, ALLOWED_TIMEZONE_IDS, get_display_timezone
 from app.forms_parse import parse_bool, parse_float, parse_int
 from app.mix_rates import mix_rates_for_admin_form
+from app.amortization_levels import (
+    delete_amortization_level,
+    list_amortization_levels,
+    parse_settings_amount,
+    parse_settings_description,
+    parse_settings_name,
+    save_amortization_level,
+)
 from app.sale_percent_options import (
     apply_sale_percent_delete,
     apply_sale_percent_save,
@@ -81,12 +89,20 @@ def _master_level_labels_for_settings(db: Session) -> dict[str, str]:
     }
 
 
+def _amortization_settings_ctx(db: Session) -> dict[str, Any]:
+    return {
+        "amortization_levels": list_amortization_levels(db),
+    }
+
+
 @router.get("/admin/settings", response_class=HTMLResponse)
 def admin_settings_page(
     request: Request,
     saved: int | None = None,
     sale_percents_saved: int | None = None,
     sale_percents_err: str | None = None,
+    amortization_saved: int | None = None,
+    amortization_err: str | None = None,
     current_user=Depends(require_role(UserRole.ADMIN_SUPER)),
     db: Session = Depends(get_db),
 ):
@@ -166,13 +182,21 @@ def admin_settings_page(
             timezone_choices=ALLOWED_TIMEZONES,
             saved=bool(saved),
             work_rates=work_rates,
-            work_rates_open=bool(sale_percents_saved or (sale_percents_err or "").strip()),
+            work_rates_open=bool(
+                sale_percents_saved
+                or (sale_percents_err or "").strip()
+                or amortization_saved
+                or (amortization_err or "").strip()
+            ),
             work_rates_saved=False,
             work_rates_error=None,
             payroll_open=False,
             sale_percents=list_sale_percents(db),
             sale_percents_saved=bool(sale_percents_saved),
             sale_percents_error=(sale_percents_err or "").strip() or None,
+            amortization_saved=bool(amortization_saved),
+            amortization_error=(amortization_err or "").strip() or None,
+            **_amortization_settings_ctx(db),
         ),
     )
 
@@ -516,6 +540,9 @@ async def admin_settings_work_rates_save(
                 sale_percents=list_sale_percents(db),
                 sale_percents_saved=False,
                 sale_percents_error=None,
+                amortization_saved=False,
+                amortization_error=None,
+                **_amortization_settings_ctx(db),
             ),
             status_code=400,
         )
@@ -578,4 +605,38 @@ async def admin_settings_sale_percents_save(
     store_sale_percents(db, updated, user_id=current_user.id)
     db.commit()
     return RedirectResponse(url="/admin/settings?sale_percents_saved=1", status_code=303)
+
+
+@router.post("/admin/settings/amortization")
+async def admin_settings_amortization_save(
+    request: Request,
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN_SUPER)),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    action = str(form.get("action") or "save").strip().lower()
+    try:
+        if action == "delete":
+            raw_id = str(form.get("id") or "").strip()
+            if not raw_id.isdigit():
+                raise ValueError("Уровень не найден.")
+            delete_amortization_level(db, level_id=int(raw_id), user_id=int(current_user.id))
+        else:
+            raw_id = str(form.get("id") or "").strip()
+            level_id = int(raw_id) if raw_id.isdigit() else None
+            save_amortization_level(
+                db,
+                level_id=level_id,
+                name=parse_settings_name(form.get("name")),
+                amount=parse_settings_amount(form.get("amount")),
+                description=parse_settings_description(form.get("description")),
+                user_id=int(current_user.id),
+            )
+    except ValueError as exc:
+        return RedirectResponse(
+            url="/admin/settings?amortization_err=" + quote(str(exc)),
+            status_code=303,
+        )
+    db.commit()
+    return RedirectResponse(url="/admin/settings?amortization_saved=1", status_code=303)
 

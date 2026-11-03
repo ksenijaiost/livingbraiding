@@ -27,7 +27,6 @@ from app.db.models import (
     KitReserve,
     MaterialPriceCurrent,
     MaterialType,
-    AmortizationLevel,
     MixComplexity,
     MixSource,
     QuestionnaireFieldType,
@@ -48,13 +47,6 @@ from app.client_validation import client_has_any_contact, strip_or_none
 from app.mix_rates import mix_complexity_rate_for
 from app.forms_parse import parse_bool, parse_date_iso, parse_float
 from app.setting_keys import KIT_MAX_RESERVES_PER_KIT, SALON_CUT_PCT
-
-# Фиксированные суммы амортизации по уровню (себестоимость визита); подписи на форме — из этого же словаря.
-AMORTIZATION_LEVEL_RUBLES: dict[str, float] = {
-    AmortizationLevel.MIN.value: 100.0,
-    AmortizationLevel.MID.value: 200.0,
-    AmortizationLevel.MAX.value: 500.0,
-}
 
 
 def get_kit_max_reserves_per_kit(db: Session) -> int:
@@ -791,14 +783,11 @@ def parse_kit_inlay_form(
             except ValueError:
                 comp = None
 
-    amort_raw = g("amortization_level", "") or "MIN"
-    if str(amort_raw).strip().upper() in ("NONE", "NO", "0"):
+    amort_raw = str(g("amortization_level", "") or "").strip()
+    if not amort_raw or amort_raw.upper() in ("NONE", "NO", "0"):
         amort = None
     else:
-        try:
-            amort = AmortizationLevel(amort_raw)
-        except ValueError:
-            amort = AmortizationLevel.MIN
+        amort = amort_raw
 
     stock_kit_lines = _parse_stock_kit_lines_from_form(form, g, g_int, g_bool)
     stock_id = stock_kit_lines[0].kit_id if stock_kit_lines else 0
@@ -942,7 +931,7 @@ class KitInlayFormInput:
     kudri_grams: float
     mix_source: MixSource | None
     mix_complexity: MixComplexity | None
-    amortization_level: AmortizationLevel | None
+    amortization_level: str | None
     service_id: int
     kit_kind: str
     # STOCK
