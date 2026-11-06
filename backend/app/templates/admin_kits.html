@@ -57,22 +57,22 @@
     </p>
 
     <div class="lb-table-wrap">
-    <table>
+    <table class="lb-kits-table">
       <thead>
         <tr>
           {% if is_super %}
-            <th>
+            <th class="lb-kits-col-id">
               <a href="/kits?q={{ (q or '')|urlencode }}&amp;stock={{ stock_mode }}&amp;sort=id&amp;dir={{ 'desc' if sort == 'id' and sort_dir == 'asc' else 'asc' }}">
                 ID{% if sort == 'id' %} {% if sort_dir == 'asc' %}↑{% else %}↓{% endif %}{% endif %}
               </a>
             </th>
           {% endif %}
-          <th>
+          <th class="lb-kits-col-sku">
             <a href="/kits?q={{ (q or '')|urlencode }}&amp;stock={{ stock_mode }}&amp;sort=sku&amp;dir={{ 'desc' if sort == 'sku' and sort_dir == 'asc' else 'asc' }}">
               Артикул{% if sort == 'sku' %} {% if sort_dir == 'asc' %}↑{% else %}↓{% endif %}{% endif %}
             </a>
           </th>
-          <th>
+          <th class="lb-kits-col-title">
             <a href="/kits?q={{ (q or '')|urlencode }}&amp;stock={{ stock_mode }}&amp;sort=title&amp;dir={{ 'desc' if sort == 'title' and sort_dir == 'asc' else 'asc' }}">
               Название{% if sort == 'title' %} {% if sort_dir == 'asc' %}↑{% else %}↓{% endif %}{% endif %}
             </a>
@@ -101,8 +101,8 @@
               {% endif %}
               <a href="/kits/{{ k.id }}"><strong>{{ k.sku }}</strong></a>
             </td>
-            <td>{{ k.title }}</td>
-            <td class="muted">
+            <td class="lb-kits-col-title">{{ k.title }}</td>
+            <td class="muted lb-nowrap">
               {% if k.stock_price_total is not none %}
                 {% set dpp = (k.discount_percent or 0)|int %}
                 {% if dpp > 0 %}
@@ -197,11 +197,11 @@
       <h3 style="margin:24px 0 10px;">Неактуальные комплекты</h3>
       <p class="muted" style="font-size:13px;margin:0 0 12px;">Снята галочка «Актуален» в карточке — в выборе «из наличия» не показываются. Здесь можно удалить карточку из базы (если нет визитов и резервов).</p>
       <div class="lb-table-wrap">
-      <table>
+      <table class="lb-kits-table">
         <thead>
           <tr>
-            <th>Артикул</th>
-            <th>Название</th>
+            <th class="lb-kits-col-sku">Артикул</th>
+            <th class="lb-kits-col-title">Название</th>
             <th>Остаток</th>
             <th></th>
           </tr>
@@ -210,8 +210,8 @@
           {% for row in inactive_kit_rows %}
             {% set k = row.kit %}
             <tr style="opacity:0.85;">
-              <td><a href="/kits/{{ k.id }}"><strong>{{ k.sku }}</strong></a></td>
-              <td>{{ k.title }}</td>
+              <td class="lb-nowrap"><a href="/kits/{{ k.id }}"><strong>{{ k.sku }}</strong></a></td>
+              <td class="lb-kits-col-title">{{ k.title }}</td>
               <td>{{ k.pieces_available }} / {{ k.pieces_total }}</td>
               <td style="white-space:nowrap;">
                 {% if role_can_delete_kit(current_user.role) %}
