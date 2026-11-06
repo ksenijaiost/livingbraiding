@@ -399,6 +399,26 @@
 .lb-kit-actions {
   width: 7.5rem;
 }
+/* Список комплектов: длинные названия по составу переносятся, остальные колонки на экране */
+.lb-table-wrap > table.lb-kits-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+.lb-kits-table .lb-kits-col-id {
+  width: 3.5rem;
+}
+.lb-kits-table .lb-kits-col-sku {
+  width: 7.5rem;
+}
+.lb-kits-table .lb-kits-col-title {
+  width: auto;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+  line-height: 1.35;
+}
 .lb-kit-discount-row {
   display: inline-flex;
   gap: 6px;
