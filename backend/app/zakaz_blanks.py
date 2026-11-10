@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -9,6 +10,37 @@ if TYPE_CHECKING:
 
 _BLANK_CATALOG_CATEGORY = "Заказ"
 _BLANK_CATALOG_SUBCATEGORY = "Заготовки поштучно"
+
+# После SE_/DE_ обязательно хотя бы одно «слово» из латиницы/цифр (не "SE_", не "DE__X").
+_KIT_KEY_RE = re.compile(r"^(SE|DE)_[A-Z0-9]+(_[A-Z0-9]+)*$")
+
+
+def normalize_kit_key(raw: str | None) -> str:
+    """Strip + upper для сравнения и хранения kit_key."""
+    return str(raw or "").strip().upper()
+
+
+def normalize_blank_catalog_name(raw: str | None) -> str:
+    """Название позиции «Заготовки поштучно» без крайних пробелов, без учёта регистра."""
+    return str(raw or "").strip().casefold()
+
+
+def validate_kit_key_format(raw: str | None) -> str:
+    """
+    Проверить и нормализовать kit_key.
+
+    Формат: SE_… / DE_…, после префикса хотя бы одно слово [A-Z0-9], слова через «_».
+    Пустое, "SE_", "DE_", двойные подчёркивания, пробелы, кириллица — ошибка.
+    """
+    kk = normalize_kit_key(raw)
+    if not kk:
+        raise ValueError("Укажите ключ kit_key (например DE_CURL_HEART).")
+    if not _KIT_KEY_RE.fullmatch(kk):
+        raise ValueError(
+            "Ключ kit_key: формат SE_… или DE_…, после префикса хотя бы одно слово "
+            "из латинских букв и цифр (например DE_CURL_HEART). Без пробелов и кириллицы."
+        )
+    return kk
 
 
 @dataclass(frozen=True)
@@ -68,7 +100,7 @@ def kit_form_blank_defs(section: str) -> list[ZakazBlankDef]:
 
 def section_from_kit_key(kit_key: str) -> str | None:
     """D.E. / S.E. для фильтра состава комплекта: по префиксу ключа DE_ / SE_."""
-    k = (kit_key or "").strip().upper()
+    k = normalize_kit_key(kit_key)
     if k.startswith("SE_"):
         return "SE"
     if k.startswith("DE_"):

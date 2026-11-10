@@ -12,10 +12,13 @@ In production you may want to disable this or make it explicit via a CLI task.
 """
 
 import json
+import logging
 from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
+
+_log = logging.getLogger(__name__)
 
 from app.db.models import (
     Booking,
@@ -75,7 +78,7 @@ from app.setting_keys import (
     KIT_MAX_RESERVES_PER_KIT,
     SALON_CUT_PCT,
 )
-from app.zakaz_blanks import zakaz_blank_defs
+from app.zakaz_blanks import normalize_blank_catalog_name, normalize_kit_key, zakaz_blank_defs
 from app.time_utils import utcnow_naive
 
 
@@ -690,8 +693,43 @@ def _ensure_zakaz_products_catalog(db: Session) -> None:
     fin_map: dict[tuple[str, str], dict] = {}
 
     # ---- Blanks (used for kit price + master pay) ----
+    existing_blank_rows = list(
+        db.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.category_name == "Заказ",
+                CatalogProduct.subcategory_name == "Заготовки поштучно",
+            )
+        ).all()
+    )
+    kit_key_owner: dict[str, CatalogProduct] = {}
+    for existing in existing_blank_rows:
+        try:
+            emeta = json.loads(existing.meta_json or "{}")
+        except Exception:
+            emeta = {}
+        if not isinstance(emeta, dict):
+            continue
+        ek = normalize_kit_key(emeta.get("kit_key"))
+        if ek and ek not in kit_key_owner:
+            kit_key_owner[ek] = existing
+
     so = 0
     for row in zakaz_blank_defs():
+        kk = normalize_kit_key(row.key) if row.key else ""
+        if kk:
+            owner = kit_key_owner.get(kk)
+            if owner is not None and normalize_blank_catalog_name(owner.name) != normalize_blank_catalog_name(
+                row.display_name
+            ):
+                _log.warning(
+                    "seed: пропуск заготовки %r — kit_key=%s уже у id=%s (%r)",
+                    row.display_name,
+                    kk,
+                    int(owner.id),
+                    owner.name,
+                )
+                so += 1
+                continue
         meta = {
             "kit_key": row.key,
             "ignore_in_calc": bool(row.ignore_in_client_calc or row.key is None),
@@ -708,6 +746,17 @@ def _ensure_zakaz_products_catalog(db: Session) -> None:
             meta=meta,
             sort_order=so,
         )
+        if kk:
+            # После upsert ключ «занят» этой позицией (по имени), чтобы не создать дубль в том же прогоне.
+            upserted = db.scalar(
+                select(CatalogProduct).where(
+                    CatalogProduct.category_name == "Заказ",
+                    CatalogProduct.subcategory_name == "Заготовки поштучно",
+                    CatalogProduct.name == row.display_name,
+                )
+            )
+            if upserted is not None:
+                kit_key_owner[kk] = upserted
         so += 1
 
     _deactivate_obsolete_zakaz_blank_catalog_rows(
