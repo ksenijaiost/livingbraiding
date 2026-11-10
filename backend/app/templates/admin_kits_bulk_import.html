@@ -12,6 +12,7 @@
     <h3 class="lb-mt-0">Поля JSON и подписи в карточке комплекта:</h3>
     <p class="muted" style="font-size:14px;">Обязательность и автоподстановки — в колонке «Обязательность». Для необязательных полей там стоит «—».</p>
 
+    <div class="lb-table-wrap">
     <table style="width:100%;max-width:960px;border-collapse:collapse;font-size:14px;margin:12px 0 20px;">
       <thead>
         <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
@@ -43,11 +44,13 @@
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">author_user_ids</td><td style="padding:8px;">—</td><td style="padding:8px;"><strong>Мастера</strong> — массив id пользователей</td></tr>
       </tbody>
     </table>
+    </div>
 
     <h3>Ключи заготовок (<code>kit_key</code>)</h3>
     <p class="muted" style="font-size:14px;">В прайсе колонка «Наименование» — это поле <code>name</code> в базе (человекочитаемая подпись). В JSON для <code>composition</code> и <code>blank_stock</code> нужны ключи из <code>meta_json.kit_key</code> активных строк «Заказ» → «Заготовки поштучно» (задаются в каталоге рядом с позицией). Строка без <code>kit_key</code> или без цены не участвует в автосчёте цены склада и не попадает в эту таблицу.</p>
     <p class="muted" style="font-size:14px;">Таблица ниже строится из текущей базы при открытии страницы (те же ключи, что использует импорт и форма комплекта).</p>
 
+    <div class="lb-table-wrap">
     <table style="width:100%;max-width:900px;border-collapse:collapse;font-size:13px;margin:12px 0 16px;">
       <thead>
         <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
@@ -68,6 +71,7 @@
         {% endif %}
       </tbody>
     </table>
+    </div>
 
     {% if top_error %}
       <div class="error lb-mb-12">{{ top_error }}</div>
@@ -126,6 +130,7 @@
 
     {% if results is not none %}
       <h3 style="margin-top:24px;">Результат</h3>
+      <div class="lb-table-wrap">
       <table style="width:100%;max-width:960px;border-collapse:collapse;font-size:14px;">
         <thead>
           <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
@@ -146,6 +151,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% endif %}
   </div>
 {% endblock %}

@@ -183,6 +183,7 @@
     {% endif %}
 
     <h3>Деньги</h3>
+    <div class="lb-table-wrap">
     <table>
       <tr><td>Выручка (с клиента)</td><td>{{ "%.0f"|format(visit.amount_from_client) }} ₽</td></tr>
       {% if visit_addon_price_total and visit_addon_price_total > 0 %}
@@ -217,9 +218,11 @@
         {% endfor %}
       {% endif %}
     </table>
+    </div>
 
     <h3>Списания комплектов со склада</h3>
     {% if visit.kit_usages %}
+      <div class="lb-table-wrap">
       <table>
         <thead><tr><th>Артикул</th><th>Заготовок</th><th>В расчёт себестоимости (снимок), ₽</th></tr></thead>
         <tbody>
@@ -232,6 +235,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="muted">{{ kit_usages_note }}</p>
     {% endif %}
@@ -282,6 +286,7 @@
       <h3>История изменений</h3>
       {% set n = (audit_rows|length if audit_rows else 0) %}
       {% if n > 0 %}
+        <div class="lb-table-wrap">
         <table>
           <thead>
             <tr>
@@ -330,6 +335,7 @@
             {% endif %}
           </tbody>
         </table>
+        </div>
       {% else %}
         <p class="muted">Пока нет изменений.</p>
       {% endif %}

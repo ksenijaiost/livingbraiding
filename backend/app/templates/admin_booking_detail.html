@@ -102,6 +102,7 @@
     {% endif %}
 
     <h3 class="lb-mt-18">Связанные консультации</h3>
+    <div class="lb-table-wrap">
     <table class="lb-table-compact lb-max-720" style="margin-top:8px;">
       <tbody>
         <tr class="lb-table-compact-row">
@@ -147,6 +148,7 @@
         </tr>
       </tbody>
     </table>
+    </div>
 
     <h3 class="lb-mt-18">Связанные записи</h3>
     {% if not booking_can_create_master_records and (need_work or need_visit) %}
@@ -155,6 +157,7 @@
       </p>
     {% endif %}
     {% set wait_work_title = "Сначала создайте работу с товарами по этой брони." %}
+    <div class="lb-table-wrap">
     <table class="lb-table-compact lb-max-720" style="margin-top:8px;">
       <tbody>
         <tr class="lb-table-compact-row">
@@ -238,6 +241,7 @@
         </tr>
       </tbody>
     </table>
+    </div>
 
     {% if booking.kind.value == "VISIT" %}
       <h3 class="lb-mt-18">Параметры визита</h3>
@@ -449,6 +453,7 @@
     {% if booking_kit_reserves %}
       <h3 class="lb-mt-18">Резервы комплектов</h3>
       <p class="muted lb-font-13 lb-mb-8">По этой брони зарезервированы заготовки на складе. Ссылка ведёт в карточку комплекта.</p>
+      <div class="lb-table-wrap">
       <table class="lb-table-compact lb-max-720">
         <thead>
           <tr>
@@ -474,6 +479,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
       <p class="muted lb-font-12 lb-mt-8">При отмене брони резерв снимается автоматически. При редактировании брони (другой комплект или режим) старый резерв снимается и создаётся новый по форме.</p>
     {% endif %}
 
@@ -511,6 +517,7 @@
     {% if not audit_rows %}
       <p class="muted">Пока нет изменений.</p>
     {% else %}
+      <div class="lb-table-wrap">
       <table>
         <thead>
           <tr>
@@ -545,6 +552,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% endif %}
   </div>
 {% endblock %}

@@ -6,8 +6,7 @@
     <h2 style="margin-top: 0;">Продажи — сверка</h2>
     <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}. Фонды: маржа студии vs журнал. «С клиента» — сумма в карточке продажи.</p>
     {% if rows %}
-      <div style="overflow-x: auto;">
-        <table>
+      <div class="lb-table-wrap"><table>
           <thead>
             <tr>
               <th>ID</th>

@@ -51,22 +51,27 @@
       vertical-align: middle;
     }
     .expense-row-actions .expense-audit-btn:hover { color: #1f2937; }
-    .expense-table-wrap {
+    .expense-table-wrap.lb-table-wrap {
       width: 100%;
       max-width: 100%;
-      overflow-x: auto;
     }
     .expense-table {
-      width: 100%;
-      max-width: 100%;
-      table-layout: fixed;
+      width: max-content;
+      min-width: 100%;
+      table-layout: auto;
       border-collapse: collapse;
     }
     .expense-table th,
     .expense-table td {
-      word-break: break-word;
+      word-break: normal;
       overflow-wrap: break-word;
       vertical-align: top;
+    }
+    @media (min-width: 900px) {
+      .expense-table {
+        width: 100%;
+        table-layout: fixed;
+      }
     }
     .expense-table .expense-col-date,
     .expense-table .expense-col-amount {
@@ -321,7 +326,7 @@
       </div>
     </form>
 
-    <div class="expense-table-wrap">
+    <div class="lb-table-wrap expense-table-wrap">
       <table class="expense-table">
         <colgroup>
           <col style="width:6.5rem;" />

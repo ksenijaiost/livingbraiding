@@ -122,6 +122,7 @@
       <div class="card" style="margin-bottom:16px;">
         <h3 style="margin-top:0;">Ближайшие брони и визиты (7 дней)</h3>
         {% if upcoming %}
+          <div class="lb-table-wrap">
           <table>
             <thead>
               <tr>
@@ -142,6 +143,7 @@
               {% endfor %}
             </tbody>
           </table>
+          </div>
         {% else %}
           <p class="muted" style="margin:0;">На ближайшие 7 дней записей нет.</p>
         {% endif %}

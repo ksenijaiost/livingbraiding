@@ -174,8 +174,7 @@
           {% endif %}
 
           {% if kit_composition_table %}
-            <div style="margin-top: 10px; overflow-x: auto;">
-              <table style="font-size: 12px; min-width: 100%;">
+            <div class="lb-table-wrap"><table style="font-size: 12px; min-width: 100%;">
                 <thead>
                   <tr>
                     <th style="text-align:left;">Вид заготовки</th>
@@ -289,8 +288,7 @@
           <div class="muted" style="font-size: 12px; margin-top: 2px;">Цена «новый»: {{ corr_kit_stock.get("new_price_total") }}</div>
           <div class="muted" style="font-size: 12px; margin-top: 2px;">Цена на склад: {{ corr_kit_stock.get("stock_price_total") }}</div>
           {% if corr_kit_stock_table %}
-            <div style="margin-top: 10px; overflow-x: auto;">
-              <table style="font-size: 12px; min-width: 100%;">
+            <div class="lb-table-wrap"><table style="font-size: 12px; min-width: 100%;">
                 <thead>
                   <tr>
                     <th style="text-align:left;">Вид заготовки</th>
@@ -397,6 +395,7 @@
         {% if current_user and current_user.role.value == "ADMIN_SUPER" %}
           {% set n = (audit_rows|length if audit_rows else 0) %}
           {% if n > 0 %}
+            <div class="lb-table-wrap">
             <table>
               <thead>
                 <tr>
@@ -445,6 +444,7 @@
                 {% endif %}
               </tbody>
             </table>
+            </div>
           {% else %}
             <p class="muted">Пока нет изменений.</p>
           {% endif %}

@@ -55,6 +55,7 @@
     <div style="font-weight:600;margin-bottom:8px;">Остаток по видам заготовок</div>
     <p class="muted" style="font-size:13px;margin:0 0 10px;">Сколько штук каждого вида сейчас на складе. Сумма станет остатком комплекта.</p>
     {% if blank_stock_rows %}
+    <div class="lb-table-wrap">
     <table style="width:100%;max-width:720px;border-collapse:collapse;font-size:14px;">
       <thead>
         <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
@@ -79,6 +80,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     {% else %}
       <p class="muted" style="margin:0;">Нет видов в составе — сначала заполните таблицу состава.</p>
     {% endif %}

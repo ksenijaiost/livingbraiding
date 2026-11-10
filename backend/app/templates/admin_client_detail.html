@@ -106,6 +106,7 @@
     </form>
 
     <h3 class="section-title" style="margin-top: 20px;">Данные клиента</h3>
+    <div class="lb-table-wrap">
     <table class="kv">
       <tr>
         <th>Телефон</th>
@@ -200,6 +201,7 @@
       <tr><th>Уточнение</th><td>{{ client.source_other or "—" }}</td></tr>
       <tr><th>Подтверждён</th><td>{% if client.is_confirmed %}Да{% else %}Нет (черновик){% endif %}</td></tr>
     </table>
+    </div>
 
     <h3 class="section-title">Последние сообщения</h3>
     {% if not recent_messages %}
