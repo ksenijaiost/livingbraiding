@@ -104,6 +104,7 @@
       {% if can_confirm %}
         <form method="post" action="/kits/bulk-price-update" style="margin-top:12px;">
           <input type="hidden" name="kit_ids" value="{{ ids_prefill }}" />
+          <input type="hidden" name="confirm" value="1" />
           <button type="submit" name="action" value="confirm">Подтвердить обновление цен</button>
         </form>
         <p class="muted" style="font-size:13px;margin-top:8px;">Будут обновлены только строки без ошибок в превью. Остальные пропускаются.</p>

@@ -1346,8 +1346,37 @@ function initAdminBookingForm() {
   }
 }
 
-/** Блокирует повторный POST при двойном клике «Сохранить» (форма остаётся на экране до ответа сервера). */
+/**
+ * Блокирует повторный POST при двойном клике «Сохранить».
+ *
+ * Важно: перед disabled копируем name/value нажатой submit-кнопки в hidden —
+ * иначе браузер не отправит поля кнопки (action=confirm и т.п.) и сервер уйдёт
+ * в ветку по умолчанию.
+ */
 function initLbDoubleSubmitGuard() {
+  document.addEventListener(
+    "click",
+    function (e) {
+      var t = e.target;
+      if (!t) return;
+      var el =
+        t.closest && t.closest('button[type="submit"], input[type="submit"]');
+      if (
+        !el &&
+        t.tagName &&
+        (t.tagName === "BUTTON" || t.tagName === "INPUT") &&
+        String(t.type || "").toLowerCase() === "submit"
+      ) {
+        el = t;
+      }
+      if (!el) return;
+      var form = el.form || (el.closest && el.closest("form"));
+      if (!form) return;
+      form._lbLastSubmitter = el;
+    },
+    true
+  );
+
   document.addEventListener(
     "submit",
     function (e) {
@@ -1362,6 +1391,21 @@ function initLbDoubleSubmitGuard() {
         e.stopPropagation();
         return;
       }
+
+      var submitter = e.submitter || form._lbLastSubmitter || null;
+      if (submitter && submitter.name) {
+        var oldProxies = form.querySelectorAll('input[data-lb-submitter-proxy="1"]');
+        for (var p = 0; p < oldProxies.length; p++) {
+          oldProxies[p].parentNode && oldProxies[p].parentNode.removeChild(oldProxies[p]);
+        }
+        var hid = document.createElement("input");
+        hid.type = "hidden";
+        hid.name = submitter.name;
+        hid.value = submitter.value != null ? String(submitter.value) : "";
+        hid.setAttribute("data-lb-submitter-proxy", "1");
+        form.appendChild(hid);
+      }
+
       form.dataset.lbSubmitting = "1";
 
       var buttons = form.querySelectorAll('button[type="submit"], input[type="submit"]');
