@@ -41,8 +41,7 @@
         {% endif %}
 
         {% if sql_result.columns %}
-          <div style="overflow-x:auto; margin-top:10px;">
-            <table>
+          <div class="lb-table-wrap"><table>
               <thead>
                 <tr>
                   {% for col in sql_result.columns %}

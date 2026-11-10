@@ -640,6 +640,10 @@ async def admin_kits_bulk_price_update_post(
 ):
     form = await request.form()
     action = str(form.get("action") or "preview").strip().lower()
+    # Страховка: hidden confirm=1 в форме подтверждения (если action кнопки потерялся).
+    confirm_flag = str(form.get("confirm") or "").strip().lower() in ("1", "true", "yes", "on")
+    if confirm_flag:
+        action = "confirm"
     ids_raw = str(form.get("kit_ids") or "")
     try:
         kit_ids = parse_kit_ids_csv(ids_raw)

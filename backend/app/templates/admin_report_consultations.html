@@ -6,8 +6,7 @@
     <h2 style="margin-top: 0;">Консультации — сверка фондов</h2>
     <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}. В сводке консультации идут из журнала; здесь — строки CONSULTATION за период (и карточки по дате консультации).</p>
     {% if rows %}
-      <div style="overflow-x: auto;">
-        <table>
+      <div class="lb-table-wrap"><table>
           <thead>
             <tr>
               <th>ID</th>

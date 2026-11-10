@@ -244,8 +244,7 @@
       </div>
       <h3 style="margin: 0 0 10px; font-size: 15px;">ЗП за день</h3>
       {% if stats.daily_rows %}
-        <div style="overflow-x: auto; margin-bottom: 24px;">
-          <table class="ms-stats-table">
+        <div class="lb-table-wrap"><table class="ms-stats-table">
             <thead>
               <tr>
                 {{ ms_date_sort_th('День') }}
@@ -276,8 +275,7 @@
       {% if display_mode == 'all' %}
         <h3 style="margin: 0 0 10px; font-size: 15px;">Общий список</h3>
         {% if stats.daily_rows %}
-          <div style="overflow-x: auto; margin-bottom: 24px;">
-            <table class="ms-stats-table">
+          <div class="lb-table-wrap"><table class="ms-stats-table">
               <thead>
                 <tr>
                   {{ ms_date_sort_th('Дата') }}
@@ -308,8 +306,7 @@
       {% else %}
         <h3 style="margin: 0 0 10px; font-size: 15px;">Визиты (услуги)</h3>
         {% if stats.visits %}
-          <div style="overflow-x: auto; margin-bottom: 24px;">
-            <table class="ms-stats-table">
+          <div class="lb-table-wrap"><table class="ms-stats-table">
               <thead>
                 <tr>
                   <th>ID / дата</th>
@@ -342,8 +339,7 @@
 
         <h3 style="margin: 0 0 10px; font-size: 15px;">Работы (изготовление товаров)</h3>
         {% if stats.works %}
-          <div style="overflow-x: auto; margin-bottom: 24px;">
-            <table class="ms-stats-table">
+          <div class="lb-table-wrap"><table class="ms-stats-table">
               <thead>
                 <tr>
                   <th>ID / дата</th>
@@ -374,8 +370,7 @@
 
         <h3 style="margin: 0 0 10px; font-size: 15px;">Продажи (товар без услуги)</h3>
         {% if stats.sales %}
-          <div style="overflow-x: auto; margin-bottom: 24px;">
-            <table class="ms-stats-table">
+          <div class="lb-table-wrap"><table class="ms-stats-table">
               <thead>
                 <tr>
                   <th>ID / дата</th>
@@ -406,8 +401,7 @@
 
         <h3 style="margin: 0 0 10px; font-size: 15px;">Консультации</h3>
         {% if stats.consultations %}
-          <div style="overflow-x: auto; margin-bottom: 24px;">
-            <table class="ms-stats-table">
+          <div class="lb-table-wrap"><table class="ms-stats-table">
               <thead>
                 <tr>
                   <th>ID / дата</th>
@@ -432,8 +426,7 @@
 
         <h3 style="margin: 0 0 10px; font-size: 15px;">Почасовая работа</h3>
         {% if stats.hourly_works %}
-          <div style="overflow-x: auto; margin-bottom: 24px;">
-            <table class="ms-stats-table">
+          <div class="lb-table-wrap"><table class="ms-stats-table">
               <thead>
                 <tr>
                   <th>ID / дата</th>
@@ -460,8 +453,7 @@
 
         <h3 style="margin: 0 0 10px; font-size: 15px;">Почасовая помощь</h3>
         {% if stats.hourly_helps %}
-          <div style="overflow-x: auto;">
-            <table class="ms-stats-table">
+          <div class="lb-table-wrap"><table class="ms-stats-table">
               <thead>
                 <tr>
                   <th>Источник / дата</th>

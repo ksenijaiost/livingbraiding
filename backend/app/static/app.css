@@ -198,19 +198,71 @@
   min-width: 0;
 }
 
-/* 1.89: списки — таблица скроллится внутри, колонки не сжимаются в «столбик букв» */
+/* 3.58: таблицы админки — горизонтальный скролл, колонки не сжимаются в столбик букв */
 .lb-table-wrap {
+  --lb-table-fade-bg: #ffffff;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   max-width: 100%;
   min-width: 0;
   margin: 0 -2px;
   padding: 0 2px;
+  /* Тень по краям, когда содержимое ушло за скролл (CSS-only) */
+  background:
+    linear-gradient(to right, var(--lb-table-fade-bg) 30%, rgba(255, 255, 255, 0)),
+    linear-gradient(to left, var(--lb-table-fade-bg) 30%, rgba(255, 255, 255, 0)) 100% 0,
+    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.12), transparent),
+    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.16), transparent) 100% 0;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-size: 40px 100%, 40px 100%, 12px 100%, 14px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+.card .lb-table-wrap,
+.lb-card-bg-subtle .lb-table-wrap {
+  --lb-table-fade-bg: #ffffff;
 }
 .lb-table-wrap > table {
   width: max-content;
   min-width: 100%;
   table-layout: auto;
+  border-collapse: collapse;
+}
+.lb-table-wrap > table > thead > tr > th,
+.lb-table-wrap > table > tbody > tr > th {
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+  min-width: 4.5rem;
+  line-height: 1.3;
+  vertical-align: bottom;
+}
+.lb-table-wrap > table > tbody > tr > td,
+.lb-table-wrap > table > tfoot > tr > td {
+  word-break: normal;
+  overflow-wrap: break-word;
+  min-width: 4.5rem;
+  vertical-align: top;
+}
+.lb-table-wrap > table .lb-cell-name,
+.lb-table-wrap > table .lb-cell-service,
+.lb-table-wrap > table .pcat-name,
+.lb-table-wrap > table .lb-kits-col-title {
+  min-width: 8rem;
+}
+.lb-table-wrap > table .lb-nowrap,
+.lb-table-wrap > table th.lb-nowrap,
+.lb-table-wrap > table td.lb-nowrap,
+.lb-table-wrap > table .pcat-num,
+.lb-table-wrap > table .pcat-active {
+  white-space: nowrap;
+  min-width: 4.5rem;
+}
+.lb-table-wrap > table .pcat-actions,
+.lb-table-wrap > table .lb-kit-actions,
+.lb-table-wrap > table .lb-b-actions {
+  white-space: nowrap;
+  min-width: 7rem;
 }
 .lb-cell-service {
   max-width: 16rem;
@@ -227,35 +279,26 @@
   white-space: normal;
   line-height: 1.35;
 }
-/* Список броней: вся таблица в ширину экрана, текст переносится внутри колонок. */
+/* Список броней: на узком — скролл вбок; от 900px — fixed на всю ширину */
 .lb-bookings-scroll {
-  overflow-x: visible;
   max-width: 100%;
   min-width: 0;
 }
 .lb-bookings-scroll.lb-table-wrap > .lb-bookings-table {
-  width: 100%;
-  min-width: 0;
-  table-layout: fixed;
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
 }
-.lb-bookings-table .lb-b-id { width: 6%; }
-.lb-bookings-table .lb-b-date { width: 12%; }
-.lb-bookings-table .lb-b-client { width: 18%; }
-.lb-bookings-table .lb-b-kind { width: 11%; }
-.lb-bookings-table .lb-b-masters { width: 13%; }
-.lb-bookings-table .lb-b-details { width: 24%; }
-.lb-bookings-table .lb-b-status { width: 16%; }
-.lb-bookings-table-manage .lb-b-id { width: 6%; }
-.lb-bookings-table-manage .lb-b-date { width: 11%; }
-.lb-bookings-table-manage .lb-b-client { width: 16%; }
-.lb-bookings-table-manage .lb-b-kind { width: 9%; }
-.lb-bookings-table-manage .lb-b-masters { width: 12%; }
-.lb-bookings-table-manage .lb-b-details { width: 20%; }
-.lb-bookings-table-manage .lb-b-status { width: 15%; }
-.lb-bookings-table-manage .lb-b-actions { width: 11%; }
+.lb-bookings-table .lb-b-id { min-width: 3.5rem; }
+.lb-bookings-table .lb-b-date { min-width: 7rem; }
+.lb-bookings-table .lb-b-client { min-width: 8rem; }
+.lb-bookings-table .lb-b-kind { min-width: 6rem; }
+.lb-bookings-table .lb-b-masters { min-width: 7rem; }
+.lb-bookings-table .lb-b-details { min-width: 10rem; }
+.lb-bookings-table .lb-b-status { min-width: 7rem; }
+.lb-bookings-table-manage .lb-b-actions { min-width: 7rem; white-space: nowrap; }
 .lb-bookings-table th,
-.lb-bookings-table td,
-.lb-bookings-table td.lb-nowrap {
+.lb-bookings-table td {
   white-space: normal;
   overflow-wrap: break-word;
   word-break: normal;
@@ -266,14 +309,14 @@
 .lb-bookings-table .lb-col-kind,
 .lb-bookings-table .lb-col-status {
   max-width: none;
-  min-width: 0;
   width: auto;
 }
 .lb-bookings-table .lb-cell-service,
 .lb-bookings-table .lb-status-line,
 .lb-bookings-table .lb-status-reason {
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 .lb-bookings-table .lb-masters-list {
   display: flex;
@@ -287,6 +330,7 @@
 .lb-bookings-table .lb-master-name {
   white-space: normal;
   overflow-wrap: break-word;
+  word-break: normal;
 }
 .lb-bookings-table .lb-master-name:not(:last-child)::after {
   content: ",";
@@ -297,14 +341,27 @@
   font-weight: 400;
   line-height: 1.35;
 }
-@media (max-width: 720px) {
-  .lb-bookings-scroll {
-    overflow-x: auto;
-  }
+@media (min-width: 900px) {
   .lb-bookings-scroll.lb-table-wrap > .lb-bookings-table {
-    width: 40rem;
-    min-width: 40rem;
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
   }
+  .lb-bookings-table .lb-b-id { width: 6%; }
+  .lb-bookings-table .lb-b-date { width: 12%; }
+  .lb-bookings-table .lb-b-client { width: 18%; }
+  .lb-bookings-table .lb-b-kind { width: 11%; }
+  .lb-bookings-table .lb-b-masters { width: 13%; }
+  .lb-bookings-table .lb-b-details { width: 24%; }
+  .lb-bookings-table .lb-b-status { width: 16%; }
+  .lb-bookings-table-manage .lb-b-id { width: 6%; }
+  .lb-bookings-table-manage .lb-b-date { width: 11%; }
+  .lb-bookings-table-manage .lb-b-client { width: 16%; }
+  .lb-bookings-table-manage .lb-b-kind { width: 9%; }
+  .lb-bookings-table-manage .lb-b-masters { width: 12%; }
+  .lb-bookings-table-manage .lb-b-details { width: 20%; }
+  .lb-bookings-table-manage .lb-b-status { width: 15%; }
+  .lb-bookings-table-manage .lb-b-actions { width: 11%; }
 }
 /* Карточки в .row на узком экране не должны расползаться из‑за min-width */
 @media (max-width: 700px) {
@@ -398,26 +455,49 @@
 }
 .lb-kit-actions {
   width: 7.5rem;
+  min-width: 7.5rem;
+  white-space: nowrap;
 }
-/* Список комплектов: длинные названия по составу переносятся, остальные колонки на экране */
+/* Комплекты: на узком — max-content + скролл; от 900px — fixed на всю ширину */
 .lb-table-wrap > table.lb-kits-table {
-  width: 100%;
-  min-width: 0;
-  table-layout: fixed;
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
 }
 .lb-kits-table .lb-kits-col-id {
+  min-width: 3.5rem;
   width: 3.5rem;
+  white-space: nowrap;
 }
 .lb-kits-table .lb-kits-col-sku {
-  width: 7.5rem;
+  min-width: 7.5rem;
+  white-space: nowrap;
 }
 .lb-kits-table .lb-kits-col-title {
-  width: auto;
-  min-width: 0;
+  min-width: 12rem;
+  max-width: 18rem;
   white-space: normal;
   overflow-wrap: break-word;
   word-break: normal;
   line-height: 1.35;
+}
+@media (min-width: 900px) {
+  .lb-table-wrap > table.lb-kits-table {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+  }
+  .lb-kits-table .lb-kits-col-id {
+    width: 3.5rem;
+  }
+  .lb-kits-table .lb-kits-col-sku {
+    width: 7.5rem;
+  }
+  .lb-kits-table .lb-kits-col-title {
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
 }
 .lb-kit-discount-row {
   display: inline-flex;

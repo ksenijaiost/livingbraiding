@@ -190,8 +190,7 @@
       {% if composition_rows %}
         <dt class="muted">Состав по видам</dt>
         <dd style="margin:0;">
-          <div style="overflow-x:auto;">
-            <table style="width:100%;max-width:720px;border-collapse:collapse;font-size:13px;">
+          <div class="lb-table-wrap"><table style="width:100%;max-width:720px;border-collapse:collapse;font-size:13px;">
               <thead>
                 <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
                   <th style="padding:6px 8px;">Вид</th>
@@ -311,6 +310,7 @@
       {% if kit.is_reserved %}
         <dt class="muted">Резервы</dt>
         <dd style="margin:0;">
+          <div class="lb-table-wrap">
           <table style="width:100%;max-width:640px;font-size:13px;">
             <thead>
               <tr><th>Шт.</th><th>Для кого</th><th>Бронь</th><th>Когда (UTC→настройки)</th><th></th></tr>
@@ -347,6 +347,7 @@
               {% endfor %}
             </tbody>
           </table>
+          </div>
           <p class="muted" style="font-size:12px;margin:8px 0 0;">Лимит резервов на комплект задаётся в настройках (суперадмин).</p>
         </dd>
       {% endif %}
@@ -356,6 +357,7 @@
       <h3 style="margin:18px 0 10px;">История изменений</h3>
       {% set n = (audit_rows|length if audit_rows else 0) %}
       {% if n > 0 %}
+        <div class="lb-table-wrap">
         <table>
           <thead>
             <tr>
@@ -404,6 +406,7 @@
             {% endif %}
           </tbody>
         </table>
+        </div>
       {% else %}
         <p class="muted">Пока нет изменений.</p>
       {% endif %}

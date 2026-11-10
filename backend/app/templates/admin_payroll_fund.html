@@ -396,6 +396,7 @@
       {% if storno_preview %}
         <div class="card" style="margin-top: 12px; background:#f8f9fb;">
           <strong>Проводка #{{ storno_preview.id }}</strong>
+          <div class="lb-table-wrap">
           <table style="margin-top: 8px;">
             <tbody>
               <tr>
@@ -458,6 +459,7 @@
               </tr>
             </tbody>
           </table>
+          </div>
           <p class="muted" style="margin:10px 0 0; font-size:12px;">
             После отмены в журнал добавится сторно на сумму {{ "%.2f"|format(-storno_preview.amount) }} руб.
             с той же датой учёта.
@@ -550,8 +552,7 @@
       </p>
     </form>
     {% if ledger_rows %}
-      <div style="overflow-x:auto;">
-        <table>
+      <div class="lb-table-wrap"><table>
           <thead>
             <tr>
               <th>ID</th>

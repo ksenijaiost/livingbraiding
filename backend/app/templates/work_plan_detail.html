@@ -40,6 +40,7 @@
       </form>
     {% endif %}
 
+    <div class="lb-table-wrap">
     <table style="margin-top:12px; width:100%;">
       <tr><td class="muted" style="width:12rem; vertical-align:top;">Дата и время</td>
         <td>
@@ -66,6 +67,7 @@
         <tr><td class="muted">Отмена</td><td>{{ plan.cancelled_at|dt_local }}{% if plan.cancelled_by_user %} · {{ plan.cancelled_by_user.display_name or plan.cancelled_by_user.username }}{% endif %}</td></tr>
       {% endif %}
     </table>
+    </div>
 
     {% if plan.status.value == 'PLANNED' and not edit_time_mode %}
       <div style="margin-top:16px; display:flex; flex-wrap:wrap; gap:10px;">

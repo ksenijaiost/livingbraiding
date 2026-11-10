@@ -10,6 +10,7 @@
     <p class="muted">Телефон нормализуется так же, как в карточке клиента. Если такой телефон уже есть в базе или выше в этом файле, строка не создаётся. Без телефона клиент создаётся, дубли по имени не проверяются. Визиты не создаются.</p>
 
     <h3 class="lb-mt-0">Поля JSON</h3>
+    <div class="lb-table-wrap">
     <table style="width:100%;max-width:960px;border-collapse:collapse;font-size:14px;margin:12px 0 20px;">
       <thead>
         <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
@@ -29,6 +30,7 @@
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;font-family:monospace;">no_promo<br/>interested_in_training<br/>is_student<br/>is_model</td><td style="padding:8px;">—</td><td style="padding:8px;">Отметки, <code>true</code> / <code>false</code>. Нет ключа — отметка не ставится.</td></tr>
       </tbody>
     </table>
+    </div>
     <p class="muted">Лишнее поле в объекте — ошибка этой строки, остальные строки загружаются.</p>
 
     {% if top_error %}
@@ -65,6 +67,7 @@
     {% if results is not none %}
       <h3 style="margin-top:24px;">Результат</h3>
       <p>Создано {{ summary.created }}, пропущено дублей {{ summary.skipped }}, ошибок {{ summary.errors }}.</p>
+      <div class="lb-table-wrap">
       <table style="width:100%;max-width:960px;border-collapse:collapse;font-size:14px;">
         <thead>
           <tr style="text-align:left;border-bottom:1px solid #cbd5e1;">
@@ -89,6 +92,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% endif %}
   </div>
 {% endblock %}

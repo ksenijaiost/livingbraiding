@@ -12,7 +12,11 @@ from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthUser, require_role
-from app.zakaz_blanks import section_from_kit_key
+from app.zakaz_blanks import (
+    normalize_blank_catalog_name,
+    normalize_kit_key,
+    validate_kit_key_format,
+)
 from app.db.models import (
     CatalogProduct,
     Kit,
@@ -326,23 +330,73 @@ def catalog_product_delete_usage(db: Session, row: CatalogProduct, *, limit: int
     }
 
 
+def _blank_catalog_rows(db: Session) -> list[CatalogProduct]:
+    return list(
+        db.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.category_name == _BLANK_CATALOG_CATEGORY,
+                CatalogProduct.subcategory_name == _BLANK_CATALOG_SUBCATEGORY,
+            )
+        ).all()
+    )
+
+
 def _catalog_blank_kit_key_owner_id(db: Session, kit_key: str, *, exclude_id: int | None = None) -> int | None:
-    kk = str(kit_key or "").strip()
+    """Владелец kit_key среди всех строк «Заготовки поштучно» (в т.ч. неактивных), без учёта регистра."""
+    kk = normalize_kit_key(kit_key)
     if not kk:
         return None
-    rows = db.scalars(
-        select(CatalogProduct).where(
-            CatalogProduct.category_name == _BLANK_CATALOG_CATEGORY,
-            CatalogProduct.subcategory_name == _BLANK_CATALOG_SUBCATEGORY,
-        )
-    ).all()
-    for row in rows:
+    for row in _blank_catalog_rows(db):
         if exclude_id is not None and int(row.id) == int(exclude_id):
             continue
-        existing = str(_parse_catalog_meta(row.meta_json).get("kit_key") or "").strip()
-        if existing == kk:
+        existing = normalize_kit_key(_parse_catalog_meta(row.meta_json).get("kit_key"))
+        if existing and existing == kk:
             return int(row.id)
     return None
+
+
+def _catalog_blank_name_owner_id(db: Session, name: str, *, exclude_id: int | None = None) -> int | None:
+    """Дубль названия в «Заготовки поштучно» без учёта регистра и крайних пробелов."""
+    needle = normalize_blank_catalog_name(name)
+    if not needle:
+        return None
+    for row in _blank_catalog_rows(db):
+        if exclude_id is not None and int(row.id) == int(exclude_id):
+            continue
+        if normalize_blank_catalog_name(row.name) == needle:
+            return int(row.id)
+    return None
+
+
+def catalog_blank_kit_key_integrity_issues(db: Session) -> dict[str, Any]:
+    """
+    Нарушения в данных «Заготовки поштучно»: дубли kit_key и ключи неверного формата.
+    Для предупреждения на странице прайса.
+    """
+    by_key: dict[str, list[dict[str, Any]]] = {}
+    bad_format: list[dict[str, Any]] = []
+    for row in _blank_catalog_rows(db):
+        raw = str(_parse_catalog_meta(row.meta_json).get("kit_key") or "").strip()
+        if not raw:
+            continue
+        item = {"id": int(row.id), "name": str(row.name or ""), "kit_key": raw, "is_active": bool(row.is_active)}
+        try:
+            kk = validate_kit_key_format(raw)
+        except ValueError:
+            bad_format.append(item)
+            kk = normalize_kit_key(raw) or raw.upper()
+        by_key.setdefault(kk, []).append(item)
+    duplicates = [
+        {"kit_key": key, "rows": rows}
+        for key, rows in sorted(by_key.items(), key=lambda kv: kv[0])
+        if len(rows) > 1
+    ]
+    bad_format.sort(key=lambda x: int(x["id"]))
+    return {
+        "has_issues": bool(duplicates or bad_format),
+        "duplicates": duplicates,
+        "bad_format": bad_format,
+    }
 
 
 def _format_product_catalog_price(s: Service) -> str | None:
@@ -403,6 +457,7 @@ def products_catalog_view(
     selected = (category or "").strip() or (cats[0] if cats else None)
     grouped_rows: list[SimpleNamespace] = []
     is_catalog_products_category = False
+    blank_kit_key_issues: dict[str, Any] | None = None
     if selected:
         if selected == "Заказ":
             if normalize_rubber_catalog_names(db):
@@ -426,6 +481,14 @@ def products_catalog_view(
                     meta = {}
                 if not isinstance(meta, dict):
                     meta = {}
+                kk = str(meta.get("kit_key") or "").strip() or None
+                usage = None
+                if (
+                    row.category_name == _BLANK_CATALOG_CATEGORY
+                    and row.subcategory_name == _BLANK_CATALOG_SUBCATEGORY
+                    and kk
+                ):
+                    usage = catalog_blank_kit_key_usage(db, kk, limit=12)
                 return SimpleNamespace(
                     id=row.id,
                     category_name=row.category_name,
@@ -434,7 +497,8 @@ def products_catalog_view(
                     price=row.price,
                     master_pay=float(meta.get("master_pay")) if meta.get("master_pay") is not None else None,
                     fixed_expense=float(meta.get("fixed_expense")) if meta.get("fixed_expense") is not None else None,
-                    kit_key=(str(meta.get("kit_key") or "").strip() or None),
+                    kit_key=kk,
+                    kit_key_usage=usage,
                     ignore_in_calc=bool(meta.get("ignore_in_calc") or False),
                     is_used_in_kit_form=bool(meta.get("is_used_in_kit_form") or False),
                     is_bu=bool(meta.get("is_bu")),
@@ -453,6 +517,8 @@ def products_catalog_view(
                 sub_names = sorted(sub_names)
             if is_fixed_price_category_name(selected) and not sub_names:
                 sub_names = [FIXED_PRICE_VISIT_CATEGORY]
+            if selected == _BLANK_CATALOG_CATEGORY:
+                blank_kit_key_issues = catalog_blank_kit_key_integrity_issues(db)
             grouped_rows = []
             for sub_name in sub_names:
                 if sub_name == RUBBER_SUBCATEGORY:
@@ -534,6 +600,7 @@ def products_catalog_view(
             selected_category=selected,
             grouped_rows=grouped_rows,
             is_catalog_products_category=is_catalog_products_category,
+            blank_kit_key_issues=blank_kit_key_issues,
             msg=msg,
             err=err,
         ),
@@ -574,28 +641,41 @@ async def products_catalog_row_edit(
     meta["fixed_expense"] = fixed_expense
     meta["is_used_in_kit_form"] = parse_bool(form.get("is_used_in_kit_form"))
     meta["ignore_in_calc"] = parse_bool(form.get("ignore_in_calc"))
+    is_blank_row = (
+        row.category_name == _BLANK_CATALOG_CATEGORY
+        and row.subcategory_name == _BLANK_CATALOG_SUBCATEGORY
+    )
     new_name = str(form.get("name") or "").strip()
     if new_name:
-        if new_name != row.name:
-            exists_id = db.scalar(
-                select(CatalogProduct.id).where(
-                    CatalogProduct.category_name == row.category_name,
-                    CatalogProduct.subcategory_name == row.subcategory_name,
-                    CatalogProduct.name == new_name,
-                    CatalogProduct.id != row.id,
+        if normalize_blank_catalog_name(new_name) != normalize_blank_catalog_name(row.name):
+            if is_blank_row:
+                if _catalog_blank_name_owner_id(db, new_name, exclude_id=int(row.id)) is not None:
+                    return _redirect("err", "duplicate")
+            else:
+                exists_id = db.scalar(
+                    select(CatalogProduct.id).where(
+                        CatalogProduct.category_name == row.category_name,
+                        CatalogProduct.subcategory_name == row.subcategory_name,
+                        CatalogProduct.name == new_name,
+                        CatalogProduct.id != row.id,
+                    )
                 )
-            )
-            if exists_id:
-                return _redirect("err", "duplicate")
+                if exists_id:
+                    return _redirect("err", "duplicate")
             row.name = new_name[:200]
-    elif row.category_name == "Заказ" and row.subcategory_name == "Заготовки поштучно":
+    elif is_blank_row:
         # Для заготовок name обязателен (kit_key используется в составе/JSON).
         return _redirect("err", "blank_fields")
 
-    if row.category_name == "Заказ" and row.subcategory_name == "Заготовки поштучно":
-        kit_key = str(meta.get("kit_key") or "").strip()
-        if not kit_key:
-            return _redirect("err", "blank_fields")
+    if is_blank_row:
+        raw_kit_key = str(form.get("kit_key") if form.get("kit_key") is not None else meta.get("kit_key") or "")
+        try:
+            kit_key = validate_kit_key_format(raw_kit_key)
+        except ValueError:
+            return _redirect("err", "bad_kit_key_format")
+        if _catalog_blank_kit_key_owner_id(db, kit_key, exclude_id=int(row.id)) is not None:
+            return _redirect("err", "duplicate_kit_key")
+        meta["kit_key"] = kit_key[:80]
     row.is_active = parse_bool(form.get("is_active"))
     row.meta_json = json.dumps(meta, ensure_ascii=False)
     sync_fixed_price_catalog_product(db, row)
@@ -694,14 +774,17 @@ async def products_catalog_row_new(
     if not category or not subcategory_name or not name:
         return _redirect("err", "empty")
 
-    if category == _BLANK_CATALOG_CATEGORY and subcategory_name == _BLANK_CATALOG_SUBCATEGORY:
-        kit_key_new = str(form.get("kit_key") or "").strip()
-        if not kit_key_new:
-            return _redirect("err", "blank_fields")
-        if section_from_kit_key(kit_key_new) is None:
-            return _redirect("err", "bad_kit_key_prefix")
+    is_blank_sub = category == _BLANK_CATALOG_CATEGORY and subcategory_name == _BLANK_CATALOG_SUBCATEGORY
+    kit_key_new = ""
+    if is_blank_sub:
+        try:
+            kit_key_new = validate_kit_key_format(form.get("kit_key"))
+        except ValueError:
+            return _redirect("err", "bad_kit_key_format")
         if _catalog_blank_kit_key_owner_id(db, kit_key_new) is not None:
             return _redirect("err", "duplicate_kit_key")
+        if _catalog_blank_name_owner_id(db, name) is not None:
+            return _redirect("err", "duplicate")
 
     try:
         price = parse_optional_float(form.get("price"), field_name="price")
@@ -710,15 +793,16 @@ async def products_catalog_row_new(
     except ValueError:
         return _redirect("err", "bad_price")
 
-    exists_id = db.scalar(
-        select(CatalogProduct.id).where(
-            CatalogProduct.category_name == category,
-            CatalogProduct.subcategory_name == subcategory_name,
-            CatalogProduct.name == name,
+    if not is_blank_sub:
+        exists_id = db.scalar(
+            select(CatalogProduct.id).where(
+                CatalogProduct.category_name == category,
+                CatalogProduct.subcategory_name == subcategory_name,
+                CatalogProduct.name == name,
+            )
         )
-    )
-    if exists_id:
-        return _redirect("err", "duplicate")
+        if exists_id:
+            return _redirect("err", "duplicate")
 
     max_sort = db.scalar(
         select(func.max(CatalogProduct.sort_order)).where(
@@ -733,7 +817,7 @@ async def products_catalog_row_new(
         "ignore_in_calc": parse_bool(form.get("ignore_in_calc")),
         "is_bu": False,
     }
-    if category == _BLANK_CATALOG_CATEGORY and subcategory_name == _BLANK_CATALOG_SUBCATEGORY:
+    if is_blank_sub:
         meta["kit_key"] = kit_key_new[:80]
     row = CatalogProduct(
         category_name=category,

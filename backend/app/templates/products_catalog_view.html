@@ -2,9 +2,10 @@
 {% block help_page_id %}products_catalog_view{% endblock %}
 {% block content %}
   <style>
-    .products-catalog-wrap table {
-      table-layout: fixed;
-      width: 100%;
+    .products-catalog-wrap .lb-table-wrap > table {
+      table-layout: auto;
+      width: max-content;
+      min-width: 100%;
     }
     .products-catalog-wrap th,
     .products-catalog-wrap td {
@@ -14,7 +15,17 @@
     }
     .products-catalog-wrap .pcat-name {
       text-align: left;
-      min-width: 14rem;
+      min-width: 12rem;
+    }
+    @media (min-width: 900px) {
+      .products-catalog-wrap .lb-table-wrap > table {
+        table-layout: fixed;
+        width: 100%;
+        min-width: 0;
+      }
+      .products-catalog-wrap .pcat-name {
+        min-width: 14rem;
+      }
     }
     .products-catalog-wrap .pcat-name strong {
       font-weight: 600;
@@ -160,9 +171,11 @@
     {% elif err == "duplicate" %}
       <p class="error">Такой элемент уже есть в этой подкатегории.</p>
     {% elif err == "duplicate_kit_key" %}
-      <p class="error">Ключ <code>kit_key</code> уже используется другой позицией в «Заготовки поштучно».</p>
+      <p class="error">Ключ <code>kit_key</code> уже занят другой позицией в «Заготовки поштучно» (без учёта регистра). Укажите уникальный ключ.</p>
+    {% elif err == "bad_kit_key_format" %}
+      <p class="error">Ключ <code>kit_key</code>: формат <code>SE_…</code> или <code>DE_…</code>, после префикса хотя бы одно слово из латинских букв и цифр (например <code>DE_CURL_HEART</code>). Без пробелов и кириллицы; <code>SE_</code> / <code>DE_</code> недопустимы.</p>
     {% elif err == "bad_kit_key_prefix" %}
-      <p class="error">Ключ <code>kit_key</code> должен начинаться с <code>DE_</code> или <code>SE_</code> (тип заготовки для состава комплекта).</p>
+      <p class="error">Ключ <code>kit_key</code>: формат <code>SE_…</code> или <code>DE_…</code>, после префикса хотя бы одно слово из латинских букв и цифр (например <code>DE_CURL_HEART</code>). Без пробелов и кириллицы; <code>SE_</code> / <code>DE_</code> недопустимы.</p>
     {% elif err == "delete_active" %}
       <p class="error">Удалять можно только неактуальные строки (снимите «Актуально» и сохраните).</p>
     {% elif msg == "deleted" %}
@@ -217,6 +230,33 @@
           </p>
         </div>
       </details>
+      {% if blank_kit_key_issues and blank_kit_key_issues.has_issues %}
+        <div class="error" style="margin: 0 0 14px; max-width: 52rem; line-height: 1.45;">
+          <strong>Заготовки поштучно — проблемы с <code>kit_key</code></strong>
+          <p style="margin: 8px 0 0;">Исправьте ключи в форме строки ниже. Составы комплектов автоматически не меняются — при необходимости поправьте комплекты вручную.</p>
+          {% if blank_kit_key_issues.duplicates %}
+            <p style="margin: 10px 0 4px;"><strong>Дубли ключей:</strong></p>
+            <ul style="margin: 0; padding-left: 1.2em;">
+              {% for d in blank_kit_key_issues.duplicates %}
+                <li>
+                  <code>{{ d.kit_key }}</code> —
+                  {% for r in d.rows %}
+                    id {{ r.id }} «{{ r.name }}»{% if not r.is_active %} <span class="muted">(неакт.)</span>{% endif %}{% if not loop.last %}; {% endif %}
+                  {% endfor %}
+                </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+          {% if blank_kit_key_issues.bad_format %}
+            <p style="margin: 10px 0 4px;"><strong>Неверный формат:</strong></p>
+            <ul style="margin: 0; padding-left: 1.2em;">
+              {% for r in blank_kit_key_issues.bad_format %}
+                <li>id {{ r.id }} «{{ r.name }}»: <code>{{ r.kit_key }}</code>{% if not r.is_active %} <span class="muted">(неакт.)</span>{% endif %}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        </div>
+      {% endif %}
     {% endif %}
 
     {% if grouped_rows %}
@@ -230,8 +270,7 @@
           {% set show_labels_col = selected_category == "Заказ" and not zakaz_no_labels %}
           {% set show_expense_col = (selected_category == "Заказ" and zakaz_no_labels) or selected_category == "Работа по фикс цене" %}
           {% set show_size_col = g.show_size_col if g.show_size_col is defined else (g.subcategory_name == "Хвосты/резинки") %}
-          <div style="overflow-x:auto;">
-            <table>
+          <div class="lb-table-wrap"><table>
               <thead>
                 <tr>
                   <th class="pcat-name"><span class="lb-th-full">Наименование</span><span class="lb-th-short" title="Наименование">Назв.</span></th>
@@ -262,10 +301,33 @@
                       {% elif role_can_edit_catalog(current_user.role) and r.id %}
                         <input form="row-edit-{{ r.id }}" name="name" type="text" value="{{ r.name }}" maxlength="200" required style="width:100%;max-width:100%;box-sizing:border-box;" />
                         {% if g.subcategory_name == "Заготовки поштучно" %}
-                          <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
-                            <span class="lb-th-full">Ключ для JSON / комплекта (<code>kit_key</code>):</span>
-                            <span class="lb-th-short" title="Ключ kit_key для JSON и комплекта">ключ:</span>
-                            <code style="font-family:monospace;">{{ r.kit_key or '—' }}</code>
+                          <div style="font-size:12px;margin-top:6px;line-height:1.35;">
+                            <label class="muted" style="display:block;margin:0 0 4px;">
+                              <span class="lb-th-full">Ключ для JSON / комплекта (<code>kit_key</code>)</span>
+                              <span class="lb-th-short" title="Ключ kit_key для JSON и комплекта">ключ</span>
+                            </label>
+                            <input
+                              form="row-edit-{{ r.id }}"
+                              name="kit_key"
+                              type="text"
+                              value="{{ r.kit_key or '' }}"
+                              maxlength="80"
+                              required
+                              placeholder="DE_… или SE_…"
+                              style="font-family:monospace;width:100%;max-width:100%;box-sizing:border-box;"
+                            />
+                            {% if r.kit_key_usage and r.kit_key_usage.total %}
+                              <div class="muted" style="margin-top:6px;">
+                                Где используется ключ <code>{{ r.kit_key }}</code>
+                                ({{ r.kit_key_usage.active }} акт. / {{ r.kit_key_usage.total }} всего){% if r.kit_key_usage.truncated %}…{% endif %}:
+                                {% for k in r.kit_key_usage.kits %}
+                                  <a href="/kits/{{ k.id }}">{{ k.sku or ('#' ~ k.id) }}</a>{% if not k.is_catalog_active %} <span class="muted">(неакт.)</span>{% endif %}{% if not loop.last %}, {% endif %}
+                                {% endfor %}
+                                <div style="margin-top:2px;">При смене ключа составы комплектов не переписываются — правьте вручную.</div>
+                              </div>
+                            {% elif r.kit_key %}
+                              <div class="muted" style="margin-top:6px;">Где используется ключ <code>{{ r.kit_key }}</code>: в комплектах не найден.</div>
+                            {% endif %}
                           </div>
                         {% endif %}
                       {% else %}
@@ -400,10 +462,33 @@
                       {% if role_can_edit_catalog(current_user.role) and r.id %}
                         <input form="row-edit-{{ r.id }}" name="name" type="text" value="{{ r.name }}" maxlength="200" required style="width:100%;max-width:100%;box-sizing:border-box;" />
                         {% if g.subcategory_name == "Заготовки поштучно" %}
-                          <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.35;">
-                            <span class="lb-th-full">Ключ для JSON / комплекта (<code>kit_key</code>):</span>
-                            <span class="lb-th-short" title="Ключ kit_key для JSON и комплекта">ключ:</span>
-                            <code style="font-family:monospace;">{{ r.kit_key or '—' }}</code>
+                          <div style="font-size:12px;margin-top:6px;line-height:1.35;">
+                            <label class="muted" style="display:block;margin:0 0 4px;">
+                              <span class="lb-th-full">Ключ для JSON / комплекта (<code>kit_key</code>)</span>
+                              <span class="lb-th-short" title="Ключ kit_key для JSON и комплекта">ключ</span>
+                            </label>
+                            <input
+                              form="row-edit-{{ r.id }}"
+                              name="kit_key"
+                              type="text"
+                              value="{{ r.kit_key or '' }}"
+                              maxlength="80"
+                              required
+                              placeholder="DE_… или SE_…"
+                              style="font-family:monospace;width:100%;max-width:100%;box-sizing:border-box;"
+                            />
+                            {% if r.kit_key_usage and r.kit_key_usage.total %}
+                              <div class="muted" style="margin-top:6px;">
+                                Где используется ключ <code>{{ r.kit_key }}</code>
+                                ({{ r.kit_key_usage.active }} акт. / {{ r.kit_key_usage.total }} всего){% if r.kit_key_usage.truncated %}…{% endif %}:
+                                {% for k in r.kit_key_usage.kits %}
+                                  <a href="/kits/{{ k.id }}">{{ k.sku or ('#' ~ k.id) }}</a>{% if not k.is_catalog_active %} <span class="muted">(неакт.)</span>{% endif %}{% if not loop.last %}, {% endif %}
+                                {% endfor %}
+                                <div style="margin-top:2px;">При смене ключа составы комплектов не переписываются — правьте вручную.</div>
+                              </div>
+                            {% elif r.kit_key %}
+                              <div class="muted" style="margin-top:6px;">Где используется ключ <code>{{ r.kit_key }}</code>: в комплектах не найден.</div>
+                            {% endif %}
                           </div>
                         {% endif %}
                       {% else %}

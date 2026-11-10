@@ -6,8 +6,7 @@
     <h2 style="margin-top: 0;">Почасовая — сверка фондов</h2>
     <p class="muted">{{ date_from.isoformat() }} — {{ date_to.isoformat() }}. «В отчёте» — сумма записи; «В журнале» — нетто начисл.+сторно HOURLY_WORK (без studio EXPENSE).</p>
     {% if rows %}
-      <div style="overflow-x: auto;">
-        <table>
+      <div class="lb-table-wrap"><table>
           <thead>
             <tr>
               <th>ID</th>

@@ -20,6 +20,7 @@
 <div id="hourly_help_block" class="card" style="display: {% if hh_fp.get('hourly_help_open') or hh_prefill_rows %}block{% else %}none{% endif %}; margin: 12px 0; border: 1px solid #e2e8f0; background: #f8fafc;">
   <h3 style="margin-top: 0;">Почасовая помощь</h3>
   <p class="muted" style="font-size: 12px; margin-top: 0;">Время — для истории. Сумма — ЗП мастера-помощника (вычитается из пула ЗП участников визита/работы).</p>
+  <div class="lb-table-wrap">
   <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
     <thead>
       <tr style="text-align: left; border-bottom: 1px solid #e2e8f0;">
@@ -32,6 +33,7 @@
     </thead>
     <tbody id="hourly_help_rows"></tbody>
   </table>
+  </div>
 </div>
 <script type="application/json" id="hourly_help_masters_json">[{% for u in hh_masters_src %}{"id":{{ u.id }},"name":{{ (u.display_name or u.username)|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}]</script>
 <script type="application/json" id="hourly_help_prefill_json">{{ hh_prefill_rows|tojson }}</script>
