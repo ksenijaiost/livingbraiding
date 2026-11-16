@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Literal
@@ -17,6 +18,8 @@ from sqlalchemy.orm import Session
 from app.audit_field_labels import audit_field_label
 from app.calendar_display import get_calendar_display_hours
 from app.db.models import MasterScheduleAuditLog, MasterScheduleDay, MasterScheduleStatus
+
+ScheduleAuditSource = Literal["single", "bulk_weekday", "bulk_cyclic"]
 
 
 ScheduleColumnState = Literal["no_data", "day_off", "working"]
@@ -245,6 +248,9 @@ def _write_audit_rows_for_master_schedule(
     work_date: date,
     changed_by_user_id: int | None,
     changes: list[tuple[str, str | None, str | None]],
+    batch_id: str | None = None,
+    source: ScheduleAuditSource = "single",
+    changed_at: datetime | None = None,
 ) -> None:
     """
     Упрощённая запись audit: master_id+work_date обязательны, поэтому
@@ -252,7 +258,7 @@ def _write_audit_rows_for_master_schedule(
     """
     if not changes:
         return
-    now = datetime.utcnow()
+    now = changed_at or datetime.utcnow()
     for field_name, old_s, new_s in changes:
         db.add(
             MasterScheduleAuditLog(
@@ -263,6 +269,8 @@ def _write_audit_rows_for_master_schedule(
                 field_name=audit_field_label(field_name),
                 old_value=old_s,
                 new_value=new_s,
+                batch_id=batch_id,
+                source=source,
             )
         )
 
@@ -278,6 +286,9 @@ def save_master_schedule_day(
     break_from: time | None,
     break_to: time | None,
     changed_by_user_id: int | None,
+    batch_id: str | None = None,
+    source: ScheduleAuditSource = "single",
+    audit_changed_at: datetime | None = None,
 ) -> MasterScheduleDay:
     """Upsert одного дня в график с минимальным audit (old/new по изменившимся полям)."""
     row = db.scalar(
@@ -285,6 +296,7 @@ def save_master_schedule_day(
             MasterScheduleDay.master_id == master_id, MasterScheduleDay.work_date == work_date
         )
     )
+    audit_batch = batch_id or (str(uuid.uuid4()) if source == "single" else None)
     if row is None:
         row = MasterScheduleDay(
             master_id=master_id,
@@ -311,6 +323,9 @@ def save_master_schedule_day(
                 ("break_from", None, str(break_from) if break_from else None),
                 ("break_to", None, str(break_to) if break_to else None),
             ],
+            batch_id=audit_batch,
+            source=source,
+            changed_at=audit_changed_at,
         )
         return row
 
@@ -347,6 +362,9 @@ def save_master_schedule_day(
         work_date=work_date,
         changed_by_user_id=changed_by_user_id,
         changes=changes,
+        batch_id=audit_batch,
+        source=source,
+        changed_at=audit_changed_at,
     )
     return row
 
@@ -372,6 +390,8 @@ def apply_weekday_bulk(
     if date_to < date_from:
         date_from, date_to = date_to, date_from
 
+    batch_id = str(uuid.uuid4())
+    audit_at = datetime.utcnow()
     updated = 0
     d = date_from
     while d <= date_to:
@@ -388,6 +408,9 @@ def apply_weekday_bulk(
             break_from=break_from if is_work else None,
             break_to=break_to if is_work else None,
             changed_by_user_id=changed_by_user_id,
+            batch_id=batch_id,
+            source="bulk_weekday",
+            audit_changed_at=audit_at,
         )
         updated += 1
         d = d + timedelta(days=1)
@@ -422,6 +445,8 @@ def apply_cyclic_bulk(
     if date_to < date_from:
         date_from, date_to = date_to, date_from
 
+    batch_id = str(uuid.uuid4())
+    audit_at = datetime.utcnow()
     updated = 0
     d = date_from
     day_index = 0
@@ -458,6 +483,9 @@ def apply_cyclic_bulk(
             break_from=break_from if is_work else None,
             break_to=break_to if is_work else None,
             changed_by_user_id=changed_by_user_id,
+            batch_id=batch_id,
+            source="bulk_cyclic",
+            audit_changed_at=audit_at,
         )
 
         updated += 1

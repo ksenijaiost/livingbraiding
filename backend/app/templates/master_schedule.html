@@ -131,6 +131,95 @@
       padding-top: 12px;
       min-width: 0;
     }
+    .lb-ms-hist {
+      margin-top: 22px;
+      padding-top: 16px;
+      border-top: 1px solid #e5e7eb;
+    }
+    .lb-ms-hist h3 { margin: 0 0 6px; font-size: 1.05rem; }
+    .lb-ms-hist-hint { font-size: 13px; margin: 0 0 10px; }
+    .lb-ms-hist-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      align-items: flex-end;
+      margin-bottom: 10px;
+    }
+    .lb-ms-hist-filters .lb-ms-field { flex: 0 1 9.5rem; max-width: 100%; }
+    .lb-ms-hist-table {
+      width: 100%;
+      table-layout: fixed;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .lb-ms-hist-table th,
+    .lb-ms-hist-table td {
+      vertical-align: top;
+      padding: 8px 6px;
+      border-bottom: 1px solid #e5e7eb;
+      word-break: normal;
+      overflow-wrap: break-word;
+      text-align: left;
+    }
+    .lb-ms-hist-table td.lb-ms-hist-col-what {
+      overflow-wrap: break-word;
+    }
+    .lb-ms-hist-table th { font-weight: 600; color: #4b5563; font-size: 12px; }
+    .lb-ms-hist-col-type { width: 16%; }
+    .lb-ms-hist-col-when { width: 16%; }
+    .lb-ms-hist-col-days { width: 20%; }
+    .lb-ms-hist-col-what { width: 32%; }
+    .lb-ms-hist-col-who { width: 16%; }
+    .lb-ms-hist-lines { margin: 0; padding: 0; list-style: none; }
+    .lb-ms-hist-lines li { margin: 0 0 2px; }
+    .lb-ms-hist-dates { white-space: pre-line; overflow-wrap: anywhere; }
+    .lb-ms-hist-dates details summary {
+      cursor: pointer;
+      color: #2563eb;
+      list-style: none;
+    }
+    .lb-ms-hist-dates details summary::-webkit-details-marker { display: none; }
+    .lb-ms-hist-badge {
+      display: inline-block;
+      margin-left: 4px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 11px;
+      line-height: 1.3;
+      white-space: nowrap;
+    }
+    .lb-ms-hist-empty { font-size: 13px; color: #6b7280; margin: 8px 0 0; }
+    .lb-ms-hist-more { margin-top: 10px; }
+    @media (max-width: 600px) {
+      .lb-ms-hist-table thead { display: none; }
+      .lb-ms-hist-table,
+      .lb-ms-hist-table tbody,
+      .lb-ms-hist-table tr,
+      .lb-ms-hist-table td {
+        display: block;
+        width: 100% !important;
+      }
+      .lb-ms-hist-table tr {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin-bottom: 10px;
+        box-sizing: border-box;
+      }
+      .lb-ms-hist-table td {
+        border: none;
+        padding: 4px 0;
+      }
+      .lb-ms-hist-table td::before {
+        content: attr(data-label);
+        display: block;
+        font-size: 11px;
+        color: #6b7280;
+        margin-bottom: 2px;
+      }
+    }
   </style>
   <script type="application/json" id="lb-ms-config">{{ {"isAdmin": is_admin_super, "masterId": master_id, "todayIso": today_iso, "defaultTimeFrom": ("%02d:00" % hour_from), "defaultTimeTo": ("%02d:00" % hour_to)} | tojson }}</script>
   <div class="card">
@@ -194,6 +283,40 @@
       Если вы заполнили график на отдельные даты, то все дни между заполненными датами автоматически считаются выходными.
       Бронь визитов на незаполненные и выходные дни недоступна.
     </div>
+
+    {% if is_admin_super %}
+    <div class="lb-ms-hist" id="lbMsHistBlock">
+      <h3>История изменений</h3>
+      <p class="muted lb-ms-hist-hint" id="lbMsHistMasterHint">Мастер: —</p>
+      <div class="lb-ms-hist-filters">
+        <div class="lb-ms-field">
+          <div class="muted" style="font-size:12px;">С</div>
+          <input type="date" id="lbMsHistFrom" />
+        </div>
+        <div class="lb-ms-field">
+          <div class="muted" style="font-size:12px;">По</div>
+          <input type="date" id="lbMsHistTo" />
+        </div>
+        <button type="button" class="secondary" id="lbMsHistApply">Показать</button>
+      </div>
+      <table class="lb-ms-hist-table" id="lbMsHistTable" style="display:none;">
+        <thead>
+          <tr>
+            <th class="lb-ms-hist-col-type">Тип изменения</th>
+            <th class="lb-ms-hist-col-when">Дата изменения</th>
+            <th class="lb-ms-hist-col-days">Рабочий день</th>
+            <th class="lb-ms-hist-col-what">Что менялось</th>
+            <th class="lb-ms-hist-col-who">Кто менял</th>
+          </tr>
+        </thead>
+        <tbody id="lbMsHistTbody"></tbody>
+      </table>
+      <p class="lb-ms-hist-empty" id="lbMsHistEmpty" style="display:none;">Изменений за выбранный период нет.</p>
+      <div class="lb-ms-hist-more" id="lbMsHistMoreWrap" style="display:none;">
+        <button type="button" class="secondary" id="lbMsHistMore">Показать ещё</button>
+      </div>
+    </div>
+    {% endif %}
   </div>
 
   <!-- Day modal -->
@@ -428,5 +551,5 @@
     </div>
   </div>
 
-  <script src="/static/master_schedule.js?v=83"></script>
+  <script src="/static/master_schedule.js?v=84"></script>
 {% endblock %}
