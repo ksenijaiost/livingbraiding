@@ -22,6 +22,8 @@ from app.master_schedule import (
     schedule_filled_until,
     save_master_schedule_day,
 )
+from app.master_schedule_history import load_master_schedule_history, parse_history_date_bound
+from app.display_time import get_display_timezone
 from app.master_time_blocks import (
     TimeBlockValidationError,
     create_time_block,
@@ -221,6 +223,43 @@ def api_schedule_month_stats(
         )
 
     return JSONResponse({"month": m, "days": days})
+
+
+@router.get("/api/master-schedule/history")
+def api_master_schedule_history(
+    user_id: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    offset: int = 0,
+    limit: int = 20,
+    current_user: AuthUser = Depends(require_role(*_SCHEDULE_ADMIN)),
+    db: Session = Depends(get_db),
+):
+    """История изменений графика выбранного мастера (группировка по сохранению / batch)."""
+    master_id = int(user_id or 0)
+    if master_id <= 0:
+        raise HTTPException(status_code=400, detail="user_id required")
+    tz_name = get_display_timezone(db)
+    try:
+        changed_from = parse_history_date_bound(date_from, tz_name=tz_name, end_of_day=False)
+        changed_to = parse_history_date_bound(date_to, tz_name=tz_name, end_of_day=True)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="invalid date_from/date_to") from None
+    if offset < 0:
+        offset = 0
+    if limit < 1:
+        limit = 20
+    if limit > 100:
+        limit = 100
+    payload = load_master_schedule_history(
+        db,
+        master_id=master_id,
+        changed_from=changed_from,
+        changed_to=changed_to,
+        offset=offset,
+        limit=limit,
+    )
+    return JSONResponse(payload)
 
 
 @router.get("/api/master-schedule/day")

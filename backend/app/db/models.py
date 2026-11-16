@@ -1363,6 +1363,9 @@ class MasterScheduleAuditLog(Base):
     field_name: Mapped[str] = mapped_column(String(120), nullable=False)
     old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Одно сохранение / массовая операция: общий UUID; source: single|bulk_weekday|bulk_cyclic.
+    batch_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(32), default="single", nullable=False)
 
     changed_by_user: Mapped["User | None"] = relationship(foreign_keys=[changed_by_user_id])
     master: Mapped["User"] = relationship(foreign_keys=[master_id])

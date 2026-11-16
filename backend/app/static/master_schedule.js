@@ -15,6 +15,10 @@
   var todayIso = String(cfg.todayIso || '');
   var defaultTimeFrom = String(cfg.defaultTimeFrom || '');
   var defaultTimeTo = String(cfg.defaultTimeTo || '');
+  var histOffset = 0;
+  var histLimit = 20;
+  var histLoading = false;
+  var histHasMore = false;
 
   function addDaysIso(dateIso, deltaDays) {
     var dt = new Date(dateIso + 'T00:00:00');
@@ -327,6 +331,129 @@
     }
   }
 
+  function histDefaultFromIso() {
+    var dt = new Date(todayIso + 'T00:00:00');
+    dt.setDate(dt.getDate() - 30);
+    var y = dt.getFullYear();
+    var m = String(dt.getMonth() + 1).padStart(2, '0');
+    var dd = String(dt.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + dd;
+  }
+
+  function ensureHistFilterDefaults() {
+    var fromEl = document.getElementById('lbMsHistFrom');
+    var toEl = document.getElementById('lbMsHistTo');
+    if (fromEl && !fromEl.value) fromEl.value = histDefaultFromIso();
+    if (toEl && !toEl.value) toEl.value = todayIso;
+  }
+
+  function renderHistGroupRow(g) {
+    var datesHtml = '';
+    var preview = g.work_dates || [];
+    var all = g.work_dates_all || preview;
+    var extra = Number(g.work_dates_extra || 0);
+    if (extra > 0) {
+      datesHtml =
+        '<div class="lb-ms-hist-dates">' +
+        esc(preview.join(',\n')) +
+        '<details><summary>…ещё ' + extra + '</summary>' +
+        esc(all.slice(preview.length).join(',\n')) +
+        '</details></div>';
+    } else {
+      datesHtml = '<div class="lb-ms-hist-dates">' + esc(preview.join(',\n')) + '</div>';
+    }
+
+    var lines = g.change_lines || [];
+    var detail = g.change_lines_detail || [];
+    var whatHtml = '<ul class="lb-ms-hist-lines">';
+    for (var i = 0; i < lines.length; i++) {
+      whatHtml += '<li>' + esc(lines[i]) + '</li>';
+    }
+    whatHtml += '</ul>';
+    if (detail.length) {
+      whatHtml +=
+        '<details><summary style="cursor:pointer;color:#2563eb;font-size:12px;">подробнее</summary>' +
+        '<ul class="lb-ms-hist-lines">';
+      for (var j = 0; j < detail.length; j++) {
+        whatHtml += '<li>' + esc(detail[j]) + '</li>';
+      }
+      whatHtml += '</ul></details>';
+    }
+
+    var who = esc(g.actor_name || 'система');
+    if (g.actor_is_self) {
+      who += ' <span class="lb-ms-hist-badge">сам мастер</span>';
+    }
+
+    return (
+      '<tr>' +
+      '<td class="lb-ms-hist-col-type" data-label="Тип изменения">' + esc(g.change_type || '') + '</td>' +
+      '<td class="lb-ms-hist-col-when" data-label="Дата изменения">' + esc(g.changed_at || '') + '</td>' +
+      '<td class="lb-ms-hist-col-days" data-label="Рабочий день">' + datesHtml + '</td>' +
+      '<td class="lb-ms-hist-col-what" data-label="Что менялось">' + whatHtml + '</td>' +
+      '<td class="lb-ms-hist-col-who" data-label="Кто менял">' + who + '</td>' +
+      '</tr>'
+    );
+  }
+
+  async function loadHistory(opts) {
+    if (!isAdmin) return;
+    var block = document.getElementById('lbMsHistBlock');
+    if (!block) return;
+    var append = !!(opts && opts.append);
+    if (histLoading) return;
+    histLoading = true;
+    ensureHistFilterDefaults();
+    if (!append) histOffset = 0;
+
+    var fromEl = document.getElementById('lbMsHistFrom');
+    var toEl = document.getElementById('lbMsHistTo');
+    var hint = document.getElementById('lbMsHistMasterHint');
+    var tbody = document.getElementById('lbMsHistTbody');
+    var table = document.getElementById('lbMsHistTable');
+    var empty = document.getElementById('lbMsHistEmpty');
+    var moreWrap = document.getElementById('lbMsHistMoreWrap');
+
+    var url =
+      '/api/master-schedule/history?user_id=' + encodeURIComponent(masterId) +
+      '&offset=' + encodeURIComponent(histOffset) +
+      '&limit=' + encodeURIComponent(histLimit);
+    if (fromEl && fromEl.value) url += '&date_from=' + encodeURIComponent(fromEl.value);
+    if (toEl && toEl.value) url += '&date_to=' + encodeURIComponent(toEl.value);
+
+    try {
+      var res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var data = await res.json();
+      if (hint) hint.textContent = 'Мастер: ' + (data.master_name || '—');
+      var groups = data.groups || [];
+      if (!append && tbody) tbody.innerHTML = '';
+      if (tbody) {
+        var html = '';
+        for (var i = 0; i < groups.length; i++) html += renderHistGroupRow(groups[i]);
+        if (append) tbody.insertAdjacentHTML('beforeend', html);
+        else tbody.innerHTML = html;
+      }
+      histHasMore = !!data.has_more;
+      histOffset = Number(data.offset || 0) + groups.length;
+      var totalShown = tbody ? tbody.querySelectorAll('tr').length : 0;
+      if (table) table.style.display = totalShown ? '' : 'none';
+      if (empty) empty.style.display = totalShown ? 'none' : '';
+      if (moreWrap) moreWrap.style.display = histHasMore ? '' : 'none';
+    } catch (e) {
+      console.error(e);
+      if (hint) hint.textContent = 'Мастер: ошибка загрузки истории';
+      if (table) table.style.display = 'none';
+      if (empty) {
+        empty.style.display = '';
+        empty.textContent = 'Не удалось загрузить историю изменений.';
+      }
+      if (moreWrap) moreWrap.style.display = 'none';
+    } finally {
+      histLoading = false;
+    }
+  }
+
   async function loadMonth(ym) {
     curYm = ym;
     setBanner('Загрузка…');
@@ -486,6 +613,7 @@
     }
     window.lbMsCloseDayModal();
     await loadMonth(curYm);
+    await loadHistory();
   };
 
   function setBulkBlocks() {
@@ -600,6 +728,7 @@
     }
     window.lbMsCloseBulkModal();
     await loadMonth(curYm);
+    await loadHistory();
   };
 
   window.lbMsOpenBulk = function () {
@@ -643,12 +772,29 @@
       sel.addEventListener('change', async function () {
         masterId = Number(sel.value);
         await loadMonth(curYm);
+        await loadHistory();
+      });
+    }
+    var histApply = document.getElementById('lbMsHistApply');
+    if (histApply) {
+      histApply.addEventListener('click', function () {
+        loadHistory();
+      });
+    }
+    var histMore = document.getElementById('lbMsHistMore');
+    if (histMore) {
+      histMore.addEventListener('click', function () {
+        loadHistory({ append: true });
       });
     }
     setBulkBlocks();
     syncOddEvenBlock();
     syncBulkAllDay();
     syncBulkBreak();
+    if (isAdmin) {
+      ensureHistFilterDefaults();
+      await loadHistory();
+    }
     if (openBlockFromUrl) {
       window.lbMsOpenBlockModal();
       if (window.history && window.history.replaceState) {
