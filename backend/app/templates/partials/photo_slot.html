@@ -1,6 +1,6 @@
 {% macro photo_slot(name, label, url='', cleared='') %}
 {% set gone = cleared in ('1', 'on', 'true', 'yes') %}
-<div>
+<div class="lb-photo-slot" data-photo-slot="{{ name }}">
   <label>{{ label }}</label>
   {% if url and not gone %}
     <div class="lb-photo-existing">
@@ -9,11 +9,14 @@
       </a>
       <button type="button" class="secondary lb-photo-delete" style="margin-bottom:8px;">Удалить</button>
       <input type="hidden" name="clear_{{ name }}" value="" />
+      <input type="hidden" name="kept_{{ name }}" value="{{ url }}" />
     </div>
   {% elif gone %}
     <input type="hidden" name="clear_{{ name }}" value="1" />
     <p class="muted" style="margin: 0 0 8px;">Фото будет удалено при сохранении.</p>
+  {% elif url %}
+    <input type="hidden" name="kept_{{ name }}" value="{{ url }}" />
   {% endif %}
-  <input type="file" name="{{ name }}" accept="image/*,.heic,.heif" />
+  <input type="file" name="{{ name }}" accept="image/*" />
 </div>
 {% endmacro %}

@@ -729,6 +729,7 @@ def save_visit_with_services(
     inp: MultiServiceVisitInput,
     *,
     created_by_label: str | None = None,
+    photos: tuple[str | None, str | None, str | None] | None = None,
 ) -> Visit:
     if not inp.lines:
         raise ValueError("Добавьте хотя бы одну услугу.")
@@ -737,6 +738,10 @@ def save_visit_with_services(
     client = _resolve_client(db, inp.header, created_by_label=created_by_label)
     performed_dt = datetime.combine(inp.header.performed_date, datetime.min.time())
     ensure_event_date_in_open_payroll_period(db, performed_dt)
+
+    photo_1 = photos[0] if photos else None
+    photo_2 = photos[1] if photos else None
+    photo_3 = photos[2] if photos else None
 
     visit = Visit(
         created_by_user_id=master_id,
@@ -764,6 +769,9 @@ def save_visit_with_services(
         masters_pool=0,
         studio_fund_amount=0,
         amortization_amount=0,
+        photo_1=photo_1,
+        photo_2=photo_2,
+        photo_3=photo_3,
     )
     db.add(visit)
     db.flush()

@@ -34,7 +34,15 @@ from app.db.session import get_db
 from app.display_time import get_display_timezone
 from app.planned_service_time import planned_start_local_datetime
 from app.forms_parse import parse_int
-from app.media_store import get_nonempty_upload, save_upload_image
+from app.visit_photos import (
+    VISIT_PHOTO_REQUIRED_MSG,
+    apply_photos_to_prefill,
+    assign_photos,
+    draft_photos_tuple,
+    require_at_least_one_photo,
+    resolve_visit_photos,
+    save_uploaded_visit_photos_for_prefill,
+)
 from app.amortization_levels import (
     amortization_choices,
     amortization_rubles_map,
@@ -415,7 +423,7 @@ def _master_visit_step1_template_response(
     )
 
 
-def _draft_form_response_from_error(
+async def _draft_form_response_from_error(
     request: Request,
     *,
     current_user: AuthUser,
@@ -425,6 +433,7 @@ def _draft_form_response_from_error(
     draft_readonly: bool,
     lock_banner: dict[str, str] | None,
     error: str,
+    current_photos: tuple[str | None, str | None, str | None] = (None, None, None),
 ):
     log_user_validation_error(
         _logger,
@@ -440,6 +449,20 @@ def _draft_form_response_from_error(
     fp = collect_form_dict(form)
     fp.update(collect_questionnaire_prefill_from_form(form))
     fp.update(collect_thermo_prefill_from_form(form))
+    photo_fp = await save_uploaded_visit_photos_for_prefill(form)
+    fp.update(photo_fp)
+    apply_photos_to_prefill(
+        fp,
+        (
+            photo_fp.get("photo_1") or (None if fp.get("clear_photo_1") else current_photos[0]),
+            photo_fp.get("photo_2") or (None if fp.get("clear_photo_2") else current_photos[1]),
+            photo_fp.get("photo_3") or (None if fp.get("clear_photo_3") else current_photos[2]),
+        ),
+    )
+    if not photo_fp and "фото" not in error.lower() and "селфи" not in error.lower():
+        # Файлы из input браузер уже сбросил — подсказка, если не удалось сохранить слоты.
+        if not any(fp.get(f"photo_{i}") for i in (1, 2, 3)):
+            error = f"{error} Фото нужно выбрать заново."
     vm_on_ids, vm_pct_str = _visit_master_state_from_prefill(fp)
     selected_client = None
     eid = (fp.get("existing_client_id") or "").strip()
@@ -496,6 +519,7 @@ def _load_draft_form_context(
     fp.setdefault("client_mode", "existing")
     if draft.booking_id:
         fp.setdefault("booking_id", str(draft.booking_id))
+    apply_photos_to_prefill(fp, draft_photos_tuple(draft))
     vm_on_ids, vm_pct_str = _visit_master_state_from_prefill(fp)
     client = db.get(Client, int(draft.client_id))
     return fp, vm_on_ids, vm_pct_str, client, readonly, lock_banner
@@ -600,6 +624,58 @@ def master_visit_new_get(
     )
 
 
+async def _visit_new_form_error_response(
+    request: Request,
+    *,
+    current_user: AuthUser,
+    db: Session,
+    form: Any,
+    error: str,
+    photos: tuple[str | None, str | None, str | None] | None = None,
+):
+    _log_visit_form_error(
+        request,
+        ValueError(error),
+        current_user=current_user,
+        form=form,
+        route="POST /master/visit/new",
+    )
+    fp, vm_on_ids, vm_pct_str = master_visit_step1_prefill_from_form(form)
+    fp.update(collect_questionnaire_prefill_from_form(form))
+    fp.update(collect_thermo_prefill_from_form(form))
+    if photos and any(photos):
+        apply_photos_to_prefill(fp, photos)
+    else:
+        photo_fp = await save_uploaded_visit_photos_for_prefill(form)
+        if photo_fp:
+            fp.update(photo_fp)
+            apply_photos_to_prefill(
+                fp,
+                (photo_fp.get("photo_1"), photo_fp.get("photo_2"), photo_fp.get("photo_3")),
+            )
+        elif error != VISIT_PHOTO_REQUIRED_MSG:
+            error = f"{error} Фото нужно выбрать заново."
+    selected_client = None
+    eid = (fp.get("existing_client_id") or "").strip()
+    try:
+        eid_int = parse_int(eid, min=1, field_name="existing_client_id")
+    except ValueError:
+        eid_int = 0
+    if eid_int > 0:
+        selected_client = db.get(Client, eid_int)
+    return _master_visit_step1_template_response(
+        request,
+        current_user=current_user,
+        db=db,
+        form_prefill=fp,
+        visit_master_on_ids=vm_on_ids,
+        visit_master_pct_str=vm_pct_str,
+        selected_client=selected_client,
+        error=error,
+        status_code=400,
+    )
+
+
 @router.post("/master/visit/new")
 async def master_visit_new_post(
     request: Request,
@@ -609,7 +685,10 @@ async def master_visit_new_post(
     db: Session = Depends(get_db),
 ):
     form = await request.form()
+    photos: tuple[str | None, str | None, str | None] | None = None
     try:
+        photos, _ = await resolve_visit_photos(form, current=(None, None, None), db=db)
+        require_at_least_one_photo(photos)
         booking_id_raw = (form.get("booking_id") or "").strip() if hasattr(form.get("booking_id"), "strip") else str(form.get("booking_id") or "").strip()
         booking_id_val = int(booking_id_raw) if booking_id_raw.isdigit() else None
         has_multi = form_uses_multi_service_lines(form)
@@ -628,6 +707,7 @@ async def master_visit_new_post(
                 current_user.id,
                 multi,
                 created_by_label=format_created_by_label(current_user),
+                photos=photos,
             )
         else:
             inp = parse_kit_inlay_form(form, single_master_default_id=single_master_default_id)
@@ -640,49 +720,7 @@ async def master_visit_new_post(
                 inp,
                 created_by_label=format_created_by_label(current_user),
                 addon_sales=addon_sales,
-            )
-        # photos (up to 3)
-        try:
-            p1 = get_nonempty_upload(form, "photo_1")
-            p2 = get_nonempty_upload(form, "photo_2")
-            p3 = get_nonempty_upload(form, "photo_3")
-            if p1 is not None:
-                visit.photo_1 = await save_upload_image(p1)
-            if p2 is not None:
-                visit.photo_2 = await save_upload_image(p2)
-            if p3 is not None:
-                visit.photo_3 = await save_upload_image(p3)
-            db.commit()
-        except ValueError as exc:
-            db.rollback()
-            _log_visit_form_error(
-                request,
-                exc,
-                current_user=current_user,
-                form=form,
-                route="POST /master/visit/new",
-            )
-            fp, vm_on_ids, vm_pct_str = master_visit_step1_prefill_from_form(form)
-            fp.update(collect_questionnaire_prefill_from_form(form))
-            fp.update(collect_thermo_prefill_from_form(form))
-            selected_client = None
-            eid = (fp.get("existing_client_id") or "").strip()
-            try:
-                eid_int = parse_int(eid, min=1, field_name="existing_client_id")
-            except ValueError:
-                eid_int = 0
-            if eid_int > 0:
-                selected_client = db.get(Client, eid_int)
-            return _master_visit_step1_template_response(
-                request,
-                current_user=current_user,
-                db=db,
-                form_prefill=fp,
-                visit_master_on_ids=vm_on_ids,
-                visit_master_pct_str=vm_pct_str,
-                selected_client=selected_client,
-                error=str(exc),
-                status_code=400,
+                photos=photos,
             )
         bid_raw = str(form.get("booking_id") or "").strip()
         try:
@@ -698,34 +736,14 @@ async def master_visit_new_post(
             except Exception:
                 db.rollback()
     except ValueError as exc:
-        _log_visit_form_error(
-            request,
-            exc,
-            current_user=current_user,
-            form=form,
-            route="POST /master/visit/new",
-        )
-        fp, vm_on_ids, vm_pct_str = master_visit_step1_prefill_from_form(form)
-        fp.update(collect_questionnaire_prefill_from_form(form))
-        fp.update(collect_thermo_prefill_from_form(form))
-        selected_client = None
-        eid = (fp.get("existing_client_id") or "").strip()
-        try:
-            eid_int = parse_int(eid, min=1, field_name="existing_client_id")
-        except ValueError:
-            eid_int = 0
-        if eid_int > 0:
-            selected_client = db.get(Client, eid_int)
-        return _master_visit_step1_template_response(
+        db.rollback()
+        return await _visit_new_form_error_response(
             request,
             current_user=current_user,
             db=db,
-            form_prefill=fp,
-            visit_master_on_ids=vm_on_ids,
-            visit_master_pct_str=vm_pct_str,
-            selected_client=selected_client,
+            form=form,
             error=str(exc),
-            status_code=400,
+            photos=photos,
         )
     url = f"/visits/{visit.id}?msg=created"
     client_row = db.get(Client, visit.client_id) if visit.client_id else None
@@ -777,6 +795,7 @@ async def master_visit_draft_create_post(
 ):
     form = await request.form()
     try:
+        photos, _ = await resolve_visit_photos(form, current=(None, None, None), db=db)
         booking_id_raw = str(form.get("booking_id") or "").strip()
         booking_id_val = int(booking_id_raw) if booking_id_raw.isdigit() else None
         inp = parse_draft_form(form, booking_id=booking_id_val)
@@ -789,10 +808,11 @@ async def master_visit_draft_create_post(
             form_dict,
             created_by_label=format_created_by_label(current_user),
         )
+        assign_photos(draft, photos)
         db.commit()
     except ValueError as exc:
         db.rollback()
-        return _draft_form_response_from_error(
+        return await _draft_form_response_from_error(
             request,
             current_user=current_user,
             db=db,
@@ -820,7 +840,7 @@ async def master_visit_draft_update_post(
     lock_banner = draft_lock_banner_for_holder(lock.lock_holder)
     if lock.readonly:
         db.rollback()
-        return _draft_form_response_from_error(
+        return await _draft_form_response_from_error(
             request,
             current_user=current_user,
             db=db,
@@ -829,13 +849,15 @@ async def master_visit_draft_update_post(
             draft_readonly=True,
             lock_banner=lock_banner,
             error="Черновик сейчас редактирует другой пользователь.",
+            current_photos=draft_photos_tuple(draft),
         )
     try:
+        photos, _ = await resolve_visit_photos(form, current=draft_photos_tuple(draft), db=db)
         booking_id_raw = str(form.get("booking_id") or "").strip()
         booking_id_val = int(booking_id_raw) if booking_id_raw.isdigit() else None
         inp = parse_draft_form(form, booking_id=booking_id_val)
         form_dict = collect_form_dict(form)
-        save_visit_draft(
+        draft = save_visit_draft(
             db,
             int(draft_id),
             inp,
@@ -843,10 +865,12 @@ async def master_visit_draft_update_post(
             form_dict,
             created_by_label=format_created_by_label(current_user),
         )
+        assign_photos(draft, photos)
         db.commit()
     except ValueError as exc:
         db.rollback()
-        return _draft_form_response_from_error(
+        draft_row = db.get(VisitDraft, int(draft_id))
+        return await _draft_form_response_from_error(
             request,
             current_user=current_user,
             db=db,
@@ -855,6 +879,7 @@ async def master_visit_draft_update_post(
             draft_readonly=False,
             lock_banner=None,
             error=str(exc),
+            current_photos=draft_photos_tuple(draft_row) if draft_row else (None, None, None),
         )
     return RedirectResponse(f"/master/visit/draft/{draft_id}?draft_saved=1", status_code=303)
 
@@ -873,7 +898,7 @@ async def master_visit_draft_finalize_post(
     lock = acquire_draft_lock(db, draft, current_user.id)
     if lock.readonly:
         db.rollback()
-        return _draft_form_response_from_error(
+        return await _draft_form_response_from_error(
             request,
             current_user=current_user,
             db=db,
@@ -882,22 +907,29 @@ async def master_visit_draft_finalize_post(
             draft_readonly=True,
             lock_banner=draft_lock_banner_for_holder(lock.lock_holder),
             error="Черновик сейчас редактирует другой пользователь.",
+            current_photos=draft_photos_tuple(draft),
         )
+    photos: tuple[str | None, str | None, str | None] | None = None
     try:
+        photos, _ = await resolve_visit_photos(form, current=draft_photos_tuple(draft), db=db)
+        require_at_least_one_photo(photos)
         booking_id_raw = str(form.get("booking_id") or "").strip()
         booking_id_val = int(booking_id_raw) if booking_id_raw.isdigit() else None
         inp = parse_draft_form(form, booking_id=booking_id_val)
+        # Сохраняем актуальные фото на черновике до finalize (на случай ошибки дальше).
+        assign_photos(draft, photos)
         visit_id = finalize_visit_draft(
             db,
             int(draft_id),
             inp,
             current_user.id,
             created_by_label=format_created_by_label(current_user),
+            photos=photos,
         )
         db.commit()
     except ValueError as exc:
         db.rollback()
-        return _draft_form_response_from_error(
+        return await _draft_form_response_from_error(
             request,
             current_user=current_user,
             db=db,
@@ -906,6 +938,7 @@ async def master_visit_draft_finalize_post(
             draft_readonly=False,
             lock_banner=None,
             error=str(exc),
+            current_photos=photos or draft_photos_tuple(draft),
         )
     url = f"/visits/{visit_id}?msg=created"
     client_row = db.get(Client, draft.client_id) if draft else None

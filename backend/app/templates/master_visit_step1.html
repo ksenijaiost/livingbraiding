@@ -146,14 +146,15 @@
         </div>
       </div>
 
-      <h3>Фото (до 3)</h3>
-      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">JPG/PNG/WebP, до 10MB каждое. Доступ к фото — только для залогиненных.{% if is_edit %} Новый файл заменяет текущее. «Удалить» убирает фото при сохранении.{% endif %}</p>
+      <h3>Фото клиента, минимум одно *</h3>
+      <p class="muted" style="font-size: 12px; margin: -6px 0 10px;">JPG/PNG/WebP/HEIC, до 10MB каждое. Можно камеру или галерею. Доступ к фото — только для залогиненных.{% if is_edit %} Новый файл заменяет текущее. «Удалить» убирает фото при сохранении; хотя бы одно должно остаться.{% elif draft_id %} В черновик фото необязательно; при «Сохранить визит» нужно хотя бы одно.{% else %} Для закрытия визита нужно хотя бы одно фото в любом слоте.{% endif %}</p>
       {% from "partials/photo_slot.html" import photo_slot %}
-      <div class="row">
-        {{ photo_slot('photo_1', 'Фото 1', fp.get('photo_1', ''), fp.get('clear_photo_1', '')) }}
-        {{ photo_slot('photo_2', 'Фото 2', fp.get('photo_2', ''), fp.get('clear_photo_2', '')) }}
-        {{ photo_slot('photo_3', 'Фото 3', fp.get('photo_3', ''), fp.get('clear_photo_3', '')) }}
+      <div class="row" id="visit-photo-slots">
+        {{ photo_slot('photo_1', 'Фото 1', fp.get('photo_1', '') or fp.get('kept_photo_1', ''), fp.get('clear_photo_1', '')) }}
+        {{ photo_slot('photo_2', 'Фото 2', fp.get('photo_2', '') or fp.get('kept_photo_2', ''), fp.get('clear_photo_2', '')) }}
+        {{ photo_slot('photo_3', 'Фото 3', fp.get('photo_3', '') or fp.get('kept_photo_3', ''), fp.get('clear_photo_3', '')) }}
       </div>
+      <p id="visit-photo-error" class="error" style="display:none; margin: 8px 0 0;">Загрузи фото клиента. Если не сделала, кидай селфи 🙂</p>
       <div class="card" style="margin-top: 12px;">
         <div style="font-weight: 600; margin-bottom: 8px;">Режим мастеров</div>
         <label style="margin-right:14px;"><input type="radio" name="masters_scope" value="VISIT" {% if fp.get('masters_scope','VISIT') != 'PER_SERVICE' %}checked{% endif %} /> На весь визит</label>
@@ -4020,6 +4021,76 @@
     }
     initAddonSales();
     syncVisitPreview();
+
+    (function initVisitPhotoRequiredGuard() {
+      var form = document.getElementById('visit-form');
+      if (!form) return;
+      var errEl = document.getElementById('visit-photo-error');
+      var PHOTO_MSG = 'Загрузи фото клиента. Если не сделала, кидай селфи 🙂';
+      var isEdit = {{ 'true' if is_edit else 'false' }};
+      var isDraftPage = {{ 'true' if draft_id else 'false' }};
+
+      function slotHasPhoto(slot) {
+        if (!slot) return false;
+        var clearInp = slot.querySelector('input[name^="clear_photo_"]');
+        if (clearInp && String(clearInp.value || '') === '1') return false;
+        var fileInp = slot.querySelector('input[type="file"]');
+        if (fileInp && fileInp.files && fileInp.files.length > 0) return true;
+        var kept = slot.querySelector('input[name^="kept_photo_"]');
+        if (kept && String(kept.value || '').trim()) return true;
+        if (slot.querySelector('.lb-photo-existing img')) return true;
+        return false;
+      }
+
+      function anyPhotoPresent() {
+        var slots = form.querySelectorAll('[data-photo-slot]');
+        for (var i = 0; i < slots.length; i++) {
+          if (slotHasPhoto(slots[i])) return true;
+        }
+        return false;
+      }
+
+      function submitRequiresPhoto(submitter) {
+        if (isEdit) return false;
+        var action = '';
+        if (submitter && submitter.getAttribute) {
+          action = submitter.getAttribute('formaction') || '';
+        }
+        if (!action) action = form.getAttribute('action') || '';
+        if (action.indexOf('/master/visit/draft') >= 0 && action.indexOf('/finalize') < 0) {
+          return false;
+        }
+        if (action.indexOf('/finalize') >= 0) return true;
+        if (action.indexOf('/master/visit/new') >= 0) return true;
+        if (!isDraftPage && !isEdit) return true;
+        return false;
+      }
+
+      form.addEventListener(
+        'submit',
+        function (e) {
+          var submitter = e.submitter || form._lbLastSubmitter || null;
+          if (!submitRequiresPhoto(submitter)) {
+            if (errEl) errEl.style.display = 'none';
+            return;
+          }
+          if (anyPhotoPresent()) {
+            if (errEl) errEl.style.display = 'none';
+            return;
+          }
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          if (errEl) {
+            errEl.textContent = PHOTO_MSG;
+            errEl.style.display = '';
+            try { errEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (err) {}
+          } else {
+            alert(PHOTO_MSG);
+          }
+        },
+        true
+      );
+    })();
   </script>
   <script src="/static/correction_custom_amount.js"></script>
   {% if closed_period_confirm_required %}

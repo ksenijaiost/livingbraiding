@@ -1929,6 +1929,10 @@ class VisitDraft(Base):
     form_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     preview_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    photo_1: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    photo_2: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    photo_3: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
     locked_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finalized_visit_id: Mapped[int | None] = mapped_column(ForeignKey("visits.id"), nullable=True)

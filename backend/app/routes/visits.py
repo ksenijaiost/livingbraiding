@@ -59,7 +59,12 @@ from app.audit_field_labels import audit_field_label
 from app.kit_inlay_visit import (
     collect_questionnaire_prefill_from_form,
 )
-from app.media_store import replace_or_clear_photo
+from app.visit_photos import (
+    VISIT_PHOTO_KEEP_ONE_MSG,
+    assign_photos,
+    photo_tuple_has_any,
+    resolve_visit_photos,
+)
 from app.routes.master_visit import _master_visit_step1_template_response, _visit_master_state_from_prefill
 from app.thermo_visit import collect_thermo_prefill_from_form
 from app.webui import templates, ctx as _ctx
@@ -452,6 +457,18 @@ async def admin_visit_edit_post(
             # обязан явно выбрать мастеров; мастер тоже сохраняет отмеченных из формы.
             single_master_default_id=None,
         )
+        visit_before = db.get(Visit, visit_id)
+        assert visit_before is not None
+        had_photos = photo_tuple_has_any(
+            (visit_before.photo_1, visit_before.photo_2, visit_before.photo_3)
+        )
+        photos, photo_changed = await resolve_visit_photos(
+            form,
+            current=(visit_before.photo_1, visit_before.photo_2, visit_before.photo_3),
+            db=db,
+        )
+        if photo_changed and had_photos and not photo_tuple_has_any(photos):
+            raise ValueError(VISIT_PHOTO_KEEP_ONE_MSG)
         update_visit_with_services(
             db,
             visit_id,
@@ -462,27 +479,9 @@ async def admin_visit_edit_post(
         )
         visit = db.get(Visit, visit_id)
         assert visit is not None
-        try:
-            photo_changed = False
-            for photo_field in ("photo_1", "photo_2", "photo_3"):
-                new_url, did = await replace_or_clear_photo(
-                    form, getattr(visit, photo_field), photo_field, db=db
-                )
-                if did:
-                    setattr(visit, photo_field, new_url)
-                    photo_changed = True
-            if photo_changed:
-                db.commit()
-        except ValueError as exc:
-            db.rollback()
-            return _visit_edit_form_error_response(
-                request,
-                current_user=current_user,
-                db=db,
-                visit_id=visit_id,
-                form=form,
-                error=str(exc),
-            )
+        if photo_changed:
+            assign_photos(visit, photos)
+            db.commit()
     except ValueError as exc:
         db.rollback()
         return _visit_edit_form_error_response(
