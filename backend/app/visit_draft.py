@@ -322,6 +322,7 @@ def finalize_visit_draft(
     user_id: int,
     *,
     created_by_label: str | None = None,
+    photos: tuple[str | None, str | None, str | None] | None = None,
 ) -> int:
     draft = db.scalar(
         select(VisitDraft).where(VisitDraft.id == int(draft_id), VisitDraft.finalized_visit_id.is_(None))
@@ -330,8 +331,18 @@ def finalize_visit_draft(
         raise ValueError("Черновик не найден.")
     inp.header.existing_client_id = int(draft.client_id)
     inp.header.client_mode = "existing"
-    visit = save_visit_with_services(db, int(user_id), inp, created_by_label=created_by_label)
+    visit = save_visit_with_services(
+        db,
+        int(user_id),
+        inp,
+        created_by_label=created_by_label,
+        photos=photos,
+    )
     draft.finalized_visit_id = int(visit.id)
+    # URL переиспользуются визитом — колонки черновика можно очистить без удаления файлов.
+    draft.photo_1 = None
+    draft.photo_2 = None
+    draft.photo_3 = None
     release_draft_lock(db, draft, int(user_id))
     db.flush()
     return int(visit.id)

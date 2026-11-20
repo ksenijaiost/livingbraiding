@@ -297,7 +297,13 @@ def _collect_media_uses(db: object) -> dict[str, list[dict[str, Any]]]:
         ),
         (Visit, "фото визита", "/visits/{id}", ("photo_1", "photo_2", "photo_3"), "created_at"),
         (CareMemo, "памятка", "/clients/notifications#care-memo-{id}", ("file_path",), "created_at"),
-        (VisitDraft, "черновик визита", "/master/visit/draft/{id}", ("form_json",), "created_at"),
+        (
+            VisitDraft,
+            "черновик визита",
+            "/master/visit/draft/{id}",
+            ("form_json", "photo_1", "photo_2", "photo_3"),
+            "created_at",
+        ),
         (WorkDraft, "черновик работы", "/sales/work/draft/{id}", ("form_json",), "created_at"),
     )
     for model, kind, href, attrs, date_attr in specs:

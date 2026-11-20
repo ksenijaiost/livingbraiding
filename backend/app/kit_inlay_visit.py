@@ -1315,6 +1315,7 @@ def save_kit_inlay_visit(
     *,
     created_by_label: str | None = None,
     addon_sales: Any = None,
+    photos: tuple[str | None, str | None, str | None] | None = None,
 ) -> Visit:
     """Визит с выбранным клиентом или новым черновиком; услуга, склад STOCK, расчёт."""
     from app.visit_addon_sales import apply_addon_sales_to_lines
@@ -1329,6 +1330,7 @@ def save_kit_inlay_visit(
         master_id,
         multi,
         created_by_label=created_by_label,
+        photos=photos,
     )
 
 
